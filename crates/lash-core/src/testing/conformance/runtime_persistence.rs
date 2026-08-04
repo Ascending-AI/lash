@@ -1140,7 +1140,7 @@ async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
             .expect("claim application inputs")
             .expect("application input claim");
         let committed_message_id = format!("application-message-{turn_index}");
-        claim.record_initial_turn_application(turn_id, &committed_message_id);
+        claim.record_initial_turn_application(&crate::TurnId::from(turn_id), &committed_message_id);
         let turn_expected = claim.applications.clone();
         assert_eq!(admitted.len(), turn_expected.len());
 
@@ -1196,12 +1196,12 @@ async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
 
 async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePersistence>) {
     let session_id = "checkpoint-work";
-    let turn_id = "checkpoint-turn";
+    let turn_id = crate::TurnId::from("checkpoint-turn");
     let owner = lease_owner("checkpoint-owner");
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             session_id,
-            turn_id,
+            turn_id.as_str(),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "checkpoint input",
         ))
@@ -1228,7 +1228,7 @@ async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePersist
             session_id,
             &lease.fence(),
             &owner,
-            turn_id,
+            &turn_id,
             crate::CheckpointKind::AfterWork,
             10,
             10,
@@ -1247,7 +1247,7 @@ async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePersist
             session_id,
             &lease.fence(),
             &owner,
-            turn_id,
+            &turn_id,
             crate::CheckpointKind::AfterWork,
             10,
             10,
@@ -1268,7 +1268,7 @@ pub async fn checkpoint_claim_probe_transaction_counts(
     session_id: &str,
     counts: impl Fn() -> (usize, usize),
 ) {
-    let turn_id = format!("{session_id}:counter-turn");
+    let turn_id = crate::TurnId::from(format!("{session_id}:counter-turn"));
     let owner = lease_owner(&format!("{session_id}:checkpoint-counter-owner"));
     let lease = store
         .try_claim_session_execution_lease(session_id, &owner, 60_000)
@@ -1340,7 +1340,7 @@ pub async fn checkpoint_claim_probe_transaction_counts(
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
             session_id,
             crate::TurnInputIngress::active_turn(
-                turn_id.clone(),
+                turn_id.to_string(),
                 crate::TurnInputCheckpointBoundary::AfterWork,
             ),
             crate::TurnInput::text("pending checkpoint input"),
@@ -1845,7 +1845,7 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         StoreError::SessionExecutionLeaseExpired { .. }
     ));
     store
-        .release_session_execution_lease(&crate::SessionExecutionLeaseCompletion {
+        .release_session_execution_lease(&crate::SessionExecutionLeaseAuthority {
             session_id: first.session_id.clone(),
             owner: first.owner.clone(),
             lease_token: format!("{}:stale", first.lease_token),
@@ -4658,7 +4658,7 @@ async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn RuntimeP
             "root",
             &lease.fence(),
             &lease_owner("suffix-cancel-owner"),
-            "suffix-active-turn",
+            &crate::TurnId::from("suffix-active-turn"),
             crate::CheckpointKind::AfterWork,
             10,
         )
@@ -4769,7 +4769,7 @@ async fn pending_turn_input_claims_reclaim_complete_and_fence(store: Arc<dyn Run
     );
     assert!(matches!(
         claim
-            .materialize_for_turn()
+            .materialize_turn_input()
             .items
             .iter()
             .find(|item| matches!(item, crate::InputItem::Attachment { .. })),
@@ -5029,7 +5029,7 @@ pub async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint(
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             SESSION_ID,
-            TURN_ID,
+            &crate::TurnId::from(TURN_ID),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "accepted before checkpoint outcome",
         ))
@@ -5044,7 +5044,7 @@ pub async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint(
             SESSION_ID,
             &predecessor.fence(),
             &lease_owner("fig905-active-predecessor"),
-            TURN_ID,
+            &crate::TurnId::from(TURN_ID),
             crate::CheckpointKind::AfterWork,
             10,
         )
@@ -5064,7 +5064,7 @@ pub async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint(
             SESSION_ID,
             &successor.fence(),
             &lease_owner("fig905-active-successor"),
-            TURN_ID,
+            &crate::TurnId::from(TURN_ID),
             crate::CheckpointKind::AfterWork,
             10,
             10,
@@ -5254,12 +5254,13 @@ async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
         .expect("enqueue other active input");
 
     let lease = claim_session_execution_lease_for_test(&store, "root", "active-input-owner").await;
+    let claim_turn_id = crate::TurnId::from(turn_id);
     let claim = store
         .claim_active_turn_inputs(
             "root",
             &lease.fence(),
             &lease_owner("active-input-owner"),
-            turn_id,
+            &claim_turn_id,
             crate::CheckpointKind::AfterWork,
             1,
         )
@@ -5276,7 +5277,7 @@ async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
         "AfterWork claims must include matching active inputs admitted at that boundary in order"
     );
     assert!(matches!(
-        claim.materialize_for_turn().items.last(),
+        claim.materialize_turn_input().items.last(),
         Some(crate::InputItem::Attachment {
             source: crate::AttachmentSource::Inline { bytes, .. }
         }) if bytes == &[9, 8, 7]
@@ -5662,7 +5663,7 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
             .expect("claim reopen application")
             .expect("reopen application claim");
         claim.record_initial_turn_application(
-            turn_id,
+            &crate::TurnId::from(turn_id),
             &format!("reopen-application-message-{turn_index}"),
         );
         expected_applications.extend(claim.applications.clone());

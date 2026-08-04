@@ -92,7 +92,7 @@ impl From<&lash_core::TurnInputApplication> for RemoteTurnInputApplication {
         Self {
             input_id: value.input_id.clone(),
             source_key: value.source_key.clone(),
-            turn_id: value.turn_id.clone(),
+            turn_id: value.turn_id.to_string(),
             committed_message_id: value.committed_message_id.clone(),
             checkpoint: value.checkpoint.map(Into::into),
         }

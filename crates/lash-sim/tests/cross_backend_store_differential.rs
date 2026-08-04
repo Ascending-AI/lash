@@ -1261,7 +1261,7 @@ async fn read_sqlite_durable_state(
     let pending_turn_inputs = {
         let mut statement = connection
             .prepare(
-                "SELECT input_id, state,
+                "SELECT input_id, enqueue_seq, state, claim_id, claim_fencing_token,
                         CASE WHEN claim_token IS NULL
                              THEN NULL
                              ELSE claim_session_lease_generation
@@ -1275,8 +1275,11 @@ async fn read_sqlite_durable_state(
             .query_map([session_id], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<i64>>(2)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, Option<i64>>(5)?,
                 ))
             })
             .expect("read SQLite pending turn inputs")
@@ -1284,12 +1287,27 @@ async fn read_sqlite_durable_state(
             .expect("decode SQLite pending turn inputs")
             .into_iter()
             .map(
-                |(input_id, state, claim_session_lease_generation)| PendingTurnInputObservation {
+                |(
                     input_id,
-                    state: TurnInputState::from_wire_str(&state)
-                        .expect("decode SQLite pending-input state"),
-                    claim_session_lease_generation: claim_session_lease_generation
-                        .map(|generation| generation as u64),
+                    enqueue_seq,
+                    state,
+                    claim_id,
+                    fencing_token,
+                    claim_session_lease_generation,
+                )| {
+                    assert_claim_id_spelling(
+                        claim_id.as_deref(),
+                        "tic",
+                        enqueue_seq as u64,
+                        fencing_token as u64,
+                    );
+                    PendingTurnInputObservation {
+                        input_id,
+                        state: TurnInputState::from_wire_str(&state)
+                            .expect("decode SQLite pending-input state"),
+                        claim_session_lease_generation: claim_session_lease_generation
+                            .map(|generation| generation as u64),
+                    }
                 },
             )
             .collect()
@@ -1688,7 +1706,10 @@ impl BackendRunner {
                             self.name
                         ))
                     })?;
-                claim.record_initial_turn_application("claim-turn", "claim-message");
+                claim.record_initial_turn_application(
+                    &lash_core::TurnId::from("claim-turn"),
+                    "claim-message",
+                );
                 self.stale_turn_input_claim = Some(claim);
                 Ok(None)
             }

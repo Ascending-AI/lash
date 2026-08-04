@@ -45,7 +45,7 @@ fn test_session_execution_lease(
 
 fn session_fence_matches(
     lease: &lash_core::SessionExecutionLease,
-    fence: &lash_core::SessionExecutionLeaseFence,
+    fence: &lash_core::SessionExecutionLeaseAuthority,
 ) -> bool {
     lease.session_id == fence.session_id
         && lease.owner == fence.owner
@@ -56,7 +56,7 @@ fn session_fence_matches(
 
 fn session_completion_matches(
     lease: &lash_core::SessionExecutionLease,
-    completion: &lash_core::SessionExecutionLeaseCompletion,
+    completion: &lash_core::SessionExecutionLeaseAuthority,
 ) -> bool {
     lease.session_id == completion.session_id
         && lease.owner == completion.owner
@@ -435,7 +435,7 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
 
     async fn renew_session_execution_lease(
         &self,
-        fence: &lash_core::SessionExecutionLeaseFence,
+        fence: &lash_core::SessionExecutionLeaseAuthority,
         lease_ttl_ms: u64,
     ) -> std::result::Result<lash_core::SessionExecutionLease, lash_core::store::StoreError> {
         let mut leases = self
@@ -459,7 +459,7 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
 
     async fn release_session_execution_lease(
         &self,
-        completion: &lash_core::SessionExecutionLeaseCompletion,
+        completion: &lash_core::SessionExecutionLeaseAuthority,
     ) -> std::result::Result<(), lash_core::store::StoreError> {
         let mut leases = self
             .session_execution_leases
@@ -505,7 +505,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
     async fn claim_leading_ready_session_command(
         &self,
         _session_id: &str,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseFence,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
     ) -> std::result::Result<
         Option<lash_core::runtime::QueuedWorkClaim>,
@@ -517,7 +517,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
     async fn claim_ready_queued_work(
         &self,
         _session_id: &str,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseFence,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         _max_batches: usize,
@@ -531,9 +531,9 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
     async fn claim_checkpoint_work(
         &self,
         _session_id: &str,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseFence,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
-        _turn_id: &str,
+        _turn_id: &lash_core::TurnId,
         _checkpoint: lash_core::CheckpointKind,
         _max_inputs: usize,
         _max_batches: usize,
@@ -550,7 +550,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         _session_id: &str,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseFence,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         _batch_ids: &[String],
@@ -641,9 +641,9 @@ impl lash_core::TurnInputStore for SnapshotStore {
     async fn claim_active_turn_inputs(
         &self,
         _session_id: &str,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseFence,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
-        _turn_id: &str,
+        _turn_id: &lash_core::TurnId,
         _checkpoint: lash_core::CheckpointKind,
         _max_inputs: usize,
     ) -> std::result::Result<Option<lash_core::TurnInputClaim>, lash_core::store::StoreError> {
@@ -653,7 +653,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
     async fn claim_next_turn_inputs(
         &self,
         _session_id: &str,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseFence,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _max_inputs: usize,
     ) -> std::result::Result<Option<lash_core::TurnInputClaim>, lash_core::store::StoreError> {
@@ -810,7 +810,7 @@ impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
 
     async fn renew_session_execution_lease(
         &self,
-        fence: &lash_core::SessionExecutionLeaseFence,
+        fence: &lash_core::SessionExecutionLeaseAuthority,
         lease_ttl_ms: u64,
     ) -> std::result::Result<lash_core::SessionExecutionLease, lash_core::store::StoreError> {
         Ok(test_session_execution_lease(
@@ -823,7 +823,7 @@ impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
 
     async fn release_session_execution_lease(
         &self,
-        _completion: &lash_core::SessionExecutionLeaseCompletion,
+        _completion: &lash_core::SessionExecutionLeaseAuthority,
     ) -> std::result::Result<(), lash_core::store::StoreError> {
         Ok(())
     }
@@ -880,9 +880,9 @@ impl lash_core::TurnInputStore for BoundSessionStore {
     async fn claim_active_turn_inputs(
         &self,
         _session_id: &str,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseFence,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
-        _turn_id: &str,
+        _turn_id: &lash_core::TurnId,
         _checkpoint: lash_core::CheckpointKind,
         _max_inputs: usize,
     ) -> std::result::Result<Option<lash_core::TurnInputClaim>, lash_core::store::StoreError> {
@@ -892,7 +892,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
     async fn claim_next_turn_inputs(
         &self,
         _session_id: &str,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseFence,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _max_inputs: usize,
     ) -> std::result::Result<Option<lash_core::TurnInputClaim>, lash_core::store::StoreError> {
@@ -920,7 +920,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
     async fn claim_leading_ready_session_command(
         &self,
         _session_id: &str,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseFence,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
     ) -> std::result::Result<
         Option<lash_core::runtime::QueuedWorkClaim>,
@@ -932,7 +932,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
     async fn claim_ready_queued_work(
         &self,
         _session_id: &str,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseFence,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         _max_batches: usize,
@@ -946,9 +946,9 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
     async fn claim_checkpoint_work(
         &self,
         _session_id: &str,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseFence,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
-        _turn_id: &str,
+        _turn_id: &lash_core::TurnId,
         _checkpoint: lash_core::CheckpointKind,
         _max_inputs: usize,
         _max_batches: usize,
@@ -965,7 +965,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         _session_id: &str,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseFence,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         _batch_ids: &[String],

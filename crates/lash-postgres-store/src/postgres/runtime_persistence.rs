@@ -1270,7 +1270,7 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
 
     async fn renew_session_execution_lease(
         &self,
-        fence: &SessionExecutionLeaseFence,
+        fence: &SessionExecutionLeaseAuthority,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLease, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
@@ -1325,7 +1325,7 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
 
     async fn release_session_execution_lease(
         &self,
-        completion: &SessionExecutionLeaseCompletion,
+        completion: &SessionExecutionLeaseAuthority,
     ) -> Result<(), StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         release_session_execution_lease_tx(&mut tx, completion).await?;
@@ -1378,7 +1378,7 @@ impl QueuedWorkStore for PostgresSessionStore {
     async fn claim_leading_ready_session_command(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
@@ -1435,7 +1435,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         selected.truncate(selected_len);
         selected_batches.truncate(selected_len);
         let lease =
-            QueuedWorkClaimLease::derive(&candidates[0], session_id, owner, now, generation);
+            WorkClaimLease::derive_queued_work(&candidates[0], session_id, owner, now, generation);
         let liveness_json: Option<&str> = None;
         for row in &selected {
             let changed = sqlx::query(
@@ -1479,14 +1479,16 @@ impl QueuedWorkStore for PostgresSessionStore {
             lease_token: lease.lease_token,
             fencing_token: lease.fencing_token,
             session_lease_generation: lease.session_lease_generation,
-            batches: selected_batches,
+            data: lash_core::runtime::QueuedWorkClaimData {
+                batches: selected_batches,
+            },
         }))
     }
 
     async fn claim_ready_queued_work(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         max_batches: usize,
@@ -1543,7 +1545,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         selected.truncate(selected_len);
         selected_batches.truncate(selected_len);
         let lease =
-            QueuedWorkClaimLease::derive(&candidates[0], session_id, owner, now, generation);
+            WorkClaimLease::derive_queued_work(&candidates[0], session_id, owner, now, generation);
         let liveness_json: Option<&str> = None;
         for row in &selected {
             let changed = sqlx::query(
@@ -1587,16 +1589,18 @@ impl QueuedWorkStore for PostgresSessionStore {
             lease_token: lease.lease_token,
             fencing_token: lease.fencing_token,
             session_lease_generation: lease.session_lease_generation,
-            batches: selected_batches,
+            data: lash_core::runtime::QueuedWorkClaimData {
+                batches: selected_batches,
+            },
         }))
     }
 
     async fn claim_checkpoint_work(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
-        turn_id: &str,
+        turn_id: &lash_core::TurnId,
         checkpoint: lash_core::CheckpointKind,
         max_inputs: usize,
         max_batches: usize,
@@ -1630,7 +1634,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             owner,
             max_inputs,
             lash_core::TurnInputClaimMode::ActiveTurn {
-                turn_id: turn_id.to_string(),
+                turn_id: turn_id.clone(),
                 checkpoint,
             },
         )
@@ -1666,7 +1670,7 @@ impl QueuedWorkStore for PostgresSessionStore {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         batch_ids: &[String],
@@ -1729,7 +1733,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             return Ok(None);
         }
         let lease =
-            QueuedWorkClaimLease::derive(&candidates[0], session_id, owner, now, generation);
+            WorkClaimLease::derive_queued_work(&candidates[0], session_id, owner, now, generation);
         let liveness_json: Option<&str> = None;
         for row in &selected {
             let changed = sqlx::query(
@@ -1766,7 +1770,9 @@ impl QueuedWorkStore for PostgresSessionStore {
             lease_token: lease.lease_token,
             fencing_token: lease.fencing_token,
             session_lease_generation: lease.session_lease_generation,
-            batches: selected_batches,
+            data: lash_core::runtime::QueuedWorkClaimData {
+                batches: selected_batches,
+            },
         }))
     }
 
@@ -2146,9 +2152,9 @@ impl TurnInputStore for PostgresSessionStore {
     async fn claim_active_turn_inputs(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
-        turn_id: &str,
+        turn_id: &lash_core::TurnId,
         checkpoint: lash_core::CheckpointKind,
         max_inputs: usize,
     ) -> Result<Option<lash_core::TurnInputClaim>, StoreError> {
@@ -2159,7 +2165,7 @@ impl TurnInputStore for PostgresSessionStore {
             owner,
             max_inputs,
             lash_core::TurnInputClaimMode::ActiveTurn {
-                turn_id: turn_id.to_string(),
+                turn_id: turn_id.clone(),
                 checkpoint,
             },
         )
@@ -2169,7 +2175,7 @@ impl TurnInputStore for PostgresSessionStore {
     async fn claim_next_turn_inputs(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
     ) -> Result<Option<lash_core::TurnInputClaim>, StoreError> {
@@ -2517,7 +2523,7 @@ async fn checkpoint_work_pending_postgres(
 async fn claim_ready_queued_work_postgres_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
-    session_execution_lease: &SessionExecutionLeaseFence,
+    session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     boundary: QueuedWorkClaimBoundary,
     max_batches: usize,
@@ -2570,7 +2576,8 @@ async fn claim_ready_queued_work_postgres_tx(
     }
     selected.truncate(selected_len);
     selected_batches.truncate(selected_len);
-    let lease = QueuedWorkClaimLease::derive(&candidates[0], session_id, owner, now, generation);
+    let lease =
+        WorkClaimLease::derive_queued_work(&candidates[0], session_id, owner, now, generation);
     let liveness_json: Option<&str> = None;
     for row in &selected {
         let changed = sqlx::query(
@@ -2612,7 +2619,9 @@ async fn claim_ready_queued_work_postgres_tx(
         lease_token: lease.lease_token,
         fencing_token: lease.fencing_token,
         session_lease_generation: lease.session_lease_generation,
-        batches: selected_batches,
+        data: lash_core::runtime::QueuedWorkClaimData {
+            batches: selected_batches,
+        },
     })))
 }
 
@@ -2620,7 +2629,7 @@ async fn claim_ready_queued_work_postgres_tx(
 async fn claim_pending_turn_inputs_postgres_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
-    session_execution_lease: &SessionExecutionLeaseFence,
+    session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     max_inputs: usize,
     mode: lash_core::TurnInputClaimMode,
@@ -2668,7 +2677,7 @@ async fn claim_pending_turn_inputs_postgres_tx(
         query
             .push(" AND ingress_json::jsonb ->> 'scope' = 'active_turn'")
             .push(" AND ingress_json::jsonb ->> 'turn_id' = ")
-            .push_bind(turn_id);
+            .push_bind(turn_id.as_str());
         if *checkpoint == lash_core::CheckpointKind::AfterWork {
             query.push(
                 " AND COALESCE(ingress_json::jsonb ->> 'min_boundary', 'after_work') = 'after_work'",
@@ -2747,9 +2756,11 @@ async fn claim_pending_turn_inputs_postgres_tx(
             lease_token: lease.lease_token,
             fencing_token: lease.fencing_token,
             session_lease_generation: lease.session_lease_generation,
-            mode,
-            inputs,
-            applications: Vec::new(),
+            data: lash_core::runtime::TurnInputClaimData {
+                mode,
+                inputs,
+                applications: Vec::new(),
+            },
         },
     )))
 }
@@ -2757,7 +2768,7 @@ async fn claim_pending_turn_inputs_postgres_tx(
 async fn claim_pending_turn_inputs_postgres(
     pool: &PgPool,
     session_id: &str,
-    session_execution_lease: &SessionExecutionLeaseFence,
+    session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     max_inputs: usize,
     mode: lash_core::TurnInputClaimMode,
@@ -2807,7 +2818,7 @@ async fn claim_pending_turn_inputs_postgres(
         query
             .push(" AND ingress_json::jsonb ->> 'scope' = 'active_turn'")
             .push(" AND ingress_json::jsonb ->> 'turn_id' = ")
-            .push_bind(turn_id);
+            .push_bind(turn_id.as_str());
         if *checkpoint == lash_core::CheckpointKind::AfterWork {
             query.push(
                 " AND COALESCE(ingress_json::jsonb ->> 'min_boundary', 'after_work') = 'after_work'",
@@ -2888,9 +2899,11 @@ async fn claim_pending_turn_inputs_postgres(
         lease_token: lease.lease_token,
         fencing_token: lease.fencing_token,
         session_lease_generation: lease.session_lease_generation,
-        mode,
-        inputs,
-        applications: Vec::new(),
+        data: lash_core::runtime::TurnInputClaimData {
+            mode,
+            inputs,
+            applications: Vec::new(),
+        },
     }))
 }
 
@@ -3064,7 +3077,7 @@ async fn acquire_session_execution_lease_tx(
 async fn ensure_session_execution_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
-    fence: &SessionExecutionLeaseFence,
+    fence: &SessionExecutionLeaseAuthority,
 ) -> Result<(), StoreError> {
     if fence.session_id != session_id {
         return Err(StoreError::SessionExecutionLeaseExpired {
@@ -3096,7 +3109,7 @@ async fn ensure_session_execution_lease_tx(
 
 async fn release_session_execution_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    completion: &SessionExecutionLeaseCompletion,
+    completion: &SessionExecutionLeaseAuthority,
 ) -> Result<(), StoreError> {
     sqlx::query(
         "UPDATE lash_session_execution_leases

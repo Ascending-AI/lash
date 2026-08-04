@@ -414,38 +414,34 @@ pub enum QueuedWorkClaimBoundary {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct QueuedWorkCompletion {
-    pub session_id: String,
-    pub claim_id: String,
-    pub lease_token: String,
+pub struct QueuedWorkCompletionData {
     pub batch_ids: Vec<String>,
 }
 
+/// A shared work completion carrying settled queued-work batch identities.
+pub type QueuedWorkCompletion = crate::WorkCompletion<QueuedWorkCompletionData>;
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct QueuedWorkClaim {
-    pub session_id: String,
-    pub claim_id: String,
-    pub owner: crate::LeaseOwnerIdentity,
-    pub lease_token: String,
-    pub fencing_token: u64,
-    /// The session-execution-lease generation this claim pins. It controls when
-    /// another generation may re-claim the rows, not settlement authority
-    /// before that re-claim (ADR 0029).
-    pub session_lease_generation: u64,
+pub struct QueuedWorkClaimData {
     pub batches: Vec<QueuedWorkBatch>,
 }
 
-impl QueuedWorkClaim {
+/// A shared work claim carrying queued-work batches.
+pub type QueuedWorkClaim = crate::WorkClaim<QueuedWorkClaimData>;
+
+impl crate::WorkClaim<QueuedWorkClaimData> {
     pub fn completion(&self) -> QueuedWorkCompletion {
         QueuedWorkCompletion {
             session_id: self.session_id.clone(),
             claim_id: self.claim_id.clone(),
             lease_token: self.lease_token.clone(),
-            batch_ids: self
-                .batches
-                .iter()
-                .map(|batch| batch.batch_id.clone())
-                .collect(),
+            data: QueuedWorkCompletionData {
+                batch_ids: self
+                    .batches
+                    .iter()
+                    .map(|batch| batch.batch_id.clone())
+                    .collect(),
+            },
         }
     }
 
@@ -453,7 +449,7 @@ impl QueuedWorkClaim {
         self.batches.iter().all(|batch| batch.items.is_empty())
     }
 
-    pub fn materialize_for_checkpoint(&self) -> QueuedCheckpointWork {
+    pub fn materialize_queued_checkpoint_work(&self) -> QueuedCheckpointWork {
         let messages = Vec::new();
         let transient_messages = Vec::new();
         let mut turn_causes = Vec::new();
@@ -475,7 +471,7 @@ impl QueuedWorkClaim {
         }
     }
 
-    pub async fn materialize_for_checkpoint_with_attachments(
+    pub async fn materialize_queued_checkpoint_work_with_attachments(
         &self,
         _attachment_store: &crate::SessionAttachmentStore,
     ) -> Result<QueuedCheckpointWork, String> {
@@ -515,8 +511,8 @@ impl QueuedWorkClaim {
         }
     }
 
-    pub fn materialize_for_turn(&self) -> QueuedTurnWork {
-        let checkpoint = self.materialize_for_checkpoint();
+    pub fn materialize_queued_turn_work(&self) -> QueuedTurnWork {
+        let checkpoint = self.materialize_queued_checkpoint_work();
         let mut input = TurnInput::empty();
         for batch in &self.batches {
             for item in &batch.items {

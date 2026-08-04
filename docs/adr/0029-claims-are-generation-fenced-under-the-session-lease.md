@@ -20,7 +20,7 @@ never renewed them. `renew_queued_work_claim` was in the store trait and every
 backend, yet no call site in `crates/lash-core/src/runtime` ever invoked it, and
 there was no `renew_turn_input_claim` at all. The two unrenewed lanes were
 precisely the two that are already subordinate to the session execution lease:
-every claim call takes and validates a live `SessionExecutionLeaseFence` in the
+every claim call takes and validates a live `SessionExecutionLeaseAuthority` in the
 same transaction.
 
 Because nothing renewed them, a claim outlived its usefulness by wall-clock

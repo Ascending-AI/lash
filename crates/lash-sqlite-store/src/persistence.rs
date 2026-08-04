@@ -1064,7 +1064,7 @@ impl SessionExecutionLeaseStore for Store {
 
     async fn renew_session_execution_lease(
         &self,
-        fence: &SessionExecutionLeaseFence,
+        fence: &SessionExecutionLeaseAuthority,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLease, StoreError> {
         let fence = fence.clone();
@@ -1129,7 +1129,7 @@ impl SessionExecutionLeaseStore for Store {
 
     async fn release_session_execution_lease(
         &self,
-        completion: &SessionExecutionLeaseCompletion,
+        completion: &SessionExecutionLeaseAuthority,
     ) -> Result<(), StoreError> {
         let completion = completion.clone();
         self.conn
@@ -1216,7 +1216,7 @@ impl QueuedWorkStore for Store {
     async fn claim_leading_ready_session_command(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         let session_id = session_id.to_string();
@@ -1295,7 +1295,7 @@ impl QueuedWorkStore for Store {
                     selected.truncate(selected_len);
                     let mut selected_batches = candidate_batches;
                     selected_batches.truncate(selected_len);
-                    let lease = QueuedWorkClaimLease::derive(
+                    let lease = WorkClaimLease::derive_queued_work(
                         &candidates[0],
                         &session_id,
                         &owner,
@@ -1343,7 +1343,9 @@ impl QueuedWorkStore for Store {
                         lease_token: lease.lease_token,
                         fencing_token: lease.fencing_token,
                         session_lease_generation: lease.session_lease_generation,
-                        batches: selected_batches,
+                        data: lash_core::runtime::QueuedWorkClaimData {
+                            batches: selected_batches,
+                        },
                     })))
                 })(
                 );
@@ -1360,7 +1362,7 @@ impl QueuedWorkStore for Store {
     async fn claim_ready_queued_work(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         max_batches: usize,
@@ -1437,7 +1439,7 @@ impl QueuedWorkStore for Store {
                     selected.truncate(selected_len);
                     let mut selected_batches = candidate_batches;
                     selected_batches.truncate(selected_len);
-                    let lease = QueuedWorkClaimLease::derive(
+                    let lease = WorkClaimLease::derive_queued_work(
                         &candidates[0],
                         &session_id,
                         &owner,
@@ -1496,7 +1498,9 @@ impl QueuedWorkStore for Store {
                         lease_token: lease.lease_token,
                         fencing_token: lease.fencing_token,
                         session_lease_generation: lease.session_lease_generation,
-                        batches: selected_batches,
+                        data: lash_core::runtime::QueuedWorkClaimData {
+                            batches: selected_batches,
+                        },
                     })))
                 })(
                 );
@@ -1516,9 +1520,9 @@ impl QueuedWorkStore for Store {
     async fn claim_checkpoint_work(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
-        turn_id: &str,
+        turn_id: &lash_core::TurnId,
         checkpoint: lash_core::CheckpointKind,
         max_inputs: usize,
         max_batches: usize,
@@ -1548,7 +1552,7 @@ impl QueuedWorkStore for Store {
         let session_id = session_id.to_string();
         let session_execution_lease = session_execution_lease.clone();
         let owner = owner.clone();
-        let turn_id = turn_id.to_string();
+        let turn_id = turn_id.clone();
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<
@@ -1606,7 +1610,7 @@ impl QueuedWorkStore for Store {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         batch_ids: &[String],
@@ -1675,7 +1679,7 @@ impl QueuedWorkStore for Store {
                     {
                         return Ok(None);
                     }
-                    let lease = QueuedWorkClaimLease::derive(
+                    let lease = WorkClaimLease::derive_queued_work(
                         &candidates[0],
                         &session_id,
                         &owner,
@@ -1718,7 +1722,7 @@ impl QueuedWorkStore for Store {
                         lease_token: lease.lease_token,
                         fencing_token: lease.fencing_token,
                         session_lease_generation: lease.session_lease_generation,
-                        batches,
+                        data: lash_core::runtime::QueuedWorkClaimData { batches },
                     }))
                 })();
                 match outcome {
@@ -2225,9 +2229,9 @@ impl TurnInputStore for Store {
     async fn claim_active_turn_inputs(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
-        turn_id: &str,
+        turn_id: &lash_core::TurnId,
         checkpoint: lash_core::CheckpointKind,
         max_inputs: usize,
     ) -> Result<Option<lash_core::TurnInputClaim>, StoreError> {
@@ -2239,7 +2243,7 @@ impl TurnInputStore for Store {
             owner,
             max_inputs,
             lash_core::TurnInputClaimMode::ActiveTurn {
-                turn_id: turn_id.to_string(),
+                turn_id: turn_id.clone(),
                 checkpoint,
             },
         )
@@ -2249,7 +2253,7 @@ impl TurnInputStore for Store {
     async fn claim_next_turn_inputs(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
     ) -> Result<Option<lash_core::TurnInputClaim>, StoreError> {
@@ -2613,7 +2617,7 @@ fn claim_ready_queued_work_sqlite_conn(
     tx: &Connection,
     now: u64,
     session_id: &str,
-    session_execution_lease: &SessionExecutionLeaseFence,
+    session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     boundary: QueuedWorkClaimBoundary,
     max_batches: usize,
@@ -2674,7 +2678,8 @@ fn claim_ready_queued_work_sqlite_conn(
     selected.truncate(selected_len);
     let mut selected_batches = candidate_batches;
     selected_batches.truncate(selected_len);
-    let lease = QueuedWorkClaimLease::derive(&candidates[0], session_id, owner, now, generation);
+    let lease =
+        WorkClaimLease::derive_queued_work(&candidates[0], session_id, owner, now, generation);
     let liveness_json: Option<&str> = None;
     for row in &selected {
         let claimed = tx
@@ -2716,7 +2721,9 @@ fn claim_ready_queued_work_sqlite_conn(
         lease_token: lease.lease_token,
         fencing_token: lease.fencing_token,
         session_lease_generation: lease.session_lease_generation,
-        batches: selected_batches,
+        data: lash_core::runtime::QueuedWorkClaimData {
+            batches: selected_batches,
+        },
     })))
 }
 
@@ -2725,7 +2732,7 @@ fn claim_pending_turn_inputs_sqlite_conn(
     tx: &Connection,
     now: u64,
     session_id: &str,
-    session_execution_lease: &SessionExecutionLeaseFence,
+    session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     max_inputs: usize,
     mode: lash_core::TurnInputClaimMode,
@@ -2769,7 +2776,7 @@ fn claim_pending_turn_inputs_sqlite_conn(
                 " AND json_extract(ingress_json, '$.scope') = 'active_turn'
                   AND json_extract(ingress_json, '$.turn_id') = ?",
             );
-            values.push(turn_id.clone().into());
+            values.push(turn_id.to_string().into());
             if *checkpoint == lash_core::CheckpointKind::AfterWork {
                 sql.push_str(
                     " AND COALESCE(json_extract(ingress_json, '$.min_boundary'), 'after_work') = 'after_work'",
@@ -2846,9 +2853,11 @@ fn claim_pending_turn_inputs_sqlite_conn(
         lease_token: lease.lease_token,
         fencing_token: lease.fencing_token,
         session_lease_generation: lease.session_lease_generation,
-        mode,
-        inputs,
-        applications: Vec::new(),
+        data: lash_core::runtime::TurnInputClaimData {
+            mode,
+            inputs,
+            applications: Vec::new(),
+        },
     })))
 }
 
@@ -2856,7 +2865,7 @@ async fn claim_pending_turn_inputs_sqlite(
     conn: &SqliteConnection,
     now: u64,
     session_id: &str,
-    session_execution_lease: &SessionExecutionLeaseFence,
+    session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     max_inputs: usize,
     mode: lash_core::TurnInputClaimMode,
@@ -2915,7 +2924,7 @@ async fn claim_pending_turn_inputs_sqlite(
                         " AND json_extract(ingress_json, '$.scope') = 'active_turn'
                           AND json_extract(ingress_json, '$.turn_id') = ?",
                     );
-                    values.push(turn_id.clone().into());
+                    values.push(turn_id.to_string().into());
                     if *checkpoint == lash_core::CheckpointKind::AfterWork {
                         sql.push_str(
                             " AND COALESCE(json_extract(ingress_json, '$.min_boundary'), 'after_work') = 'after_work'",
@@ -2998,9 +3007,11 @@ async fn claim_pending_turn_inputs_sqlite(
                 lease_token: lease.lease_token,
                 fencing_token: lease.fencing_token,
                 session_lease_generation: lease.session_lease_generation,
-                mode,
-                inputs,
-                applications: Vec::new(),
+                data: lash_core::runtime::TurnInputClaimData {
+                    mode,
+                    inputs,
+                    applications: Vec::new(),
+                },
             })))
         })(
         );
@@ -3134,7 +3145,7 @@ fn acquire_session_execution_lease_conn(
 fn ensure_session_execution_lease_conn(
     conn: &Connection,
     session_id: &str,
-    fence: &SessionExecutionLeaseFence,
+    fence: &SessionExecutionLeaseAuthority,
     now: u64,
 ) -> Result<(), StoreError> {
     if fence.session_id != session_id {
@@ -3166,7 +3177,7 @@ fn ensure_session_execution_lease_conn(
 
 fn release_session_execution_lease_conn(
     conn: &Connection,
-    completion: &SessionExecutionLeaseCompletion,
+    completion: &SessionExecutionLeaseAuthority,
 ) -> Result<(), StoreError> {
     conn.execute(
         "UPDATE session_execution_leases

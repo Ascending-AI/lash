@@ -37,7 +37,7 @@ use lash_core::runtime::{
     QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem,
 };
 use lash_core::store::queued_work::{
-    ClaimCandidate, QueuedWorkClaimLease, claim_scan_limit, derive_batch_id,
+    ClaimCandidate, WorkClaimLease, claim_scan_limit, derive_batch_id,
     select_leading_session_command, select_turn_work_claim_prefix,
 };
 use lash_core::store::{
@@ -55,12 +55,12 @@ use lash_core::{
     QueuedWorkStore, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
     RuntimePersistence, ScopedEffectController, SessionCommitStore, SessionExecutionLease,
-    SessionExecutionLeaseAcquisition, SessionExecutionLeaseClaimOutcome,
-    SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
-    SessionMeta, SessionNodeRecord, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy,
-    StoreError, StoreMaintenance, TokenLedgerEntry, TurnInputStore, VacuumReport,
-    facade_support::CanonicalRuntimeEffectEnvelope, facade_support::MergeKey,
-    facade_support::ProcessStartPlan, facade_support::validate_replayed_effect_envelope,
+    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord,
+    SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
+    TokenLedgerEntry, TurnInputStore, VacuumReport, facade_support::CanonicalRuntimeEffectEnvelope,
+    facade_support::MergeKey, facade_support::ProcessStartPlan,
+    facade_support::validate_replayed_effect_envelope,
 };
 use lash_core::{
     PluginError, TriggerDeliveryReservation, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
@@ -790,8 +790,10 @@ mod tests {
             session_id: session_id.clone(),
             claim_id: "claim-a".to_string(),
             lease_token: "token-a".to_string(),
-            input_ids: vec![input_id.clone()],
-            applications: Vec::new(),
+            data: lash_core::TurnInputCompletionData {
+                input_ids: vec![input_id.clone()],
+                applications: Vec::new(),
+            },
         };
         sqlx::query(
             "INSERT INTO lash_sessions (session_id, head_revision, head_json)

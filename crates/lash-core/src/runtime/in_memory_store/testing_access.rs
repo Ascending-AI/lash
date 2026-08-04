@@ -50,9 +50,7 @@ impl InMemorySessionStore {
     }
 
     /// Return raw pending-input lifecycle state for differential tests.
-    pub fn raw_pending_turn_inputs_for_testing(
-        &self,
-    ) -> Vec<(String, crate::TurnInputState, Option<u64>)> {
+    pub fn raw_pending_turn_inputs_for_testing(&self) -> Vec<super::RawPendingTurnInputForTesting> {
         self.pending_turn_inputs
             .lock()
             .expect("lock pending turn inputs")
@@ -60,7 +58,10 @@ impl InMemorySessionStore {
             .map(|entry| {
                 (
                     entry.input.input_id.clone(),
+                    entry.input.enqueue_seq,
                     entry.input.state,
+                    entry.claim_id.clone(),
+                    entry.claim_fencing_token,
                     entry
                         .claim_token
                         .as_ref()
@@ -91,7 +92,7 @@ impl InMemorySessionStore {
             .map(|entry| {
                 (
                     entry.batch.clone(),
-                    entry.claim_id.is_some(),
+                    entry.claim_id.clone(),
                     entry.claim_owner.clone(),
                     entry.claim_token.is_some(),
                     entry.claim_fencing_token,

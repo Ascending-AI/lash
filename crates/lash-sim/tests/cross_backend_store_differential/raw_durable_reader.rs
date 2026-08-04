@@ -1,5 +1,7 @@
 use super::*;
 
+type PendingTurnInputClaimRow = (String, i64, String, Option<String>, i64, Option<i64>);
+
 impl RawDurableReader {
     pub(super) fn detach_store(&mut self) {
         match self {
@@ -31,13 +33,28 @@ impl RawDurableReader {
                 let pending_turn_inputs = store
                     .raw_pending_turn_inputs_for_testing()
                     .into_iter()
-                    .map(|(input_id, state, claim_session_lease_generation)| {
-                        PendingTurnInputObservation {
+                    .map(
+                        |(
                             input_id,
+                            enqueue_seq,
                             state,
+                            claim_id,
+                            fencing_token,
                             claim_session_lease_generation,
-                        }
-                    })
+                        )| {
+                            assert_claim_id_spelling(
+                                claim_id.as_deref(),
+                                "recording-tic",
+                                enqueue_seq,
+                                fencing_token,
+                            );
+                            PendingTurnInputObservation {
+                                input_id,
+                                state,
+                                claim_session_lease_generation,
+                            }
+                        },
+                    )
                     .collect();
                 let queued_work = store
                     .raw_queued_work_for_testing()
@@ -48,7 +65,7 @@ impl RawDurableReader {
                             ordinal,
                             (
                                 batch,
-                                claim_id_present,
+                                claim_id,
                                 claim_owner,
                                 claim_token_present,
                                 claim_fencing_token,
@@ -58,7 +75,7 @@ impl RawDurableReader {
                             queued_work_observation(
                                 ordinal,
                                 batch,
-                                claim_id_present,
+                                claim_id,
                                 claim_owner,
                                 claim_token_present,
                                 claim_fencing_token,
@@ -336,8 +353,8 @@ impl RawDurableReader {
                         },
                     )
                     .collect();
-                let pending_rows: Vec<(String, String, Option<i64>)> = sqlx::query_as(
-                    "SELECT input_id, state,
+                let pending_rows: Vec<PendingTurnInputClaimRow> = sqlx::query_as(
+                    "SELECT input_id, enqueue_seq, state, claim_id, claim_fencing_token,
                             CASE WHEN claim_token IS NULL
                                  THEN NULL
                                  ELSE claim_session_lease_generation
@@ -352,15 +369,30 @@ impl RawDurableReader {
                 .expect("read Postgres pending turn inputs");
                 let pending_turn_inputs = pending_rows
                     .into_iter()
-                    .map(|(input_id, state, claim_session_lease_generation)| {
-                        PendingTurnInputObservation {
+                    .map(
+                        |(
                             input_id,
-                            state: TurnInputState::from_wire_str(&state)
-                                .expect("decode Postgres pending-input state"),
-                            claim_session_lease_generation: claim_session_lease_generation
-                                .map(|generation| generation as u64),
-                        }
-                    })
+                            enqueue_seq,
+                            state,
+                            claim_id,
+                            fencing_token,
+                            claim_session_lease_generation,
+                        )| {
+                            assert_claim_id_spelling(
+                                claim_id.as_deref(),
+                                "tic",
+                                enqueue_seq as u64,
+                                fencing_token as u64,
+                            );
+                            PendingTurnInputObservation {
+                                input_id,
+                                state: TurnInputState::from_wire_str(&state)
+                                    .expect("decode Postgres pending-input state"),
+                                claim_session_lease_generation: claim_session_lease_generation
+                                    .map(|generation| generation as u64),
+                            }
+                        },
+                    )
                     .collect();
                 let queued_work_batches: Vec<QueuedWorkBatchRow> = sqlx::query_as(
                     "SELECT enqueue_seq, batch_id, source_key, delivery_policy, slot_policy,

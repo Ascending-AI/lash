@@ -497,7 +497,7 @@ impl LashRuntime {
 
     pub async fn drain_next_session_command(
         &mut self,
-        session_execution_lease: &crate::SessionExecutionLeaseFence,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
         let Some(store) = self
             .session
@@ -546,7 +546,7 @@ impl LashRuntime {
         &mut self,
         command: crate::SessionCommand,
         completion: Option<crate::QueuedWorkCompletion>,
-        session_execution_lease: Option<&crate::SessionExecutionLeaseFence>,
+        session_execution_lease: Option<&crate::SessionExecutionLeaseAuthority>,
     ) -> Result<(), RuntimeError> {
         self.refresh_session_graph_from_store()
             .await

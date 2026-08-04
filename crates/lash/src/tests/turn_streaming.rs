@@ -788,7 +788,7 @@ async fn durable_application_read_survives_a_trimmed_live_replay_window() -> Res
         [application]
             if application.input_id == admission.input_id
                 && application.source_key.as_deref() == Some("host:gap-source")
-                && application.turn_id == "gap-application-turn"
+                && application.turn_id.as_str() == "gap-application-turn"
                 && application.checkpoint.is_none()
                 && session
                     .read_view()
@@ -2221,7 +2221,7 @@ async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Result<()> {
             applications,
         } if applications.iter().any(|application| {
             application.source_key.as_deref() == Some("injection:queue-1")
-                && application.turn_id == "queued-input-turn"
+                && application.turn_id.as_str() == "queued-input-turn"
                 && application.checkpoint
                     == Some(lash_core::CheckpointKind::BeforeCompletion)
                 && application.committed_message_id

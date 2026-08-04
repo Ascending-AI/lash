@@ -13,6 +13,8 @@ pub mod queued_work;
 mod realization;
 mod runtime_commit;
 mod session_execution_lease;
+mod turn_id;
+mod work_claim;
 
 pub use crate::session_graph::RealizedNodeTimestamp;
 pub use attachment_manifest::{
@@ -33,9 +35,11 @@ pub use runtime_commit::{
 };
 pub use session_execution_lease::{
     LeaseOwnerIdentity, SessionExecutionLease, SessionExecutionLeaseAcquisition,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
-    SessionExecutionLeaseDisplacement, SessionExecutionLeaseFence,
+    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
+    SessionExecutionLeaseDisplacement,
 };
+pub use turn_id::TurnId;
+pub use work_claim::{WorkClaim, WorkCompletion};
 
 fn default_root_session_id() -> String {
     "root".to_string()
@@ -867,7 +871,7 @@ impl RuntimeCommit {
     /// runtime commit rather than in a separate raceable write.
     pub fn releasing_session_execution_lease(
         mut self,
-        completion: SessionExecutionLeaseCompletion,
+        completion: SessionExecutionLeaseAuthority,
     ) -> Self {
         self.release_session_execution_lease = Some(completion);
         self
@@ -1204,32 +1208,32 @@ pub trait TurnInputStore: Send + Sync {
     async fn claim_active_turn_inputs(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
-        turn_id: &str,
+        turn_id: &crate::TurnId,
         checkpoint: crate::CheckpointKind,
         max_inputs: usize,
-    ) -> Result<Option<crate::TurnInputClaim>, StoreError>;
+    ) -> Result<Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>, StoreError>;
 
     /// Claim queued next-turn input at idle.
     async fn claim_next_turn_inputs(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
-    ) -> Result<Option<crate::TurnInputClaim>, StoreError>;
+    ) -> Result<Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>, StoreError>;
 
     /// Abandon a held pending-turn-input claim so it can be reclaimed.
     async fn abandon_turn_input_claim(
         &self,
-        claim: &crate::TurnInputClaim,
+        claim: &crate::WorkClaim<crate::runtime::TurnInputClaimData>,
     ) -> Result<(), StoreError>;
 
     /// Release multiple held pending-turn-input claims in one backend batch.
     async fn abandon_turn_input_claims(
         &self,
-        claims: &[crate::TurnInputClaim],
+        claims: &[crate::WorkClaim<crate::runtime::TurnInputClaimData>],
     ) -> Result<(), StoreError> {
         for claim in claims {
             self.abandon_turn_input_claim(claim).await?;
@@ -1269,7 +1273,7 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
     /// [`StoreError::SessionExecutionLeaseExpired`].
     async fn renew_session_execution_lease(
         &self,
-        fence: &SessionExecutionLeaseFence,
+        fence: &SessionExecutionLeaseAuthority,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLease, StoreError>;
 
@@ -1278,7 +1282,7 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
     /// This operation is idempotent and must not clear a newer owner's lease.
     async fn release_session_execution_lease(
         &self,
-        completion: &SessionExecutionLeaseCompletion,
+        completion: &SessionExecutionLeaseAuthority,
     ) -> Result<(), StoreError>;
 
     /// Read the current session-execution-lease row without claiming it.
@@ -1334,9 +1338,9 @@ pub trait QueuedWorkStore: Send + Sync {
     async fn claim_leading_ready_session_command(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
-    ) -> Result<Option<crate::QueuedWorkClaim>, StoreError>;
+    ) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError>;
 
     /// Claim the next ready turn-work group for `owner_id`.
     ///
@@ -1347,11 +1351,11 @@ pub trait QueuedWorkStore: Send + Sync {
     async fn claim_ready_queued_work(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
         max_batches: usize,
-    ) -> Result<Option<crate::QueuedWorkClaim>, StoreError>;
+    ) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError>;
 
     /// Claim both ingress families admitted at an active-turn checkpoint.
     ///
@@ -1362,16 +1366,16 @@ pub trait QueuedWorkStore: Send + Sync {
     async fn claim_checkpoint_work(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
-        turn_id: &str,
+        turn_id: &crate::TurnId,
         checkpoint: crate::CheckpointKind,
         max_inputs: usize,
         max_batches: usize,
     ) -> Result<
         (
-            Option<crate::TurnInputClaim>,
-            Option<crate::QueuedWorkClaim>,
+            Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>,
+            Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>,
         ),
         StoreError,
     >;
@@ -1389,22 +1393,22 @@ pub trait QueuedWorkStore: Send + Sync {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
         batch_ids: &[String],
-    ) -> Result<Option<crate::QueuedWorkClaim>, StoreError>;
+    ) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError>;
 
     /// Release a held queued-work claim without completing it.
     async fn abandon_queued_work_claim(
         &self,
-        claim: &crate::QueuedWorkClaim,
+        claim: &crate::WorkClaim<crate::runtime::QueuedWorkClaimData>,
     ) -> Result<(), StoreError>;
 
     /// Release multiple queued-work claims in one backend batch.
     async fn abandon_queued_work_claims(
         &self,
-        claims: &[crate::QueuedWorkClaim],
+        claims: &[crate::WorkClaim<crate::runtime::QueuedWorkClaimData>],
     ) -> Result<(), StoreError> {
         for claim in claims {
             self.abandon_queued_work_claim(claim).await?;

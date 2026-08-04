@@ -300,7 +300,7 @@ impl LashRuntime {
                         format!("agent-frame handoff did not target frame `{frame_id}`"),
                     ));
                 }
-                let materialized = claim.materialize_for_turn();
+                let materialized = claim.materialize_queued_turn_work();
                 let follow_turn_id = agent_frame_follow_turn_id(&root_trace_turn_id, turns.len());
                 crate::trace::emit_trace(
                     &self.host.core.tracing.trace_sink,

@@ -194,12 +194,18 @@ pub(super) fn session_owned_artifact_ref_observations(
 pub(super) fn queued_work_observation(
     ordinal: usize,
     batch: QueuedWorkBatch,
-    claim_id_present: bool,
+    claim_id: Option<String>,
     claim_owner: Option<LeaseOwnerIdentity>,
     claim_token_present: bool,
     claim_fencing_token: u64,
     claim_session_lease_generation: Option<u64>,
 ) -> QueuedWorkObservation {
+    assert_claim_id_spelling(
+        claim_id.as_deref(),
+        "recording-qwc",
+        batch.enqueue_seq,
+        claim_fencing_token,
+    );
     QueuedWorkObservation {
         ordinal,
         source_key: batch.source_key,
@@ -212,7 +218,7 @@ pub(super) fn queued_work_observation(
             .into_iter()
             .map(|item| serde_json::to_value(item.payload).expect("encode queued-work payload"))
             .collect(),
-        claim_id_present,
+        claim_id_present: claim_id.is_some(),
         claim_owner,
         claim_token_present,
         claim_fencing_token,
@@ -257,6 +263,12 @@ pub(super) fn queued_work_observations_from_sql_rows(
             )| {
                 let mut payloads = payloads_by_batch.remove(&batch_id).unwrap_or_default();
                 payloads.sort_by_key(|(item_index, _)| *item_index);
+                assert_claim_id_spelling(
+                    claim_id.as_deref(),
+                    "qwc",
+                    _enqueue_seq as u64,
+                    claim_fencing_token as u64,
+                );
                 QueuedWorkObservation {
                     ordinal,
                     source_key,
@@ -286,4 +298,19 @@ pub(super) fn queued_work_observations_from_sql_rows(
             },
         )
         .collect()
+}
+
+pub(super) fn assert_claim_id_spelling(
+    claim_id: Option<&str>,
+    prefix: &str,
+    enqueue_seq: u64,
+    fencing_token: u64,
+) {
+    if let Some(claim_id) = claim_id {
+        assert_eq!(
+            claim_id,
+            format!("{prefix}:{enqueue_seq}:{fencing_token}"),
+            "durable claim-id bytes drifted from the backend dialect"
+        );
+    }
 }

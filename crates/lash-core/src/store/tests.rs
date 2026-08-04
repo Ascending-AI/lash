@@ -146,14 +146,16 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
         session_id: "golden-session".to_string(),
         claim_id: "claim-a".to_string(),
         lease_token: "lease-a".to_string(),
-        input_ids: vec!["input-1".to_string()],
-        applications: vec![crate::TurnInputApplication {
-            input_id: "input-1".to_string(),
-            source_key: None,
-            turn_id: "turn-42".to_string(),
-            committed_message_id: "random-attempt-a".to_string(),
-            checkpoint: None,
-        }],
+        data: crate::TurnInputCompletionData {
+            input_ids: vec!["input-1".to_string()],
+            applications: vec![crate::TurnInputApplication {
+                input_id: "input-1".to_string(),
+                source_key: None,
+                turn_id: crate::TurnId::from("turn-42"),
+                committed_message_id: "random-attempt-a".to_string(),
+                checkpoint: None,
+            }],
+        },
     }];
     let mut replay = first.clone();
     replay.completed_turn_input_claims[0].applications[0].committed_message_id =

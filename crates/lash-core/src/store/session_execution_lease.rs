@@ -57,16 +57,14 @@ pub struct SessionExecutionLease {
     pub expires_at_epoch_ms: u64,
 }
 
+/// Shared authority presented at every session-execution-lease fence and
+/// completion seam.
+///
+/// Fence checks and release used to accept field-identical record types. That
+/// allowed one role to gain an authority field without making the other role a
+/// compile error. A single record keeps both paths structurally identical.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct SessionExecutionLeaseFence {
-    pub session_id: String,
-    pub owner: LeaseOwnerIdentity,
-    pub lease_token: String,
-    pub fencing_token: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct SessionExecutionLeaseCompletion {
+pub struct SessionExecutionLeaseAuthority {
     pub session_id: String,
     pub owner: LeaseOwnerIdentity,
     pub lease_token: String,
@@ -76,8 +74,8 @@ pub struct SessionExecutionLeaseCompletion {
 impl SessionExecutionLease {
     /// Captures session, owner, lease token, and fencing generation that store implementors must
     /// verify before accepting execution writes.
-    pub fn fence(&self) -> SessionExecutionLeaseFence {
-        SessionExecutionLeaseFence {
+    pub fn authority(&self) -> SessionExecutionLeaseAuthority {
+        SessionExecutionLeaseAuthority {
             session_id: self.session_id.clone(),
             owner: self.owner.clone(),
             lease_token: self.lease_token.clone(),
@@ -85,15 +83,14 @@ impl SessionExecutionLease {
         }
     }
 
-    /// Captures session, owner, lease token, and fencing generation that store implementors must
-    /// verify before releasing the execution lease.
-    pub fn completion(&self) -> SessionExecutionLeaseCompletion {
-        SessionExecutionLeaseCompletion {
-            session_id: self.session_id.clone(),
-            owner: self.owner.clone(),
-            lease_token: self.lease_token.clone(),
-            fencing_token: self.fencing_token,
-        }
+    /// Captures the shared authority for a session-execution fence check.
+    pub fn fence(&self) -> SessionExecutionLeaseAuthority {
+        self.authority()
+    }
+
+    /// Captures the same shared authority for idempotent lease release.
+    pub fn completion(&self) -> SessionExecutionLeaseAuthority {
+        self.authority()
     }
 }
 
@@ -182,5 +179,24 @@ impl SessionExecutionLeaseClaimOutcome {
             Self::Acquired(acquisition) => Some(acquisition),
             Self::Busy { .. } => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_authority_json_keeps_the_fence_and_completion_shape() {
+        let authority = SessionExecutionLeaseAuthority {
+            session_id: "session".to_string(),
+            owner: LeaseOwnerIdentity::opaque("owner", "incarnation"),
+            lease_token: "lease".to_string(),
+            fencing_token: 7,
+        };
+        assert_eq!(
+            serde_json::to_string(&authority).expect("serialize lease authority"),
+            r#"{"session_id":"session","owner":{"owner_id":"owner","incarnation_id":"incarnation"},"lease_token":"lease","fencing_token":7}"#
+        );
     }
 }

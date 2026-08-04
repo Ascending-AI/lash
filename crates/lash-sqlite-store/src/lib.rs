@@ -57,7 +57,7 @@ use lash_core::runtime::{
     prepare_process_event_append, prepare_process_registration,
 };
 use lash_core::store::queued_work::{
-    ClaimCandidate, QueuedWorkClaimLease, claim_scan_limit, derive_batch_id,
+    ClaimCandidate, WorkClaimLease, claim_scan_limit, derive_batch_id,
     select_leading_session_command, select_turn_work_claim_prefix,
 };
 use lash_core::store::{
@@ -73,10 +73,10 @@ use lash_core::{
     ProcessLeaseCompletion, ProcessListFilter, ProcessLiveReferenceSummary, ProcessObserverBy,
     ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
     ProcessStarted, QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
-    SessionExecutionLeaseAcquisition, SessionExecutionLeaseClaimOutcome,
-    SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
-    SessionMeta, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError,
-    StoreMaintenance, TurnInputStore, VacuumReport, facade_support::MergeKey,
+    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionMeta,
+    SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
+    TurnInputStore, VacuumReport, facade_support::MergeKey,
     facade_support::PROCESS_LEASE_SCHEMA_VERSION, facade_support::ProcessStartPlan,
     facade_support::SessionPickerInfo,
 };

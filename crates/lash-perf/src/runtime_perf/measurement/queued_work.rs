@@ -492,7 +492,7 @@ async fn run_once_turn_input_ingress_interrupt(
         let turn_before_memory = process_memory_sample();
         let turn_started = Instant::now();
         let mut phase_profile = BTreeMap::new();
-        let turn_id = format!("turn-input-ingress-{turn_index}");
+        let turn_id = lash_core::TurnId::from(format!("turn-input-ingress-{turn_index}"));
 
         let (lease, phase) =
             measure_runtime_perf_async_phase("turn_input_ingress.claim_session_lease", async {
@@ -526,7 +526,7 @@ async fn run_once_turn_input_ingress_interrupt(
                             lash_core::PendingTurnInputDraft::new(
                                 &session_id,
                                 lash_core::TurnInputIngress::active_turn(
-                                    &turn_id,
+                                    turn_id.clone(),
                                     lash_core::TurnInputCheckpointBoundary::AfterWork,
                                 ),
                                 input,
@@ -622,7 +622,7 @@ async fn run_once_turn_input_ingress_interrupt(
                 active_claim.inputs.len()
             );
         }
-        let active_turn_input = active_claim.materialize_for_turn();
+        let active_turn_input = active_claim.materialize_turn_input();
         // Position-independent on purpose: a claim aggregates many inputs and
         // only the first carries the attachment, so the attachment is not the
         // last item. Assert survival, not placement.
@@ -708,7 +708,7 @@ async fn run_once_turn_input_ingress_interrupt(
             .await?;
         phase_profile.insert(phase.0, phase.1);
         next_claims += 1;
-        let next_turn_input = next_claim.materialize_for_turn();
+        let next_turn_input = next_claim.materialize_turn_input();
         // Position-independent: see the active-claim assertion above.
         if !next_turn_input.items.iter().any(|item| {
             matches!(

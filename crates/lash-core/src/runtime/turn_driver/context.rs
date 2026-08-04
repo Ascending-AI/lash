@@ -14,8 +14,10 @@ impl<'run> RuntimeTurnDriver<'run> {
     ) -> Result<crate::RuntimeExecutionContext<'run>, PluginError> {
         let manager = self.session_services.clone();
         let effect_controller = self.effect_controller_handle();
-        let direct_completions = manager
-            .direct_completion_client(effect_controller.clone_scoped(), Some(self.turn_id.clone()));
+        let direct_completions = manager.direct_completion_client(
+            effect_controller.clone_scoped(),
+            Some(self.turn_id.to_string()),
+        );
         let execution_env_spec = self
             .turn_pipeline
             .state()

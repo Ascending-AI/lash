@@ -784,22 +784,23 @@ pub use runtime::{
     SessionQueueEventKind, SessionRevision, SessionScope, SessionStoreCreateRequest,
     SessionStoreFactory, SlotPolicy, TokenLedgerEntry, ToolCallLaunch, TurnActivity,
     TurnActivityId, TurnCancelOriginHint, TurnContext, TurnEvent, TurnInput, TurnInputApplication,
-    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimMode, TurnInputCompletion,
-    TurnInputIngress, TurnInputState, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
-    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason,
+    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputClaimMode,
+    TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputState, WaitKind,
+    WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
+    WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{
     LlmAttachmentSpec, ProcessEventSemantics, QueuedCheckpointTurnInput, QueuedCheckpointWork,
     QueuedTurnWork, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
-    QueuedWorkClaimBoundary, QueuedWorkCompletion, QueuedWorkItem, QueuedWorkPayload,
-    RuntimeReplay, RuntimeSubject, load_process_execution_env, materialize_process_event_semantics,
-    persist_process_execution_env, prepare_process_event_append, prepare_process_registration,
-    prepare_process_start, process_event_invocation, process_event_payload_hash,
-    process_registration_fingerprint, process_wake_batch_draft,
-    process_wake_batch_draft_with_policy, process_wake_input_from_event_payload,
-    process_wake_turn_cause, process_wake_turn_text, require_event_replay,
+    QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkCompletion, QueuedWorkCompletionData,
+    QueuedWorkItem, QueuedWorkPayload, RuntimeReplay, RuntimeSubject, load_process_execution_env,
+    materialize_process_event_semantics, persist_process_execution_env,
+    prepare_process_event_append, prepare_process_registration, prepare_process_start,
+    process_event_invocation, process_event_payload_hash, process_registration_fingerprint,
+    process_wake_batch_draft, process_wake_batch_draft_with_policy,
+    process_wake_input_from_event_payload, process_wake_turn_cause, process_wake_turn_text,
+    require_event_replay,
 };
 pub(crate) use runtime::{
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, QueuedWorkEnqueueOutcome,
@@ -807,6 +808,7 @@ pub(crate) use runtime::{
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use runtime::{apply_process_event_projection, fold_process_record};
 pub(crate) use session_model::plugin_runtime_protocol_event;
+pub use store::{TurnId, WorkClaim, WorkCompletion};
 // Effect / process-control types consumed by external effect hosts (e.g.
 // lash-restate's workflows) and their integration tests. Kept on the public
 // surface; the rest of the runtime block above stays crate-internal.
@@ -835,9 +837,9 @@ pub use store::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, GcReport,
     LeaseOwnerIdentity, QueuedWorkStore, RuntimePersistence, SessionAdmission, SessionBinding,
     SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
-    SessionExecutionLeaseDisplacement, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
-    SessionMeta, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
+    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
+    SessionExecutionLeaseDisplacement, SessionExecutionLeaseStore, SessionMeta, StoreError,
+    StoreMaintenance, TurnInputStore, VacuumReport,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

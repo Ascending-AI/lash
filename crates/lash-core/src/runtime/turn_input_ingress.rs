@@ -4,7 +4,7 @@ use crate::{CheckpointKind, PluginMessage, TurnCause, TurnInput};
 #[serde(tag = "scope", rename_all = "snake_case")]
 pub enum TurnInputIngress {
     ActiveTurn {
-        turn_id: String,
+        turn_id: crate::TurnId,
         #[serde(default)]
         min_boundary: TurnInputCheckpointBoundary,
     },
@@ -15,7 +15,7 @@ impl TurnInputIngress {
     /// Routes an input to an active turn at or after the named checkpoint boundary for turn-input
     /// store implementors.
     pub fn active_turn(
-        turn_id: impl Into<String>,
+        turn_id: impl Into<crate::TurnId>,
         min_boundary: TurnInputCheckpointBoundary,
     ) -> Self {
         Self::ActiveTurn {
@@ -34,7 +34,7 @@ impl TurnInputIngress {
     /// returning `None` for next-turn ingress.
     pub fn active_turn_id(&self) -> Option<&str> {
         match self {
-            Self::ActiveTurn { turn_id, .. } => Some(turn_id),
+            Self::ActiveTurn { turn_id, .. } => Some(turn_id.as_str()),
             Self::NextTurn => None,
         }
     }
@@ -200,7 +200,7 @@ pub struct TurnInputApplication {
     pub input_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
-    pub turn_id: String,
+    pub turn_id: crate::TurnId,
     pub committed_message_id: String,
     /// Present for active-turn checkpoint application and absent when the
     /// input formed the initial canonical input of an idle queued turn.
@@ -332,40 +332,35 @@ pub enum PendingTurnInputSuffixCancelOutcome {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TurnInputClaimMode {
     ActiveTurn {
-        turn_id: String,
+        turn_id: crate::TurnId,
         checkpoint: CheckpointKind,
     },
     NextTurn,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct TurnInputCompletion {
-    pub session_id: String,
-    pub claim_id: String,
-    pub lease_token: String,
+pub struct TurnInputCompletionData {
     pub input_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub applications: Vec<TurnInputApplication>,
 }
 
+/// A shared work completion carrying settled turn-input identities and
+/// application evidence.
+pub type TurnInputCompletion = crate::WorkCompletion<TurnInputCompletionData>;
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct TurnInputClaim {
-    pub session_id: String,
-    pub claim_id: String,
-    pub owner: crate::LeaseOwnerIdentity,
-    pub lease_token: String,
-    pub fencing_token: u64,
-    /// The session-execution-lease generation this claim pins. It controls when
-    /// another generation may re-claim the rows, not settlement authority
-    /// before that re-claim (ADR 0029).
-    pub session_lease_generation: u64,
+pub struct TurnInputClaimData {
     pub mode: TurnInputClaimMode,
     pub inputs: Vec<PendingTurnInput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub applications: Vec<TurnInputApplication>,
 }
 
-impl TurnInputClaim {
+/// A shared work claim carrying pending turn-input material.
+pub type TurnInputClaim = crate::WorkClaim<TurnInputClaimData>;
+
+impl crate::WorkClaim<TurnInputClaimData> {
     /// Exposes completion to store and durable-substrate implementors while claiming and settling
     /// durable queued work.
     pub fn completion(&self) -> TurnInputCompletion {
@@ -373,18 +368,24 @@ impl TurnInputClaim {
             session_id: self.session_id.clone(),
             claim_id: self.claim_id.clone(),
             lease_token: self.lease_token.clone(),
-            input_ids: self
-                .inputs
-                .iter()
-                .map(|input| input.input_id.clone())
-                .collect(),
-            applications: self.applications.clone(),
+            data: TurnInputCompletionData {
+                input_ids: self
+                    .inputs
+                    .iter()
+                    .map(|input| input.input_id.clone())
+                    .collect(),
+                applications: self.applications.clone(),
+            },
         }
     }
 
     /// Updates initial turn application state for store and durable-substrate implementors while
     /// claiming and settling durable queued work.
-    pub fn record_initial_turn_application(&mut self, turn_id: &str, committed_message_id: &str) {
+    pub fn record_initial_turn_application(
+        &mut self,
+        turn_id: &crate::TurnId,
+        committed_message_id: &str,
+    ) {
         self.applications = self
             .inputs
             .iter()
@@ -397,7 +398,7 @@ impl TurnInputClaim {
             .map(|input| TurnInputApplication {
                 input_id: input.input_id.clone(),
                 source_key: input.source_key.clone(),
-                turn_id: turn_id.to_string(),
+                turn_id: turn_id.clone(),
                 committed_message_id: committed_message_id.to_string(),
                 checkpoint: None,
             })
@@ -408,7 +409,7 @@ impl TurnInputClaim {
     /// appear in the committed checkpoint messages.
     pub fn record_checkpoint_applications(
         &mut self,
-        turn_id: &str,
+        turn_id: &crate::TurnId,
         checkpoint: CheckpointKind,
         committed_messages: &[crate::Message],
     ) {
@@ -426,7 +427,7 @@ impl TurnInputClaim {
                     .then(|| TurnInputApplication {
                         input_id: input.input_id.clone(),
                         source_key: input.source_key.clone(),
-                        turn_id: turn_id.to_string(),
+                        turn_id: turn_id.clone(),
                         committed_message_id,
                         checkpoint: Some(checkpoint),
                     })
@@ -451,7 +452,7 @@ impl TurnInputClaim {
 
     /// Materializes claimed inputs in claim order for turn-input store implementors, resolving
     /// attachments and omitting inputs that produce no committed message.
-    pub async fn materialize_for_checkpoint(
+    pub async fn materialize_checkpoint_turn_input(
         &self,
         attachment_store: &crate::SessionAttachmentStore,
         attachment_source_policy: &dyn crate::AttachmentSourcePolicy,
@@ -476,7 +477,7 @@ impl TurnInputClaim {
 
     /// Materializes for turn data for store and durable-substrate implementors while claiming and
     /// settling durable queued work.
-    pub fn materialize_for_turn(&self) -> TurnInput {
+    pub fn materialize_turn_input(&self) -> TurnInput {
         let mut input_items = Vec::new();
         let mut protocol_turn_options = None;
         let mut trace_turn_id = None;

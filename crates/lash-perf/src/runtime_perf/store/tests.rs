@@ -68,3 +68,73 @@ async fn perf_store_reports_the_holder_a_claim_displaces() {
     )
     .await;
 }
+
+#[tokio::test]
+async fn perf_store_pins_durable_claim_id_dialects() {
+    let store = RuntimePerfStore::default();
+    let session_id = "perf-claim-id-dialects";
+    let owner = LeaseOwnerIdentity::opaque("perf-owner", "perf-incarnation");
+    let queued = store
+        .enqueue_queued_work(QueuedWorkBatchDraft::new(
+            session_id,
+            DeliveryPolicy::EarliestSafeBoundary,
+            SlotPolicy::Exclusive,
+            vec![QueuedWorkPayload::agent_frame_task("frame", "task", None)],
+        ))
+        .await
+        .expect("enqueue perf queued work");
+    let pending = store
+        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
+            session_id,
+            lash_core::TurnInputIngress::next_turn(),
+            lash_core::TurnInput::text("input"),
+        ))
+        .await
+        .expect("enqueue perf turn input");
+    let lease = store
+        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .await
+        .expect("claim perf session lease")
+        .acquired()
+        .expect("perf session lease acquired");
+    let queued_claim = store
+        .claim_ready_queued_work(
+            session_id,
+            &lease.fence(),
+            &owner,
+            lash_core::runtime::QueuedWorkClaimBoundary::Idle,
+            1,
+        )
+        .await
+        .expect("claim perf queued work")
+        .expect("perf queued claim");
+    let input_claim = store
+        .claim_next_turn_inputs(session_id, &lease.fence(), &owner, 1)
+        .await
+        .expect("claim perf turn input")
+        .expect("perf turn-input claim");
+
+    assert_eq!(
+        queued_claim.claim_id,
+        format!("perf-qwc:{}:1", queued.enqueue_seq)
+    );
+    assert_eq!(
+        input_claim.claim_id,
+        format!("perf-tic:{}:1", pending.enqueue_seq)
+    );
+    assert_eq!(
+        store.queued_work.lock().expect("perf queued work")[0]
+            .claim_id
+            .as_deref(),
+        Some(queued_claim.claim_id.as_str())
+    );
+    assert_eq!(
+        store
+            .pending_turn_inputs
+            .lock()
+            .expect("perf pending inputs")[0]
+            .claim_id
+            .as_deref(),
+        Some(input_claim.claim_id.as_str())
+    );
+}
