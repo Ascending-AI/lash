@@ -319,14 +319,24 @@ impl SessionCommitStore for Store {
                             String,
                             Option<String>,
                             Option<i64>,
+                            Option<i64>,
                         )> = tx
                             .query_row(
                                 "SELECT turn_commit_hash, result_json,
-                                        request_identity_hash, identity_encoding_version
+                                        request_identity_hash, identity_encoding_version,
+                                        requested_node_count
                                  FROM runtime_turn_commits
                                  WHERE session_id = ?1 AND turn_id = ?2",
                                 params![commit.session_id, operation_key],
-                                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                                |row| {
+                                    Ok((
+                                        row.get(0)?,
+                                        row.get(1)?,
+                                        row.get(2)?,
+                                        row.get(3)?,
+                                        row.get(4)?,
+                                    ))
+                                },
                             )
                             .optional()
                             .map_err(sqlite_error)?;
@@ -335,36 +345,38 @@ impl SessionCommitStore for Store {
                             result_json,
                             stored_identity,
                             stored_version,
+                            stored_requested_node_count,
                         )) = prior
                         {
-                            if stored_hash == turn_commit_hash {
-                                let mut result: RuntimeCommitResult =
-                                    serde_json::from_str(&result_json).map_err(|err| {
-                                        StoreError::Backend(format!(
-                                            "failed to decode runtime turn commit result: {err}"
-                                        ))
-                                    })?;
-                                result.receipt_replayed = true;
-                                if let Some(completion) =
-                                    commit.release_session_execution_lease.as_ref()
-                                {
-                                    release_session_execution_lease_conn(tx, completion)?;
-                                }
-                                return Ok(result);
-                            }
-                            if let (
-                                Some(stored_version),
-                                Some(attempted_version),
-                                Some(stored_identity),
-                                Some(attempted_identity),
-                            ) = (
-                                stored_version,
-                                completed.identity_encoding_version.map(i64::from),
+                            let stored_count = stored_requested_node_count
+                                .map(u64::try_from)
+                                .transpose()
+                                .map_err(|_| {
+                                    StoreError::Backend(
+                                        "stored append requested-node count is negative".to_string(),
+                                    )
+                                })?;
+                            let attempted_count = completed
+                                .requested_node_count
+                                .map(u64::try_from)
+                                .transpose()
+                                .map_err(|_| {
+                                    StoreError::Backend(
+                                        "attempted append requested-node count does not fit u64"
+                                            .to_string(),
+                                    )
+                                })?;
+                            match lash_core::store::decide_runtime_commit_receipt(
+                                &stored_hash,
+                                &turn_commit_hash,
+                                stored_version.and_then(|version| u32::try_from(version).ok()),
+                                completed.identity_encoding_version,
                                 stored_identity.as_deref(),
                                 completed.request_identity_hash.as_deref(),
-                            ) && stored_version == attempted_version
-                            {
-                                if stored_identity == attempted_identity {
+                                stored_count,
+                                attempted_count,
+                            ) {
+                                lash_core::store::RuntimeCommitReceiptDecision::Replay => {
                                     let mut result: RuntimeCommitResult =
                                         serde_json::from_str(&result_json).map_err(|err| {
                                             StoreError::Backend(format!(
@@ -379,15 +391,30 @@ impl SessionCommitStore for Store {
                                     }
                                     return Ok(result);
                                 }
-                                return Err(StoreError::AppendOperationIdentityConflict {
-                                    session_id: commit.session_id.clone(),
-                                    operation_key,
-                                });
+                                lash_core::store::RuntimeCommitReceiptDecision::AppendIdentityConflict => {
+                                    return Err(StoreError::AppendOperationIdentityConflict {
+                                        session_id: commit.session_id.clone(),
+                                        operation_key,
+                                    });
+                                }
+                                lash_core::store::RuntimeCommitReceiptDecision::RuntimeCommitConflict => {
+                                    return Err(StoreError::RuntimeTurnCommitConflict {
+                                        session_id: commit.session_id.clone(),
+                                        turn_id: operation_key,
+                                    });
+                                }
+                                lash_core::store::RuntimeCommitReceiptDecision::CorruptRequestedNodeCount {
+                                    stored,
+                                    attempted,
+                                } => {
+                                    return Err(StoreError::AppendReceiptRequestedNodeCountCorrupt {
+                                        session_id: commit.session_id.clone(),
+                                        operation_key,
+                                        stored,
+                                        attempted,
+                                    });
+                                }
                             }
-                            return Err(StoreError::RuntimeTurnCommitConflict {
-                                session_id: commit.session_id.clone(),
-                                turn_id: operation_key,
-                            });
                         }
                     }
                     if commit.turn_commit.request_identity_hash.is_some()

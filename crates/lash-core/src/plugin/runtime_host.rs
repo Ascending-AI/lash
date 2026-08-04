@@ -240,9 +240,13 @@ impl<'run> SessionTurnRequest<'run> {
 /// A plugin-authored append onto a session's history graph.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppendSessionNodesRequest {
-    /// Caller-stable identity for this logical append. Reusing it after the
-    /// session head advances returns the first append result from the durable
-    /// receipt. Reusing it with different semantic request content is rejected.
+    /// Caller-stable identity for this logical append. While its durable receipt
+    /// is retained, a retry that reproduces the same ancestor, ordered nodes,
+    /// and semantic field values under the same identity-encoding version
+    /// returns the first append result even after the session head advances.
+    /// Changing any of those request fields while reusing the operation id is a
+    /// typed caller conflict. A retry must therefore preserve the original
+    /// request, rather than rebuilding it from the session's new head.
     pub operation_id: String,
     pub nodes: Vec<SessionAppendNode>,
     /// Branch-liveness precondition: refuse the append unless this node is
@@ -308,7 +312,10 @@ pub struct AppendSessionNodesRequest {
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum AppendSessionNodesResult {
     /// The nodes are durable. `node_ids` are their store-assigned ids in
-    /// request order and `leaf_node_id` is the session's leaf after the append.
+    /// request order. On a fresh append, `leaf_node_id` is the selected leaf
+    /// after that commit. On receipt replay both fields are the stored
+    /// first-attempt result; later commits may have moved the current session
+    /// leaf elsewhere.
     ///
     /// The first appended node parents on whatever the leaf was when the
     /// runtime reloaded the head, which is not necessarily

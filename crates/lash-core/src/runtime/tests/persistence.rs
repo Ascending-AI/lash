@@ -1,4 +1,5 @@
 use super::*;
+use crate::SessionCommitStore as _;
 
 // The in-memory `RecordingStore` stands in for the real store across these
 // runtime tests; the conformance suite holds it to the same durability
@@ -23,6 +24,84 @@ async fn in_memory_append_receipt_replays_after_ancestor_superseded() {
         },
     )
     .await;
+}
+
+#[tokio::test]
+async fn in_memory_append_receipt_restores_mixed_usage_envelope() {
+    crate::testing::conformance::append_receipt_mixed_usage_envelope(Arc::new(
+        RecordingStore::default(),
+    ))
+    .await;
+}
+
+#[tokio::test]
+async fn in_memory_append_receipt_rolls_back_failure_after_first_mutation() {
+    let store = Arc::new(RecordingStore::default());
+    let mut state = RuntimeSessionState::default();
+    let nodes = vec![crate::SessionAppendNode::plugin(
+        "in-memory-post-mutation-atomicity",
+        serde_json::json!({"value": 1}),
+    )];
+    let operation = crate::runtime::state::boundary_operation(
+        "root",
+        "in-memory-post-mutation-atomicity",
+        "append-session-nodes",
+    );
+    let stamp =
+        crate::RuntimeTurnCommitStamp::append_session_nodes(operation.clone(), None, &nodes)
+            .expect("append stamp");
+    let draft_namespace = operation.storage_key().expect("operation key");
+    crate::runtime::state::append_session_nodes_to_state_with_clock(
+        &mut state,
+        &nodes,
+        &draft_namespace,
+        &crate::SystemClock,
+    );
+    let mut graph = state.pending_graph_commit();
+    graph
+        .derive_node_ids("root", &operation)
+        .expect("derive append ids");
+    let mut commit = crate::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
+        &state,
+        graph,
+        &[],
+        operation,
+    )
+    .expect("append commit");
+    commit.turn_commit = stamp;
+    store.fail_next_runtime_commit_after_first_mutation(crate::StoreError::Backend(
+        "injected failure after first in-memory mutation".to_string(),
+    ));
+
+    let error = store
+        .commit_runtime_state(commit.clone())
+        .await
+        .expect_err("post-mutation failure must reject the append");
+    assert!(matches!(
+        error,
+        crate::StoreError::Backend(message)
+            if message == "injected failure after first in-memory mutation"
+    ));
+    assert!(
+        store
+            .load_session()
+            .await
+            .expect("load failed append")
+            .is_none()
+    );
+    assert!(
+        crate::SessionCommitStore::load_session_meta(store.as_ref())
+            .await
+            .expect("load rolled-back session meta")
+            .is_none()
+    );
+    assert!(store.raw_runtime_turn_commits_for_testing().is_empty());
+
+    store
+        .commit_runtime_state(commit)
+        .await
+        .expect("retry after honest rollback succeeds");
+    assert_eq!(store.raw_runtime_turn_commits_for_testing().len(), 1);
 }
 
 fn recording_runtime_persistence() -> Arc<dyn crate::RuntimePersistence> {

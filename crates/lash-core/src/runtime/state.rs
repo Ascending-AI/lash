@@ -792,6 +792,23 @@ pub(crate) fn apply_graph_commit_node_id_mapping(
     Ok(())
 }
 
+pub(crate) fn receipt_append_node_ids(
+    result: &crate::store::RuntimeCommitResult,
+    requested_node_count: usize,
+) -> Result<Vec<String>, crate::StoreError> {
+    if result.realized_node_timestamps.len() < requested_node_count {
+        return Err(crate::StoreError::Backend(format!(
+            "append receipt returned {} realized node timestamps for {requested_node_count} requested nodes",
+            result.realized_node_timestamps.len()
+        )));
+    }
+    Ok(result.realized_node_timestamps
+        [result.realized_node_timestamps.len() - requested_node_count..]
+        .iter()
+        .map(|realized| realized.node_id.clone())
+        .collect())
+}
+
 pub(super) fn open_agent_frame_in_state_with_clock(
     state: &mut RuntimeSessionState,
     request: crate::OpenAgentFrameRequest,

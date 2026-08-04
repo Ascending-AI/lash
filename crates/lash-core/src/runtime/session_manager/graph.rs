@@ -23,7 +23,20 @@ impl CurrentSessionCapability {
             let result = writer
                 .append_session_nodes(request)
                 .await
-                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+                .map_err(|err| match err {
+                    crate::SessionError::Store {
+                        source:
+                            crate::StoreError::AppendOperationIdentityConflict {
+                                session_id,
+                                operation_key,
+                            },
+                        ..
+                    } => crate::PluginError::AppendOperationIdentityConflict {
+                        session_id,
+                        operation_key,
+                    },
+                    err => crate::PluginError::Session(err.to_string()),
+                })?;
             runtime.publish_from(&writer);
             return Ok(result);
         }
@@ -45,10 +58,10 @@ impl CurrentSessionCapability {
         } else {
             self.snapshot.to_runtime_state()
         };
-        let usage_deltas = if usage.persist_to_store {
-            usage.merge_drained_token_ledger(&mut state)
+        let mut staged_usage = if usage.persist_to_store {
+            Some(usage.stage_token_ledger(&mut state))
         } else {
-            Vec::new()
+            None
         };
         let operation = super::super::state::boundary_operation(
             &state.session_id,
@@ -79,16 +92,19 @@ impl CurrentSessionCapability {
             .iter()
             .map(|(_, derived)| derived.clone())
             .collect::<Vec<_>>();
-        let node_ids = persisted_node_ids[persisted_node_ids
+        let locally_derived_node_ids = persisted_node_ids[persisted_node_ids
             .len()
             .saturating_sub(requested_node_count)..]
             .to_vec();
-        let leaf_node_id = state.session_graph.leaf_node_id.clone().unwrap_or_default();
+        let locally_derived_leaf_node_id = graph.leaf_node_id.clone().unwrap_or_default();
+        let usage_deltas = staged_usage
+            .as_ref()
+            .map_or(&[][..], |staged| staged.deltas());
         let mut commit =
             crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
                 &state,
                 graph,
-                &usage_deltas,
+                usage_deltas,
                 operation,
             )
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
@@ -106,14 +122,29 @@ impl CurrentSessionCapability {
             Err(crate::StoreError::AppendAncestorNotActive { required_node_id }) => {
                 return Ok(crate::AppendSessionNodesResult::StaleBranch { required_node_id });
             }
+            Err(crate::StoreError::AppendOperationIdentityConflict {
+                session_id,
+                operation_key,
+            }) => {
+                return Err(crate::PluginError::AppendOperationIdentityConflict {
+                    session_id,
+                    operation_key,
+                });
+            }
             Err(err) => return Err(crate::PluginError::Session(err.to_string())),
         };
+        let receipt_replayed = result.receipt_replayed;
         let committed_leaf_node_id = result.committed_leaf_node_id.clone();
-        if result.receipt_replayed {
-            crate::store::refresh_persisted_session_state(store.as_ref(), &mut state)
-                .await
-                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+        if !receipt_replayed && let Some(staged) = staged_usage.take() {
+            staged.commit();
+        }
+        let node_ids = if receipt_replayed {
+            super::super::state::receipt_append_node_ids(&result, requested_node_count)
+                .map_err(|err| crate::PluginError::Session(err.to_string()))?
         } else {
+            locally_derived_node_ids
+        };
+        if !receipt_replayed {
             super::super::state::apply_graph_commit_node_id_mapping(&mut state, &node_id_mapping)
                 .map_err(|err| crate::PluginError::Session(err.to_string()))?;
             state.apply_persisted_commit_result(result);
@@ -121,7 +152,7 @@ impl CurrentSessionCapability {
         background.sync_needed.store(true, Ordering::Release);
         Ok(crate::AppendSessionNodesResult::Appended {
             node_ids,
-            leaf_node_id: committed_leaf_node_id.unwrap_or(leaf_node_id),
+            leaf_node_id: committed_leaf_node_id.unwrap_or(locally_derived_leaf_node_id),
         })
     }
 }

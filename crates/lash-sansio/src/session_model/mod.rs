@@ -49,6 +49,11 @@ impl ProtocolEvent {
 }
 
 /// Typed node accepted at session-graph append boundaries.
+///
+/// Its semantic fields are projected by Lash's versioned append-request
+/// identity encoder. Adding or changing a variant or nested semantic field
+/// requires an identity encoding version bump and replacement golden corpus;
+/// serde representation itself is deliberately not the identity format.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 // justification: append nodes are public durable DTOs kept inline to preserve their established Rust construction API.

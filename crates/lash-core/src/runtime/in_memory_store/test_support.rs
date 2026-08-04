@@ -41,6 +41,22 @@ impl SessionExecutionLeaseReleaseGate {
 }
 
 impl InMemorySessionStore {
+    pub(super) fn fail_after_first_runtime_commit_mutation_if_requested(
+        &self,
+        session_meta_before_commit: Option<crate::SessionMeta>,
+    ) -> Result<(), crate::StoreError> {
+        if let Some(error) = self
+            .fail_next_runtime_commit_after_first_mutation
+            .lock()
+            .expect("lock post-mutation runtime commit failure")
+            .take()
+        {
+            *self.session_meta.lock().expect("lock session meta") = session_meta_before_commit;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     pub(crate) async fn save_session_head_meta(&self, meta: crate::SessionHeadMeta) {
         *self.session_head_meta.lock().expect("lock store") = Some(meta);
     }
@@ -48,6 +64,13 @@ impl InMemorySessionStore {
     pub(crate) fn load_session_count(&self) -> usize {
         self.load_session_count
             .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub(crate) fn fail_load_session_on_call(&self, call: usize) {
+        *self
+            .fail_load_session_on_call
+            .lock()
+            .expect("lock load-session failure injection") = Some(call);
     }
 
     pub(crate) fn checkpoint_claim_counts(&self) -> (usize, usize) {

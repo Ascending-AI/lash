@@ -201,6 +201,8 @@ pub struct InMemorySessionStore {
     #[cfg(test)]
     load_session_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
+    fail_load_session_on_call: Mutex<Option<usize>>,
+    #[cfg(test)]
     checkpoint_probe_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     checkpoint_write_transaction_count: std::sync::atomic::AtomicUsize,
@@ -208,6 +210,8 @@ pub struct InMemorySessionStore {
     commit_write_transaction_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     fail_next_runtime_commit: Mutex<Option<crate::StoreError>>,
+    #[cfg(test)]
+    fail_next_runtime_commit_after_first_mutation: Mutex<Option<crate::StoreError>>,
     #[cfg(test)]
     fail_next_session_execution_lease_renewal: Mutex<Option<crate::StoreError>>,
     #[cfg(test)]
@@ -294,6 +298,8 @@ impl InMemorySessionStore {
             #[cfg(test)]
             load_session_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
+            fail_load_session_on_call: Mutex::new(None),
+            #[cfg(test)]
             checkpoint_probe_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             checkpoint_write_transaction_count: std::sync::atomic::AtomicUsize::new(0),
@@ -301,6 +307,8 @@ impl InMemorySessionStore {
             commit_write_transaction_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             fail_next_runtime_commit: Mutex::new(None),
+            #[cfg(test)]
+            fail_next_runtime_commit_after_first_mutation: Mutex::new(None),
             #[cfg(test)]
             fail_next_session_execution_lease_renewal: Mutex::new(None),
             #[cfg(test)]
@@ -350,6 +358,14 @@ impl InMemorySessionStore {
             .fail_next_runtime_commit
             .lock()
             .expect("lock next runtime commit failure") = Some(error);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_runtime_commit_after_first_mutation(&self, error: crate::StoreError) {
+        *self
+            .fail_next_runtime_commit_after_first_mutation
+            .lock()
+            .expect("lock post-mutation runtime commit failure") = Some(error);
     }
 
     fn verify_session_execution_lease(
@@ -769,8 +785,25 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         &self,
     ) -> Result<Option<crate::store::PersistedSessionRead>, crate::store::StoreError> {
         #[cfg(test)]
-        self.load_session_count
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let load_call = self
+            .load_session_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
+        #[cfg(test)]
+        if self
+            .fail_load_session_on_call
+            .lock()
+            .expect("lock load-session failure injection")
+            .is_some_and(|call| call == load_call)
+        {
+            self.fail_load_session_on_call
+                .lock()
+                .expect("lock load-session failure injection")
+                .take();
+            return Err(crate::StoreError::Backend(
+                "injected load-session failure".to_string(),
+            ));
+        }
         let _transaction = self
             .write_transaction
             .lock()
@@ -897,7 +930,12 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 .validate_process_wake_source()
                 .map_err(crate::store::StoreError::Backend)?;
         }
+        #[cfg(test)]
+        let session_meta_before_commit =
+            self.session_meta.lock().expect("lock session meta").clone();
         self.ensure_session_metadata_for_commit(&commit)?;
+        #[cfg(test)]
+        self.fail_after_first_runtime_commit_mutation_if_requested(session_meta_before_commit)?;
         commit.validate_node_derivation()?;
         let completed = &commit.turn_commit;
         let operation_key = completed.operation.storage_key()?;
@@ -909,56 +947,19 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .get(&key)
             .cloned()
         {
-            if stored.turn_commit_hash == turn_commit_hash {
-                if let Some(completion) = commit.release_session_execution_lease.as_ref() {
-                    self.release_session_execution_lease_in_memory(completion);
-                }
-                let mut result = stored.result;
-                result.receipt_replayed = true;
-                return Ok(result);
-            }
-            if let (
-                Some(stored_version),
-                Some(attempted_version),
-                Some(stored_identity),
-                Some(attempted_identity),
-            ) = (
-                stored.identity_encoding_version,
-                completed.identity_encoding_version,
-                stored.request_identity_hash.as_deref(),
-                completed.request_identity_hash.as_deref(),
-            ) && stored_version == attempted_version
-            {
-                if stored_identity == attempted_identity {
-                    if let Some(completion) = commit.release_session_execution_lease.as_ref() {
-                        self.release_session_execution_lease_in_memory(completion);
-                    }
-                    let mut result = stored.result;
-                    result.receipt_replayed = true;
-                    return Ok(result);
-                }
-                return Err(crate::store::StoreError::AppendOperationIdentityConflict {
-                    session_id,
-                    operation_key,
-                });
-            }
-            return Err(crate::store::StoreError::RuntimeTurnCommitConflict {
+            let result = receipts::replay_existing_runtime_commit(
+                stored,
+                &turn_commit_hash,
+                completed,
                 session_id,
-                turn_id: operation_key,
-            });
+                operation_key,
+            )?;
+            if let Some(completion) = commit.release_session_execution_lease.as_ref() {
+                self.release_session_execution_lease_in_memory(completion);
+            }
+            return Ok(result);
         }
-        if completed.request_identity_hash.is_some()
-            && let Some(required) = completed.requested_ancestor_node_id.as_deref()
-            && !self
-                .session_graph
-                .lock()
-                .expect("lock graph")
-                .active_path_contains(required)
-        {
-            return Err(crate::store::StoreError::AppendAncestorNotActive {
-                required_node_id: required.to_string(),
-            });
-        }
+        receipts::enforce_fresh_append_ancestor(&self.session_graph, completed)?;
         let expected = commit.expected_head_revision;
         if expected != actual {
             return Err(crate::store::StoreError::HeadRevisionConflict {
@@ -1419,7 +1420,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     result: result.clone(),
                     committed_at_ms: self.clock.timestamp_ms(),
                     request_identity_hash: commit.turn_commit.request_identity_hash.clone(),
-                    _requested_node_count: commit.turn_commit.requested_node_count,
+                    requested_node_count: commit.turn_commit.requested_node_count,
                     _requested_ancestor_node_id: commit
                         .turn_commit
                         .requested_ancestor_node_id

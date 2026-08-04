@@ -45,6 +45,7 @@ where
     drop(probe);
     runtime_persistence_suite(|| make().open).await;
     gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(make().open).await;
+    append_receipt_survives_reopen(make()).await;
     runtime_persistence_survives_reopen(make()).await;
 }
 
@@ -176,6 +177,8 @@ where
     final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(make()).await;
     append_request_receipt_replays_after_head_advance(make()).await;
     append_request_receipt_rejects_changed_content(make()).await;
+    append_request_receipt_rejects_corrupt_node_count(make()).await;
+    concurrent_same_append_operation_applies_exactly_once(make()).await;
     legacy_append_receipt_keeps_exact_hash_semantics(make()).await;
     append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics(make()).await;
     append_receipt_and_graph_append_are_atomic(make()).await;
@@ -406,6 +409,80 @@ async fn append_request_receipt_rejects_changed_content(store: Arc<dyn RuntimePe
     );
 }
 
+async fn append_request_receipt_rejects_corrupt_node_count(store: Arc<dyn RuntimePersistence>) {
+    let mut state = seed_append_receipt_state(&store).await;
+    let nodes = vec![crate::SessionAppendNode::plugin(
+        "append-receipt",
+        serde_json::json!({"value": "count-cross-check"}),
+    )];
+    let (first, _) = append_request_commit(&mut state, "count-cross-check", &nodes, None);
+    let mut corrupt_retry = first.clone();
+    corrupt_retry.turn_commit.requested_node_count = Some(nodes.len() + 1);
+    commit_runtime_state_for_test(&store, first, "count-cross-check-first")
+        .await
+        .expect("first count-cross-check append");
+
+    let error = store
+        .commit_runtime_state(corrupt_retry)
+        .await
+        .expect_err("matching receipt hashes with a different node count are corruption");
+    assert!(matches!(
+        error,
+        StoreError::AppendReceiptRequestedNodeCountCorrupt {
+            stored: Some(1),
+            attempted: Some(2),
+            ..
+        }
+    ));
+}
+
+async fn concurrent_same_append_operation_applies_exactly_once(store: Arc<dyn RuntimePersistence>) {
+    let state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        ..RuntimeSessionState::default()
+    };
+    let nodes = vec![crate::SessionAppendNode::plugin(
+        "append-receipt-race",
+        serde_json::json!({"value": "same-operation"}),
+    )];
+    let (left, node_ids) =
+        append_request_commit(&mut state.clone(), "same-operation-race", &nodes, None);
+    let (right, right_node_ids) =
+        append_request_commit(&mut state.clone(), "same-operation-race", &nodes, None);
+    assert_eq!(node_ids, right_node_ids);
+    assert_eq!(
+        left.turn_commit_hash().expect("left race hash"),
+        right.turn_commit_hash().expect("right race hash")
+    );
+
+    let (left_result, right_result) = tokio::join!(
+        store.commit_runtime_state(left),
+        store.commit_runtime_state(right)
+    );
+    let left_result = left_result.expect("left same-operation race result");
+    let right_result = right_result.expect("right same-operation race result");
+    assert_ne!(
+        left_result.receipt_replayed, right_result.receipt_replayed,
+        "one concurrent attempt must publish and the other must replay"
+    );
+    let read = store
+        .load_session()
+        .await
+        .expect("load same-operation race")
+        .expect("same-operation race session");
+    for node_id in node_ids {
+        assert_eq!(
+            read.graph
+                .nodes
+                .iter()
+                .filter(|node| node.node_id == node_id)
+                .count(),
+            1,
+            "the concurrent same-operation node must be durable exactly once"
+        );
+    }
+}
+
 /// Prove that a durable append receipt wins after a branch switch removes the
 /// request's ancestor from the active path.
 ///
@@ -510,7 +587,6 @@ async fn append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics(
     assert!(exact.receipt_replayed);
 
     let mut changed = exact_retry;
-    changed.turn_commit.identity_encoding_version = Some(1);
     changed.checkpoint.turn_state.turn_index += 1;
     let error = store
         .commit_runtime_state(changed)
@@ -4810,6 +4886,40 @@ async fn attachment_manifest_reference_tracking_and_gc_root_set(
 fn sha256_of(bytes: &[u8]) -> impl std::fmt::LowerHex {
     use sha2::{Digest, Sha256};
     Sha256::digest(bytes)
+}
+
+async fn append_receipt_survives_reopen(factory: ReopenableRuntimePersistence) {
+    let mut state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        ..RuntimeSessionState::default()
+    };
+    let nodes = vec![crate::SessionAppendNode::plugin(
+        "append-receipt-reopen",
+        serde_json::json!({"value": "reopen"}),
+    )];
+    let (first_commit, _) =
+        append_request_commit(&mut state, "append-receipt-reopen", &nodes, None);
+    let first =
+        commit_runtime_state_for_test(&factory.open, first_commit, "append-receipt-reopen-first")
+            .await
+            .expect("commit append receipt before reopen");
+
+    let mut reopened_state = loaded_conformance_state(&factory.reopen).await;
+    let (retry_commit, _) =
+        append_request_commit(&mut reopened_state, "append-receipt-reopen", &nodes, None);
+    let replay = factory
+        .reopen
+        .commit_runtime_state(retry_commit)
+        .await
+        .expect("reopened store replays append receipt");
+    assert!(replay.receipt_replayed);
+    assert_eq!(replay.head_revision, first.head_revision);
+    assert_eq!(replay.checkpoint_ref, first.checkpoint_ref);
+    assert_eq!(replay.committed_leaf_node_id, first.committed_leaf_node_id);
+    assert_eq!(
+        replay.realized_node_timestamps,
+        first.realized_node_timestamps
+    );
 }
 
 async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersistence) {

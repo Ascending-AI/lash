@@ -403,6 +403,85 @@ async fn append_conformance_runtime(
     .expect("append conformance runtime")
 }
 
+/// Prove that a plugin-facing lost-response append retry restores interleaved
+/// usage to the shared ledger and that the next natural commit persists it.
+///
+/// Integrator class (ADR 0051): **conformance-suite embedders**.
+pub async fn append_receipt_mixed_usage_envelope(store: Arc<dyn crate::RuntimePersistence>) {
+    crate::runtime::append_receipt_mixed_usage_envelope_conformance(store).await;
+}
+
+/// Rewrite a committed receipt to a genuine pre-upgrade JSON shape and prove
+/// that the public runtime result still returns the original non-empty leaf.
+///
+/// `rewrite_receipt` performs backend-specific row surgery after the first
+/// append, removing the newer result fields from durable storage while leaving
+/// the receipt's request identity intact so the public replay path is exercised.
+///
+/// Integrator class (ADR 0051): **conformance-suite embedders**.
+pub async fn old_format_append_receipt_returns_public_leaf<F, Fut>(
+    store: Arc<dyn crate::RuntimePersistence>,
+    rewrite_receipt: F,
+) where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let request = session_store_request(
+        "root",
+        "old-format-append-receipt-model",
+        crate::SessionRelation::Root,
+    );
+    let mut runtime = append_conformance_runtime(&store, &request).await;
+    runtime
+        .append_session_nodes(crate::AppendSessionNodesRequest {
+            operation_id: "old-format-append-receipt-seed".to_string(),
+            nodes: vec![crate::SessionAppendNode::plugin(
+                "old-format-append-receipt-seed",
+                serde_json::json!({"seed": true}),
+            )],
+            requires_ancestor_node_id: None,
+        })
+        .await
+        .expect("seed old-format fixture session");
+    let append = crate::AppendSessionNodesRequest {
+        operation_id: "old-format-append-receipt".to_string(),
+        nodes: vec![crate::SessionAppendNode::plugin(
+            "old-format-append-receipt",
+            serde_json::json!({"value": 1}),
+        )],
+        requires_ancestor_node_id: None,
+    };
+    let first = runtime
+        .append_session_nodes(append.clone())
+        .await
+        .expect("first old-format fixture append");
+    rewrite_receipt().await;
+    let replay = runtime
+        .append_session_nodes(append)
+        .await
+        .expect("old-format fixture receipt replay");
+    let (
+        crate::AppendSessionNodesResult::Appended {
+            node_ids: first_node_ids,
+            leaf_node_id: first_leaf,
+        },
+        crate::AppendSessionNodesResult::Appended {
+            node_ids: replay_node_ids,
+            leaf_node_id: replay_leaf,
+        },
+    ) = (first, replay)
+    else {
+        panic!("old-format append fixture must return Appended")
+    };
+    assert!(!first_leaf.is_empty());
+    assert_eq!(replay_node_ids, first_node_ids);
+    assert_eq!(replay_leaf, first_leaf);
+    assert!(
+        !replay_leaf.is_empty(),
+        "legacy fallback must be a real node id"
+    );
+}
+
 /// Append one plugin node through the runtime and return its durable id.
 async fn append_conformance_plugin_node(
     runtime: &mut crate::LashRuntime,

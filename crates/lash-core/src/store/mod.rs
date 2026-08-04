@@ -15,7 +15,10 @@ mod realization;
 pub use attachment_manifest::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
 };
-pub use commit_identity::{OperationId, derive_history_node_id};
+pub use commit_identity::{
+    OperationId, RuntimeCommitReceiptDecision, decide_runtime_commit_receipt,
+    derive_history_node_id,
+};
 pub use error::StoreError;
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use load::{load_persisted_session_state, refresh_persisted_session_state};
@@ -772,6 +775,7 @@ impl RuntimeCommit {
                 turn_id: completed.operation.storage_key()?,
             });
         }
+        commit_identity::validate_append_receipt_identity(completed)?;
         Ok(())
     }
 
@@ -1172,6 +1176,24 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
         node_id: &str,
     ) -> Result<Option<crate::SessionNodeRecord>, StoreError>;
 
+    /// Atomically persist one settled runtime commit and its durable receipt.
+    ///
+    /// Implementors must look up the `(session_id, operation storage key)`
+    /// receipt inside the write transaction before the fresh append ancestor
+    /// fence and head-revision compare-and-swap. Existing receipts must be
+    /// adjudicated with [`decide_runtime_commit_receipt`]: replay returns the
+    /// stored first-attempt [`RuntimeCommitResult`] with only
+    /// [`RuntimeCommitResult::receipt_replayed`] set transiently, applies none
+    /// of the attempted commit envelope, and may release the attempt's explicit
+    /// execution-lease completion. Conflicts and corrupt count cross-checks
+    /// mutate nothing.
+    ///
+    /// A fresh identity-bearing append enforces
+    /// [`RuntimeTurnCommitStamp::requested_ancestor_node_id`] against the
+    /// transaction's active path, then atomically publishes graph, checkpoint,
+    /// usage, queue/input settlements, attachment adoptions, and a receipt whose
+    /// stored replay bit is `false`. Receipt lookup, fresh-only ancestor fencing,
+    /// commit publication, and receipt insertion are one transaction.
     async fn commit_runtime_state(
         &self,
         commit: RuntimeCommit,

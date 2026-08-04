@@ -26,6 +26,8 @@ pub mod scenario_contracts;
 mod session_api;
 mod session_execution_lease;
 mod session_manager;
+#[cfg(any(test, feature = "testing"))]
+pub(crate) use session_manager::append_receipt_mixed_usage_envelope_conformance;
 mod session_ops;
 pub(crate) mod state;
 #[cfg(test)]
@@ -107,10 +109,13 @@ pub(super) fn session_commit_error(
     source: crate::store::StoreError,
 ) -> SessionError {
     match source {
-        source @ crate::store::StoreError::SessionDeleted { .. } => SessionError::Store {
-            context: context.to_string(),
-            source,
-        },
+        source @ (crate::store::StoreError::SessionDeleted { .. }
+        | crate::store::StoreError::AppendOperationIdentityConflict { .. }) => {
+            SessionError::Store {
+                context: context.to_string(),
+                source,
+            }
+        }
         source => SessionError::Protocol(format!("{context}: {source}")),
     }
 }

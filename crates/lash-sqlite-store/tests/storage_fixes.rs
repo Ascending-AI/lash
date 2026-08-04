@@ -409,7 +409,7 @@ async fn unsupported_schema_error_reports_real_versions() {
     );
     assert!(
         message.contains("schema version 25"),
-        "error must report the real expected version 24: {message}"
+        "error must report the real expected version 25: {message}"
     );
     assert!(
         !message.contains("version 1 only"),

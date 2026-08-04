@@ -331,6 +331,195 @@ impl RuntimeSessionServices {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
+pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
+    store: Arc<dyn crate::RuntimePersistence>,
+) {
+    let policy = crate::SessionPolicy {
+        provider_id: "mixed-envelope-provider".to_string(),
+        model: crate::ModelSpec::from_token_limits(
+            "mixed-envelope-model",
+            Default::default(),
+            200_000,
+            None,
+        )
+        .expect("mixed-envelope model spec"),
+        ..crate::SessionPolicy::default()
+    };
+    let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
+        .build_session("root", None)
+        .expect("mixed-envelope plugin session");
+    let mut runtime = crate::LashRuntime::from_persistent_embedded_state(
+        policy.clone(),
+        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory()),
+        crate::PersistentRuntimeServices::new(plugins, Arc::clone(&store)),
+        crate::RuntimeSessionState {
+            policy,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("mixed-envelope runtime");
+    super::state::append_session_nodes_to_state_with_clock(
+        &mut runtime.state,
+        &[crate::SessionAppendNode::plugin(
+            "mixed-envelope-preexisting-pending",
+            serde_json::json!({"pending": true}),
+        )],
+        "mixed-envelope-preexisting-pending",
+        &crate::SystemClock,
+    );
+    let services = Arc::new(
+        RuntimeSessionServices::new(&runtime, true, None).expect("mixed-envelope session services"),
+    );
+    let graph = services.graph_service();
+    let request = crate::AppendSessionNodesRequest {
+        operation_id: "mixed-envelope-lost-response".to_string(),
+        nodes: vec![crate::SessionAppendNode::plugin(
+            "mixed-envelope",
+            serde_json::json!({"attempt": 1}),
+        )],
+        requires_ancestor_node_id: None,
+    };
+    let first = graph
+        .append_session_nodes("root", request.clone())
+        .await
+        .expect("first mixed-envelope append");
+
+    let interleaved_usage = crate::TokenUsage {
+        input_tokens: 17,
+        output_tokens: 5,
+        cache_read_input_tokens: 3,
+        cache_write_input_tokens: 2,
+        reasoning_output_tokens: 1,
+    };
+    services.usage.record_token_usage(
+        "mixed-envelope-source",
+        "mixed-envelope-model",
+        &interleaved_usage,
+    );
+    runtime
+        .await_background_work()
+        .await
+        .expect("refresh between lost response and retry");
+    let retry_services = Arc::new(
+        RuntimeSessionServices::new(&runtime, true, None)
+            .expect("mixed-envelope retry session services"),
+    );
+    let replay = retry_services
+        .graph_service()
+        .append_session_nodes("root", request)
+        .await
+        .expect("lost-response retry replays");
+    let (
+        crate::AppendSessionNodesResult::Appended {
+            node_ids: first_node_ids,
+            leaf_node_id: first_leaf,
+        },
+        crate::AppendSessionNodesResult::Appended {
+            node_ids: replay_node_ids,
+            leaf_node_id: replay_leaf,
+        },
+    ) = (first, replay)
+    else {
+        panic!("both mixed-envelope attempts must append or replay")
+    };
+    let operation = super::state::boundary_operation(
+        "root",
+        "mixed-envelope-lost-response",
+        "append-session-nodes",
+    );
+    let locally_rederived_retry_id =
+        crate::store::derive_history_node_id("root", &operation, 0).expect("retry node derivation");
+    assert_ne!(
+        first_node_ids,
+        vec![locally_rederived_retry_id],
+        "the scenario must make retry-local node-id derivation differ from the stored result"
+    );
+    assert_eq!(replay_node_ids, first_node_ids);
+    assert_eq!(replay_leaf, first_leaf);
+    {
+        let ledger = retry_services
+            .usage
+            .token_ledger
+            .lock()
+            .expect("mixed-envelope ledger");
+        assert_eq!(ledger.len(), 1);
+        assert_eq!(ledger[0].source, "mixed-envelope-source");
+        assert_eq!(ledger[0].model, "mixed-envelope-model");
+        assert_eq!(ledger[0].usage, interleaved_usage);
+    }
+
+    let changed_content_error = retry_services
+        .graph_service()
+        .append_session_nodes(
+            "root",
+            crate::AppendSessionNodesRequest {
+                operation_id: "mixed-envelope-lost-response".to_string(),
+                nodes: vec![crate::SessionAppendNode::plugin(
+                    "mixed-envelope",
+                    serde_json::json!({"attempt": "changed"}),
+                )],
+                requires_ancestor_node_id: None,
+            },
+        )
+        .await
+        .expect_err("changed content for an existing operation must be rejected");
+    match changed_content_error {
+        crate::PluginError::AppendOperationIdentityConflict {
+            session_id,
+            operation_key,
+        } => {
+            assert_eq!(session_id, "root");
+            assert!(
+                operation_key.contains("\"key\":\"append-session-nodes\""),
+                "typed conflict must retain the durable append operation key: {operation_key}"
+            );
+        }
+        other => panic!("expected a typed append identity conflict, got {other:?}"),
+    }
+    {
+        let ledger = retry_services
+            .usage
+            .token_ledger
+            .lock()
+            .expect("mixed-envelope ledger after rejection");
+        assert_eq!(ledger.len(), 1);
+        assert_eq!(ledger[0].usage, interleaved_usage);
+    }
+
+    runtime
+        .await_background_work()
+        .await
+        .expect("refresh after receipt replay");
+    runtime
+        .session_graph_service()
+        .expect("fresh graph service")
+        .append_session_nodes(
+            "root",
+            crate::AppendSessionNodesRequest {
+                operation_id: "mixed-envelope-natural-commit".to_string(),
+                nodes: vec![crate::SessionAppendNode::plugin(
+                    "mixed-envelope",
+                    serde_json::json!({"attempt": 2}),
+                )],
+                requires_ancestor_node_id: None,
+            },
+        )
+        .await
+        .expect("next natural commit persists restored usage");
+
+    let read = store
+        .load_session()
+        .await
+        .expect("load mixed-envelope session")
+        .expect("mixed-envelope session exists");
+    assert_eq!(read.token_ledger.len(), 1);
+    assert_eq!(read.token_ledger[0].source, "mixed-envelope-source");
+    assert_eq!(read.token_ledger[0].model, "mixed-envelope-model");
+    assert_eq!(read.token_ledger[0].usage, interleaved_usage);
+}
+
 pub(super) async fn emit_session_events_to_sink(
     events: &dyn EventSink,
     plugin_events: Vec<SessionStreamEvent>,

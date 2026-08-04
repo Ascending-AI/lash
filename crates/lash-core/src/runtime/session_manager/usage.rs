@@ -92,15 +92,19 @@ impl UsageCapability {
         std::mem::take(&mut *ledger)
     }
 
-    pub(in crate::runtime::session_manager) fn merge_drained_token_ledger(
-        &self,
+    pub(in crate::runtime::session_manager) fn stage_token_ledger<'a>(
+        &'a self,
         state: &mut RuntimeSessionState,
-    ) -> Vec<TokenLedgerEntry> {
+    ) -> StagedTokenLedger<'a> {
         let drained = self.drain_token_ledger();
         for entry in drained.iter().cloned() {
             merge_ledger_entry(&mut state.token_ledger, entry);
         }
-        drained
+        StagedTokenLedger {
+            usage: self,
+            drained,
+            restore_on_drop: true,
+        }
     }
 
     pub(in crate::runtime) async fn persist_current_usage_ledger(
@@ -115,18 +119,17 @@ impl UsageCapability {
             return Ok(());
         };
         let mut state = current.current_snapshot_for_store_write().await?;
-        let drained = self.drain_token_ledger();
-        if drained.is_empty() {
+        let staged = self.stage_token_ledger(&mut state);
+        if staged.deltas().is_empty() {
             return Ok(());
-        }
-        for entry in drained.iter().cloned() {
-            merge_ledger_entry(&mut state.token_ledger, entry);
         }
         let operation =
             super::super::state::boundary_operation(&state.session_id, boundary_id, "usage-ledger");
         let (commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation(
-                &mut state, &drained, operation,
+                &mut state,
+                staged.deltas(),
+                operation,
             )
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         let result = commit_runtime_state_with_fresh_session_execution_lease(
@@ -140,7 +143,36 @@ impl UsageCapability {
         .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         state.apply_persisted_commit_result(result);
         state.mark_node_ids_persisted(persisted_node_ids);
+        staged.commit();
         Ok(())
+    }
+}
+
+pub(in crate::runtime::session_manager) struct StagedTokenLedger<'a> {
+    usage: &'a UsageCapability,
+    drained: Vec<TokenLedgerEntry>,
+    restore_on_drop: bool,
+}
+
+impl StagedTokenLedger<'_> {
+    pub(in crate::runtime::session_manager) fn deltas(&self) -> &[TokenLedgerEntry] {
+        &self.drained
+    }
+
+    pub(in crate::runtime::session_manager) fn commit(mut self) {
+        self.restore_on_drop = false;
+    }
+}
+
+impl Drop for StagedTokenLedger<'_> {
+    fn drop(&mut self) {
+        if !self.restore_on_drop {
+            return;
+        }
+        let mut ledger = self.usage.token_ledger.lock().expect("token ledger lock");
+        for entry in self.drained.drain(..) {
+            merge_ledger_entry(&mut ledger, entry);
+        }
     }
 }
 

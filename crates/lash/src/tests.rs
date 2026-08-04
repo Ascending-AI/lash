@@ -186,19 +186,6 @@ impl lash_core::SessionCommitStore for SnapshotStore {
     {
         let turn_commit_hash = commit.turn_commit_hash()?;
         let session_id = commit.session_id.clone();
-        {
-            let mut session_meta = self.session_meta.lock().expect("session metadata lock");
-            if session_meta.is_none() {
-                *session_meta = Some(lash_core::SessionMeta {
-                    session_id: commit.session_id.clone(),
-                    session_name: commit.session_id.clone(),
-                    created_at: "test".to_string(),
-                    model: commit.config.model.id.clone(),
-                    cwd: None,
-                    relation: lash_core::SessionRelation::Root,
-                });
-            }
-        }
         let mut read = self.read.lock().expect("snapshot store lock");
         let realized_node_timestamps = commit
             .graph
@@ -225,6 +212,28 @@ impl lash_core::SessionCommitStore for SnapshotStore {
                 session_id,
                 turn_id: operation_key,
             });
+        }
+        if let Some(required_node_id) = commit.turn_commit.requested_ancestor_node_id.as_deref()
+            && !read
+                .as_ref()
+                .is_some_and(|read| read.graph.active_path_contains(required_node_id))
+        {
+            return Err(lash_core::store::StoreError::AppendAncestorNotActive {
+                required_node_id: required_node_id.to_string(),
+            });
+        }
+        {
+            let mut session_meta = self.session_meta.lock().expect("session metadata lock");
+            if session_meta.is_none() {
+                *session_meta = Some(lash_core::SessionMeta {
+                    session_id: commit.session_id.clone(),
+                    session_name: commit.session_id.clone(),
+                    created_at: "test".to_string(),
+                    model: commit.config.model.id.clone(),
+                    cwd: None,
+                    relation: lash_core::SessionRelation::Root,
+                });
+            }
         }
         let existing_graph = read
             .as_ref()

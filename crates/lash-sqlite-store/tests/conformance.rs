@@ -742,6 +742,53 @@ async fn sqlite_append_receipt_replays_after_ancestor_superseded() {
 }
 
 #[tokio::test]
+async fn sqlite_append_receipt_restores_mixed_usage_envelope() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Arc::new(
+        Store::open(&dir.path().join("append-receipt-mixed-envelope.db"))
+            .await
+            .expect("open store"),
+    );
+    lash_core::testing::conformance::append_receipt_mixed_usage_envelope(store).await;
+}
+
+#[tokio::test]
+async fn sqlite_old_format_append_receipt_returns_public_leaf() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("append-receipt-old-format.db");
+    let store = Arc::new(Store::open(&path).await.expect("open store"));
+    lash_core::testing::conformance::old_format_append_receipt_returns_public_leaf(
+        store,
+        move || async move {
+            let conn = rusqlite::Connection::open(path).expect("open raw SQLite receipt fixture");
+            let result_json: String = conn
+                .query_row(
+                    "SELECT result_json FROM runtime_turn_commits
+                     WHERE turn_id LIKE '%old-format-append-receipt%'
+                       AND turn_id NOT LIKE '%old-format-append-receipt-seed%'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("read runtime receipt JSON");
+            let mut result: serde_json::Value =
+                serde_json::from_str(&result_json).expect("decode runtime receipt JSON");
+            let fields = result.as_object_mut().expect("receipt result object");
+            fields.remove("committed_leaf_node_id");
+            fields.remove("receipt_replayed");
+            conn.execute(
+                "UPDATE runtime_turn_commits
+                 SET result_json = ?1
+                 WHERE turn_id LIKE '%old-format-append-receipt%'
+                   AND turn_id NOT LIKE '%old-format-append-receipt-seed%'",
+                rusqlite::params![serde_json::to_string(&result).expect("encode old receipt")],
+            )
+            .expect("install raw pre-upgrade receipt fixture");
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn sqlite_store_schema_excludes_embedded_turn_replay_tables() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("schema.db");

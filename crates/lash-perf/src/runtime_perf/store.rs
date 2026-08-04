@@ -642,6 +642,17 @@ impl SessionCommitStore for RuntimePerfStore {
                 turn_id: operation_key,
             });
         }
+        if let Some(required_node_id) = turn_commit.requested_ancestor_node_id.as_deref()
+            && !self
+                .session_graph
+                .lock()
+                .expect("lock perf graph for append ancestor fence")
+                .active_path_contains(required_node_id)
+        {
+            return Err(StoreError::AppendAncestorNotActive {
+                required_node_id: required_node_id.to_string(),
+            });
+        }
         if expected_head_revision != actual {
             return Err(store::StoreError::HeadRevisionConflict {
                 expected: expected_head_revision,
