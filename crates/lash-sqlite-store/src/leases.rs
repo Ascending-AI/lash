@@ -10,30 +10,9 @@ use super::*;
 ///
 /// This is the one place the "stored token matches and is unexpired" rule
 /// lives for process leasing.
-pub(crate) fn guard_lease<L: LeaseFence>(
-    current: Option<&L>,
-    expected_token: &str,
-    now: u64,
-) -> bool {
+pub(crate) fn guard_lease(current: Option<&ProcessLease>, expected_token: &str, now: u64) -> bool {
     match current {
-        Some(current) => {
-            current.lease_token() == expected_token && current.expires_at_epoch_ms() > now
-        }
+        Some(current) => current.lease_token == expected_token && current.expires_at_epoch_ms > now,
         None => false,
-    }
-}
-
-/// Minimal view of a persisted lease that [`guard_lease`] needs.
-pub(crate) trait LeaseFence {
-    fn lease_token(&self) -> &str;
-    fn expires_at_epoch_ms(&self) -> u64;
-}
-
-impl LeaseFence for ProcessLease {
-    fn lease_token(&self) -> &str {
-        &self.lease_token
-    }
-    fn expires_at_epoch_ms(&self) -> u64 {
-        self.expires_at_epoch_ms
     }
 }
