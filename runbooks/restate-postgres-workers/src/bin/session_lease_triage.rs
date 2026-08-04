@@ -106,9 +106,12 @@ fn emit(checkpoint: Value) {
 /// Collects the `session_execution_lease.*` trace events an operator is told to
 /// read, in emission order, with every structured field.
 ///
-/// This is the runbook's copy of the log an operator would grep, and the
-/// *order* is part of the evidence: `renew_failed` before `taken_over` is what
-/// tells a handoff apart from a transient store error.
+/// This is the runbook's copy of the log an operator would grep. Order is not the
+/// evidence: `taken_over` comes from the winner's claim, so in the flagship case
+/// it is the *only* lease event, the dead holder having emitted nothing. What
+/// establishes a handoff is that a `taken_over` names a displaced holder at a
+/// lower generation; a `renew_failed` from that holder is a separate, optional
+/// notice that appears only if it was still alive to file one.
 #[derive(Clone, Default)]
 struct LeaseTraceCapture {
     events: Arc<Mutex<Vec<Value>>>,
