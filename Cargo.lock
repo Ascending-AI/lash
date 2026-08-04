@@ -1943,6 +1943,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "hmac",
+ "insta",
  "lash-http-transport",
  "lash-sansio",
  "lash-trace",

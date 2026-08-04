@@ -17,8 +17,9 @@ pub(in crate::runtime) use usage::ChildUsageEventRelay;
 pub(in crate::runtime::session_manager) use usage::{
     ChannelEventSink, LiveChildUsageForwarder, subtract_usage,
 };
-pub(in crate::runtime) use usage::{
-    PendingTokenLedgerEntry, record_token_usage_shared, stage_token_ledger_shared,
+pub(crate) use usage::{
+    PendingTokenLedgerEntry, StagedTokenLedger, record_token_usage_shared,
+    stage_token_ledger_shared,
 };
 
 #[derive(Clone)]

@@ -1,13 +1,13 @@
 use super::*;
 
-#[derive(Clone, Debug)]
-pub(in crate::runtime) struct PendingTokenLedgerEntry {
-    pub(in crate::runtime) entry: TokenLedgerEntry,
-    pub(in crate::runtime) identity: Option<crate::store::RuntimeUsageDeltaIdentity>,
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct PendingTokenLedgerEntry {
+    pub(crate) entry: TokenLedgerEntry,
+    pub(crate) identity: Option<crate::store::RuntimeUsageDeltaIdentity>,
 }
 
 impl PendingTokenLedgerEntry {
-    pub(in crate::runtime) fn unstaged(entry: TokenLedgerEntry) -> Self {
+    pub(crate) fn unstaged(entry: TokenLedgerEntry) -> Self {
         Self {
             entry,
             identity: None,
@@ -168,20 +168,17 @@ impl UsageCapability {
     }
 }
 
-pub(in crate::runtime) struct StagedTokenLedger {
+pub(crate) struct StagedTokenLedger {
     ledger: Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
     deltas: Vec<crate::store::RuntimeUsageDelta>,
 }
 
 impl StagedTokenLedger {
-    pub(in crate::runtime) fn deltas(&self) -> &[crate::store::RuntimeUsageDelta] {
+    pub(crate) fn deltas(&self) -> &[crate::store::RuntimeUsageDelta] {
         &self.deltas
     }
 
-    pub(in crate::runtime) fn confirm_identities(
-        self,
-        confirmed: &[crate::store::RuntimeUsageDeltaIdentity],
-    ) {
+    pub(crate) fn confirm_identities(self, confirmed: &[crate::store::RuntimeUsageDeltaIdentity]) {
         let confirmed = confirmed
             .iter()
             .cloned()
@@ -199,7 +196,7 @@ impl StagedTokenLedger {
     }
 }
 
-pub(in crate::runtime) fn stage_token_ledger_shared(
+pub(crate) fn stage_token_ledger_shared(
     token_ledger: &Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
     operation: &crate::OperationId,
 ) -> Result<StagedTokenLedger, crate::StoreError> {
@@ -264,7 +261,7 @@ fn usage_has_any_tokens(usage: &TokenUsage) -> bool {
         || usage.reasoning_output_tokens != 0
 }
 
-pub(in crate::runtime) fn record_token_usage_shared(
+pub(crate) fn record_token_usage_shared(
     token_ledger: &Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
     source: &str,
     model: &str,

@@ -69,6 +69,7 @@ class TranscriptDiffTests(unittest.TestCase):
         marker_lines = {
             "Checkpoint": "      0004  Checkpoint         label.only",
             "DurableEffect": "      0005  DurableEffect      effect.park",
+            "usage": "                 usage                 entries=1 input=2 output=3 cache_read=0 cache_write=0 reasoning=0 total=5",
             "stored logical=": "                 tool_state        stored logical=27 B",
             "ref (unchanged)": "                 tool_state        ref (unchanged)",
             "rev=": "      0006  Commit             commit rev=1->2",

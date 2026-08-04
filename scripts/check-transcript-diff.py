@@ -23,6 +23,7 @@ DURABLE_MARKERS = (
     "checkpoint.commit",
     "checkpoint.request",
     "durable.effect",
+    "usage                 entries=",
     "stored logical=",
     "ref (unchanged)",
     "Checkpoint",

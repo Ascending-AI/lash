@@ -27,7 +27,7 @@
 use std::collections::BTreeMap;
 
 use super::harness::AgentScenarioRun;
-use lash_core::testing::behavior_transcript::{Actor, Attr, Component, Entry, IdKind, Kind};
+use lash_core::testing::behavior_transcript::{Actor, Attr, Component, Entry, IdKind, Kind, Usage};
 use lash_core::testing::checkpoint_observer::{CheckpointComponentWriteKind, CheckpointWriteEvent};
 
 /// Render one Agent Scenario run as a behavior transcript.
@@ -152,7 +152,8 @@ fn activity_entry(event: &lash_core::TurnEvent, session_id: &str) -> Option<Entr
             checkpoint,
         } => Entry::new(Kind::Commit, actor(), "queued_messages.committed")
             .attr(Attr::int("messages", messages.len() as u64))
-            .attr(Attr::debug_token("checkpoint", checkpoint)),
+            .attr(Attr::debug_token("checkpoint", checkpoint))
+            .usage(Usage::none()),
         lash_core::TurnEvent::FinalValue { value } => {
             Entry::new(Kind::Outcome, actor(), "turn.final_value").attr(Attr::json("value", value))
         }
@@ -236,6 +237,14 @@ fn commit_entry(write: &CheckpointWriteEvent) -> Entry {
         Actor::session(write.attributed_session().to_string()),
         write.revision_before,
         write.revision_after,
+        Usage::new(
+            write.usage.entries,
+            write.usage.input_tokens,
+            write.usage.output_tokens,
+            write.usage.cache_read_input_tokens,
+            write.usage.cache_write_input_tokens,
+            write.usage.reasoning_output_tokens,
+        ),
     );
     for component in &write.components {
         entry = entry.component(match &component.kind {
@@ -271,6 +280,7 @@ mod tests {
             turn_index: revision_before as usize + 1,
             revision_before,
             revision_after: revision_before + 1,
+            usage: Default::default(),
             components: vec![CheckpointComponentWrite {
                 component,
                 kind: CheckpointComponentWriteKind::Stored {

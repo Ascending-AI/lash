@@ -24,6 +24,7 @@ root         provider  model.request           iteration=0
 root         exec      cell.ok                 calls=2
 root         outcome   turn.final_value        value={"joined":["left","right"]}
 root         commit    checkpoint.commit       rev=0->1
+root                     usage                entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
 root                     turn_state            stored logical=284B
 root                     tool_state            ref (unchanged)
 process-001  outcome   process.completed       label="child" kind="lashlang" terminal=true
@@ -79,8 +80,9 @@ enforced at the cheapest point: a transcript nobody reads is not evidence.
 were chosen so the defect classes the repo actually fears each land on a line: a
 reordered tool batch moves `tool` lines; a missing checkpoint moves or drops a
 `commit` line; a dropped component body flips `stored logical=` to
-`ref (unchanged)`; a lost child folds to `process.failed`; a lease supersession is
-a `lease` line; an injected backend error is a `fault` line.
+`ref (unchanged)`; a usage-accounting change moves the mandatory typed `usage`
+line under that commit; a lost child folds to `process.failed`; a lease
+supersession is a `lease` line; an injected backend error is a `fault` line.
 
 **Independence from what it tests (ADR 0044).** The module imports nothing else
 from `lash_core`. It consumes strings, integers, booleans and
@@ -118,7 +120,8 @@ projection from an `Effect` stream onto the vocabulary is shared once more in
   attribute rather than a header line.
 - `scripts/check-transcript-diff.py` keys on the vocabulary's durable event names
   (`checkpoint.commit`, `checkpoint.request`, `durable.effect`) as well as the
-  component renderings and `rev=`. The legacy `Checkpoint` / `DurableEffect`
+  mandatory typed `usage` component, other component renderings, and `rev=`. The
+  legacy `Checkpoint` / `DurableEffect`
   tokens stay listed so nothing already blessed silently stops being flagged. The
   Rust-side list is `behavior_transcript::DURABLE_WRITE_EVENTS`; the two are kept
   in sync by hand, and a durable event name the script does not know about is a
