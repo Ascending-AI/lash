@@ -165,10 +165,12 @@ impl SessionAdmin {
 
     async fn update_config(&self, patch: SessionConfigPatch) -> Result<()> {
         self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime.update_session_config(patch).await;
+            runtime
+                .update_session_config(patch)
+                .await
+                .map_err(Into::into)
         })
-        .await;
-        Ok(())
+        .await
     }
 
     async fn export_state(&self) -> lash_core::SessionSnapshot {
@@ -221,26 +223,29 @@ impl SessionAdmin {
 
     async fn set_prompt_template(&self, template: PromptTemplate) -> Result<()> {
         self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime.set_prompt_template(template).await;
+            runtime
+                .set_prompt_template(template)
+                .await
+                .map_err(Into::into)
         })
-        .await;
-        Ok(())
+        .await
     }
 
     async fn clear_prompt_template(&self) -> Result<()> {
         self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime.clear_prompt_template().await;
+            runtime.clear_prompt_template().await.map_err(Into::into)
         })
-        .await;
-        Ok(())
+        .await
     }
 
     async fn add_prompt_contribution(&self, contribution: PromptContribution) -> Result<()> {
         self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime.add_prompt_contribution(contribution).await;
+            runtime
+                .add_prompt_contribution(contribution)
+                .await
+                .map_err(Into::into)
         })
-        .await;
-        Ok(())
+        .await
     }
 
     async fn replace_prompt_slot(
@@ -249,18 +254,19 @@ impl SessionAdmin {
         contributions: impl IntoIterator<Item = PromptContribution>,
     ) -> Result<()> {
         self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime.replace_prompt_slot(slot, contributions).await;
+            runtime
+                .replace_prompt_slot(slot, contributions)
+                .await
+                .map_err(Into::into)
         })
-        .await;
-        Ok(())
+        .await
     }
 
     async fn clear_prompt_slot(&self, slot: PromptSlot) -> Result<()> {
         self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime.clear_prompt_slot(slot).await;
+            runtime.clear_prompt_slot(slot).await.map_err(Into::into)
         })
-        .await;
-        Ok(())
+        .await
     }
 
     async fn apply_protocol_session_extension(

@@ -76,8 +76,8 @@ pub enum PluginLifecycleEvent<'run> {
     TurnFinalized(Arc<AssembledTurn>),
     /// Best-effort observer hook emitted after durable session state advances.
     ///
-    /// Hook failures are isolated from the foreground turn: the turn has already
-    /// committed, and observers must not affect that commit.
+    /// Hook failures cannot affect the commit, which has already completed, but
+    /// they are returned to the host as `lifecycle_hook_failed` turn issues.
     TurnPersisted(Box<SessionStateChangedContext<'run>>),
     SessionRestored(SessionReadView),
     SessionConfigChanged(Box<SessionConfigChangedContext>),

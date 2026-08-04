@@ -66,8 +66,12 @@
 //! [`ExecutionScope`]; the second indexes session-owned waits so cancellation
 //! and deletion can resolve them durably. Await-event identity epoch 3 uses the
 //! v2 wait-index namespace and marker. Before upgrading, drain and recreate
-//! both Restate services' state; the index open gate rejects pre-cutover state
-//! with a recreate instruction and never migrates old parked-wait addresses.
+//! both Restate services' state. Every post-cutover register, resolve, renew,
+//! and woken-settle path crosses the index epoch gate and rejects pre-cutover
+//! state with a recreate instruction. A fully parked pre-cutover invocation
+//! cannot execute that new gate and its v2 workflow address is unreachable from
+//! v3 resolutions; it never self-terminates. Draining and purging those
+//! invocations before the cutover is the only remedy.
 
 use std::fmt;
 use std::future::Future;
@@ -2885,6 +2889,12 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
             serde_json::from_str(&payload).map_err(TerminalError::from_error)?
         };
 
+        // A workflow that wakes after a deployment upgrade must cross the
+        // index epoch gate before it can return a resolution. Restate replays
+        // the old registration command, so this settle call is the first new
+        // command a previously parked invocation can execute. Fully parked v2
+        // invocations never reach it; the module and migration docs therefore
+        // require a pre-cutover drain/purge rather than claiming self-healing.
         let settle: restate_sdk::context::Request<
             '_,
             Json<RestateDurableWaitSettleRequest>,

@@ -353,16 +353,19 @@ impl LashRuntime {
         self.policy.clone()
     }
 
-    pub(super) async fn notify_session_config_changed(&self, previous: SessionPolicy) {
+    pub(super) async fn notify_session_config_changed(
+        &self,
+        previous: SessionPolicy,
+    ) -> Result<(), crate::PluginError> {
         let Some(session) = self.session.as_ref() else {
-            return;
+            return Ok(());
         };
         let current = self.session_policy();
         if current == previous {
-            return;
+            return Ok(());
         }
         let Ok(services) = self.runtime_session_services() else {
-            return;
+            return Ok(());
         };
         session
             .plugins()
@@ -374,7 +377,7 @@ impl LashRuntime {
                     sessions: services.state_service(),
                 },
             )))
-            .await;
+            .await
     }
 
     pub(super) async fn apply_session_config_mutations(&mut self, previous: SessionPolicy) {

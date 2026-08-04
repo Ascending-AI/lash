@@ -1360,19 +1360,35 @@ async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_start_order(
     );
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
         .expect("source key");
-    let alpha_id = register_fig811_subscription(
+    let _alpha_id = register_fig811_subscription(
         store.as_ref(),
         "fig811-register-alpha",
         "alpha",
         &source_key,
     )
     .await;
-    let beta_id =
+    let _beta_id =
         register_fig811_subscription(store.as_ref(), "fig811-register-beta", "beta", &source_key)
             .await;
-    assert!(
-        alpha_id > beta_id,
-        "fixture requires subscription-id order to oppose canonical key order"
+    let mut expected_subscriptions = store
+        .list_subscriptions(lash_core::TriggerSubscriptionFilter::default())
+        .await
+        .expect("list FIG-811 subscriptions for canonical order");
+    expected_subscriptions.sort_by(|left, right| {
+        left.owner_scope
+            .namespace()
+            .cmp(&right.owner_scope.namespace())
+            .then_with(|| left.subscription_key.cmp(&right.subscription_key))
+            .then_with(|| left.subscription_id.cmp(&right.subscription_id))
+    });
+    let expected_subscription_ids = expected_subscriptions
+        .iter()
+        .map(|subscription| subscription.subscription_id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        expected_subscription_ids.len(),
+        2,
+        "the FIG-811 fixture must contain exactly its alpha and beta subscriptions"
     );
 
     let registry = process_registry();
@@ -1446,16 +1462,15 @@ async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_start_order(
             .iter()
             .map(|delivery| (delivery.subscription_id.as_str(), &delivery.outcome,))
             .collect::<Vec<_>>(),
-        vec![
-            (
-                alpha_id.as_str(),
-                &lash_core::facade_support::TriggerDeliveryEmitOutcome::AlreadyReserved,
-            ),
-            (
-                beta_id.as_str(),
-                &lash_core::facade_support::TriggerDeliveryEmitOutcome::AlreadyReserved,
-            ),
-        ]
+        expected_subscription_ids
+            .into_iter()
+            .map(|subscription_id| {
+                (
+                    subscription_id,
+                    &lash_core::facade_support::TriggerDeliveryEmitOutcome::AlreadyReserved,
+                )
+            })
+            .collect::<Vec<_>>()
     );
     assert_eq!(
         registry
@@ -2620,6 +2635,13 @@ fn durable_wait_index_epoch_rejects_legacy_state_and_accepts_fresh_state() {
         &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()],
     )
     .expect("matching epoch reopens current state");
+    let wrong_epoch = validate_durable_wait_index_epoch(
+        Some(DURABLE_WAIT_INDEX_IDENTITY_EPOCH - 1),
+        &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()],
+    )
+    .expect_err("wrong identity epoch must be rejected");
+    assert!(wrong_epoch.contains("incompatible with epoch 3"));
+    assert!(wrong_epoch.contains("drain and recreate"));
     assert!(DURABLE_WAIT_INDEX_METADATA_KEY.starts_with("wait-index/v2/"));
 }
 

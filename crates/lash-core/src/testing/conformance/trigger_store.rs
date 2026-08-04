@@ -674,7 +674,10 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     assert!(!reenabled.record_snapshot.tombstoned);
     assert_eq!(reenabled.subscription_id, registered.subscription_id);
     assert_eq!(reenabled.incarnation, registered.incarnation);
-    assert_eq!(reenabled.definition_hash, registered.definition_hash);
+    assert_eq!(
+        reenabled.definition_fingerprint,
+        registered.definition_fingerprint
+    );
 
     let live = store
         .list_subscriptions(crate::TriggerSubscriptionFilter::for_session("session-a"))

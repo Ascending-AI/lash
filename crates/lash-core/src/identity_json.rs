@@ -6,6 +6,10 @@
 //! conflict. Schema leaves additionally discard JSON Schema annotations that
 //! do not affect validation; a byte change after that reduction is a schema
 //! definition conflict.
+//!
+//! Leaf bytes pin `serde_json`'s number rendering as part of the family
+//! grammar. A dependency upgrade that changes that rendering requires a family
+//! version bump and refreshed goldens rather than silent identity drift.
 
 const SCHEMA_ANNOTATIONS: &[&str] = &[
     "$comment",
@@ -70,10 +74,18 @@ fn normalize_schema(value: &serde_json::Value) -> serde_json::Value {
         if SCHEMA_ANNOTATIONS.contains(&key.as_str()) {
             continue;
         }
+        // Keep this schema-position map aligned with the Draft-7 semantics
+        // compiled by lash-sansio's `jsonschema::JSONSchema::compile` call.
+        // Draft-7 schema positions are definitions, properties,
+        // patternProperties, object-valued dependencies, additionalProperties,
+        // propertyNames, items (schema or tuple), additionalItems, contains,
+        // allOf/anyOf/oneOf, not, and if/then/else. Later-draft positions that
+        // the dependency already accepts are reduced here as well.
         let value = match key.as_str() {
             "$defs" | "definitions" | "dependentSchemas" | "patternProperties" | "properties" => {
                 normalize_schema_map(value)
             }
+            "dependencies" => normalize_draft7_dependencies(value),
             "additionalItems"
             | "additionalProperties"
             | "contains"
@@ -93,6 +105,26 @@ fn normalize_schema(value: &serde_json::Value) -> serde_json::Value {
             // primitives or instance-name collections. Unknown future
             // keywords remain opaque rather than silently becoming schema
             // grammar under this family version.
+            _ => normalize_payload(value),
+        };
+        normalized.insert(key.clone(), value);
+    }
+    serde_json::Value::Object(normalized)
+}
+
+fn normalize_draft7_dependencies(value: &serde_json::Value) -> serde_json::Value {
+    let serde_json::Value::Object(values) = value else {
+        return normalize_payload(value);
+    };
+    let mut entries = values.iter().collect::<Vec<_>>();
+    entries.sort_by_key(|(key, _)| *key);
+    let mut normalized = serde_json::Map::new();
+    for (key, value) in entries {
+        let value = match value {
+            // Draft-7 dependency schemas occupy schema positions. Arrays are
+            // property-name lists and must remain identity-bearing instance
+            // data rather than being traversed as tuple schemas.
+            serde_json::Value::Object(_) | serde_json::Value::Bool(_) => normalize_schema(value),
             _ => normalize_payload(value),
         };
         normalized.insert(key.clone(), value);
@@ -175,5 +207,34 @@ mod tests {
         let title_in_const = serde_json::json!({"const": {"title": "identity-bearing value"}});
         let empty_const = serde_json::json!({"const": {}});
         assert_ne!(schema_leaf(&title_in_const), schema_leaf(&empty_const));
+    }
+
+    #[test]
+    fn schema_leaf_reduces_draft7_dependency_schemas_but_not_property_lists() {
+        let annotated = serde_json::json!({
+            "dependencies": {
+                "credit_card": {
+                    "title": "display only",
+                    "description": "display only",
+                    "required": ["billing_address"]
+                },
+                "billing_address": ["credit_card"]
+            }
+        });
+        let semantic = serde_json::json!({
+            "dependencies": {
+                "credit_card": {"required": ["billing_address"]},
+                "billing_address": ["credit_card"]
+            }
+        });
+        assert_eq!(schema_leaf(&annotated), schema_leaf(&semantic));
+
+        let changed_property_list = serde_json::json!({
+            "dependencies": {
+                "credit_card": {"required": ["billing_address"]},
+                "billing_address": ["postal_code"]
+            }
+        });
+        assert_ne!(schema_leaf(&semantic), schema_leaf(&changed_property_list));
     }
 }

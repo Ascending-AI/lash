@@ -17,7 +17,7 @@
 # in this file records how the DDL declares it and is documentation, not a
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
-version 36
+version 37
 table lash_attachment_manifest
   column attachment_id text not-null
   column canonical_uri text not-null
@@ -156,7 +156,7 @@ table lash_processes
   column originator_id text not-null
   column process_id text not-null
   column record_json text not-null
-  column registration_hash text not-null
+  column registration_fingerprint text not-null
   column status text not-null
   column updated_at_ms bigint not-null
   column wake_session_id text nullable
@@ -253,7 +253,7 @@ table lash_trigger_deliveries
 table lash_trigger_mutation_receipts
   column created_at_ms bigint not-null
   column operation_id text not-null
-  column request_hash text not-null
+  column request_fingerprint text not-null
   column result_json text not-null
   primary-key (operation_id)
 table lash_trigger_occurrences
@@ -268,7 +268,7 @@ table lash_trigger_occurrences
   primary-key (occurrence_id)
 table lash_trigger_subscriptions
   column created_at_ms bigint not-null
-  column definition_hash text not-null
+  column definition_fingerprint text not-null
   column enabled boolean not-null
   column incarnation text not-null
   column owner_scope text not-null

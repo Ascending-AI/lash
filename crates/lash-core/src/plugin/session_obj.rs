@@ -53,6 +53,18 @@ fn lifecycle_event_hook_kind(event: &PluginLifecycleEvent<'_>) -> &'static str {
     }
 }
 
+pub(crate) fn plugin_lifecycle_hook_issue(error: PluginError) -> crate::runtime::TurnIssue {
+    crate::runtime::TurnIssue {
+        kind: "plugin".to_string(),
+        code: Some("lifecycle_hook_failed".to_string()),
+        terminal_reason: None,
+        message: error.to_string(),
+        raw: None,
+        retryable: None,
+        provider_failure_kind: None,
+    }
+}
+
 fn collect_owned_sync<C, O, H, F>(
     hooks: &[RegisteredHook<H>],
     ctx: C,
@@ -419,15 +431,18 @@ impl PluginSession {
         (projector.hook)(ctx).await
     }
 
-    pub async fn emit_runtime_event(&self, event: PluginLifecycleEvent<'_>) {
-        self.emit_runtime_event_with_phase_probe(event, None).await;
+    pub async fn emit_runtime_event(
+        &self,
+        event: PluginLifecycleEvent<'_>,
+    ) -> Result<(), PluginError> {
+        self.emit_runtime_event_with_phase_probe(event, None).await
     }
 
     pub async fn emit_runtime_event_with_phase_probe(
         &self,
         event: PluginLifecycleEvent<'_>,
         phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
-    ) {
+    ) -> Result<(), PluginError> {
         let hook_kind = lifecycle_event_hook_kind(&event);
         let mut pending = FuturesUnordered::new();
         for registered in &self.contributions.runtime_event_hooks {
@@ -447,11 +462,28 @@ impl PluginSession {
                 (plugin_id, result)
             });
         }
+        let mut failures = Vec::new();
         while let Some((plugin_id, result)) = pending.next().await {
-            if let Err(err) = result {
-                tracing::warn!(plugin_id, "plugin runtime event hook failed: {err}");
+            if let Err(error) = result {
+                failures.push((plugin_id, error));
             }
         }
+        if failures.is_empty() {
+            return Ok(());
+        }
+        failures.sort_by(|(left_id, left_error), (right_id, right_error)| {
+            left_id
+                .cmp(right_id)
+                .then_with(|| left_error.to_string().cmp(&right_error.to_string()))
+        });
+        let details = failures
+            .into_iter()
+            .map(|(plugin_id, error)| format!("plugin `{plugin_id}`: {error}"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        Err(PluginError::Session(format!(
+            "plugin runtime event hooks failed: {details}"
+        )))
     }
 
     pub fn has_runtime_event_hooks(&self) -> bool {

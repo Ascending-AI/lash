@@ -681,8 +681,14 @@ impl LashRuntime {
             );
         }
         self.mark_phase_begin(RuntimeTurnPhase::PostPersistHooks);
-        self.emit_turn_persisted_event(&returned_turn, scoped_effect_controller, &trace_turn_id)
-            .await?;
+        if let Some(error) = self
+            .emit_turn_persisted_event(&returned_turn, scoped_effect_controller, &trace_turn_id)
+            .await?
+        {
+            returned_turn
+                .errors
+                .push(crate::plugin::plugin_lifecycle_hook_issue(error));
+        }
         self.mark_phase_end(RuntimeTurnPhase::PostPersistHooks);
         self.mark_phase_end(RuntimeTurnPhase::PersistTurn);
 
@@ -864,12 +870,12 @@ impl LashRuntime {
         returned_turn: &AssembledTurn,
         scoped_effect_controller: &ScopedEffectController<'_>,
         trace_turn_id: &str,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<Option<crate::PluginError>, RuntimeError> {
         let Some(session) = self.session.as_ref() else {
-            return Ok(());
+            return Ok(None);
         };
         let Ok(manager) = self.runtime_session_services() else {
-            return Ok(());
+            return Ok(None);
         };
         let phase_turn_id = turn_phase_id(trace_turn_id, "turn-persisted");
         let phase_controller = scoped_child_turn_controller(
@@ -882,7 +888,7 @@ impl LashRuntime {
             Some(phase_turn_id),
         );
 
-        session
+        let result = session
             .plugins()
             .emit_runtime_event_with_phase_probe(
                 crate::PluginLifecycleEvent::TurnPersisted(Box::new(
@@ -897,7 +903,7 @@ impl LashRuntime {
                 self.turn_phase_probe.clone(),
             )
             .await;
-        Ok(())
+        Ok(result.err())
     }
 
     /// Run one logical turn and stream every physical frame to the host sink.

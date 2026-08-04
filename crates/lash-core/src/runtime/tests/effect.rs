@@ -11,7 +11,7 @@ struct EffectControllerRecord {
 }
 
 #[derive(Clone, Default)]
-struct RecordingEffectController {
+pub(super) struct RecordingEffectController {
     records: Arc<Mutex<Vec<EffectControllerRecord>>>,
     envelopes: Arc<Mutex<Vec<String>>>,
     llm_calls: Arc<Mutex<usize>>,
@@ -45,7 +45,7 @@ impl RecordingEffectController {
         self
     }
 
-    fn with_direct_gate(
+    pub(super) fn with_direct_gate(
         mut self,
         gate: Arc<(
             tokio::sync::Notify,
@@ -92,7 +92,7 @@ fn runtime_host_config_with_inline_controller(
     config
 }
 
-fn scoped_test_turn<'a>(
+pub(super) fn scoped_test_turn<'a>(
     controller: &'a dyn RuntimeEffectController,
     turn_id: &str,
 ) -> ScopedEffectController<'a> {
@@ -648,7 +648,9 @@ impl RuntimeEffectController for WrongOutcomeEffectController {
     }
 }
 
-fn host_with_effect_recorder(recorder: RecordingEffectController) -> EmbeddedRuntimeHost {
+pub(super) fn host_with_effect_recorder(
+    recorder: RecordingEffectController,
+) -> EmbeddedRuntimeHost {
     let mut config = runtime_host_config_with_inline_controller(Arc::new(recorder));
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         mock_provider(Vec::new()).into_handle(),
@@ -1855,10 +1857,11 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
         None,
     );
     let mut request = crate::DirectRequest::text("mock-model", "summarize");
-    request.caused_by = Some(CausalRef::ToolCall {
+    let caused_by = CausalRef::ToolCall {
         session_id: "root".to_string(),
         call_id: "originating-tool-call".to_string(),
-    });
+    };
+    request.caused_by = Some(caused_by.clone());
     let completion = direct
         .direct_completion(request, "direct-test")
         .await
@@ -1868,11 +1871,20 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
     assert_eq!(completion.usage.input_tokens, 7);
     assert_eq!(completion.llm_call.call_id.0, "direct-effect-test");
     assert_eq!(recorder.count_kind(RuntimeEffectKind::Direct), 1);
+    let discriminator =
+        crate::runtime::causal::direct_request_discriminator(None, Some(&caused_by), 1);
+    let expected_replay_key = crate::runtime::causal::direct_effect_invocation(
+        "root",
+        "direct-test",
+        discriminator,
+        None,
+        Some(caused_by),
+    )
+    .replay_key()
+    .expect("derived direct-effect replay key")
+    .to_string();
     assert!(recorder.records().iter().any(|record| {
-        record.kind == RuntimeEffectKind::Direct
-            && record
-                .replay_key
-                .contains("cause:3:4:root:21:originating-tool-call:ordinal:1")
+        record.kind == RuntimeEffectKind::Direct && record.replay_key == expected_replay_key
     }));
     let ledger = runtime.shared_token_ledger.lock().expect("token ledger");
     assert_eq!(ledger.len(), 1);
