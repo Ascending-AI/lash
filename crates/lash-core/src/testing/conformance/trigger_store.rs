@@ -20,6 +20,7 @@ where
     mutation_receipts_follow_retention_cutoff(make()).await;
     reservations_execute_the_reserved_revision(make()).await;
     disable_preserves_reserved_work_and_requires_explicit_enable(make()).await;
+    register_disable_reenable_roundtrip_is_fenced_and_receipted(make()).await;
     delete_tombstones_preserves_history_and_revive_changes_incarnation(make()).await;
     owner_namespaces_are_exact_and_session_cleanup_is_scoped(make()).await;
     explicit_prune_is_journaled_and_owner_scoped(make()).await;
@@ -568,6 +569,149 @@ async fn disable_preserves_reserved_work_and_requires_explicit_enable(
             .reservations
             .len(),
         1
+    );
+}
+
+/// Re-enable is a first-class fenced verb, not a gap hosts must work around by
+/// writing the store's tables themselves. The whole
+/// `register -> disable -> re-enable` roundtrip must run through
+/// `execute_command`: the fence rejects a stale revision, the accepted enable
+/// advances the revision and flips the record, its receipt replays byte-for-byte
+/// afterwards, and occurrences reach the target again.
+async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
+    store: Arc<dyn crate::TriggerStore>,
+) {
+    let key = "reenable-roundtrip-key";
+    let source_key = "reenable-roundtrip-source";
+    let registered = mutate(
+        &store,
+        "reenable-roundtrip-register",
+        register_command(
+            "session-a",
+            sample_draft("session-a", key, source_key, "worker"),
+        ),
+    )
+    .await;
+    assert_eq!(registered.revision, 1);
+    assert!(registered.enabled);
+
+    let disabled = mutate(
+        &store,
+        "reenable-roundtrip-disable",
+        revision_command("session-a", key, 1, "disable"),
+    )
+    .await;
+    assert_eq!(disabled.revision, 2);
+    assert_eq!(
+        disabled.disposition,
+        crate::TriggerMutationDisposition::Disabled
+    );
+    assert!(
+        store
+            .ingest_occurrence(button_occurrence(source_key, "reenable-roundtrip-disabled"))
+            .await
+            .unwrap()
+            .reservations
+            .is_empty(),
+        "a disabled subscription reserves nothing"
+    );
+
+    // The revision the caller read before the disable is now stale: the fence
+    // must reject it instead of enabling from a superseded view.
+    let stale = execute(
+        &store,
+        "reenable-roundtrip-stale-enable",
+        revision_command("session-a", key, 1, "enable"),
+    )
+    .await
+    .expect_err("stale enable conflicts");
+    assert!(matches!(
+        stale,
+        crate::TriggerOperationError::Conflict {
+            existing_revision: Some(2),
+            ..
+        }
+    ));
+
+    // The host re-reads through the same command surface, then enables at the
+    // observed revision.
+    let listed = execute(
+        &store,
+        "reenable-roundtrip-list",
+        crate::TriggerCommand::List {
+            owner_scope: owner("session-a"),
+            filter: crate::TriggerSubscriptionFilter {
+                subscription_key: Some(key.to_string()),
+                ..Default::default()
+            },
+        },
+    )
+    .await
+    .expect("list before enable");
+    let crate::TriggerCommandOutcome::List { records } = listed else {
+        panic!("expected list records");
+    };
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].revision, 2);
+    assert!(!records[0].enabled);
+
+    let reenabled = mutate(
+        &store,
+        "reenable-roundtrip-enable",
+        revision_command("session-a", key, records[0].revision, "enable"),
+    )
+    .await;
+    assert_eq!(
+        reenabled.disposition,
+        crate::TriggerMutationDisposition::Enabled
+    );
+    assert_eq!(reenabled.revision, 3);
+    assert!(reenabled.enabled);
+    assert!(reenabled.record_snapshot.enabled);
+    assert!(!reenabled.record_snapshot.tombstoned);
+    assert_eq!(reenabled.subscription_id, registered.subscription_id);
+    assert_eq!(reenabled.incarnation, registered.incarnation);
+    assert_eq!(reenabled.definition_hash, registered.definition_hash);
+
+    let live = store
+        .list_subscriptions(crate::TriggerSubscriptionFilter::for_session("session-a"))
+        .await
+        .unwrap();
+    assert_eq!(live.len(), 1);
+    assert_eq!(live[0].revision, 3);
+    assert!(live[0].enabled);
+
+    // Delivery resumes for occurrences emitted after the re-enable.
+    let delivered = store
+        .ingest_occurrence(button_occurrence(source_key, "reenable-roundtrip-enabled"))
+        .await
+        .unwrap();
+    assert_eq!(delivered.reservations.len(), 1);
+    assert_eq!(delivered.reservations[0].subscription.revision, 3);
+
+    // Both journaled operations replay to their original receipts, even though
+    // the row has moved past them.
+    let replayed_enable = mutate(
+        &store,
+        "reenable-roundtrip-enable",
+        revision_command("session-a", key, records[0].revision, "enable"),
+    )
+    .await;
+    assert_eq!(replayed_enable, reenabled);
+    let replayed_disable = mutate(
+        &store,
+        "reenable-roundtrip-disable",
+        revision_command("session-a", key, 1, "disable"),
+    )
+    .await;
+    assert_eq!(replayed_disable, disabled);
+    assert!(
+        store
+            .list_subscriptions(crate::TriggerSubscriptionFilter::for_session("session-a"))
+            .await
+            .unwrap()[0]
+            .enabled,
+        "receipt replay must not re-apply the mutation"
     );
 }
 
