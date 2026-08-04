@@ -6,13 +6,9 @@ pub async fn assert_real_turn_kill_recovery(
     tempdir: &std::path::Path,
     mut command: impl FnMut(&str, &str, &std::path::Path) -> tokio::process::Command,
 ) {
-    for (action, crashed_count, recovered_count) in [
-        ("turn_provider_mid_stream", 0, 1),
-        ("turn_provider_after_tool_mid_stream", 1, 1),
-        ("turn_effect_after_external", 1, 2),
-        ("turn_final_commit_boundary", 1, 1),
-        ("turn_final_commit_inside", 1, 1),
-    ] {
+    for (action, crashed_count, recovered_count, expected_end_state, known_defect) in
+        lash_core::testing::conformance::cold_process_turn_expectations()
+    {
         let nonce = uuid::Uuid::new_v4().to_string();
         let marker = tempdir.join(format!("{action}-{nonce}.log"));
         let mut child = command(action, &nonce, &marker)
@@ -53,15 +49,20 @@ pub async fn assert_real_turn_kill_recovery(
         .await
         .unwrap_or_else(|_| panic!("{action} recovery helper timed out"))
         .unwrap_or_else(|error| panic!("spawn {action} recovery helper: {error}"));
+        let recovery_stdout = String::from_utf8_lossy(&recovered.stdout);
+        let recovery_stderr = String::from_utf8_lossy(&recovered.stderr);
         assert!(
             recovered.status.success(),
-            "{action} recovery helper failed: {}",
-            String::from_utf8_lossy(&recovered.stderr)
+            "{action} recovery helper failed: {recovery_stderr}; stdout: {recovery_stdout}"
         );
+        let expected_summary = format!("turn_complete {expected_end_state}");
         assert!(
-            String::from_utf8_lossy(&recovered.stdout).contains("turn_complete"),
-            "{action} recovery helper did not complete a real turn"
+            recovery_stdout.lines().any(|line| line == expected_summary),
+            "{action} recovery helper did not match the exact durable end state `{expected_summary}`: {recovery_stdout}"
         );
+        if let Some(notice) = known_defect {
+            eprintln!("{notice}");
+        }
         assert_eq!(
             marker_lines(&marker),
             recovered_count,

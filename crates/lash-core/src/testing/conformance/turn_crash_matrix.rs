@@ -151,28 +151,99 @@ enum EffectOperation {
 #[serde(rename_all = "snake_case")]
 enum CrashPlacement {
     Boundary,
+    AfterExternalEffectBeforeOutcome,
     InsideCall,
     ProviderMidStream,
 }
 
 /// Stable generated crash-point identity.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 struct TurnCrashPoint {
     operation: TurnSeamOperation,
     placement: CrashPlacement,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct Level2EffectExecutions {
+    at_crash: usize,
+    after_recovery: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct DurableEndStateExpectation {
+    #[serde(default)]
+    terminal: Option<usize>,
+    #[serde(default)]
+    pending_inputs: Option<usize>,
+    #[serde(default)]
+    queued_work: Option<usize>,
+}
+
+impl DurableEndStateExpectation {
+    fn exact(self) -> Option<DurableEndState> {
+        Some(DurableEndState {
+            terminal: self.terminal?,
+            pending_inputs: self.pending_inputs?,
+            queued_work: self.queued_work?,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct KnownDefectExpectation {
+    #[serde(default)]
+    ticket: String,
+    #[serde(default)]
+    expected_defective: DurableEndStateExpectation,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct Level2Expectation {
+    effect_executions: Level2EffectExecutions,
+    #[serde(default)]
+    exact: Option<DurableEndStateExpectation>,
+    #[serde(default)]
+    known_defect: Option<KnownDefectExpectation>,
+}
+
 /// Reviewable recovery ruling for one generated point.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 struct TurnCrashOutcome {
     point: TurnCrashPoint,
     outcome: String,
-    external_effect_executions: usize,
-    level_1: bool,
-    level_2: bool,
+    effect_executions_l1: usize,
+    #[serde(default)]
+    level_2: Option<Level2Expectation>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DurableEndState {
+    terminal: usize,
+    pending_inputs: usize,
+    queued_work: usize,
+}
+
+impl DurableEndState {
+    const CORRECT: Self = Self {
+        terminal: 1,
+        pending_inputs: 0,
+        queued_work: 0,
+    };
+
+    fn summary(self) -> String {
+        format!(
+            "terminal={} pending_inputs={} queued_work={}",
+            self.terminal, self.pending_inputs, self.queued_work
+        )
+    }
+}
+
+#[derive(Debug, Default)]
 struct SeamState {
     trace: Vec<TurnSeamOperation>,
     completed: Vec<TurnSeamOperation>,
@@ -180,7 +251,7 @@ struct SeamState {
     hit: bool,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 struct SeamControl {
     state: Arc<Mutex<SeamState>>,
     hit: Arc<tokio::sync::Notify>,
@@ -956,7 +1027,7 @@ impl RuntimeEffectController for SeamEffectController {
 #[derive(Clone, Debug, Default)]
 struct TraceTool {
     marker: Option<std::path::PathBuf>,
-    pause_after_external_effect: bool,
+    control: SeamControl,
 }
 
 fn trace_tool_definition() -> crate::ToolDefinition {
@@ -988,11 +1059,14 @@ impl crate::ToolProvider for TraceTool {
             writeln!(file, "executed").expect("append level-2 external-effect marker");
             file.flush().expect("flush level-2 external-effect marker");
         }
-        if self.pause_after_external_effect {
-            println!("crash_ready");
-            std::io::Write::flush(&mut std::io::stdout())
-                .expect("flush level-2 effect crash signal");
-            std::future::pending().await
+        let operation = TurnSeamOperation::Effect(EffectOperation::ToolAttempt {
+            name: "trace_effect".to_string(),
+        });
+        if self
+            .control
+            .matches(&operation, CrashPlacement::AfterExternalEffectBeforeOutcome)
+        {
+            self.control.stop_here().await;
         }
         crate::ToolResult::ok(serde_json::json!({"effect":"executed"}))
     }
@@ -1043,7 +1117,7 @@ async fn build_runtime(
     control: SeamControl,
     executions: Arc<std::sync::atomic::AtomicUsize>,
     identity: &ReferenceIdentity,
-    trace_tool: TraceTool,
+    mut trace_tool: TraceTool,
 ) -> crate::LashRuntime {
     super::bind_conformance_session(&store, &identity.session_id).await;
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
@@ -1057,6 +1131,7 @@ async fn build_runtime(
         Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
     )
     .with_lease_timings(recovery_timings());
+    trace_tool.control = control.clone();
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(provider_handle(control)));
     let mut plugin_factories = crate::testing::test_standard_protocol_factories();
@@ -1147,6 +1222,15 @@ fn generated_points(trace: &[TurnSeamOperation]) -> Vec<TurnCrashPoint> {
             });
         }
         if matches!(operation, TurnSeamOperation::Effect(_)) {
+            if matches!(
+                operation,
+                TurnSeamOperation::Effect(EffectOperation::ToolAttempt { .. })
+            ) {
+                points.push(TurnCrashPoint {
+                    operation: operation.clone(),
+                    placement: CrashPlacement::AfterExternalEffectBeforeOutcome,
+                });
+            }
             points.push(TurnCrashPoint {
                 operation: operation.clone(),
                 placement: CrashPlacement::InsideCall,
@@ -1177,6 +1261,216 @@ enum ColdProcessTurnAction {
     Recover,
 }
 
+impl ColdProcessTurnAction {
+    const CRASH_ACTIONS: [Self; 5] = [
+        Self::ProviderInitialMidStream,
+        Self::ProviderAfterToolMidStream,
+        Self::EffectAfterExternalBeforeOutcome,
+        Self::FinalCommitBoundary,
+        Self::FinalCommitInsideCall,
+    ];
+
+    fn command(self) -> &'static str {
+        match self {
+            Self::ProviderInitialMidStream => "turn_provider_mid_stream",
+            Self::ProviderAfterToolMidStream => "turn_provider_after_tool_mid_stream",
+            Self::EffectAfterExternalBeforeOutcome => "turn_effect_after_external",
+            Self::FinalCommitBoundary => "turn_final_commit_boundary",
+            Self::FinalCommitInsideCall => "turn_final_commit_inside",
+            Self::Recover => "turn_recover",
+        }
+    }
+
+    fn point(self) -> Option<TurnCrashPoint> {
+        match self {
+            Self::ProviderInitialMidStream => Some(TurnCrashPoint {
+                operation: TurnSeamOperation::Provider(ProviderOperation::InitialMidStream),
+                placement: CrashPlacement::ProviderMidStream,
+            }),
+            Self::ProviderAfterToolMidStream => Some(TurnCrashPoint {
+                operation: TurnSeamOperation::Provider(ProviderOperation::AfterToolMidStream),
+                placement: CrashPlacement::ProviderMidStream,
+            }),
+            Self::EffectAfterExternalBeforeOutcome => Some(TurnCrashPoint {
+                operation: TurnSeamOperation::Effect(EffectOperation::ToolAttempt {
+                    name: "trace_effect".to_string(),
+                }),
+                placement: CrashPlacement::AfterExternalEffectBeforeOutcome,
+            }),
+            Self::FinalCommitBoundary => Some(TurnCrashPoint {
+                operation: TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
+                    settles_queue: true,
+                    settles_turn_input: true,
+                    releases_lease: true,
+                }),
+                placement: CrashPlacement::Boundary,
+            }),
+            Self::FinalCommitInsideCall => Some(TurnCrashPoint {
+                operation: TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
+                    settles_queue: true,
+                    settles_turn_input: true,
+                    releases_lease: true,
+                }),
+                placement: CrashPlacement::InsideCall,
+            }),
+            Self::Recover => None,
+        }
+    }
+}
+
+fn validate_outcome_table(
+    generated: &[TurnCrashPoint],
+    table: &[TurnCrashOutcome],
+) -> Result<(), String> {
+    let table_points = table
+        .iter()
+        .map(|entry| entry.point.clone())
+        .collect::<Vec<_>>();
+    if table_points != generated {
+        return Err(format!(
+            "outcome table must cover every generated level-1 point exactly in trace order\nexpected: {generated:#?}\nactual: {table_points:#?}"
+        ));
+    }
+
+    let expected_level_2 = ColdProcessTurnAction::CRASH_ACTIONS
+        .into_iter()
+        .map(|action| action.point().expect("crash action has a point"))
+        .collect::<Vec<_>>();
+    let actual_level_2 = table
+        .iter()
+        .filter(|entry| entry.level_2.is_some())
+        .map(|entry| entry.point.clone())
+        .collect::<Vec<_>>();
+    let same_set = actual_level_2.len() == expected_level_2.len()
+        && expected_level_2
+            .iter()
+            .all(|point| actual_level_2.contains(point));
+    if !same_set {
+        return Err(format!(
+            "outcome table level-2 point set must match the cold-process actions\nexpected: {expected_level_2:#?}\nactual: {actual_level_2:#?}"
+        ));
+    }
+
+    for entry in table.iter().filter(|entry| entry.level_2.is_some()) {
+        let expectation = entry.level_2.as_ref().expect("filtered level-2 row");
+        match (&expectation.exact, &expectation.known_defect) {
+            (Some(exact), None) => {
+                let observed = exact.exact().ok_or_else(|| {
+                    format!(
+                        "level-2 exact expectation must specify terminal, pending_inputs, and queued_work: {:?}",
+                        entry.point
+                    )
+                })?;
+                if observed != DurableEndState::CORRECT {
+                    return Err(format!(
+                        "ordinary level-2 expectation must assert the correct durable end state exactly: {:?}",
+                        entry.point
+                    ));
+                }
+            }
+            (None, Some(known_defect)) => {
+                if !is_ticket_id(&known_defect.ticket) {
+                    return Err(format!(
+                        "known-defect expectation requires a ticket id: {:?}",
+                        entry.point
+                    ));
+                }
+                let defective = known_defect.expected_defective.exact().ok_or_else(|| {
+                    format!(
+                        "known-defect expectation must specify terminal, pending_inputs, and queued_work exactly: {:?}",
+                        entry.point
+                    )
+                })?;
+                if defective == DurableEndState::CORRECT {
+                    return Err(format!(
+                        "known-defect expectation must differ from the correct durable end state: {:?}",
+                        entry.point
+                    ));
+                }
+                let correct_summary = DurableEndState::CORRECT.summary().replace(' ', ", ");
+                if !entry.outcome.contains(&known_defect.ticket)
+                    || !entry.outcome.contains(&correct_summary)
+                {
+                    return Err(format!(
+                        "known-defect outcome prose must name {} and the correct end state `{correct_summary}`: {:?}",
+                        known_defect.ticket, entry.point
+                    ));
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "level-2 expectation must contain exactly one of `exact` or `known_defect`: {:?}",
+                    entry.point
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn is_ticket_id(ticket: &str) -> bool {
+    let Some((project, number)) = ticket.split_once('-') else {
+        return false;
+    };
+    !project.is_empty()
+        && project
+            .bytes()
+            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
+        && !number.is_empty()
+        && number.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+/// Return each helper action's exact effect-count and durable-state oracle.
+///
+/// The values are derived from `turn_crash_outcomes.json`, keeping the backend
+/// helper-process assertions on the same oracle as the level-1 matrix.
+pub fn cold_process_turn_expectations() -> Vec<(&'static str, usize, usize, String, Option<String>)>
+{
+    let generated = generated_points(&golden_trace());
+    let table = turn_crash_matrix_outcomes();
+    validate_outcome_table(&generated, &table).expect("committed turn crash outcomes are valid");
+    ColdProcessTurnAction::CRASH_ACTIONS
+        .into_iter()
+        .map(|action| {
+            let point = action.point().expect("crash action has a point");
+            let expectation = table
+                .iter()
+                .find(|entry| entry.point == point)
+                .and_then(|entry| entry.level_2.as_ref())
+                .expect("level-2 action has a committed expectation");
+            let (end_state, known_defect) = match (&expectation.exact, &expectation.known_defect) {
+                (Some(exact), None) => (
+                    exact.exact().expect("validated exact end-state expectation"),
+                    None,
+                ),
+                (None, Some(defect)) => {
+                    let expected = defect
+                        .expected_defective
+                        .exact()
+                        .expect("validated exact known-defect expectation");
+                    let notice = format!(
+                        "KNOWN-DEFECT {} reproduced exactly for {}: observed {}; fixing {} must produce the correct durable end state {}",
+                        defect.ticket,
+                        action.command(),
+                        expected.summary(),
+                        defect.ticket,
+                        DurableEndState::CORRECT.summary()
+                    );
+                    (expected, Some(notice))
+                }
+                _ => unreachable!("validated level-2 end-state expectation"),
+            };
+            (
+                action.command(),
+                expectation.effect_executions.at_crash,
+                expectation.effect_executions.after_recovery,
+                end_state.summary(),
+                known_defect,
+            )
+        })
+        .collect()
+}
+
 /// Return the stable execution scope used by a level-2 helper scenario.
 pub fn cold_process_turn_scope(scenario: &str) -> crate::ExecutionScope {
     let identity = ReferenceIdentity::for_scenario(scenario);
@@ -1192,8 +1486,9 @@ pub fn cold_process_turn_scope(scenario: &str) -> crate::ExecutionScope {
 ///
 /// Crash actions print `crash_ready` only after the configured semantic point
 /// is reached and then park until the parent sends `SIGKILL`. `Recover` polls
-/// the session lease, drives a fresh runtime/controller, and prints
-/// `turn_complete` after durable recovery.
+/// the session lease, drives a fresh runtime/controller, and reports exact
+/// committed terminal-output and ingress counts from the reopened store. The
+/// parent process compares that `turn_complete` summary with the outcome table.
 pub async fn cold_process_real_turn_driver(
     store: Arc<dyn RuntimePersistence>,
     effect_controller: Arc<dyn RuntimeEffectController>,
@@ -1247,9 +1542,9 @@ pub async fn cold_process_real_turn_driver(
 
     let trace_tool = TraceTool {
         marker: external_effect_marker,
-        pause_after_external_effect: action
-            == ColdProcessTurnAction::EffectAfterExternalBeforeOutcome,
+        ..TraceTool::default()
     };
+    let reader = Arc::clone(&store);
     let decorated = SeamStore::wrap(store, control.clone());
     let runtime = Box::pin(build_runtime(
         decorated,
@@ -1260,34 +1555,7 @@ pub async fn cold_process_real_turn_driver(
     ))
     .await;
 
-    let point = match action {
-        ColdProcessTurnAction::ProviderInitialMidStream => Some(TurnCrashPoint {
-            operation: TurnSeamOperation::Provider(ProviderOperation::InitialMidStream),
-            placement: CrashPlacement::ProviderMidStream,
-        }),
-        ColdProcessTurnAction::ProviderAfterToolMidStream => Some(TurnCrashPoint {
-            operation: TurnSeamOperation::Provider(ProviderOperation::AfterToolMidStream),
-            placement: CrashPlacement::ProviderMidStream,
-        }),
-        ColdProcessTurnAction::FinalCommitBoundary => Some(TurnCrashPoint {
-            operation: TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
-                settles_queue: true,
-                settles_turn_input: true,
-                releases_lease: true,
-            }),
-            placement: CrashPlacement::Boundary,
-        }),
-        ColdProcessTurnAction::FinalCommitInsideCall => Some(TurnCrashPoint {
-            operation: TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
-                settles_queue: true,
-                settles_turn_input: true,
-                releases_lease: true,
-            }),
-            placement: CrashPlacement::InsideCall,
-        }),
-        ColdProcessTurnAction::EffectAfterExternalBeforeOutcome
-        | ColdProcessTurnAction::Recover => None,
-    };
+    let point = action.point();
     if let Some(point) = point {
         control.arm(point);
     } else {
@@ -1298,20 +1566,41 @@ pub async fn cold_process_real_turn_driver(
         crate::task::spawn(
             async move { drive_turn(runtime, effect_controller, &task_identity).await },
         );
-    if action == ColdProcessTurnAction::EffectAfterExternalBeforeOutcome {
-        let _ = task.await;
-        unreachable!("effect crash action parks inside the external tool")
-    }
     if action != ColdProcessTurnAction::Recover {
         control.wait_for_hit().await;
         println!("crash_ready");
         std::io::Write::flush(&mut std::io::stdout()).expect("flush level-2 crash signal");
         std::future::pending::<()>().await;
     }
-    task.await
+    let _recovered_turn = task
+        .await
         .expect("join cold-process recovered turn")
         .expect("drive cold-process recovered turn");
-    println!("turn_complete");
+    let state = crate::load_persisted_session_state(reader.as_ref())
+        .await
+        .expect("read cold-process recovered state")
+        .expect("cold-process recovery committed a session head");
+    let terminal_count = state
+        .session_graph
+        .read_model()
+        .messages
+        .iter()
+        .flat_map(|message| message.parts.iter())
+        .filter(|part| part.content == "trace turn complete")
+        .count();
+    let pending_input_count = reader
+        .list_pending_turn_inputs(&identity.session_id)
+        .await
+        .expect("list cold-process recovered turn inputs")
+        .len();
+    let queued_work_count = reader
+        .list_queued_work(&identity.session_id)
+        .await
+        .expect("list cold-process recovered queued work")
+        .len();
+    println!(
+        "turn_complete terminal={terminal_count} pending_inputs={pending_input_count} queued_work={queued_work_count}"
+    );
 }
 
 /// Re-record the reference turn and fail if its live seam traffic drifts from
@@ -1352,19 +1641,8 @@ where
     );
     let generated = generated_points(&golden_trace());
     let table = turn_crash_matrix_outcomes();
-    assert_eq!(
-        table
-            .iter()
-            .map(|entry| entry.point.clone())
-            .collect::<Vec<_>>(),
-        generated,
-        "outcome table must cover exactly the generated matrix in trace order"
-    );
-    assert_eq!(
-        table.iter().filter(|entry| entry.level_2).count(),
-        5,
-        "outcome table must identify exactly the five cold-process risk points"
-    );
+    validate_outcome_table(&generated, &table)
+        .unwrap_or_else(|error| panic!("invalid turn crash outcome table: {error}"));
 }
 
 async fn wait_for_recovery_lease<F>(make: &F, scenario: &str)
@@ -1416,9 +1694,6 @@ where
 {
     Box::pin(turn_crash_trace_drift_check(&make)).await;
     for entry in turn_crash_matrix_outcomes() {
-        if !entry.level_1 {
-            continue;
-        }
         let scenario = point_key(&entry.point);
         let identity = ReferenceIdentity::for_scenario(&scenario);
         let raw = make(&scenario);
@@ -1486,7 +1761,7 @@ where
             .count();
         assert_eq!(
             terminal_count, 1,
-            "{scenario}: recovery must expose one terminal assistant output"
+            "{scenario} ({entry:?}): recovery must expose one terminal assistant output"
         );
         let pending_inputs = reader
             .list_pending_turn_inputs(&identity.session_id)
@@ -1502,12 +1777,12 @@ where
                 .await
                 .expect("list queued work")
                 .is_empty(),
-            "{scenario}: queued-work claim settles exactly once"
+            "{scenario} ({entry:?}): queued-work claim settles exactly once"
         );
 
         let effect_count = executions.load(std::sync::atomic::Ordering::SeqCst);
         assert_eq!(
-            effect_count, entry.external_effect_executions,
+            effect_count, entry.effect_executions_l1,
             "{scenario}: {}",
             entry.outcome
         );
@@ -1522,13 +1797,77 @@ mod tests {
     fn golden_trace_generates_exactly_the_reviewed_outcome_table() {
         let generated = generated_points(&golden_trace());
         let table = turn_crash_matrix_outcomes();
-        assert_eq!(table.len(), generated.len());
-        assert_eq!(
-            table
-                .into_iter()
-                .map(|entry| entry.point)
-                .collect::<Vec<_>>(),
-            generated
+        validate_outcome_table(&generated, &table).expect("committed table is valid");
+    }
+
+    #[test]
+    fn outcome_validation_rejects_a_dropped_level_1_point() {
+        let generated = generated_points(&golden_trace());
+        let mut table = turn_crash_matrix_outcomes();
+        table.remove(4);
+        assert!(
+            validate_outcome_table(&generated, &table).is_err(),
+            "removing any generated level-1 point must invalidate the oracle"
+        );
+    }
+
+    #[test]
+    fn outcome_validation_rejects_a_relocated_level_2_expectation() {
+        let generated = generated_points(&golden_trace());
+        let mut table = turn_crash_matrix_outcomes();
+        let source = table
+            .iter()
+            .position(|entry| {
+                entry.point
+                    == ColdProcessTurnAction::ProviderInitialMidStream
+                        .point()
+                        .expect("crash point")
+            })
+            .expect("level-2 source row");
+        let destination = table
+            .iter()
+            .position(|entry| {
+                entry.point
+                    == TurnCrashPoint {
+                        operation: TurnSeamOperation::Store(StoreOperation::LoadSession),
+                        placement: CrashPlacement::Boundary,
+                    }
+            })
+            .expect("level-1-only destination row");
+        table[destination].level_2 = table[source].level_2.take();
+        assert!(
+            validate_outcome_table(&generated, &table).is_err(),
+            "moving a level-2 expectation to a different point must invalidate the oracle"
+        );
+    }
+
+    #[test]
+    fn outcome_validation_rejects_a_known_defect_without_a_ticket() {
+        let generated = generated_points(&golden_trace());
+        let mut table = turn_crash_matrix_outcomes();
+        let defect = table
+            .iter_mut()
+            .find_map(|entry| entry.level_2.as_mut()?.known_defect.as_mut())
+            .expect("committed known-defect row");
+        defect.ticket.clear();
+        assert!(
+            validate_outcome_table(&generated, &table).is_err(),
+            "a known defect without a ticket id must invalidate the oracle"
+        );
+    }
+
+    #[test]
+    fn outcome_validation_rejects_a_non_exact_known_defect() {
+        let generated = generated_points(&golden_trace());
+        let mut table = turn_crash_matrix_outcomes();
+        let defect = table
+            .iter_mut()
+            .find_map(|entry| entry.level_2.as_mut()?.known_defect.as_mut())
+            .expect("committed known-defect row");
+        defect.expected_defective.queued_work = None;
+        assert!(
+            validate_outcome_table(&generated, &table).is_err(),
+            "a non-exact known-defect state must invalidate the oracle"
         );
     }
 
