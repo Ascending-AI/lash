@@ -228,7 +228,7 @@ pub(in crate::runtime) fn stage_token_ledger_shared(
             operation_storage_key.clone(),
             next_ordinal,
             &pending.entry,
-        )?);
+        ));
         next_ordinal = next_ordinal.checked_add(1).ok_or_else(|| {
             crate::StoreError::Backend(
                 "usage delta ordinal overflowed durable u64 identity".to_string(),
@@ -408,11 +408,44 @@ impl LiveChildUsageForwarder {
             .await;
     }
 
+    #[cfg(test)]
+    pub(in crate::runtime::session_manager) async fn relay_token_usage_gated_for_test(
+        &self,
+        protocol_iteration: usize,
+        usage: &TokenUsage,
+        cumulative_usage: &TokenUsage,
+        after_live_accounting: impl std::future::Future<Output = ()>,
+    ) {
+        self.relay_token_usage_with_after_live_accounting(
+            protocol_iteration,
+            usage,
+            cumulative_usage,
+            after_live_accounting,
+        )
+        .await;
+    }
+
     async fn relay_token_usage(
+        &self,
+        protocol_iteration: usize,
+        usage: &TokenUsage,
+        cumulative_usage: &TokenUsage,
+    ) {
+        self.relay_token_usage_with_after_live_accounting(
+            protocol_iteration,
+            usage,
+            cumulative_usage,
+            std::future::ready(()),
+        )
+        .await;
+    }
+
+    async fn relay_token_usage_with_after_live_accounting(
         &self,
         protocol_iteration: usize,
         _usage: &TokenUsage,
         cumulative_usage: &TokenUsage,
+        after_live_accounting: impl std::future::Future<Output = ()>,
     ) {
         let (delta, cumulative) = {
             let mut live_usage = self
@@ -434,6 +467,7 @@ impl LiveChildUsageForwarder {
             *reported = cumulative_usage.clone();
             (delta, reported.clone())
         };
+        after_live_accounting.await;
         record_token_usage_shared(&self.token_ledger, &self.source, &self.model, &delta);
         if let Some(relay) = &self.relay {
             relay

@@ -643,6 +643,85 @@ mod tests {
         );
     }
 
+    /// Cancellation can release a turn after an emit has updated the live map
+    /// but before that delta reaches the pending ledger. Staging in that gap
+    /// must neither lose nor duplicate the late delta.
+    #[tokio::test]
+    async fn live_usage_emit_racing_release_and_staging_is_recorded_exactly_once() {
+        let (turns, live_usage) = shared_maps();
+        let ledger = Arc::new(StdMutex::new(Vec::new()));
+        let lease =
+            ManagedTurnLease::register(&turns, &live_usage, "session", "turn").expect("register");
+        let forwarder = LiveChildUsageForwarder {
+            turn_id: "turn".to_string(),
+            session_id: "session".to_string(),
+            source: "child".to_string(),
+            model: "mock-model".to_string(),
+            token_ledger: Arc::clone(&ledger),
+            child_turn_live_usage: Arc::clone(&live_usage),
+            relay: None,
+            turn_released: lease.released_flag(),
+        };
+        let cumulative = TokenUsage {
+            input_tokens: 5,
+            output_tokens: 1,
+            ..TokenUsage::default()
+        };
+        let (accounted_tx, accounted_rx) = tokio::sync::oneshot::channel();
+        let (resume_tx, resume_rx) = tokio::sync::oneshot::channel();
+        let emit = crate::task::spawn(async move {
+            forwarder
+                .relay_token_usage_gated_for_test(0, &cumulative, &cumulative, async move {
+                    accounted_tx.send(()).expect("test remains gated");
+                    resume_rx.await.expect("resume gated emit");
+                })
+                .await;
+        });
+
+        accounted_rx
+            .await
+            .expect("emit reaches post-accounting gate");
+        drop(lease);
+        assert!(
+            live_usage.lock().expect("live usage").is_empty(),
+            "release must remove the accounted live-map entry"
+        );
+
+        let staged_before_record = stage_token_ledger_shared(
+            &ledger,
+            &super::super::state::boundary_operation("session", "before-late-emit", "usage-ledger"),
+        )
+        .expect("stage while emit is gated");
+        assert!(
+            staged_before_record.deltas().is_empty(),
+            "the gated emit has not reached the ledger yet"
+        );
+
+        resume_tx.send(()).expect("gated emit remains live");
+        emit.await.expect("gated emit task");
+
+        assert!(
+            live_usage.lock().expect("live usage").is_empty(),
+            "the resumed emit must not resurrect released live usage"
+        );
+        assert_eq!(
+            ledger_input_tokens(&ledger),
+            5,
+            "the late delta must be recorded once, neither lost nor doubled"
+        );
+        assert!(
+            staged_before_record.deltas().is_empty(),
+            "the earlier staging snapshot must remain empty"
+        );
+        let staged_after_record = stage_token_ledger_shared(
+            &ledger,
+            &super::super::state::boundary_operation("session", "after-late-emit", "usage-ledger"),
+        )
+        .expect("stage late delta");
+        assert_eq!(staged_after_record.deltas().len(), 1);
+        assert_eq!(staged_after_record.deltas()[0].entry.usage.input_tokens, 5);
+    }
+
     fn ledger_input_tokens(ledger: &Arc<StdMutex<Vec<PendingTokenLedgerEntry>>>) -> i64 {
         ledger
             .lock()

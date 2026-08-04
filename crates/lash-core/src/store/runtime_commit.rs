@@ -132,14 +132,14 @@ impl RuntimeUsageDeltaIdentity {
         operation_storage_key: String,
         entry_ordinal: u64,
         entry: &crate::TokenLedgerEntry,
-    ) -> Result<Self, StoreError> {
+    ) -> Self {
         let payload_hash = usage_payload_identity_hash(entry);
-        Ok(Self {
+        Self {
             operation_storage_key,
             entry_ordinal,
             payload_encoding_version: USAGE_PAYLOAD_ENCODING_V1,
             payload_hash,
-        })
+        }
     }
 }
 
@@ -237,15 +237,40 @@ mod usage_payload_identity_tests {
     }
 
     #[test]
-    fn usage_payload_encoding_v1_golden_byte_corpus() {
+    fn usage_payload_encoding_v1_golden_identity_corpus() {
         let rendered = usage_payload_v1_corpus()
             .into_iter()
-            .map(|(name, entry)| (name, hex(&usage_payload_identity_bytes(&entry))))
+            .enumerate()
+            .map(|(entry_ordinal, (name, entry))| {
+                let identity = RuntimeUsageDeltaIdentity::for_entry(
+                    format!("golden:{name}"),
+                    entry_ordinal as u64,
+                    &entry,
+                );
+                let rendered_identity = format!(
+                    "{}:{}:{}:{}",
+                    identity.operation_storage_key,
+                    identity.entry_ordinal,
+                    identity.payload_encoding_version,
+                    identity.payload_hash
+                );
+                (
+                    name,
+                    format!(
+                        "{}|{}|{rendered_identity}",
+                        hex(&usage_payload_identity_bytes(&entry)),
+                        identity.payload_hash
+                    ),
+                )
+            })
             .collect::<std::collections::BTreeMap<_, _>>();
         let expected = include_str!("testdata/usage_payload_encoding_v1.hex")
             .lines()
             .filter(|line| !line.trim().is_empty())
-            .map(|line| line.split_once('=').expect("name=hex golden corpus row"))
+            .map(|line| {
+                line.split_once('=')
+                    .expect("name=preimage|payload_hash|full_identity golden corpus row")
+            })
             .collect::<std::collections::BTreeMap<_, _>>();
         let missing = rendered
             .iter()
@@ -262,15 +287,17 @@ mod usage_payload_identity_tests {
             let expected = expected
                 .get(name)
                 .expect("rendered golden corpus row was checked above");
-            assert_eq!(actual, **expected, "v1 bytes moved for {name}");
+            assert_eq!(
+                actual, **expected,
+                "v1 preimage, payload hash, or full identity moved for {name}"
+            );
         }
     }
 
     #[test]
     fn usage_identity_version_participates_in_equality() {
         let entry = usage_payload_v1_corpus().pop().expect("usage fixture").1;
-        let current = RuntimeUsageDeltaIdentity::for_entry("operation".to_string(), 0, &entry)
-            .expect("current identity");
+        let current = RuntimeUsageDeltaIdentity::for_entry("operation".to_string(), 0, &entry);
         assert_eq!(current.payload_encoding_version, USAGE_PAYLOAD_ENCODING_V1);
         let mut future = current.clone();
         future.payload_encoding_version += 1;
@@ -332,7 +359,7 @@ impl RuntimeUsageDelta {
                     operation_storage_key.clone(),
                     entry_ordinal,
                     &entry,
-                )?;
+                );
                 Ok(Self { identity, entry })
             })
             .collect()

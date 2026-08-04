@@ -675,7 +675,7 @@ impl RuntimeCommit {
                 delta.identity.operation_storage_key.clone(),
                 delta.identity.entry_ordinal,
                 &delta.entry,
-            )?;
+            );
             if delta.identity.payload_encoding_version != expected.payload_encoding_version
                 || delta.identity.payload_hash != expected.payload_hash
             {

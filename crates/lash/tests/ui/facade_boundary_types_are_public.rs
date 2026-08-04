@@ -329,8 +329,7 @@ fn persistence_types_are_nameable(
                     operation_storage_key.clone(),
                     entry_ordinal as u64,
                     &entry,
-                )
-                .expect("usage identity");
+                );
                 RuntimeUsageDelta { identity, entry }
             })
             .collect(),
