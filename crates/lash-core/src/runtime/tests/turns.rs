@@ -5162,14 +5162,14 @@ fn queued_work_payload_cannot_encode_persisted_turn_input() {
     // work has no model-visible TurnInput representation. Persisted user input
     // therefore has to cross the dedicated PendingTurnInputDraft/
     // TurnInputStore seam used by `LashRuntime::enqueue_turn_input`.
-    fn work_class(payload: &crate::QueuedWorkPayload) -> crate::runtime::QueuedWorkClass {
+    fn work_class(payload: &crate::QueuedWorkPayload) -> crate::store::QueuedWorkClass {
         match payload {
             crate::QueuedWorkPayload::ProcessWake { .. }
             | crate::QueuedWorkPayload::AgentFrameTask { .. } => {
-                crate::runtime::QueuedWorkClass::TurnWork
+                crate::store::QueuedWorkClass::TurnWork
             }
             crate::QueuedWorkPayload::SessionCommand { .. } => {
-                crate::runtime::QueuedWorkClass::SessionCommand
+                crate::store::QueuedWorkClass::SessionCommand
             }
         }
     }

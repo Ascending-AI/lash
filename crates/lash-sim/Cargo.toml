@@ -43,6 +43,9 @@ tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync
 [dev-dependencies]
 insta = "1"
 lash-provider-auth = { workspace = true }
+lash-provider-anthropic = { workspace = true, features = ["testing"] }
+lash-provider-google = { workspace = true, features = ["testing"] }
+lash-provider-openai = { workspace = true, features = ["testing"] }
 rmp-serde = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = { workspace = true }

@@ -126,6 +126,15 @@ jobs:
       - name: Test lash-remote-protocol core conversions
         run: cargo test -p lash-remote-protocol --features core-conversions --locked
 
+      # Provider test support is deliberately outside each crate's default
+      # feature set. Keep the shared normalization contract explicit so a
+      # production-safe default cannot silently reduce conformance coverage.
+      - name: Test provider response-normalization conformance
+        run: |
+          cargo test -p lash-provider-openai --features testing --locked conformance
+          cargo test -p lash-provider-anthropic --features testing --locked conformance
+          cargo test -p lash-provider-google --features testing --locked conformance
+
       # nextest does not run doctests; keep them covered here (also builds the
       # workspace crates as rlibs, warming the shared cache for the readers).
       - name: Test workspace doctests

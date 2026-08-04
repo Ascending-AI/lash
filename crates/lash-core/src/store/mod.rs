@@ -14,6 +14,7 @@ mod realization;
 mod runtime_commit;
 mod session_execution_lease;
 
+pub use crate::session_graph::RealizedNodeTimestamp;
 pub use attachment_manifest::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
 };
@@ -24,7 +25,8 @@ pub use commit_identity::{
 pub use error::StoreError;
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use load::{load_persisted_session_state, refresh_persisted_session_state};
-pub use realization::{RealizedNodeTimestamp, commit_runtime_state_verified};
+pub use queued_work::QueuedWorkClass;
+pub use realization::commit_runtime_state_verified;
 pub use runtime_commit::{
     RuntimeCommit, RuntimeCommitResult, RuntimeTurnCommitStamp, RuntimeUsageDelta,
     RuntimeUsageDeltaIdentity,
@@ -1326,7 +1328,7 @@ pub trait QueuedWorkStore: Send + Sync {
     /// Claim a leading ready session-command batch for `owner_id`.
     ///
     /// A command claim is returned only when the earliest ready claimable batch
-    /// is classified as [`crate::runtime::QueuedWorkClass::SessionCommand`].
+    /// is classified as [`QueuedWorkClass::SessionCommand`].
     /// Backends derive the class from queued payloads; no schema column is
     /// required.
     async fn claim_leading_ready_session_command(
@@ -1339,7 +1341,7 @@ pub trait QueuedWorkStore: Send + Sync {
     /// Claim the next ready turn-work group for `owner_id`.
     ///
     /// A turn-work claim is returned only when the earliest ready claimable
-    /// batch is classified as [`crate::runtime::QueuedWorkClass::TurnWork`].
+    /// batch is classified as [`QueuedWorkClass::TurnWork`].
     /// Earlier ready session commands are not skipped and are never
     /// materialized as turn input.
     async fn claim_ready_queued_work(

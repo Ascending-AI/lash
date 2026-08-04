@@ -202,7 +202,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
         let realized_node_timestamps = commit
             .graph
             .appended_nodes()
-            .map(|node| lash_core::store::RealizedNodeTimestamp {
+            .map(|node| lash_core::session_graph::RealizedNodeTimestamp {
                 node_id: node.node_id.clone(),
                 timestamp: node.timestamp.clone(),
             })

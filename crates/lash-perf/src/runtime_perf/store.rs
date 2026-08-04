@@ -266,7 +266,7 @@ impl RuntimePerfStore {
 
     fn queued_batch_work_class(
         batch: &QueuedWorkBatch,
-    ) -> Result<lash_core::runtime::QueuedWorkClass, StoreError> {
+    ) -> Result<lash_core::store::QueuedWorkClass, StoreError> {
         batch.work_class().ok_or_else(|| {
             StoreError::Backend(format!(
                 "queued-work batch `{}` has mixed or empty payload classes",
@@ -585,7 +585,7 @@ impl SessionCommitStore for RuntimePerfStore {
         let realized_node_timestamps = commit
             .graph
             .appended_nodes()
-            .map(|node| store::RealizedNodeTimestamp {
+            .map(|node| lash_core::session_graph::RealizedNodeTimestamp {
                 node_id: node.node_id.clone(),
                 timestamp: node.timestamp.clone(),
             })
@@ -1351,7 +1351,7 @@ impl QueuedWorkStore for RuntimePerfStore {
                 return Ok(None);
             };
             if Self::queued_batch_work_class(&queued[index].batch)?
-                != lash_core::runtime::QueuedWorkClass::TurnWork
+                != lash_core::store::QueuedWorkClass::TurnWork
             {
                 return Ok(None);
             }
@@ -1364,7 +1364,7 @@ impl QueuedWorkStore for RuntimePerfStore {
                 store::queued_work::ClaimCandidate {
                     enqueue_seq: entry.batch.enqueue_seq,
                     claim_fencing_token: entry.claim_fencing_token,
-                    work_class: lash_core::runtime::QueuedWorkClass::TurnWork,
+                    work_class: lash_core::store::QueuedWorkClass::TurnWork,
                     delivery_policy: entry.batch.delivery_policy,
                     slot_policy: entry.batch.slot_policy,
                     merge_key: entry.batch.merge_key.clone(),

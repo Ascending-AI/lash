@@ -7,8 +7,8 @@ use tokio::sync::mpsc;
 
 use crate::ModelSpec;
 use crate::llm::types::{LlmEventSender, LlmStreamEvent};
-use crate::plugin::PluginMessage;
 use crate::provider::{ProviderBinding, ProviderHandle, ProviderResolutionError};
+use lash_sansio::PluginMessage;
 
 pub use lash_sansio::format_tool_output_content;
 pub use lash_sansio::session_model::{

@@ -111,9 +111,7 @@ impl EmbedError {
         match self {
             Self::Runtime(err) => matches!(
                 err.code,
-                RuntimeErrorCode::SessionExecutionBusy
-                    | RuntimeErrorCode::SessionExecutionLeaseLost
-                    | RuntimeErrorCode::StoreCommitContended
+                RuntimeErrorCode::SessionExecutionBusy | RuntimeErrorCode::StoreCommitContended
             ),
             _ => false,
         }
@@ -209,27 +207,38 @@ mod tests {
     }
 
     #[test]
-    fn lease_contention_codes_are_retryable_and_not_terminal() {
-        for code in [
-            RuntimeErrorCode::SessionExecutionBusy,
-            RuntimeErrorCode::SessionExecutionLeaseLost,
-            RuntimeErrorCode::StoreCommitContended,
-        ] {
-            let err = runtime_error(code);
-            assert!(err.is_retryable(), "{err}");
-            assert!(!err.is_terminal(), "{err}");
-        }
+    fn session_execution_busy_is_retryable_and_not_terminal() {
+        let err = runtime_error(RuntimeErrorCode::SessionExecutionBusy);
+        assert!(err.is_retryable(), "{err}");
+        assert!(!err.is_terminal(), "{err}");
     }
 
     #[test]
-    fn untyped_failures_are_neither_retryable_nor_terminal() {
-        for err in [
-            runtime_error(RuntimeErrorCode::StoreCommitFailed),
-            runtime_error(RuntimeErrorCode::Other("plugin_defined_abort".into())),
-        ] {
-            assert!(!err.is_retryable(), "{err}");
-            assert!(!err.is_terminal(), "{err}");
-        }
+    fn session_execution_lease_lost_requires_reload_and_is_not_retryable_as_is() {
+        let err = runtime_error(RuntimeErrorCode::SessionExecutionLeaseLost);
+        assert!(!err.is_retryable(), "{err}");
+        assert!(!err.is_terminal(), "{err}");
+    }
+
+    #[test]
+    fn store_commit_contended_is_retryable_and_not_terminal() {
+        let err = runtime_error(RuntimeErrorCode::StoreCommitContended);
+        assert!(err.is_retryable(), "{err}");
+        assert!(!err.is_terminal(), "{err}");
+    }
+
+    #[test]
+    fn store_commit_failed_is_neither_retryable_nor_terminal() {
+        let err = runtime_error(RuntimeErrorCode::StoreCommitFailed);
+        assert!(!err.is_retryable(), "{err}");
+        assert!(!err.is_terminal(), "{err}");
+    }
+
+    #[test]
+    fn untyped_runtime_failures_are_neither_retryable_nor_terminal() {
+        let err = runtime_error(RuntimeErrorCode::Other("plugin_defined_abort".into()));
+        assert!(!err.is_retryable(), "{err}");
+        assert!(!err.is_terminal(), "{err}");
     }
 
     #[test]

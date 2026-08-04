@@ -270,7 +270,7 @@ impl SessionCommitStore for Store {
         let realized_node_timestamps = commit
             .graph
             .appended_nodes()
-            .map(|node| lash_core::store::RealizedNodeTimestamp {
+            .map(|node| lash_core::session_graph::RealizedNodeTimestamp {
                 node_id: node.node_id.clone(),
                 timestamp: node.timestamp.clone(),
             })
@@ -1649,8 +1649,7 @@ impl QueuedWorkStore for Store {
                             return Ok(None);
                         };
                         let batch = queued_work_batch_from_conn(tx, row.clone())?;
-                        if batch.work_class() != Some(lash_core::runtime::QueuedWorkClass::TurnWork)
-                        {
+                        if batch.work_class() != Some(lash_core::store::QueuedWorkClass::TurnWork) {
                             return Ok(None);
                         }
                         rows.push(row);
@@ -1662,7 +1661,7 @@ impl QueuedWorkStore for Store {
                             Ok(ClaimCandidate {
                                 enqueue_seq: row.enqueue_seq,
                                 claim_fencing_token: row.claim_fencing_token,
-                                work_class: lash_core::runtime::QueuedWorkClass::TurnWork,
+                                work_class: lash_core::store::QueuedWorkClass::TurnWork,
                                 delivery_policy: decode_delivery_policy(
                                     row.delivery_policy.clone(),
                                 )?,

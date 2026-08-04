@@ -1,11 +1,5 @@
 use super::{RuntimeCommit, RuntimeCommitResult, SessionCommitStore, StoreError};
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct RealizedNodeTimestamp {
-    pub node_id: String,
-    pub timestamp: String,
-}
-
 /// Commit through the production realization boundary.
 pub async fn commit_runtime_state_verified(
     store: &(dyn SessionCommitStore + '_),
@@ -29,6 +23,7 @@ pub async fn commit_runtime_state_verified(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session_graph::RealizedNodeTimestamp;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Default)]

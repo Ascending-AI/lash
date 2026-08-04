@@ -365,7 +365,7 @@ impl InMemorySessionStore {
 
     fn queued_batch_work_class(
         batch: &crate::QueuedWorkBatch,
-    ) -> Result<crate::runtime::QueuedWorkClass, crate::store::StoreError> {
+    ) -> Result<crate::store::QueuedWorkClass, crate::store::StoreError> {
         batch.work_class().ok_or_else(|| {
             crate::store::StoreError::Backend(format!(
                 "queued-work batch `{}` has mixed or empty payload classes",
@@ -658,7 +658,7 @@ impl InMemorySessionStore {
         first_ready
             .map(|entry| {
                 Self::queued_batch_work_class(&entry.batch).map(|class| {
-                    class == crate::runtime::QueuedWorkClass::TurnWork
+                    class == crate::store::QueuedWorkClass::TurnWork
                         && entry.batch.delivery_policy
                             == crate::DeliveryPolicy::EarliestSafeBoundary
                 })
@@ -784,7 +784,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         let realized_node_timestamps = commit
             .graph
             .appended_nodes()
-            .map(|node| crate::store::RealizedNodeTimestamp {
+            .map(|node| crate::session_graph::RealizedNodeTimestamp {
                 node_id: node.node_id.clone(),
                 timestamp: node.timestamp.clone(),
             })

@@ -307,9 +307,11 @@ impl EmbeddedRuntimeBuilder {
         if let Some(manifest_store) = self.attachment_manifest_store {
             persistence = persistence.with_attachment_manifest_store(manifest_store);
         }
-        let embedded_host = EmbeddedRuntimeHost::new(self.core)
-            .with_session_store_factory_option(self.session_store_factory.clone())
-            .with_trigger_store_option(self.trigger_store.clone());
+        let embedded_host = EmbeddedRuntimeHost {
+            core: self.core,
+            session_store_factory: self.session_store_factory,
+            trigger_store: self.trigger_store,
+        };
         // `assemble_runtime` owns the (store, registry) wiring + residency so the
         // worker rebuild cannot drift from the live open path.
         let mut runtime = LashRuntime::assemble_runtime(
@@ -331,33 +333,5 @@ impl EmbeddedRuntimeBuilder {
 impl LashRuntime {
     pub fn builder() -> EmbeddedRuntimeBuilder {
         EmbeddedRuntimeBuilder::new()
-    }
-}
-
-trait EmbeddedRuntimeHostExt {
-    fn with_session_store_factory_option(
-        self,
-        session_store_factory: Option<Arc<dyn SessionStoreFactory>>,
-    ) -> Self;
-
-    fn with_trigger_store_option(self, trigger_store: Option<Arc<dyn crate::TriggerStore>>)
-    -> Self;
-}
-
-impl EmbeddedRuntimeHostExt for EmbeddedRuntimeHost {
-    fn with_session_store_factory_option(
-        mut self,
-        session_store_factory: Option<Arc<dyn SessionStoreFactory>>,
-    ) -> Self {
-        self.session_store_factory = session_store_factory;
-        self
-    }
-
-    fn with_trigger_store_option(
-        mut self,
-        trigger_store: Option<Arc<dyn crate::TriggerStore>>,
-    ) -> Self {
-        self.trigger_store = trigger_store;
-        self
     }
 }

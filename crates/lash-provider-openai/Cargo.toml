@@ -14,10 +14,9 @@ keywords = ["lash", "agent", "llm", "openai", "codex"]
 categories = ["api-bindings", "asynchronous"]
 
 [features]
-# Enables the cross-provider response-normalization conformance test, which
-# needs `lash-llm-transport`'s `testing` module. On by default so the suite
-# runs under a plain `cargo test`.
-default = ["testing"]
+# Enables public test support and the cross-provider response-normalization
+# conformance test. CI opts in explicitly; production builds keep it disabled.
+default = []
 testing = ["lash-llm-transport/testing"]
 
 [lints]
@@ -43,4 +42,9 @@ uuid = { workspace = true, features = ["v4"] }
 # The runtime facade, so the Codex WebSocket path is proven end-to-end through
 # a normal `LashCore` turn in `tests/codex_websocket_runtime.rs`.
 lash = { workspace = true }
+lash-llm-transport = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+
+[[test]]
+name = "codex_websocket_runtime"
+required-features = ["testing"]

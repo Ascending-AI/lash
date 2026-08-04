@@ -173,6 +173,7 @@ mod store_commit_error_tests {
 // `PromptUsage` is re-exported below alongside the runtime's own types.
 pub use lash_sansio::PromptUsage;
 
+pub use crate::store::QueuedWorkClass;
 use assembly::{
     LlmDebugText, LlmDebugToolCall, LlmStreamAccumulator, LlmStreamDebugState, LlmStreamEventLog,
     LlmStreamState, LlmStreamSummary, TurnAssembler,
@@ -289,9 +290,9 @@ pub(crate) use turn_queue::process_wake_batch_draft_with_policy;
 pub use turn_queue::{
     DeliveryPolicy, MergeKey, ProcessWakeSource, QueuedCheckpointWork, QueuedTurnWork,
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
-    QueuedWorkClass, QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem,
-    QueuedWorkPayload, SessionCommand, SessionCommandReceipt, SlotPolicy, WakeCoalescingKey,
-    WakeTurnMode, WakeTurnPolicy, process_wake_batch_draft, process_wake_source_key,
+    QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkPayload,
+    SessionCommand, SessionCommandReceipt, SlotPolicy, WakeCoalescingKey, WakeTurnMode,
+    WakeTurnPolicy, process_wake_batch_draft, process_wake_source_key,
 };
 pub use usage::{
     SessionUsageReport, TokenLedgerEntry, UsageReportRow, UsageTotals, diff_token_ledger,

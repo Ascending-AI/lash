@@ -257,7 +257,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                 return Ok(None);
             };
             if Self::queued_batch_work_class(&queued[index].batch)?
-                != crate::runtime::QueuedWorkClass::TurnWork
+                != crate::store::QueuedWorkClass::TurnWork
             {
                 return Ok(None);
             }
@@ -270,7 +270,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                 crate::store::queued_work::ClaimCandidate {
                     enqueue_seq: entry.batch.enqueue_seq,
                     claim_fencing_token: entry.claim_fencing_token,
-                    work_class: crate::runtime::QueuedWorkClass::TurnWork,
+                    work_class: crate::store::QueuedWorkClass::TurnWork,
                     delivery_policy: entry.batch.delivery_policy,
                     slot_policy: entry.batch.slot_policy,
                     merge_key: entry.batch.merge_key.clone(),

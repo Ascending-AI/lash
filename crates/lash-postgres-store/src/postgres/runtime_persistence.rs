@@ -413,7 +413,7 @@ impl SessionCommitStore for PostgresSessionStore {
         let realized_node_timestamps = commit
             .graph
             .appended_nodes()
-            .map(|node| lash_core::store::RealizedNodeTimestamp {
+            .map(|node| lash_core::session_graph::RealizedNodeTimestamp {
                 node_id: node.node_id.clone(),
                 timestamp: node.timestamp.clone(),
             })
@@ -1704,7 +1704,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             };
             let row = queued_batch_row(row)?;
             let batch = queued_work_batch_from_row(&mut tx, row.clone()).await?;
-            if batch.work_class() != Some(lash_core::runtime::QueuedWorkClass::TurnWork) {
+            if batch.work_class() != Some(lash_core::store::QueuedWorkClass::TurnWork) {
                 tx.rollback().await.map_err(store_sqlx_error)?;
                 return Ok(None);
             }
@@ -1716,7 +1716,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             .map(|row| ClaimCandidate {
                 enqueue_seq: row.enqueue_seq,
                 claim_fencing_token: row.claim_fencing_token,
-                work_class: lash_core::runtime::QueuedWorkClass::TurnWork,
+                work_class: lash_core::store::QueuedWorkClass::TurnWork,
                 delivery_policy: row.delivery_policy,
                 slot_policy: row.slot_policy,
                 merge_key: row.merge_key.clone(),
