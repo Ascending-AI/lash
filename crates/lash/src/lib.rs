@@ -108,13 +108,13 @@ pub mod observe {
 /// [`LashCore::triggers`] and [`LashSession::triggers`].
 ///
 /// Reads have a facade: [`CoreTriggerAdmin::subscriptions`](crate::admin::CoreTriggerAdmin::subscriptions)
-/// and [`SessionTriggerAdmin`](crate::admin::SessionTriggerAdmin) project
-/// registrations for host and session scopes. Mutations go through the store
-/// contract below: [`TriggerCommand`] executed by
-/// [`TriggerStore::execute_command`], the only supported way to change a
-/// subscription. The tables a durable store keeps (`lash_*` in the
-/// first-party SQL backends) are private to lash; raw SQL against them is
-/// unsupported for reads and writes alike.
+/// and [`SessionTriggerAdmin`] project registrations for host and session
+/// scopes. Mutations go through the store contract below:
+/// [`TriggerCommand`](crate::triggers::TriggerCommand) executed by
+/// [`TriggerStore::execute_command`](crate::triggers::TriggerStore::execute_command),
+/// the only supported way to change a subscription. The tables a durable store
+/// keeps (`lash_*` in the first-party SQL backends) are private to lash; raw SQL
+/// against them is unsupported for reads and writes alike.
 pub mod triggers {
     /// Process-free [`TriggerStore`] for tests and single-process hosts, matching
     /// the in-memory backends [`persistence`](crate::persistence) and
