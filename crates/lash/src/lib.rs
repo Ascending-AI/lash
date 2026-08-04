@@ -21,6 +21,7 @@ pub mod recoverable_chat;
 pub mod rlm;
 pub mod scenario_contracts;
 mod session;
+mod session_lease;
 mod support;
 #[cfg(all(test, feature = "rlm"))]
 mod tests;
@@ -199,6 +200,13 @@ pub mod direct {
 }
 
 pub mod persistence {
+    /// Diagnostic read over a session's execution lease: holder identity,
+    /// generation, expiry, and renewal state. Snapshot only — the commit CAS is
+    /// the authority (ADR 0029). Entry point:
+    /// [`LashCore::session_lease_diagnostics`](crate::LashCore::session_lease_diagnostics).
+    pub use crate::session_lease::{
+        SessionLeaseDiagnostics, SessionLeaseHolder, SessionLeaseRenewal,
+    };
     pub use lash_core::CheckpointKind;
     pub use lash_core::facade_support::FileAttachmentStore;
     pub use lash_core::runtime::{
