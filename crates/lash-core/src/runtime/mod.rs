@@ -30,6 +30,11 @@ mod session_manager;
 pub(crate) use session_manager::append_receipt_mixed_usage_envelope_conformance;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use session_manager::append_usage_cancellation_exactly_once_conformance;
+#[cfg(any(test, feature = "testing"))]
+pub(crate) use session_manager::{
+    PendingTokenLedgerEntry, StagedTokenLedger, record_token_usage_shared,
+    stage_token_ledger_shared,
+};
 mod session_ops;
 pub(crate) mod state;
 #[cfg(test)]

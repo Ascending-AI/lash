@@ -1,7 +1,7 @@
 //! Model-based [`RuntimePersistence`] laws for leases, queues, inputs, commit
 //! CAS, and checkpoint components; process-scoped laws live in the sibling harness.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,19 +15,27 @@ use crate::{
     LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputDraft,
     PluginSessionSnapshot, PluginSnapshotEntry, PluginSnapshotMeta, QueuedWorkBatch,
     QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkPayload,
-    RuntimeCommit, RuntimePersistence, RuntimeSessionState, SessionExecutionLease,
-    SessionExecutionLeaseClaimOutcome, StoreError, ToolState, TurnInput, TurnInputClaim,
-    TurnInputIngress, facade_support::ToolStateFacadeOps,
+    RuntimeCommit, RuntimePersistence, RuntimeSessionState, RuntimeUsageDeltaIdentity,
+    SessionExecutionLease, SessionExecutionLeaseClaimOutcome, StoreError, ToolState, TurnInput,
+    TurnInputClaim, TurnInputIngress, facade_support::ToolStateFacadeOps,
 };
 
 mod claim_honesty;
+mod generator;
+mod usage_conservation;
+
+use generator::generated_case;
+use usage_conservation::{
+    assert_usage_conservation, confirm_usage, record_usage, register_committed_usage,
+    replay_usage_receipt, stage_usage,
+};
 
 const SESSION_ID: &str = "runtime-persistence-property";
 const DEFAULT_CASES: u32 = 32;
 const DEFAULT_RUNNER_SEED: u64 = 857;
 const DEDICATED_LAW_SEED: u64 = 0x0ded_1ca7_e857;
-const MAX_OPS: usize = 64;
-const GENERATED_PREFIX_OPS: usize = 40;
+const MAX_OPS: usize = 80;
+const GENERATED_PREFIX_OPS: usize = 51;
 
 /// The generated operation alphabet shared by every runtime-persistence backend.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -64,6 +72,17 @@ pub enum RuntimePersistenceOp {
     CancelTurnInput {
         selection: u8,
     },
+    RecordUsage {
+        slot: u8,
+        value: u8,
+    },
+    StageUsage {
+        replay_last_commit: bool,
+    },
+    ConfirmUsage {
+        selection: u8,
+    },
+    ReplayUsageReceipt,
     Commit {
         component_mode: u8,
         value: u8,
@@ -118,7 +137,19 @@ struct ReferenceModel {
     components: ComponentModel,
     crashed_work: BTreeSet<String>,
     crashed_inputs: BTreeSet<String>,
+    pending_usage: Arc<std::sync::Mutex<Vec<crate::runtime::PendingTokenLedgerEntry>>>,
+    staged_usage: Option<crate::runtime::StagedTokenLedger>,
+    staged_usage_operation: Option<crate::OperationId>,
+    pending_usage_confirmations: Vec<PendingUsageConfirmation>,
+    durable_usage: HashMap<RuntimeUsageDeltaIdentity, crate::TokenLedgerEntry>,
+    recorded_usage: crate::TokenUsage,
+    last_usage_commit: Option<RuntimeCommit>,
     operation_sequence: u64,
+}
+
+struct PendingUsageConfirmation {
+    staged: crate::runtime::StagedTokenLedger,
+    identities: Vec<RuntimeUsageDeltaIdentity>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -138,6 +169,10 @@ struct RunShape {
     input_claims: u64,
     input_applications: u64,
     input_cancellations: u64,
+    usage_records: u64,
+    usage_stages: u64,
+    usage_confirmations: u64,
+    usage_receipt_replays: u64,
     accepted_commits: u64,
     stale_head_rejections: u64,
     checkpoint_stores: u64,
@@ -163,6 +198,10 @@ struct RunShapeTotals {
     input_claims: AtomicU64,
     input_applications: AtomicU64,
     input_cancellations: AtomicU64,
+    usage_records: AtomicU64,
+    usage_stages: AtomicU64,
+    usage_confirmations: AtomicU64,
+    usage_receipt_replays: AtomicU64,
     accepted_commits: AtomicU64,
     stale_head_rejections: AtomicU64,
     checkpoint_stores: AtomicU64,
@@ -193,6 +232,10 @@ impl RunShapeTotals {
         add!(input_claims);
         add!(input_applications);
         add!(input_cancellations);
+        add!(usage_records);
+        add!(usage_stages);
+        add!(usage_confirmations);
+        add!(usage_receipt_replays);
         add!(accepted_commits);
         add!(stale_head_rejections);
         add!(checkpoint_stores);
@@ -270,7 +313,7 @@ where
     }
 
     eprintln!(
-        "runtime-persistence run shape ({backend}, cases={cases}): lease_acquisitions={} lease_fence_rejections={} queue_enqueues={} queue_claims={} selected_batch_claims={} queue_completions={} claim_supersession_rejections={} stale_claim_settlements={} out_of_order_settlements={} coalesced_claims={} queue_cancellations={} input_enqueues={} input_claims={} input_applications={} input_cancellations={} accepted_commits={} stale_head_rejections={} checkpoint_stores={} checkpoint_ref_reuses={} crash_points={} crash_reclaims={}",
+        "runtime-persistence run shape ({backend}, cases={cases}): lease_acquisitions={} lease_fence_rejections={} queue_enqueues={} queue_claims={} selected_batch_claims={} queue_completions={} claim_supersession_rejections={} stale_claim_settlements={} out_of_order_settlements={} coalesced_claims={} queue_cancellations={} input_enqueues={} input_claims={} input_applications={} input_cancellations={} usage_records={} usage_stages={} usage_confirmations={} usage_receipt_replays={} accepted_commits={} stale_head_rejections={} checkpoint_stores={} checkpoint_ref_reuses={} crash_points={} crash_reclaims={}",
         totals.lease_acquisitions.load(Ordering::Relaxed),
         totals.lease_fence_rejections.load(Ordering::Relaxed),
         totals.queue_enqueues.load(Ordering::Relaxed),
@@ -286,6 +329,10 @@ where
         totals.input_claims.load(Ordering::Relaxed),
         totals.input_applications.load(Ordering::Relaxed),
         totals.input_cancellations.load(Ordering::Relaxed),
+        totals.usage_records.load(Ordering::Relaxed),
+        totals.usage_stages.load(Ordering::Relaxed),
+        totals.usage_confirmations.load(Ordering::Relaxed),
+        totals.usage_receipt_replays.load(Ordering::Relaxed),
         totals.accepted_commits.load(Ordering::Relaxed),
         totals.stale_head_rejections.load(Ordering::Relaxed),
         totals.checkpoint_stores.load(Ordering::Relaxed),
@@ -318,6 +365,10 @@ fn assert_required_shape(shape: RunShape) -> Result<(), TestCaseError> {
         (shape.input_claims, "input claims"),
         (shape.input_applications, "input applications"),
         (shape.input_cancellations, "input cancellations"),
+        (shape.usage_records, "usage records"),
+        (shape.usage_stages, "usage stages"),
+        (shape.usage_confirmations, "usage confirmations"),
+        (shape.usage_receipt_replays, "usage receipt replays"),
         (shape.accepted_commits, "accepted commits"),
         (shape.stale_head_rejections, "stale-head rejections"),
         (shape.checkpoint_stores, "checkpoint stores"),
@@ -329,167 +380,6 @@ fn assert_required_shape(shape: RunShape) -> Result<(), TestCaseError> {
         prop_assert!(count > 0, "generated alphabet starvation: no {name}");
     }
     Ok(())
-}
-
-fn generated_case() -> impl Strategy<Value = GeneratedCase> {
-    (
-        any::<u64>(),
-        prop::collection::vec(operation(), 1..=(MAX_OPS - GENERATED_PREFIX_OPS)),
-    )
-        .prop_map(|(seed, random)| {
-            let mut operations = generated_prefix();
-            operations.extend(random);
-            GeneratedCase { seed, operations }
-        })
-}
-
-fn generated_prefix() -> Vec<RuntimePersistenceOp> {
-    use RuntimePersistenceOp::*;
-    vec![
-        ClaimLease { owner: 0 },
-        EnqueueWork {
-            slot: 0,
-            value: 0,
-            coalesce: false,
-        },
-        EnqueueWork {
-            slot: 1,
-            value: 1,
-            coalesce: false,
-        },
-        EnqueueWork {
-            slot: 2,
-            value: 2,
-            coalesce: true,
-        },
-        EnqueueWork {
-            slot: 3,
-            value: 3,
-            coalesce: true,
-        },
-        ClaimWork {
-            selected: true,
-            selection: 1,
-        },
-        Commit {
-            component_mode: 0,
-            value: 0,
-            settle_work: true,
-            settle_inputs: false,
-            stale_head: false,
-        },
-        ClaimWork {
-            selected: false,
-            selection: 0,
-        },
-        Crash,
-        ClaimLease { owner: 1 },
-        ClaimLease { owner: 0 },
-        RenewLease { stale: true },
-        ClaimWorkWithStaleLease,
-        ClaimWork {
-            selected: false,
-            selection: 0,
-        },
-        SettleStaleWork,
-        Commit {
-            component_mode: 0,
-            value: 0,
-            settle_work: true,
-            settle_inputs: false,
-            stale_head: false,
-        },
-        ClaimWork {
-            selected: false,
-            selection: 0,
-        },
-        Commit {
-            component_mode: 0,
-            value: 0,
-            settle_work: true,
-            settle_inputs: false,
-            stale_head: false,
-        },
-        EnqueueTurnInput { slot: 0, value: 0 },
-        EnqueueTurnInput { slot: 1, value: 1 },
-        ClaimTurnInputs { max_inputs: 3 },
-        Crash,
-        ClaimLease { owner: 2 },
-        ClaimTurnInputsWithStaleLease,
-        ClaimTurnInputs { max_inputs: 3 },
-        SettleStaleTurnInputs,
-        Commit {
-            component_mode: 1,
-            value: 1,
-            settle_work: false,
-            settle_inputs: true,
-            stale_head: false,
-        },
-        EnqueueWork {
-            slot: 5,
-            value: 5,
-            coalesce: false,
-        },
-        ClaimWork {
-            selected: false,
-            selection: 0,
-        },
-        Crash,
-        ClaimLease { owner: 3 },
-        SettleStaleWork,
-        Commit {
-            component_mode: 0,
-            value: 0,
-            settle_work: false,
-            settle_inputs: false,
-            stale_head: false,
-        },
-        Commit {
-            component_mode: 1,
-            value: 2,
-            settle_work: false,
-            settle_inputs: false,
-            stale_head: true,
-        },
-        Commit {
-            component_mode: 1,
-            value: 2,
-            settle_work: false,
-            settle_inputs: false,
-            stale_head: false,
-        },
-        EnqueueWork {
-            slot: 4,
-            value: 4,
-            coalesce: false,
-        },
-        CancelWork { selection: 0 },
-        EnqueueTurnInput { slot: 2, value: 2 },
-        CancelTurnInput { selection: 0 },
-    ]
-}
-
-fn operation() -> impl Strategy<Value = RuntimePersistenceOp> {
-    use RuntimePersistenceOp::*;
-    prop_oneof![
-        3 => (0_u8..4).prop_map(|owner| ClaimLease { owner }),
-        2 => any::<bool>().prop_map(|stale| RenewLease { stale }),
-        1 => Just(Crash),
-        5 => (0_u8..8, any::<u8>(), any::<bool>()).prop_map(|(slot, value, coalesce)| EnqueueWork { slot, value, coalesce }),
-        4 => (any::<bool>(), any::<u8>()).prop_map(|(selected, selection)| ClaimWork { selected, selection }),
-        1 => Just(ClaimWorkWithStaleLease),
-        2 => any::<u8>().prop_map(|selection| CancelWork { selection }),
-        4 => (0_u8..8, any::<u8>()).prop_map(|(slot, value)| EnqueueTurnInput { slot, value }),
-        3 => (1_u8..5).prop_map(|max_inputs| ClaimTurnInputs { max_inputs }),
-        1 => Just(ClaimTurnInputsWithStaleLease),
-        2 => any::<u8>().prop_map(|selection| CancelTurnInput { selection }),
-        6 => (0_u8..5, any::<u8>(), any::<bool>(), any::<bool>(), any::<bool>())
-            .prop_map(|(component_mode, value, settle_work, settle_inputs, stale_head)| Commit {
-                component_mode, value, settle_work, settle_inputs, stale_head,
-            }),
-        2 => Just(SettleStaleWork),
-        2 => Just(SettleStaleTurnInputs),
-    ]
 }
 
 async fn replay_case(
@@ -509,6 +399,11 @@ async fn replay_case(
             .await
             .map_err(|reason| {
                 TestCaseError::fail(format!("model agreement at step {step}: {reason}"))
+            })?;
+        assert_usage_conservation(store.as_ref(), &model)
+            .await
+            .map_err(|reason| {
+                TestCaseError::fail(format!("usage conservation at step {step}: {reason}"))
             })?;
     }
     Ok(shape)
@@ -758,6 +653,10 @@ async fn apply_operation(
                 }
             }
         }
+        RecordUsage { slot, value } => record_usage(model, shape, *slot, *value)?,
+        StageUsage { replay_last_commit } => stage_usage(model, shape, seed, *replay_last_commit)?,
+        ConfirmUsage { selection } => confirm_usage(model, shape, *selection)?,
+        ReplayUsageReceipt => replay_usage_receipt(store, model, shape).await?,
         Commit {
             component_mode,
             value,
@@ -993,18 +892,48 @@ async fn commit_operation(
         .as_ref()
         .map(|claim| claim.applications.clone())
         .unwrap_or_default();
-    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
-    model.operation_sequence += 1;
-    commit = commit
-        .with_operation(crate::OperationId::new(
+    let mut staged_usage = model.staged_usage.take();
+    let mut staged_usage_operation = model.staged_usage_operation.take();
+    let staged_replays_last_commit = match (
+        staged_usage_operation.as_ref(),
+        model.last_usage_commit.as_ref(),
+    ) {
+        (Some(staged), Some(last)) => {
+            staged.storage_key().map_err(|error| error.to_string())?
+                == last
+                    .turn_commit
+                    .operation
+                    .storage_key()
+                    .map_err(|error| error.to_string())?
+        }
+        _ => false,
+    };
+    if staged_replays_last_commit {
+        model.staged_usage = staged_usage.take();
+        model.staged_usage_operation = staged_usage_operation.take();
+    }
+    let submitted_usage = staged_usage
+        .as_ref()
+        .map(|staged| staged.deltas().to_vec())
+        .unwrap_or_default();
+    let operation = if let Some(operation) = staged_usage_operation.clone() {
+        operation
+    } else {
+        model.operation_sequence += 1;
+        crate::OperationId::new(
             crate::ExecutionScope::runtime_operation(format!(
                 "runtime-persistence-property:{seed}:{}",
                 model.operation_sequence
             )),
             "commit",
-        ))
-        .map_err(|error| error.to_string())?
-        .0;
+        )
+    };
+    let (mut commit, _) = RuntimeCommit::persisted_state_with_operation_and_staged_usage(
+        &mut state,
+        &submitted_usage,
+        operation,
+    )
+    .map_err(|error| error.to_string())?;
     if stale_head {
         commit.expected_head_revision = model.head_revision.saturating_add(1);
     }
@@ -1016,8 +945,11 @@ async fn commit_operation(
     }
 
     let before = session_snapshot(store).await?;
+    let committed_envelope = commit.clone();
     let result = store.commit_runtime_state(commit).await;
     if stale_head {
+        model.staged_usage = staged_usage;
+        model.staged_usage_operation = staged_usage_operation;
         if !matches!(result, Err(StoreError::HeadRevisionConflict { .. })) {
             return Err(format!(
                 "stale expected head was not rejected by HeadRevisionConflict: {result:?}"
@@ -1037,6 +969,20 @@ async fn commit_operation(
     }
     if result.turn_input_applications != expected_applications {
         return Err("commit returned different turn-input applications".to_string());
+    }
+    register_committed_usage(
+        model,
+        &submitted_usage,
+        &result.committed_usage_delta_identities,
+    )?;
+    if let Some(staged) = staged_usage {
+        model
+            .pending_usage_confirmations
+            .push(PendingUsageConfirmation {
+                staged,
+                identities: result.committed_usage_delta_identities.clone(),
+            });
+        model.last_usage_commit = Some(committed_envelope);
     }
     model.head_revision = result.head_revision;
     model.has_session = true;

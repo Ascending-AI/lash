@@ -63,12 +63,14 @@ class TranscriptDiffTests(unittest.TestCase):
 
     def test_each_marker_fires_alone(self) -> None:
         # One fixture per marker, each carrying ONLY that marker: losing any
-        # single marker from DURABLE_MARKERS / REV_TRANSITION must fail here.
+        # single marker from DURABLE_MARKERS / USAGE_COMPONENT /
+        # REV_TRANSITION must fail here.
         # (The original fixture carried Checkpoint AND rev=, so the regex
         # covered for a deleted marker tuple — proven by mutation in review.)
         marker_lines = {
             "Checkpoint": "      0004  Checkpoint         label.only",
             "DurableEffect": "      0005  DurableEffect      effect.park",
+            "usage": "session-001              usage                 entries=1 input=2 output=3 cache_read=0 cache_write=0 reasoning=0 total=5",
             "stored logical=": "                 tool_state        stored logical=27 B",
             "ref (unchanged)": "                 tool_state        ref (unchanged)",
             "rev=": "      0006  Commit             commit rev=1->2",

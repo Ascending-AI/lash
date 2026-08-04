@@ -46,5 +46,24 @@
       { "op": "enqueue_turn_input", "slot": 0, "value": 0 },
       { "op": "enqueue_turn_input", "slot": 0, "value": 1 }
     ]
+  },
+  {
+    "seed": 859,
+    "operations": [
+      { "op": "claim_lease", "owner": 0 },
+      { "op": "record_usage", "slot": 0, "value": 7 },
+      { "op": "stage_usage", "replay_last_commit": false },
+      {
+        "op": "commit",
+        "component_mode": 0,
+        "value": 0,
+        "settle_work": false,
+        "settle_inputs": false,
+        "stale_head": false
+      },
+      { "op": "confirm_usage", "selection": 0 },
+      { "op": "record_usage", "slot": 0, "value": 7 },
+      { "op": "stage_usage", "replay_last_commit": true }
+    ]
   }
 ]

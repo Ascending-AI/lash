@@ -774,10 +774,12 @@ fn rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback() {
     rlm          observe   message.lashlang_code   text="finish { missing: true }"
     rlm          exec      cell.start              lang="lashlang"
     rlm          commit    checkpoint.request      checkpoint=after_work
+    rlm                      usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
     rlm          provider  model.request           messages=2 tools=0
     rlm          observe   message.lashlang_code   text="finish { ok: true }"
     rlm          exec      cell.start              lang="lashlang"
     rlm          commit    checkpoint.request      checkpoint=before_completion
+    rlm                      usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
     rlm          outcome   turn.final_value        value={"ok":true}
     "#);
 }
@@ -871,6 +873,7 @@ fn rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary
     rlm          resume    cell.restore
     rlm          exec      cell.start              lang="lashlang"
     rlm          commit    checkpoint.request      checkpoint=after_work
+    rlm                      usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
     rlm          provider  model.request           messages=2 tools=0
     "#);
 }

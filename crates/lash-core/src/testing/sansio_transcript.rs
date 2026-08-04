@@ -20,7 +20,7 @@
 
 use lash_sansio::{Effect, TurnProtocol};
 
-use super::behavior_transcript::{Actor, Attr, Entry, IdKind, Kind, Transcript};
+use super::behavior_transcript::{Actor, Attr, Entry, IdKind, Kind, Transcript, Usage};
 use crate::{SessionStreamEvent, TurnFinish, TurnOutcome, TurnStop};
 
 /// Event name for a protocol-requested checkpoint at the sans-io seam.
@@ -73,9 +73,12 @@ fn record_effect<M: TurnProtocol>(transcript: &mut Transcript, actor: &str, effe
             );
         }
         Effect::Checkpoint { checkpoint, .. } => {
+            // This is a protocol request, not an accepted runtime commit; the
+            // effect carries no submitted usage envelope to observe.
             transcript.record(
                 Entry::new(Kind::Commit, session(), CHECKPOINT_REQUEST_EVENT)
-                    .attr(Attr::debug_token("checkpoint", checkpoint)),
+                    .attr(Attr::debug_token("checkpoint", checkpoint))
+                    .usage(Usage::none()),
             );
         }
         Effect::Emit(event) => record_stream_event(transcript, actor, event),
@@ -144,10 +147,13 @@ fn record_stream_event(transcript: &mut Transcript, actor: &str, event: &Session
             messages,
             checkpoint,
         } => {
+            // Injected messages are a host-authored commit and never contain a
+            // provider response, so this event genuinely submits no usage.
             transcript.record(
                 Entry::new(Kind::Commit, session(), "injected_messages.committed")
                     .attr(Attr::int("messages", messages.len() as u64))
-                    .attr(Attr::debug_token("checkpoint", checkpoint)),
+                    .attr(Attr::debug_token("checkpoint", checkpoint))
+                    .usage(Usage::none()),
             );
         }
         SessionStreamEvent::TurnOutcome { outcome } => {

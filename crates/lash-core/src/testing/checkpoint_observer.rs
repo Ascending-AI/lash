@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 /// The value keeps its historical `lash.sim.` prefix because generated
 /// simulation trace artifacts embed it; the observer itself is no longer
 /// simulator-specific.
-pub const CHECKPOINT_WRITE_EVENT_SCHEMA: &str = "lash.sim.checkpoint-write-event.v1";
+pub const CHECKPOINT_WRITE_EVENT_SCHEMA: &str = "lash.sim.checkpoint-write-event.v2";
 
 /// One checkpoint component observed at the successful store-commit seam.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -70,6 +70,17 @@ pub enum CheckpointComponentWriteKind {
     UnchangedRef,
 }
 
+/// Typed token-accounting facts submitted by one runtime commit.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CheckpointUsageWrite {
+    pub entries: usize,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_input_tokens: i64,
+    pub cache_write_input_tokens: i64,
+    pub reasoning_output_tokens: i64,
+}
+
 /// A successful runtime-state commit as observed by the simulator's store
 /// wrapper. Component bodies are inspected before delegation, while the
 /// resulting head revision is recorded only after the backend accepts them.
@@ -90,6 +101,7 @@ pub struct CheckpointWriteEvent {
     pub turn_index: usize,
     pub revision_before: u64,
     pub revision_after: u64,
+    pub usage: CheckpointUsageWrite,
     pub components: Vec<CheckpointComponentWrite>,
 }
 
@@ -452,8 +464,34 @@ fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
         turn_index: commit.checkpoint.turn_state.turn_index,
         revision_before: commit.expected_head_revision,
         revision_after: 0,
+        usage: checkpoint_usage_write(commit),
         components,
     }
+}
+
+fn checkpoint_usage_write(commit: &RuntimeCommit) -> CheckpointUsageWrite {
+    let mut usage = CheckpointUsageWrite {
+        entries: commit.usage_deltas.len(),
+        ..CheckpointUsageWrite::default()
+    };
+    for delta in &commit.usage_deltas {
+        usage.input_tokens = usage
+            .input_tokens
+            .saturating_add(delta.entry.usage.input_tokens);
+        usage.output_tokens = usage
+            .output_tokens
+            .saturating_add(delta.entry.usage.output_tokens);
+        usage.cache_read_input_tokens = usage
+            .cache_read_input_tokens
+            .saturating_add(delta.entry.usage.cache_read_input_tokens);
+        usage.cache_write_input_tokens = usage
+            .cache_write_input_tokens
+            .saturating_add(delta.entry.usage.cache_write_input_tokens);
+        usage.reasoning_output_tokens = usage
+            .reasoning_output_tokens
+            .saturating_add(delta.entry.usage.reasoning_output_tokens);
+    }
+    usage
 }
 
 fn logical_encoded_len(value: &impl Serialize) -> Result<usize, serde_json::Error> {
@@ -761,6 +799,121 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+
+    #[tokio::test]
+    async fn committed_transcript_golden_carries_recorded_usage() {
+        use crate::testing::behavior_transcript::{Actor, Entry, Transcript, Usage};
+
+        let collector = CheckpointWriteCollector::default();
+        let factory = ObservedSessionStoreFactory::new(
+            Arc::new(crate::facade_support::InMemorySessionStoreFactory::new()),
+            collector.clone(),
+        );
+        let store = factory
+            .create_store(&SessionStoreCreateRequest {
+                session_id: "observed-usage".to_string(),
+                relation: crate::SessionRelation::Root,
+                policy: Default::default(),
+            })
+            .await
+            .expect("create observed store");
+        let pending = Arc::new(Mutex::new(Vec::new()));
+        let recorded = crate::TokenUsage {
+            input_tokens: 11,
+            output_tokens: 7,
+            cache_read_input_tokens: 3,
+            cache_write_input_tokens: 2,
+            reasoning_output_tokens: 4,
+        };
+        crate::runtime::record_token_usage_shared(&pending, "turn", "model-a", &recorded);
+        let operation = crate::OperationId::new(
+            crate::ExecutionScope::runtime_operation("observed-usage-turn"),
+            "append-session-nodes",
+        );
+        let staged = crate::runtime::stage_token_ledger_shared(&pending, &operation)
+            .expect("stage recorded usage");
+        let mut state = crate::RuntimeSessionState {
+            session_id: "observed-usage".to_string(),
+            ..crate::RuntimeSessionState::default()
+        };
+        let (commit, _) = RuntimeCommit::persisted_state_with_operation_and_staged_usage(
+            &mut state,
+            staged.deltas(),
+            operation,
+        )
+        .expect("bind staged usage to commit envelope");
+        let result = store
+            .commit_runtime_state(commit)
+            .await
+            .expect("commit recorded usage");
+        staged.confirm_identities(&result.committed_usage_delta_identities);
+
+        let write = collector.events().pop().expect("observed accepted commit");
+        let mut transcript = Transcript::new();
+        transcript.record(Entry::commit(
+            Actor::session(write.session_id),
+            write.revision_before,
+            write.revision_after,
+            Usage::new(
+                write.usage.entries,
+                write.usage.input_tokens,
+                write.usage.output_tokens,
+                write.usage.cache_read_input_tokens,
+                write.usage.cache_write_input_tokens,
+                write.usage.reasoning_output_tokens,
+            ),
+        ));
+        insta::assert_snapshot!(transcript.render(), @r#"
+        session-001  commit    checkpoint.commit       rev=0->1
+        session-001              usage                 entries=1 input=11 output=7 cache_read=3 cache_write=2 reasoning=4 total=23
+        "#);
+    }
+
+    #[test]
+    fn commit_observer_projects_typed_usage_buckets() {
+        let state = crate::RuntimeSessionState {
+            session_id: "observed-usage".to_string(),
+            ..crate::RuntimeSessionState::default()
+        };
+        let commit = RuntimeCommit::persisted_state_for_test(
+            &state,
+            &[
+                crate::TokenLedgerEntry {
+                    source: "turn".to_string(),
+                    model: "model-a".to_string(),
+                    usage: crate::TokenUsage {
+                        input_tokens: 11,
+                        output_tokens: 7,
+                        cache_read_input_tokens: 3,
+                        cache_write_input_tokens: 2,
+                        reasoning_output_tokens: 4,
+                    },
+                },
+                crate::TokenLedgerEntry {
+                    source: "child".to_string(),
+                    model: "model-b".to_string(),
+                    usage: crate::TokenUsage {
+                        input_tokens: 5,
+                        output_tokens: 6,
+                        cache_read_input_tokens: 1,
+                        cache_write_input_tokens: 0,
+                        reasoning_output_tokens: 2,
+                    },
+                },
+            ],
+        );
+        assert_eq!(
+            checkpoint_usage_write(&commit),
+            CheckpointUsageWrite {
+                entries: 2,
+                input_tokens: 16,
+                output_tokens: 13,
+                cache_read_input_tokens: 4,
+                cache_write_input_tokens: 2,
+                reasoning_output_tokens: 6,
+            }
+        );
+    }
 
     #[test]
     fn logical_size_failure_degrades_to_unknown_stored_size() {

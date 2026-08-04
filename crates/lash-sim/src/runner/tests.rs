@@ -406,6 +406,7 @@ async fn generated_park_resume_transcript_is_readable_and_logical_size_labeled()
     suspend-tool  resume    session.resume
     suspend-tool  tool      suspend.tool.resume     name="await_tool"
     suspend-tool  commit    checkpoint.commit       rev=0->1
+    suspend-tool              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
     suspend-tool              turn_state            stored logical=210B
     suspend-tool              tool_state            stored logical=2.2KB
     suspend-tool              plugin_snapshot       stored logical=443B

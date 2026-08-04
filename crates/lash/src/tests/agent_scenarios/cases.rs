@@ -192,6 +192,7 @@ finish result"#,
         root         exec      cell.ok                 calls=1
         root         outcome   turn.final_value        value={"ok":true}
         root         commit    checkpoint.commit       rev=0->1
+        root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=284B
         root                     tool_state            stored logical=3.6KB
         root                     plugin_snapshot       stored logical=433B
@@ -336,15 +337,18 @@ finish result"#,
         root         exec      cell.ok                 calls=1
         root         outcome   turn.final_value        value={"len":2}
         root         commit    checkpoint.commit       rev=0->1
+        root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=284B
         root                     tool_state            stored logical=8.1KB
         root                     plugin_snapshot       stored logical=429B
         root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
+        session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=414B
         session-001              tool_state            stored logical=8.9KB
         session-001              plugin_snapshot       stored logical=429B
         session-001  commit    checkpoint.commit       rev=1->2
+        session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=414B
         session-001              tool_state            ref (unchanged)
         session-001              plugin_snapshot       ref (unchanged)
@@ -393,6 +397,7 @@ finish result"#,
         root         exec      cell.ok                 calls=1
         root         outcome   turn.final_value        value={"parent":"done"}
         root         commit    checkpoint.commit       rev=0->1
+        root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=284B
         root                     tool_state            stored logical=3.3KB
         root                     plugin_snapshot       stored logical=333B
@@ -454,15 +459,18 @@ finish result"#,
         root         exec      cell.start              lang="lashlang"
         root         exec      cell.failed             calls=0 error="receiver for operation `fail` is not a module authority"
         root         commit    checkpoint.commit       rev=0->1
+        root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=284B
         root                     tool_state            stored logical=8.1KB
         root                     plugin_snapshot       stored logical=429B
         root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
+        session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=419B
         session-001              tool_state            stored logical=8.9KB
         session-001              plugin_snapshot       stored logical=429B
         session-001  commit    checkpoint.commit       rev=1->2
+        session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=419B
         session-001              tool_state            ref (unchanged)
         session-001              plugin_snapshot       ref (unchanged)
@@ -531,6 +539,7 @@ finish { joined: [left_value, right_value] }"#,
         root         exec      cell.ok                 calls=2
         root         outcome   turn.final_value        value={"joined":["left","right"]}
         root         commit    checkpoint.commit       rev=0->1
+        root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=284B
         root                     tool_state            stored logical=3.3KB
         root                     plugin_snapshot       stored logical=333B

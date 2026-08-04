@@ -687,6 +687,7 @@ fn standard_protocol_scenario_native_tool_loop_reenters_model_after_checkpoint()
     standard     tool      tool.call               name="read_file" call=call-001
     standard     tool      tool.result             name="read_file" outcome=success call=call-001
     standard     commit    checkpoint.request      checkpoint=after_work
+    standard                 usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
     standard     provider  model.request           messages=3 tools=0
     "#);
 }
@@ -748,6 +749,7 @@ fn standard_protocol_scenario_parallel_tool_results_checkpoint_once() {
     standard     tool      tool.result             name="read_file" outcome=success call=call-001
     standard     tool      tool.result             name="read_file" outcome=success call=call-002
     standard     commit    checkpoint.request      checkpoint=after_work
+    standard                 usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
     standard     provider  model.request           messages=3 tools=0
     "#);
 }
@@ -790,6 +792,7 @@ fn standard_protocol_scenario_tool_failure_feedback_reenters_model_after_checkpo
     standard     tool      tool.call               name="search" call=call-001
     standard     tool      tool.result             name="search" outcome=failure call=call-001
     standard     commit    checkpoint.request      checkpoint=after_work
+    standard                 usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
     standard     provider  model.request           messages=3 tools=0
     "#);
 }
