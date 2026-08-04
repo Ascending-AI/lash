@@ -209,6 +209,83 @@ if let Some(process_report) = report.process {
       </div>
     </div>
 
+    <div class="section" id="private-tables">
+      <div class="section-header">
+        <h2>Private Tables</h2>
+        <p>Every table lash creates is named <code>lash_*</code>, and all of them are private to lash — writes and reads alike.</p>
+      </div>
+      <aside class="contract">
+        <strong>Private by policy</strong>
+        <p>Raw SQL against a <code>lash_*</code> table is unsupported. Table names, column sets, and the shape of the record JSON stored in them are stable only within one schema version, and a version change is a clean break with no migration chain (see <a href="#schema-compatibility">schema compatibility</a> above).</p>
+      </aside>
+      <p>Writes are the sharper edge. A hand-written <code>UPDATE</code> lands outside the revision fence and the idempotency receipt the store commits in the same transaction, so it can leave trigger, process, or session state that no retry, replay, or receipt read can reconstruct. Lash has no repair path for state changed that way, and it fails silently rather than loudly.</p>
+      <p>Every question worth asking a <code>lash_*</code> table has a supported answer:</p>
+      <div class="listing">
+        <div class="listing__row">
+          <div class="listing__label">trigger state</div>
+          <div class="listing__body"><p><code>TriggerCommand::List</code> through <code>TriggerStore::execute_command</code>, or <code>core.triggers().subscriptions(filter)</code> for the projected registration view. Every mutation is another <code>TriggerCommand</code>: <code>Register</code>, <code>Update</code>, <code>Enable</code>, <code>Disable</code>, <code>Delete</code>, <code>Revive</code>, <code>Prune</code>.</p></div>
+        </div>
+        <div class="listing__row">
+          <div class="listing__label">session state</div>
+          <div class="listing__body"><p><code>session.admin().state().export()</code> for the committed snapshot, plus the <code>RuntimePersistence</code> contract itself when a host owns a concrete store. Session mutation stays inside turns and <code>SessionCommand</code>s.</p></div>
+        </div>
+        <div class="listing__row">
+          <div class="listing__label">process state</div>
+          <div class="listing__body"><p><code>core.processes()</code> for observation, signalling, retention, and the deletion change feed. It is the whole process surface; the registry's rows are its implementation.</p></div>
+        </div>
+        <div class="listing__row">
+          <div class="listing__label">observability reads</div>
+          <div class="listing__body"><p>The push seams, not a scan: <code>ProcessEventSink</code>, <code>TraceSink</code>, and session observation. A host projection that needs its own indexed, query-shaped tables builds them from those events and queries its own tables. See <a href="./reporting.html">reporting channels</a>.</p></div>
+        </div>
+      </div>
+      <p>Re-enabling a disabled trigger subscription is the case hosts most often reach for SQL to solve. It is a first-class fenced verb: read the live revision, then <code>Enable</code> at that revision under an idempotent operation id.</p>
+      <pre data-lang="rust" data-snippet="persistence#trigger-reenable"><code>use lash::triggers::{TriggerCommand, TriggerCommandOutcome, TriggerSubscriptionFilter};
+
+// Read the live revision through the command surface, not with SQL.
+let TriggerCommandOutcome::List { records } = store
+    .execute_command(
+        "reenable-read",
+        TriggerCommand::List {
+            owner_scope: owner_scope.clone(),
+            filter: TriggerSubscriptionFilter {
+                subscription_key: Some(subscription_key.to_string()),
+                ..TriggerSubscriptionFilter::default()
+            },
+        },
+    )
+    .await??
+else {
+    unreachable!("List returns list records")
+};
+let Some(record) = records.first() else {
+    anyhow::bail!("no live subscription for `{subscription_key}`");
+};
+
+// Enable is fenced on the revision just read, and the operation id makes the
+// retry idempotent.
+let outcome = store
+    .execute_command(
+        &amp;format!("reenable:{subscription_key}:{}", record.revision),
+        TriggerCommand::Enable {
+            owner_scope,
+            actor,
+            subscription_key: subscription_key.to_string(),
+            expected_revision: record.revision,
+        },
+    )
+    .await?;
+match outcome {
+    Ok(TriggerCommandOutcome::Mutation { receipt }) =&gt; {
+        assert!(receipt.enabled);
+    }
+    Ok(_) =&gt; unreachable!("Enable returns one mutation receipt"),
+    // A concurrent writer moved the row first: re-read and retry. Never
+    // patch the row by hand.
+    Err(conflict) =&gt; retry_reenable_later(conflict)?,
+}</code></pre>
+      <p>A stale <code>expected_revision</code> returns a typed conflict carrying the current revision, so the correct response is re-read and retry. Hosts upgrading away from hand-written trigger SQL will find the operation-by-operation mapping under <a href="./operations.html#host-sql-cutover">retiring host SQL</a>.</p>
+    </div>
+
     <div class="section" id="cas-conflicts">
       <div class="section-header">
         <h2>Session Lane And CAS</h2>
