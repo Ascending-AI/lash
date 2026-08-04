@@ -383,10 +383,13 @@ impl PostgresStorage {
     /// signing secret seeded at the wrong width, and returns them rather than
     /// failing.
     ///
-    /// Runs inside one transaction holding
-    /// [`PostgresStorage::schema_advisory_lock_key`] in shared mode, so every
-    /// catalog read sees one snapshot and a host migration that takes the same key
-    /// exclusively is excluded for the duration.
+    /// Acquires [`PostgresStorage::schema_advisory_lock_key`] in shared mode and
+    /// then reads inside one `REPEATABLE READ` transaction, so every `pg_catalog`
+    /// read shares a single snapshot taken after the lock was granted and a host
+    /// migration holding the same key exclusively is excluded for the duration.
+    ///
+    /// Because it takes the key itself, this cannot be called by something that
+    /// already holds it — see [`PostgresStorage::verify_schema_on`] for that.
     ///
     /// This is the entry point for a host's migration CI:
     ///
@@ -401,24 +404,70 @@ impl PostgresStorage {
         verify_schema_under_advisory_lock(pool).await
     }
 
+    /// Runs the same check on a connection the caller already owns, taking no lock
+    /// and starting no transaction of its own.
+    ///
+    /// This is the verifier for the published migration protocol. A CI job that
+    /// holds [`PostgresStorage::schema_advisory_lock_key`] around its
+    /// migrate-then-verify sequence cannot use
+    /// [`PostgresStorage::verify_schema_for`]: that one acquires the key itself, so
+    /// it would queue behind the caller's own exclusive hold and never proceed.
+    /// Pass the locked connection here instead.
+    ///
+    /// The caller owns both guarantees this skips. Hold the key for the whole
+    /// sequence, and read inside a `REPEATABLE READ` transaction if the catalog
+    /// reads should share one snapshot — `SET TRANSACTION ISOLATION LEVEL
+    /// REPEATABLE READ` must be the transaction's first statement, before anything
+    /// that waits for a lock, or the snapshot predates the grant. An open
+    /// [`sqlx::Transaction`] derefs to the connection this wants, so
+    /// `verify_schema_on(&mut tx)` works directly.
+    ///
+    /// ```no_run
+    /// # use lash_postgres_store::PostgresStorage;
+    /// # async fn gate(pool: sqlx::PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    /// use sqlx::Connection as _;
+    ///
+    /// let (namespace, key) = PostgresStorage::schema_advisory_lock_key();
+    /// let mut connection = pool.acquire().await?;
+    /// sqlx::query("SELECT pg_advisory_lock($1, $2)")
+    ///     .bind(namespace)
+    ///     .bind(key)
+    ///     .execute(&mut *connection)
+    ///     .await?;
+    /// // ... run the migrations here, still holding the key ...
+    /// let report = PostgresStorage::verify_schema_on(&mut connection).await?;
+    /// assert!(report.is_conformant(), "{report}");
+    /// sqlx::query("SELECT pg_advisory_unlock($1, $2)")
+    ///     .bind(namespace)
+    ///     .bind(key)
+    ///     .execute(&mut *connection)
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn verify_schema_on(
+        connection: &mut sqlx::PgConnection,
+    ) -> Result<SchemaReport, StoreError> {
+        verify_schema_shape(connection).await
+    }
+
     /// The advisory-lock key lash holds while provisioning, opening, or verifying
-    /// the schema, as `(namespace, key)` arguments to the `pg_advisory_xact_lock`
-    /// family.
+    /// the schema, as `(namespace, key)` arguments to the `pg_advisory_lock` family.
     ///
     /// Open and provisioning take it exclusively;
-    /// [`PostgresStorage::verify_schema_for`] takes it in shared mode. Between
-    /// them that serializes everything lash does to the schema — but it cannot by
-    /// itself coordinate a host migration that does not participate: a migration
-    /// committing between two catalog reads can make an open succeed against a
-    /// schema that has already drifted, or refuse one that is mid-migration and
-    /// fine.
+    /// [`PostgresStorage::verify_schema_for`] takes it in shared mode. Between them
+    /// that serializes everything lash does to the schema — but it cannot by itself
+    /// coordinate a host migration that does not participate. A non-participating
+    /// migration can commit before a verification's snapshot or after its commit, so
+    /// the report describes the schema as of that snapshot rather than as of now.
     ///
     /// The supported protocol is therefore to take this key around migrations —
-    /// `SELECT pg_advisory_xact_lock(715421, 907001)` in the same transaction, or
-    /// the session-level form around a multi-statement migration — which is also
-    /// what a migration CI job should wrap around its migrate-then-verify
-    /// sequence. Deployments that can instead guarantee no migration runs
-    /// concurrently with an open need nothing.
+    /// `SELECT pg_advisory_xact_lock(715421, 907001)` in the migration's own
+    /// transaction, or the session-level form around a multi-statement migration.
+    /// A migration CI job should wrap it around the whole migrate-then-verify
+    /// sequence and verify with [`PostgresStorage::verify_schema_on`], which does
+    /// not try to take the key a second time. Deployments that can instead guarantee
+    /// no migration runs concurrently with an open need nothing.
     pub fn schema_advisory_lock_key() -> (i32, i32) {
         SCHEMA_ADVISORY_LOCK_KEY
     }
@@ -627,7 +676,7 @@ pub use effect_replay::{
 };
 use schema_shape::{
     AWAIT_EVENT_SIGNING_SECRET_BYTES, ComponentVersion, SchemaShape, read_component_version,
-    resolve_installation, verify_schema_shape,
+    read_search_path, resolve_installation, verify_schema_shape,
 };
 pub use schema_shape::{
     ColumnShape, ColumnValueSource, ForeignKeyAction, ForeignKeyShape, SchemaCheck, SchemaFinding,

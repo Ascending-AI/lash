@@ -151,22 +151,45 @@ migration produced wrongly — so a check reachable only through a successful op
 could not describe the databases it exists to describe.
 
 lash takes one published advisory key (`PostgresStorage::schema_advisory_lock_key`)
-for everything it does to the schema: exclusively while provisioning and opening,
-and in shared mode inside the single transaction `verify_schema_for` runs, so
-concurrent verifications do not conflict with each other while any exclusive holder
-excludes them all. Taking it in the verification path is not decoration — the same
-docs recommend that entry point for migration CI, and a key that covered opens but
-not verification would be a protocol with a hole exactly where hosts were told to
-use it.
+for everything it does to the schema: exclusively while provisioning and opening, and
+in shared mode around verification, so concurrent verifications do not conflict with
+each other while any exclusive holder excludes them all. Taking it in the
+verification path is not decoration — the same docs recommend that entry point for
+migration CI, and a key that covered opens but not verification would be a protocol
+with a hole exactly where hosts were told to use it.
 
-What the key cannot do by itself is coordinate a participant that ignores it: a host
-migration committing between two catalog reads can make an open succeed against a
-schema that has already drifted, or refuse one that is mid-migration and fine.
-Holding relation locks strong enough to close that would mean blocking a host's own
-DDL from inside lash's open path, which is a worse trade. The supported protocol is
-therefore to take this key around migrations — which is also what a migration CI job
-should wrap around its migrate-then-verify sequence — or to guarantee no migration
-runs concurrently with an open.
+Two orderings inside `verify_schema_for` are load-bearing rather than incidental.
+The lock is taken at **session** scope, before the transaction begins, because a
+`REPEATABLE READ` snapshot is established by the transaction's first statement — and
+that includes a statement blocked waiting for a lock. An `xact`-scoped lock acquired
+as the first statement would snapshot the catalog *before* being granted, so a
+verification that queued behind a host migration would go on to describe the schema
+as it was before that migration. The transaction is then `REPEATABLE READ`, which is
+what makes every `pg_catalog` read share one snapshot; under the default
+`READ COMMITTED` a concurrently committed catalog row could appear midway through a
+verification. For the same reason nothing in the check resolves names with
+`to_regclass` or a `::regclass` cast: PostgreSQL resolves names through an
+always-current catalog snapshot, so those lookups can see a relation the next
+`pg_class` read cannot. Objects are located by joining `pg_class` against a
+search path captured once, and probed by OID thereafter.
+
+Because that session lock outlives its transaction, verification runs on a connection
+detached from the pool and closed afterwards. A future cancelled between the lock and
+the unlock would otherwise return a still-locked connection to the pool and block
+every later exclusive holder for that connection's lifetime; an owned connection
+releases the lock by closing, on the cancellation path as much as the happy one.
+
+What the key cannot do is coordinate a participant that ignores it. A
+non-participating migration can commit before a verification's snapshot or after its
+commit, so a report describes the schema as of that snapshot rather than as of now —
+but it can no longer change underneath a verification mid-read. Holding relation locks
+strong enough to close the remaining window would mean blocking a host's own DDL from
+inside lash's open path, which is a worse trade. The supported protocol is therefore
+to take this key around migrations, and a migration CI job should wrap it around the
+whole migrate-then-verify sequence. Such a job cannot use `verify_schema_for`, which
+acquires the key itself and would queue behind the caller's own exclusive hold:
+`PostgresStorage::verify_schema_on(&mut connection)` is the verifier for a caller that
+already holds the key and owns its own transaction.
 
 The expectation artifact is regenerated from a live database rather than
 hand-written, and CI runs the Postgres lane on PostgreSQL 14, 16, and 18,
@@ -230,13 +253,20 @@ verify against; shape-checking there would be lash verifying itself.
 - The gate emits its full decision basis — stamped and expected version, both policy
   knobs, and finding counts per class — on every outcome it can reach, denial and
   admission alike, per the decision-evidence standard in
-  `docs/agents/way-of-working.md`. A refused open is diagnosable from a trace
-  without reproducing it.
+  `docs/agents/way-of-working.md`. That includes the early returns: the
+  lash-managed stale-version preflight, which denies before the structural read runs
+  at all, and both signing-secret refusals. The admission is recorded only after the
+  secret read succeeds, so a database with an unusable secret cannot log an admit and
+  then refuse the open — decision evidence that contradicts the outcome is worse than
+  none.
 
-- A report's remedy is chosen per finding class. Version findings get the
-  reject-and-recreate instruction and deliberately do *not* mention
-  `SchemaCheck::WarnOnly`, because that valve cannot open past the version
-  boundary; recommending it there would be advice a host cannot follow.
+- A report's remedy is chosen per finding class, and a version finding dominates.
+  Any report carrying one gets the reject-and-recreate instruction and deliberately
+  does *not* mention `SchemaCheck::WarnOnly`, including the mixed report an
+  unreadable version stamp produces: that valve cannot open past the version boundary
+  in any mode, so recommending it would be advice a host cannot follow. Recreating
+  from the artifact resolves every finding class anyway, so withholding it costs
+  nothing.
 - The await-event signing secret is a data precondition rather than a shape, so
   `SchemaCheck::WarnOnly` does not relax it: without the row there is no secret
   to authenticate promises with, and the store cannot construct itself.

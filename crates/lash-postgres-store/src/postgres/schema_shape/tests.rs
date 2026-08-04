@@ -136,7 +136,10 @@ async fn read_scratch_shape(connection: &mut sqlx::PgConnection, scratch: &str) 
         table_names.len() > 20,
         "the DDL artifact must create lash's whole table set, found {table_names:?}"
     );
-    let installation = resolve_installation(connection)
+    let search_path = read_search_path(connection)
+        .await
+        .expect("read scratch search path");
+    let installation = resolve_installation(connection, &search_path)
         .await
         .expect("resolve scratch installation")
         .expect("the scratch schema is provisioned");

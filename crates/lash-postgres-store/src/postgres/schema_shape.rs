@@ -595,14 +595,17 @@ const ARTIFACT_HEADER: &str = "\
 # catalog the DDL artifact actually produces. Every attribute recorded here
 # renders identically on PostgreSQL 14 through 18; CI asserts that on all three.
 #
-# Columns are matched by name, never by ordinal position. Uniqueness guards and
-# foreign keys are matched by their column SET and kind, never by constraint or
-# index name and never by column order -- UNIQUE (a, b) and UNIQUE (b, a) reject
-# the same rows, so one standing in for the other is not drift. What does differ
-# between same-set guards is compared: the partial predicate and null-distinctness
-# for guards, the delete action for foreign keys. Column order in this file records
-# how the DDL declares it and is documentation, not a requirement. Every object is
-# read from the one namespace where lash_schema_versions resolves.
+# Columns are matched by name, never by ordinal position; constraint and index names
+# are never compared at all. A uniqueness guard is matched by its kind and its key
+# column SET -- UNIQUE (a, b) and UNIQUE (b, a) reject the same rows, so one standing
+# in for the other is not drift. A foreign key is matched by its parent table and the
+# SET OF ITS COLUMN PAIRINGS, so declaration order is likewise irrelevant while
+# (a, b) -> (x, y) stays distinct from the crossed (a, b) -> (y, x). What a matched
+# pair is then compared on is what changes the rows it affects: the partial predicate
+# and null-distinctness for a guard, the delete action for a foreign key. Column order
+# in this file records how the DDL declares it and is documentation, not a
+# requirement. Every object is read from the one namespace where lash_schema_versions
+# resolves.
 ";
 
 fn parse_column_line(rest: &str) -> Option<ColumnShape> {
@@ -1128,14 +1131,6 @@ impl SchemaReport {
             .any(|finding| matches!(finding, SchemaFinding::VersionMismatch { .. }))
     }
 
-    /// Whether any finding concerns the catalog's shape or seed data, which
-    /// [`SchemaCheck::WarnOnly`] does relax.
-    fn has_shape_finding(&self) -> bool {
-        self.findings
-            .iter()
-            .any(|finding| !matches!(finding, SchemaFinding::VersionMismatch { .. }))
-    }
-
     /// Counts of findings by section, for the gate's decision evidence.
     pub(crate) fn finding_counts(&self) -> BTreeMap<&'static str, usize> {
         let mut counts = BTreeMap::new();
@@ -1186,11 +1181,11 @@ impl fmt::Display for SchemaReport {
                 write!(formatter, "\n  {finding}")?;
             }
         }
-        // The remedy has to match the findings. A version mismatch is
-        // unconditional — `SchemaCheck::WarnOnly` cannot open past it — so
-        // recommending the valve there would send a host down a path that cannot
-        // work. Both remedies appear when both classes are present, which is the
-        // unreadable-stamp case.
+        // The remedy has to be one a host can actually follow, so a version finding
+        // dominates: `SchemaCheck::WarnOnly` cannot open past the version boundary
+        // in any mode, and a report that carries both classes — the unreadable-stamp
+        // case does — must still not offer it. Recreating from the artifact resolves
+        // every finding either way, so nothing is lost by withholding the valve.
         write!(
             formatter,
             "\n\nProvision this database from the DDL artifact this build ships \
@@ -1198,21 +1193,18 @@ impl fmt::Display for SchemaReport {
              crates/lash-postgres-store/schema.sql) rather than transcribing it."
         )?;
         if self.has_version_finding() {
-            write!(
+            return write!(
                 formatter,
                 " The component schema is a reject-and-recreate boundary with no migration \
                  chain, so a database stamped for another generation needs a fresh one: this \
                  gate is unconditional and no `SchemaCheck` relaxes it."
-            )?;
+            );
         }
-        if self.has_shape_finding() {
-            write!(
-                formatter,
-                " To open against a structurally drifted schema anyway, set \
-                 `PostgresStoreConfig::schema_check = SchemaCheck::WarnOnly`."
-            )?;
-        }
-        Ok(())
+        write!(
+            formatter,
+            " To open against a structurally drifted schema anyway, set \
+             `PostgresStoreConfig::schema_check = SchemaCheck::WarnOnly`."
+        )
     }
 }
 
@@ -1220,7 +1212,8 @@ impl fmt::Display for SchemaReport {
 mod introspect;
 
 pub(crate) use introspect::{
-    ComponentVersion, read_component_version, resolve_installation, verify_schema_shape,
+    ComponentVersion, read_component_version, read_search_path, resolve_installation,
+    verify_schema_shape,
 };
 /// Reached only by the artifact-generation and catalog tests, which drive the
 /// introspection directly rather than through a full verification.

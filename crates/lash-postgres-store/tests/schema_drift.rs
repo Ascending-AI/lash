@@ -1281,6 +1281,29 @@ async fn report_remedies_match_the_finding_class() {
         !shape_report.contains("reject-and-recreate"),
         "a shape report must not claim the database needs recreating: {shape_report}"
     );
+
+    // The mixed case: an unreadable stamp carries a VersionMismatch *and* the column
+    // findings that explain it. A version finding dominates, so the valve must still
+    // not be offered — recreating from the artifact resolves both classes anyway.
+    scratch
+        .apply("ALTER TABLE lash_schema_versions ALTER COLUMN version TYPE TEXT")
+        .await;
+    let mixed_report = PostgresStorage::verify_schema_for(&scratch.pool)
+        .await
+        .expect("verify the unreadable-stamp database")
+        .to_string();
+    assert!(
+        mixed_report.contains("COMPONENT VERSION") && mixed_report.contains("COLUMN DRIFT"),
+        "the mixed case must carry both finding classes: {mixed_report}"
+    );
+    assert!(
+        !mixed_report.contains("SchemaCheck::WarnOnly"),
+        "a report carrying a version finding must never recommend the valve: {mixed_report}"
+    );
+    assert!(
+        mixed_report.contains("reject-and-recreate"),
+        "the mixed case must give the reject-and-recreate remedy: {mixed_report}"
+    );
     scratch.cleanup().await;
 }
 
@@ -1436,12 +1459,106 @@ async fn the_schema_gate_emits_its_decision_basis() {
         ],
     );
 
+    // (e) the LashManaged preflight is a separate early return: it denies before the
+    // structural read runs at all, and has to carry the same basis.
+    assert!(
+        PostgresStorage::from_pool_with(
+            scratch.pool.clone(),
+            PostgresStoreConfig {
+                schema_provisioning: SchemaProvisioning::LashManaged,
+                ..PostgresStoreConfig::default()
+            },
+        )
+        .await
+        .is_err()
+    );
+    assert_evidence_with_provisioning(
+        capture,
+        &scratch.name,
+        "denied_version_preflight",
+        "LashManaged",
+        &["found_version=Some(1)", "COMPONENT VERSION=1"],
+    );
+
     scratch.cleanup().await;
+}
+
+/// The signing secret is read after the structural verdict, so its two failures are
+/// their own outcomes — and they are reachable exactly where they matter: under
+/// `WarnOnly`, which relaxes the seed *findings* but cannot conjure a key to
+/// authenticate promises with. Recording an admission before that read would let such
+/// a database log an admit and then refuse the open, and decision evidence that
+/// contradicts what happened is worse than none.
+#[tokio::test]
+async fn a_rejected_signing_secret_emits_its_own_decision() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping signing-secret decision evidence: database URL is not set");
+        return;
+    };
+    let capture = installed_capture();
+
+    for (mutation, outcome) in [
+        (
+            "UPDATE lash_await_event_meta SET signing_secret = decode('0102', 'hex')",
+            "denied_seed_secret_width",
+        ),
+        (
+            "DELETE FROM lash_await_event_meta",
+            "denied_seed_secret_missing",
+        ),
+    ] {
+        let scratch = ScratchSchema::provision(&database_url).await;
+        scratch.apply(mutation).await;
+
+        // Under Enforce the report already names the bad row, so the shape gate is
+        // what denies — with its own evidence.
+        assert!(
+            scratch
+                .open_host_provisioned(SchemaCheck::Enforce)
+                .await
+                .is_err()
+        );
+        assert_evidence(capture, &scratch.name, "denied_shape", &["SEED ROWS=1"]);
+
+        // Under WarnOnly the finding is relaxed and the secret read is what refuses.
+        assert!(
+            scratch
+                .open_host_provisioned(SchemaCheck::WarnOnly)
+                .await
+                .is_err()
+        );
+        assert_evidence(
+            capture,
+            &scratch.name,
+            outcome,
+            &["schema_check=WarnOnly", "SEED ROWS=1"],
+        );
+        assert!(
+            capture
+                .events_for(&scratch.name)
+                .iter()
+                .all(|event| !event.contains("outcome=allowed")),
+            "no open succeeded, so nothing may have logged an admission: {:?}",
+            capture.events_for(&scratch.name)
+        );
+        scratch.cleanup().await;
+    }
 }
 
 /// Asserts one captured decision carries the named outcome plus the inputs the gate
 /// consulted to reach it.
 fn assert_evidence(capture: &EventCapture, schema: &str, outcome: &str, extra: &[&str]) {
+    assert_evidence_with_provisioning(capture, schema, outcome, "HostProvisioned", extra);
+}
+
+/// As [`assert_evidence`], for an outcome reached under another provisioning mode.
+fn assert_evidence_with_provisioning(
+    capture: &EventCapture,
+    schema: &str,
+    outcome: &str,
+    provisioning: &str,
+    extra: &[&str],
+) {
     let events = capture.events_for(schema);
     let event = events
         .iter()
@@ -1451,17 +1568,132 @@ fn assert_evidence(capture: &EventCapture, schema: &str, outcome: &str, extra: &
                 "no schema-gate event with outcome={outcome} for {schema}; captured:\n{events:#?}"
             )
         });
-    for field in [
-        "component=lash-postgres-store",
-        "expected_version=35",
-        "provisioning=HostProvisioned",
-    ]
-    .iter()
-    .chain(extra)
+    let provisioning = format!("provisioning={provisioning}");
+    for field in ["component=lash-postgres-store", "expected_version=35"]
+        .iter()
+        .chain(std::iter::once(&provisioning.as_str()))
+        .chain(extra)
     {
         assert!(
             event.contains(field),
             "the {outcome} decision must carry {field}; got:\n{event}"
         );
     }
+}
+
+/// The published migration protocol tells CI to hold the advisory key around its
+/// migrate-then-verify sequence. `verify_schema_for` acquires the key itself, so a
+/// caller already holding it exclusively would queue behind its own connection
+/// forever; `verify_schema_on` is the verifier for that case. This pins both halves:
+/// the standalone form blocks, and the connection-taking form completes.
+#[tokio::test]
+async fn a_caller_holding_the_advisory_key_can_still_verify() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping locked-caller verification: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    let (lock_namespace, lock_key) = PostgresStorage::schema_advisory_lock_key();
+
+    // A migration CI job: take the key exclusively, then verify on that connection.
+    let mut migrator = scratch.pool.acquire().await.expect("acquire migrator");
+    sqlx::query("SELECT pg_advisory_lock($1, $2)")
+        .bind(lock_namespace)
+        .bind(lock_key)
+        .execute(&mut *migrator)
+        .await
+        .expect("take the published key exclusively");
+
+    let report = PostgresStorage::verify_schema_on(&mut migrator)
+        .await
+        .expect("verify on the already-locked connection");
+    assert!(
+        report.is_conformant(),
+        "verification on the locked connection must describe the schema: {report}"
+    );
+
+    // The pool form must not be usable here: it waits for the shared lock behind the
+    // exclusive hold this same test still owns.
+    let blocked = tokio::time::timeout(
+        std::time::Duration::from_millis(750),
+        PostgresStorage::verify_schema_for(&scratch.pool),
+    )
+    .await;
+    assert!(
+        blocked.is_err(),
+        "verify_schema_for must queue behind an exclusive holder, which is exactly why \
+         verify_schema_on exists"
+    );
+
+    sqlx::query("SELECT pg_advisory_unlock($1, $2)")
+        .bind(lock_namespace)
+        .bind(lock_key)
+        .execute(&mut *migrator)
+        .await
+        .expect("release the published key");
+    drop(migrator);
+
+    // Released, so the standalone form works again.
+    assert!(
+        PostgresStorage::verify_schema_for(&scratch.pool)
+            .await
+            .expect("verify once the key is free")
+            .is_conformant()
+    );
+    scratch.cleanup().await;
+}
+
+/// `verify_schema_for` claims every catalog read shares one snapshot. That is only
+/// true if the transaction is `REPEATABLE READ` *and* the lock was granted before the
+/// snapshot was taken — an `xact`-scoped lock acquired as the first statement
+/// snapshots before it is granted, so a verification queued behind a migration would
+/// describe the pre-migration schema. This pins the observable consequence: a
+/// verification that waits for the key sees what the holder committed.
+#[tokio::test]
+async fn verification_waiting_for_the_key_sees_the_holders_committed_work() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping snapshot-ordering check: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    let (lock_namespace, lock_key) = PostgresStorage::schema_advisory_lock_key();
+
+    // Hold the key, then drop the dedup guard while a verification is already queued.
+    let mut holder = scratch.pool.acquire().await.expect("acquire holder");
+    sqlx::query("SELECT pg_advisory_lock($1, $2)")
+        .bind(lock_namespace)
+        .bind(lock_key)
+        .execute(&mut *holder)
+        .await
+        .expect("take the key");
+
+    let verify_pool = scratch.pool.clone();
+    let verification =
+        tokio::spawn(async move { PostgresStorage::verify_schema_for(&verify_pool).await });
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    sqlx::query("DROP INDEX idx_lash_process_events_key")
+        .execute(&mut *holder)
+        .await
+        .expect("drop the guard while the verification waits");
+    sqlx::query("SELECT pg_advisory_unlock($1, $2)")
+        .bind(lock_namespace)
+        .bind(lock_key)
+        .execute(&mut *holder)
+        .await
+        .expect("release the key");
+    drop(holder);
+
+    let report = verification
+        .await
+        .expect("verification task")
+        .expect("verification result");
+    assert!(
+        report.findings.iter().any(|finding| matches!(
+            finding,
+            SchemaFinding::MissingUniqueGuard { table, .. } if table == "lash_process_events"
+        )),
+        "a verification that waited for the key must see the schema as the holder left \
+         it, not as it was before the wait: {report}"
+    );
+    scratch.cleanup().await;
 }

@@ -17,6 +17,31 @@ use super::{
 };
 use crate::{SCHEMA_COMPONENT, SCHEMA_VERSION, StoreError, store_sqlx_error};
 
+/// The effective schema search path, read once per verification.
+///
+/// Resolving names against a list captured up front — rather than calling
+/// `to_regclass` per object — is what lets every catalog lookup honour the
+/// transaction snapshot. `to_regclass` and `::regclass` casts deliberately do not:
+/// PostgreSQL resolves names through an always-current catalog snapshot, so under
+/// `REPEATABLE READ` they can see a relation the very next `pg_class` read cannot.
+pub(crate) struct SearchPath(Vec<String>);
+
+/// Reads the connection's effective search path, in precedence order.
+pub(crate) async fn read_search_path(
+    connection: &mut PgConnection,
+) -> Result<SearchPath, StoreError> {
+    let schemas: Vec<String> = sqlx::query_scalar(
+        "SELECT schema_name::text
+         FROM unnest(pg_catalog.current_schemas(true)) WITH ORDINALITY
+              AS resolved(schema_name, precedence)
+         ORDER BY resolved.precedence",
+    )
+    .fetch_all(&mut *connection)
+    .await
+    .map_err(store_sqlx_error)?;
+    Ok(SearchPath(schemas))
+}
+
 /// The single lash installation a verification reads.
 ///
 /// Anchoring on one namespace is what makes the check a statement about a
@@ -29,25 +54,45 @@ pub(crate) struct Installation {
     quoted_namespace: String,
     /// Namespace name as the catalog reports it.
     namespace: String,
+    /// OID of the anchoring table itself, so probing it needs no name resolution.
+    anchor_oid: i64,
+}
+
+impl Installation {
+    /// Namespace the installation is anchored in.
+    pub(crate) fn namespace(&self) -> &str {
+        &self.namespace
+    }
 }
 
 /// Resolves the namespace holding this database's lash installation.
 ///
-/// Returns `None` when `lash_schema_versions` does not resolve at all, which is
-/// the unprovisioned database.
+/// Picks the first namespace on the search path that carries the anchoring table,
+/// which is the same relation an unqualified statement would resolve — but read
+/// from `pg_class` directly, so the answer belongs to the transaction's snapshot
+/// rather than to a name lookup that ignores it.
+///
+/// Returns `None` when no namespace on the path carries it: the unprovisioned
+/// database.
 pub(crate) async fn resolve_installation(
     connection: &mut PgConnection,
+    search_path: &SearchPath,
 ) -> Result<Option<Installation>, StoreError> {
     let row = sqlx::query(
         "SELECT namespace.oid::bigint AS namespace_oid,
                 namespace.nspname::text AS namespace,
-                pg_catalog.quote_ident(namespace.nspname) AS quoted_namespace
+                pg_catalog.quote_ident(namespace.nspname) AS quoted_namespace,
+                relation.oid::bigint AS anchor_oid
          FROM pg_catalog.pg_class AS relation
          JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
-         WHERE relation.oid = pg_catalog.to_regclass(pg_catalog.quote_ident($1))::oid
-           AND relation.relkind IN ('r', 'p')",
+         WHERE relation.relname = $1
+           AND relation.relkind IN ('r', 'p')
+           AND namespace.nspname = ANY($2::text[])
+         ORDER BY array_position($2::text[], namespace.nspname)
+         LIMIT 1",
     )
     .bind(ANCHOR_TABLE)
+    .bind(&search_path.0)
     .fetch_optional(&mut *connection)
     .await
     .map_err(store_sqlx_error)?;
@@ -55,6 +100,7 @@ pub(crate) async fn resolve_installation(
         namespace_oid: row.get("namespace_oid"),
         namespace: row.get("namespace"),
         quoted_namespace: row.get("quoted_namespace"),
+        anchor_oid: row.get("anchor_oid"),
     }))
 }
 
@@ -88,9 +134,17 @@ pub(crate) async fn read_component_version(
     installation: &Installation,
     expected: &SchemaShape,
 ) -> Result<ComponentVersion, StoreError> {
+    // Probed by OID rather than by a `::regclass` cast, which would resolve the
+    // name outside the transaction's snapshot.
     let probed = ["component", "version"];
-    if !probe_columns_match_expected(connection, installation, expected, ANCHOR_TABLE, &probed)
-        .await?
+    if !probe_columns_match_expected(
+        connection,
+        installation.anchor_oid,
+        expected,
+        ANCHOR_TABLE,
+        &probed,
+    )
+    .await?
     {
         return Ok(ComponentVersion::Unreadable);
     }
@@ -114,7 +168,7 @@ pub(crate) async fn read_component_version(
 /// safe to execute the typed statement.
 async fn probe_columns_match_expected(
     connection: &mut PgConnection,
-    installation: &Installation,
+    table_oid: i64,
     expected: &SchemaShape,
     table: &str,
     columns: &[&str],
@@ -133,16 +187,15 @@ async fn probe_columns_match_expected(
     }
     let matched: i64 = sqlx::query_scalar(
         "SELECT count(*)
-         FROM unnest($3::text[], $4::text[]) AS want(name, sql_type)
+         FROM unnest($2::text[], $3::text[]) AS want(name, sql_type)
          JOIN pg_catalog.pg_attribute AS attribute
              ON attribute.attname = want.name
             AND pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) = want.sql_type
-         WHERE attribute.attrelid = ($1 || '.' || pg_catalog.quote_ident($2))::regclass
+         WHERE attribute.attrelid::bigint = $1
            AND attribute.attnum > 0
            AND NOT attribute.attisdropped",
     )
-    .bind(&installation.quoted_namespace)
-    .bind(table)
+    .bind(table_oid)
     .bind(&names)
     .bind(&types)
     .fetch_one(&mut *connection)
@@ -163,7 +216,8 @@ pub(crate) async fn verify_schema_shape(
 ) -> Result<SchemaReport, StoreError> {
     let expected = SchemaShape::expected();
     let table_names: Vec<String> = expected.tables.keys().cloned().collect();
-    let Some(installation) = resolve_installation(connection).await? else {
+    let search_path = read_search_path(connection).await?;
+    let Some(installation) = resolve_installation(connection, &search_path).await? else {
         return Ok(SchemaReport {
             schema: None,
             expected_version: SCHEMA_VERSION,
@@ -194,13 +248,14 @@ pub(crate) async fn verify_schema_shape(
         });
         return Ok(report);
     }
-    report.findings = read_shadow_findings(connection, &installation, &table_names).await?;
+    report.findings =
+        read_shadow_findings(connection, &installation, &search_path, &table_names).await?;
     let resolved = resolve_tables(connection, &installation, &table_names).await?;
     let found = read_live_shape(connection, &resolved).await?;
     report.findings.extend(expected.diff(&found));
-    report
-        .findings
-        .extend(read_seed_row_findings(connection, &installation, &expected, &found).await?);
+    report.findings.extend(
+        read_seed_row_findings(connection, &installation, &resolved, &expected, &found).await?,
+    );
     if matches!(stamp, ComponentVersion::Unreadable) {
         report.findings.push(SchemaFinding::VersionMismatch {
             expected: SCHEMA_VERSION,
@@ -215,33 +270,42 @@ pub(crate) struct ResolvedTable {
     oid: i64,
 }
 
-/// Reports every lash-named relation that `search_path` resolves outside the
+/// Reports every lash-named relation that the search path resolves outside the
 /// anchored namespace.
 ///
 /// These are the relations lash's own unqualified statements would hit, so a
 /// database that has them is not the installation the rest of the check just
-/// verified — regardless of whether the anchored copy is itself perfect.
+/// verified — regardless of whether the anchored copy is itself perfect. Any
+/// relkind counts: a view or foreign table shadowing a lash table diverts writes
+/// just as effectively.
+///
+/// Resolution is a `pg_class` join ordered by search-path precedence rather than a
+/// `to_regclass` call, so it sees the same snapshot as every other read here.
 async fn read_shadow_findings(
     connection: &mut PgConnection,
     installation: &Installation,
+    search_path: &SearchPath,
     table_names: &[String],
 ) -> Result<Vec<SchemaFinding>, StoreError> {
     let rows = sqlx::query(
-        "SELECT expected.name AS name,
+        "SELECT DISTINCT ON (expected.name)
+                expected.name AS name,
+                namespace.oid::bigint AS found_namespace_oid,
                 namespace.nspname::text AS found_schema
          FROM unnest($1::text[]) AS expected(name)
-         JOIN pg_catalog.pg_class AS relation
-             ON relation.oid = pg_catalog.to_regclass(pg_catalog.quote_ident(expected.name))::oid
+         JOIN pg_catalog.pg_class AS relation ON relation.relname = expected.name
          JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
-         WHERE relation.relnamespace <> $2::oid",
+         WHERE namespace.nspname = ANY($2::text[])
+         ORDER BY expected.name, array_position($2::text[], namespace.nspname)",
     )
     .bind(table_names)
-    .bind(installation.namespace_oid)
+    .bind(&search_path.0)
     .fetch_all(&mut *connection)
     .await
     .map_err(store_sqlx_error)?;
     Ok(rows
         .into_iter()
+        .filter(|row| row.get::<i64, _>("found_namespace_oid") != installation.namespace_oid)
         .map(|row| SchemaFinding::ShadowedTable {
             table: row.get("name"),
             expected_schema: installation.namespace.clone(),
@@ -516,20 +580,18 @@ pub(crate) fn normalize_predicate(predicate: &str) -> String {
 async fn read_seed_row_findings(
     connection: &mut PgConnection,
     installation: &Installation,
+    resolved: &BTreeMap<String, ResolvedTable>,
     expected: &SchemaShape,
     found: &SchemaShape,
 ) -> Result<Vec<SchemaFinding>, StoreError> {
     let mut findings = Vec::new();
     for (table, detail) in SEED_ROWS {
+        let Some(table_oid) = resolved.get(table).map(|table| table.oid) else {
+            continue;
+        };
         if !found.tables.contains_key(table)
-            || !probe_columns_match_expected(
-                connection,
-                installation,
-                expected,
-                table,
-                &["singleton"],
-            )
-            .await?
+            || !probe_columns_match_expected(connection, table_oid, expected, table, &["singleton"])
+                .await?
         {
             continue;
         }
@@ -552,10 +614,11 @@ async fn read_seed_row_findings(
     // carry it too: a host gating its migration CI on `verify_schema` would
     // otherwise pass a database whose secret it seeded at the wrong width and
     // fail at the production open instead.
-    if found.tables.contains_key("lash_await_event_meta")
+    if let Some(meta_oid) = resolved.get("lash_await_event_meta").map(|table| table.oid)
+        && found.tables.contains_key("lash_await_event_meta")
         && probe_columns_match_expected(
             connection,
-            installation,
+            meta_oid,
             expected,
             "lash_await_event_meta",
             &["singleton", "signing_secret"],

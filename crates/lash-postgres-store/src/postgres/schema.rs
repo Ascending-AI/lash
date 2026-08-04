@@ -43,11 +43,25 @@ pub(crate) async fn ensure_schema(
     if options.provisioning == SchemaProvisioning::LashManaged {
         // Preflight before the DDL: a stale baseline must be rejected rather than
         // have this build's creation statements layered over it.
-        if let Some(installation) = resolve_installation(&mut tx).await?
+        let search_path = read_search_path(&mut tx).await?;
+        if let Some(installation) = resolve_installation(&mut tx, &search_path).await?
             && let ComponentVersion::Readable(Some(version)) =
                 read_component_version(&mut tx, &installation, &SchemaShape::expected()).await?
             && version != SCHEMA_VERSION
         {
+            // Same field set as every other outcome, built from what the preflight
+            // knows: it runs before the structural read, so the only finding it can
+            // have is the version itself.
+            let preflight = SchemaReport {
+                schema: Some(installation.namespace().to_string()),
+                expected_version: SCHEMA_VERSION,
+                found_version: Some(version),
+                findings: vec![SchemaFinding::VersionMismatch {
+                    expected: SCHEMA_VERSION,
+                    found: Some(version),
+                }],
+            };
+            record_schema_gate_decision(&preflight, options, "denied_version_preflight");
             return Err(version_mismatch_error(Some(version)));
         }
         tx.execute(SCHEMA_DDL).await.map_err(store_sqlx_error)?;
@@ -63,23 +77,20 @@ pub(crate) async fn ensure_schema(
         record_schema_gate_decision(&report, options, "denied_version");
         return Err(version_mismatch_error(report.found_version));
     }
-    if report.is_conformant() {
-        record_schema_gate_decision(&report, options, "allowed");
-    } else {
-        match options.check {
-            SchemaCheck::Enforce => {
-                record_schema_gate_decision(&report, options, "denied_shape");
-                return Err(StoreError::Backend(report.to_string()));
-            }
-            SchemaCheck::WarnOnly => {
-                record_schema_gate_decision(&report, options, "allowed_warn_only");
-                tracing::warn!(
-                    "opening Postgres storage against a non-conformant schema because \
-                     SchemaCheck::WarnOnly is configured: {report}"
-                );
-            }
+    let admitted_as = match (report.is_conformant(), options.check) {
+        (true, _) => "allowed",
+        (false, SchemaCheck::Enforce) => {
+            record_schema_gate_decision(&report, options, "denied_shape");
+            return Err(StoreError::Backend(report.to_string()));
         }
-    }
+        (false, SchemaCheck::WarnOnly) => {
+            tracing::warn!(
+                "opening Postgres storage against a non-conformant schema because \
+                 SchemaCheck::WarnOnly is configured: {report}"
+            );
+            "allowed_warn_only"
+        }
+    };
 
     let signing_secret: Option<Vec<u8>> = sqlx::query_scalar(
         "SELECT signing_secret FROM lash_await_event_meta WHERE singleton = TRUE",
@@ -92,42 +103,87 @@ pub(crate) async fn ensure_schema(
     // itself. Without this row there is no key to authenticate durable await-event
     // promises with, so there is nothing to hand back. A host-provisioned database
     // missing it must apply the seed statements from `schema.sql`.
-    let signing_secret = signing_secret.ok_or_else(|| {
-        StoreError::Backend(
-            "Postgres await-event signing secret row is missing from lash_await_event_meta; \
-             apply the seed statements from this build's schema.sql artifact"
-                .to_string(),
-        )
-    })?;
-    if signing_secret.len() != AWAIT_EVENT_SIGNING_SECRET_BYTES {
-        return Err(StoreError::Backend(format!(
-            "Postgres await-event signing secret has {} bytes, expected \
-             {AWAIT_EVENT_SIGNING_SECRET_BYTES}",
-            signing_secret.len()
-        )));
-    }
+    //
+    // The admission is recorded only after this succeeds. Logging it earlier would
+    // let a database with an unusable secret produce an admission event and then a
+    // rejected open, which is the one shape of decision evidence worse than none.
+    let signing_secret = match signing_secret {
+        Some(secret) if secret.len() == AWAIT_EVENT_SIGNING_SECRET_BYTES => secret,
+        Some(secret) => {
+            record_schema_gate_decision(&report, options, "denied_seed_secret_width");
+            return Err(StoreError::Backend(format!(
+                "Postgres await-event signing secret has {} bytes, expected \
+                 {AWAIT_EVENT_SIGNING_SECRET_BYTES}",
+                secret.len()
+            )));
+        }
+        None => {
+            record_schema_gate_decision(&report, options, "denied_seed_secret_missing");
+            return Err(StoreError::Backend(
+                "Postgres await-event signing secret row is missing from \
+                 lash_await_event_meta; apply the seed statements from this build's schema.sql \
+                 artifact"
+                    .to_string(),
+            ));
+        }
+    };
+    record_schema_gate_decision(&report, options, admitted_as);
     tx.commit().await.map_err(store_sqlx_error)?;
     Ok(signing_secret)
 }
 
 /// Runs the structural check under the published advisory key, held in *shared*
-/// mode for the duration of one transaction.
+/// mode, with every catalog read pinned to one snapshot.
 ///
-/// The key is the coordination point lash publishes for hosts, so verification has
-/// to take it or the protocol is only half real: a migration that takes the key
-/// would exclude opens but not the migration-CI verification the same docs
-/// recommend. Shared mode is the right strength — concurrent verifications do not
-/// conflict with each other, an exclusive holder (a lash open, or a host migration
-/// following the protocol) excludes them all, and one transaction gives every
-/// catalog read a single snapshot.
+/// Two orderings matter here and neither is incidental.
+///
+/// The key is taken at *session* scope, before the transaction begins, because a
+/// `REPEATABLE READ` snapshot is established by the transaction's first statement —
+/// and that includes the statement that waits for a lock. Acquiring an
+/// `xact`-scoped lock as the first statement would therefore snapshot the catalog
+/// *before* the lock was granted, so a verification that queued behind a host
+/// migration would go on to describe the schema as it was before that migration.
+/// Measured on PostgreSQL 16: a transaction whose first statement blocks on the key
+/// cannot see a table the lock holder committed while it waited.
+///
+/// The transaction is then `REPEATABLE READ` so every `pg_catalog` read shares one
+/// snapshot. `READ COMMITTED` would re-snapshot per statement, which is what let a
+/// concurrently committed catalog row appear midway through a verification.
 pub(crate) async fn verify_schema_under_advisory_lock(
     pool: &PgPool,
 ) -> Result<SchemaReport, StoreError> {
-    let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
     let (lock_namespace, lock_key) = SCHEMA_ADVISORY_LOCK_KEY;
-    sqlx::query("SELECT pg_advisory_xact_lock_shared($1, $2)")
-        .bind(lock_namespace)
-        .bind(lock_key)
+    // Detached rather than borrowed from the pool, because the lock this takes is
+    // *session*-scoped: a future cancelled between the lock and the unlock would
+    // otherwise hand a still-locked connection back to the pool and block every
+    // later exclusive holder for that connection's lifetime. An owned connection is
+    // closed when it drops — on the error and cancellation paths as much as the
+    // happy one — and the backend releases the session lock with it.
+    let mut connection = pool.acquire().await.map_err(store_sqlx_error)?.detach();
+    let verified = async {
+        sqlx::query("SELECT pg_advisory_lock_shared($1, $2)")
+            .bind(lock_namespace)
+            .bind(lock_key)
+            .execute(&mut connection)
+            .await
+            .map_err(store_sqlx_error)?;
+        verify_within_repeatable_read(&mut connection).await
+    }
+    .await;
+    let _ = sqlx::Connection::close(connection).await;
+    verified
+}
+
+/// Reads the schema inside one `REPEATABLE READ` transaction.
+async fn verify_within_repeatable_read(
+    connection: &mut sqlx::PgConnection,
+) -> Result<SchemaReport, StoreError> {
+    let mut tx = sqlx::Connection::begin(connection)
+        .await
+        .map_err(store_sqlx_error)?;
+    // Must precede every other statement in the transaction: PostgreSQL rejects the
+    // change once a snapshot has been established.
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
