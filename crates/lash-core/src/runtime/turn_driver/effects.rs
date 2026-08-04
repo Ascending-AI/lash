@@ -1,19 +1,158 @@
 use super::*;
 
-impl RuntimeTurnDriver<'_> {
-    fn record_pending_queue_claim(&mut self, claim: crate::QueuedWorkClaim) {
-        // A later checkpoint can reclaim a replay-restored predecessor claim
-        // under the successor session-lease generation. Keep only the newer
-        // authority for any overlapping durable batch.
-        self.pending_queue_claims.retain(|pending| {
-            !pending.batches.iter().any(|pending_batch| {
-                claim
+fn compare_queue_claim_authority(
+    left: &crate::QueuedWorkClaim,
+    right: &crate::QueuedWorkClaim,
+) -> std::cmp::Ordering {
+    (left.session_lease_generation, left.fencing_token)
+        .cmp(&(right.session_lease_generation, right.fencing_token))
+}
+
+fn merge_pending_queue_claim_authority(
+    pending_claims: &mut Vec<crate::QueuedWorkClaim>,
+    mut incoming: crate::QueuedWorkClaim,
+) -> Result<(), RuntimeError> {
+    for pending in pending_claims.iter_mut() {
+        let overlapping = pending
+            .batches
+            .iter()
+            .filter(|pending_batch| {
+                incoming
                     .batches
                     .iter()
                     .any(|batch| batch.batch_id == pending_batch.batch_id)
             })
-        });
-        self.pending_queue_claims.push(claim);
+            .map(|batch| batch.batch_id.clone())
+            .collect::<Vec<_>>();
+        if overlapping.is_empty() {
+            continue;
+        }
+
+        match compare_queue_claim_authority(pending, &incoming) {
+            std::cmp::Ordering::Less => pending
+                .batches
+                .retain(|batch| !overlapping.contains(&batch.batch_id)),
+            std::cmp::Ordering::Greater => incoming
+                .batches
+                .retain(|batch| !overlapping.contains(&batch.batch_id)),
+            std::cmp::Ordering::Equal
+                if pending.claim_id == incoming.claim_id
+                    && pending.lease_token == incoming.lease_token =>
+            {
+                incoming
+                    .batches
+                    .retain(|batch| !overlapping.contains(&batch.batch_id));
+            }
+            std::cmp::Ordering::Equal => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::StoreCommitFailed,
+                    format!(
+                        "queued-work rows {overlapping:?} have conflicting claim authorities `{}` and `{}` at session generation {} and fencing token {}",
+                        pending.claim_id,
+                        incoming.claim_id,
+                        incoming.session_lease_generation,
+                        incoming.fencing_token,
+                    ),
+                ));
+            }
+        }
+    }
+    pending_claims.retain(|claim| !claim.batches.is_empty());
+    if !incoming.batches.is_empty() {
+        pending_claims.push(incoming);
+    }
+    Ok(())
+}
+
+fn merge_pending_turn_input_claim_authority(
+    pending_claims: &mut Vec<crate::TurnInputClaim>,
+    incoming: &mut crate::TurnInputClaim,
+) -> Result<std::collections::HashSet<String>, RuntimeError> {
+    let mut already_delivered = std::collections::HashSet::new();
+    for pending in pending_claims.iter_mut() {
+        let overlapping = pending
+            .inputs
+            .iter()
+            .filter(|pending_input| {
+                incoming
+                    .inputs
+                    .iter()
+                    .any(|input| input.input_id == pending_input.input_id)
+            })
+            .map(|input| input.input_id.clone())
+            .collect::<std::collections::HashSet<_>>();
+        if overlapping.is_empty() {
+            continue;
+        }
+
+        match (pending.session_lease_generation, pending.fencing_token)
+            .cmp(&(incoming.session_lease_generation, incoming.fencing_token))
+        {
+            std::cmp::Ordering::Less => {
+                already_delivered.extend(overlapping.iter().cloned());
+                for application in pending
+                    .applications
+                    .iter()
+                    .filter(|application| overlapping.contains(&application.input_id))
+                {
+                    if !incoming
+                        .applications
+                        .iter()
+                        .any(|existing| existing.input_id == application.input_id)
+                    {
+                        incoming.applications.push(application.clone());
+                    }
+                }
+                pending
+                    .inputs
+                    .retain(|input| !overlapping.contains(&input.input_id));
+                pending
+                    .applications
+                    .retain(|application| !overlapping.contains(&application.input_id));
+            }
+            std::cmp::Ordering::Greater => {
+                incoming
+                    .inputs
+                    .retain(|input| !overlapping.contains(&input.input_id));
+                incoming
+                    .applications
+                    .retain(|application| !overlapping.contains(&application.input_id));
+            }
+            std::cmp::Ordering::Equal
+                if pending.claim_id == incoming.claim_id
+                    && pending.lease_token == incoming.lease_token =>
+            {
+                incoming
+                    .inputs
+                    .retain(|input| !overlapping.contains(&input.input_id));
+                incoming
+                    .applications
+                    .retain(|application| !overlapping.contains(&application.input_id));
+            }
+            std::cmp::Ordering::Equal => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::StoreCommitFailed,
+                    format!(
+                        "turn-input rows {overlapping:?} have conflicting claim authorities `{}` and `{}` at session generation {} and fencing token {}",
+                        pending.claim_id,
+                        incoming.claim_id,
+                        incoming.session_lease_generation,
+                        incoming.fencing_token,
+                    ),
+                ));
+            }
+        }
+    }
+    pending_claims.retain(|claim| !claim.inputs.is_empty());
+    Ok(already_delivered)
+}
+
+impl RuntimeTurnDriver<'_> {
+    fn merge_pending_queue_claim_authority(
+        &mut self,
+        claim: crate::QueuedWorkClaim,
+    ) -> Result<(), RuntimeError> {
+        merge_pending_queue_claim_authority(&mut self.pending_queue_claims, claim)
     }
 
     pub(in crate::runtime) async fn execute_checkpoint_locally(
@@ -23,7 +162,6 @@ impl RuntimeTurnDriver<'_> {
         checkpoint: CheckpointKind,
         event_tx: &mpsc::Sender<RuntimeStreamEvent>,
     ) -> RuntimeEffectOutcome {
-        let prior_queue_claim_count = self.pending_queue_claims.len();
         let result = self
             .run_checkpoint(messages, protocol_iteration, checkpoint, event_tx)
             .await
@@ -31,7 +169,10 @@ impl RuntimeTurnDriver<'_> {
         RuntimeEffectOutcome::Checkpoint {
             result,
             claims: Box::new(crate::runtime::effect::CheckpointClaimSet {
-                queued_work_claims: self.pending_queue_claims[prior_queue_claim_count..].to_vec(),
+                // A checkpoint outcome is a self-contained authority snapshot.
+                // Replay must never reconstruct it from mutations to the
+                // driver's resident claim set.
+                queued_work_claims: self.pending_queue_claims.clone(),
                 turn_input_claim: self.pending_checkpoint_turn_input_claim.clone(),
             }),
         }
@@ -63,7 +204,7 @@ impl RuntimeTurnDriver<'_> {
             .map_err(RuntimeEffectControllerError::into_runtime_error)?;
         let delivery = result.map_err(RuntimeEffectControllerError::into_runtime_error)?;
         for claim in queued_work_claims {
-            self.record_pending_queue_claim(claim);
+            self.merge_pending_queue_claim_authority(claim)?;
         }
         if let Some(claim) = turn_input_claim {
             match self.pending_checkpoint_turn_input_claim.as_ref() {
@@ -187,8 +328,16 @@ impl RuntimeTurnDriver<'_> {
             "checkpoint claims must be resolved before another checkpoint runs"
         );
         self.pending_checkpoint_turn_input_claim = turn_input_claim;
-        if let Some(claim) = self.pending_checkpoint_turn_input_claim.as_ref() {
-            let materialized = claim
+        if let Some(claim) = self.pending_checkpoint_turn_input_claim.as_mut() {
+            let already_delivered = merge_pending_turn_input_claim_authority(
+                &mut self.pending_turn_input_claims,
+                claim,
+            )?;
+            let mut delivery_claim = claim.clone();
+            delivery_claim
+                .inputs
+                .retain(|input| !already_delivered.contains(&input.input_id));
+            let materialized = delivery_claim
                 .materialize_for_checkpoint(
                     self.host.core.durability.attachment_store.as_ref(),
                     self.host.core.attachment_source_policy.as_ref(),
@@ -226,7 +375,7 @@ impl RuntimeTurnDriver<'_> {
             committed.extend(materialized.messages);
             transient_messages.extend(materialized.transient_messages);
             turn_causes.extend(materialized.turn_causes);
-            self.record_pending_queue_claim(claim);
+            self.merge_pending_queue_claim_authority(claim)?;
         }
         let plugins = Arc::clone(self.session.plugins());
         let applied = plugins
@@ -423,4 +572,113 @@ async fn normalize_plugin_attachment_source(
         *source = crate::AttachmentSource::stored(attachment_ref);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod claim_authority_tests {
+    use super::*;
+
+    fn coalesced_batch(batch_id: &str, enqueue_seq: u64) -> crate::QueuedWorkBatch {
+        let policy = crate::WakeTurnPolicy::coalesce(
+            crate::DeliveryPolicy::EarliestSafeBoundary,
+            crate::WakeCoalescingKey::Group("fig905".to_string()),
+        );
+        crate::QueuedWorkBatch {
+            batch_id: batch_id.to_string(),
+            session_id: "fig905".to_string(),
+            enqueue_seq,
+            source_key: Some(format!("fig905:{batch_id}")),
+            delivery_policy: policy.delivery(),
+            slot_policy: policy.queue_slot_policy(),
+            merge_key: policy.queue_merge_key(),
+            available_at_ms: 0,
+            enqueued_at_ms: 0,
+            items: Vec::new(),
+        }
+    }
+
+    fn claim(
+        claim_id: &str,
+        generation: u64,
+        fencing_token: u64,
+        batches: &[(&str, u64)],
+    ) -> crate::QueuedWorkClaim {
+        crate::QueuedWorkClaim {
+            session_id: "fig905".to_string(),
+            claim_id: claim_id.to_string(),
+            owner: crate::LeaseOwnerIdentity::opaque("fig905", claim_id),
+            lease_token: format!("token:{claim_id}"),
+            fencing_token,
+            session_lease_generation: generation,
+            batches: batches
+                .iter()
+                .map(|(batch_id, enqueue_seq)| coalesced_batch(batch_id, *enqueue_seq))
+                .collect(),
+        }
+    }
+
+    fn authorities(claims: &[crate::QueuedWorkClaim]) -> Vec<(&str, &str)> {
+        let mut rows = claims
+            .iter()
+            .flat_map(|claim| {
+                claim
+                    .batches
+                    .iter()
+                    .map(move |batch| (batch.batch_id.as_str(), claim.claim_id.as_str()))
+            })
+            .collect::<Vec<_>>();
+        rows.sort_unstable();
+        rows
+    }
+
+    #[test]
+    fn one_overlap_keeps_the_successor_in_the_complete_checkpoint_claim_set() {
+        let mut pending = vec![claim("predecessor", 1, 1, &[("a", 1)])];
+        merge_pending_queue_claim_authority(&mut pending, claim("successor", 2, 2, &[("a", 1)]))
+            .expect("merge one overlapping row");
+
+        assert_eq!(authorities(&pending), vec![("a", "successor")]);
+    }
+
+    #[test]
+    fn two_coalesced_overlaps_replace_both_rows_without_slice_arithmetic() {
+        let mut pending = vec![
+            claim("predecessor-a", 1, 1, &[("a", 1)]),
+            claim("predecessor-b", 1, 1, &[("b", 2)]),
+        ];
+        merge_pending_queue_claim_authority(
+            &mut pending,
+            claim("successor", 2, 2, &[("a", 1), ("b", 2)]),
+        )
+        .expect("merge the WakeTurnPolicy::coalesce claim shape");
+
+        assert_eq!(
+            authorities(&pending),
+            vec![("a", "successor"), ("b", "successor")]
+        );
+    }
+
+    #[test]
+    fn partial_overlap_retains_the_predecessors_non_overlapping_row() {
+        let mut pending = vec![claim("predecessor", 1, 1, &[("a", 1), ("b", 2)])];
+        merge_pending_queue_claim_authority(&mut pending, claim("successor", 2, 2, &[("a", 1)]))
+            .expect("merge a partial overlap");
+
+        assert_eq!(
+            authorities(&pending),
+            vec![("a", "successor"), ("b", "predecessor")]
+        );
+    }
+
+    #[test]
+    fn restored_older_authority_cannot_replace_a_live_successor() {
+        let mut pending = vec![claim("successor", 3, 4, &[("a", 1)])];
+        merge_pending_queue_claim_authority(
+            &mut pending,
+            claim("restored-predecessor", 2, 3, &[("a", 1)]),
+        )
+        .expect("ignore stale replay authority");
+
+        assert_eq!(authorities(&pending), vec![("a", "successor")]);
+    }
 }

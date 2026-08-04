@@ -532,16 +532,16 @@ pub mod runtime {
     /// an expected retirement (a deleted session) from a real fault.
     pub use lash_core::RuntimeErrorCause;
     pub use lash_core::runtime::{
-        AssembledTurn, AwaitEventResolver, DirectCompletionClient, EmbeddedRuntimeHost, EventSink,
-        ExecutionScope, InlineRuntimeEffectController, LashRuntime, LlmAttachmentSpec,
-        LlmRequestSpec, NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
-        QueuedWorkDriver, QueuedWorkRunError, QueuedWorkRunErrorClass, QueuedWorkRunHandle,
-        QueuedWorkRunRequest, QueuedWorkWakeDisposition, QueuedWorkWakeFailure,
-        RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-        RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-        RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeHandle,
-        RuntimeInvocation, RuntimeObservation, RuntimeScope, RuntimeTurnPhase,
-        RuntimeTurnPhaseProbe, ScopedEffectController, TurnContext,
+        AssembledTurn, AwaitEventResolver, CheckpointClaimSet, DirectCompletionClient,
+        EmbeddedRuntimeHost, EventSink, ExecutionScope, InlineRuntimeEffectController, LashRuntime,
+        LlmAttachmentSpec, LlmRequestSpec, NoopEventSink, NoopTurnActivitySink, ProcessCommand,
+        ProcessEffectOutcome, QueuedWorkDriver, QueuedWorkRunError, QueuedWorkRunErrorClass,
+        QueuedWorkRunHandle, QueuedWorkRunRequest, QueuedWorkWakeDisposition,
+        QueuedWorkWakeFailure, RuntimeEffectCommand, RuntimeEffectController,
+        RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
+        RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEnvironmentBuilder, RuntimeError,
+        RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeObservation, RuntimeScope,
+        RuntimeTurnPhase, RuntimeTurnPhaseProbe, ScopedEffectController, TurnContext,
     };
     /// The host clock accepted by
     /// [`LashCoreBuilder::clock`](crate::LashCoreBuilder::clock), used for

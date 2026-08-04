@@ -113,7 +113,6 @@ impl InMemoryPendingTurnInput {
         }
     }
 }
-
 impl InMemorySessionExecutionLease {
     fn is_live(&self, now: u64) -> bool {
         self.lease_token.is_some() && self.expires_at_epoch_ms > now
@@ -605,12 +604,15 @@ impl InMemorySessionStore {
                             turn_id,
                             checkpoint,
                         } => {
-                            entry.input.state == crate::TurnInputState::PendingActive
-                                && entry
-                                    .input
-                                    .ingress
-                                    .active_turn_id()
-                                    .is_some_and(|active| active == turn_id)
+                            matches!(
+                                entry.input.state,
+                                crate::TurnInputState::PendingActive
+                                    | crate::TurnInputState::Accepted
+                            ) && entry
+                                .input
+                                .ingress
+                                .active_turn_id()
+                                .is_some_and(|active| active == turn_id)
                                 && entry.input.ingress.admits_checkpoint(*checkpoint)
                         }
                         crate::TurnInputClaimMode::NextTurn => {
@@ -1111,9 +1113,34 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     })
                     .count();
                 if matches != completed.batch_ids.len() {
+                    let row_id = completed.batch_ids.iter().find(|batch_id| {
+                        !queued.iter().any(|entry| {
+                            entry.batch.session_id == completed.session_id
+                                && entry.batch.batch_id == **batch_id
+                                && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
+                                && entry.claim_token.as_deref()
+                                    == Some(completed.lease_token.as_str())
+                        })
+                    });
+                    let current = row_id.and_then(|batch_id| {
+                        queued.iter().find(|entry| {
+                            entry.batch.session_id == completed.session_id
+                                && entry.batch.batch_id == *batch_id
+                        })
+                    });
                     return Err(crate::store::StoreError::QueuedWorkClaimSuperseded {
                         session_id: completed.session_id.clone(),
                         claim_id: completed.claim_id.clone(),
+                        row_id: row_id.cloned().map(String::into_boxed_str),
+                        superseding_claim_id: current
+                            .and_then(|entry| entry.claim_id.clone())
+                            .map(String::into_boxed_str),
+                        superseding_session_lease_generation: current.and_then(|entry| {
+                            entry
+                                .claim_token
+                                .as_ref()
+                                .map(|_| Box::new(entry.claim_session_lease_generation))
+                        }),
                     });
                 }
             }
@@ -1134,9 +1161,34 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     })
                     .count();
                 if matches != completed.input_ids.len() {
+                    let row_id = completed.input_ids.iter().find(|input_id| {
+                        !pending.iter().any(|entry| {
+                            entry.input.session_id == completed.session_id
+                                && entry.input.input_id == **input_id
+                                && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
+                                && entry.claim_token.as_deref()
+                                    == Some(completed.lease_token.as_str())
+                        })
+                    });
+                    let current = row_id.and_then(|input_id| {
+                        pending.iter().find(|entry| {
+                            entry.input.session_id == completed.session_id
+                                && entry.input.input_id == *input_id
+                        })
+                    });
                     return Err(crate::store::StoreError::TurnInputClaimSuperseded {
                         session_id: completed.session_id.clone(),
                         claim_id: completed.claim_id.clone(),
+                        row_id: row_id.cloned().map(String::into_boxed_str),
+                        superseding_claim_id: current
+                            .and_then(|entry| entry.claim_id.clone())
+                            .map(String::into_boxed_str),
+                        superseding_session_lease_generation: current.and_then(|entry| {
+                            entry
+                                .claim_token
+                                .as_ref()
+                                .map(|_| Box::new(entry.claim_session_lease_generation))
+                        }),
                     });
                 }
             }

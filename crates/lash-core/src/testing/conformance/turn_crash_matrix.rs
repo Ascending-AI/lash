@@ -1048,6 +1048,94 @@ impl RuntimeEffectController for SeamEffectController {
     }
 }
 
+#[derive(Clone)]
+struct CrashAfterCheckpointExecutionController {
+    inner: Arc<dyn RuntimeEffectController>,
+}
+
+#[async_trait::async_trait]
+impl crate::AwaitEventResolver for CrashAfterCheckpointExecutionController {
+    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
+        self.inner.replay_ownership()
+    }
+
+    fn allows_process_lifetime_completion_keys(&self) -> bool {
+        self.inner.allows_process_lifetime_completion_keys()
+    }
+
+    async fn await_event_key(
+        &self,
+        scope: &crate::ExecutionScope,
+        wait: crate::AwaitEventWaitIdentity,
+    ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
+        self.inner.await_event_key(scope, wait).await
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+        resolution: crate::Resolution,
+    ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
+        self.inner.resolve_await_event(key, resolution).await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+    ) -> Result<Option<crate::Resolution>, crate::RuntimeError> {
+        self.inner.peek_await_event(key).await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+        cancel: tokio_util::sync::CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<crate::Resolution, crate::RuntimeError> {
+        self.inner.await_await_event(key, cancel, deadline).await
+    }
+
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), crate::RuntimeError> {
+        self.inner.revoke_await_events_for_session(session_id).await
+    }
+
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), crate::RuntimeError> {
+        self.inner.cancel_await_events_for_session(session_id).await
+    }
+}
+
+#[async_trait::async_trait]
+impl RuntimeEffectController for CrashAfterCheckpointExecutionController {
+    async fn execute_effect(
+        &self,
+        envelope: RuntimeEffectEnvelope,
+        executor: RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        if !matches!(
+            &envelope.command,
+            crate::RuntimeEffectCommand::Checkpoint {
+                checkpoint: crate::CheckpointKind::AfterWork,
+            }
+        ) {
+            return self.inner.execute_effect(envelope, executor).await;
+        }
+        let crash_after_execution =
+            RuntimeEffectLocalExecutor::testing(move |envelope| async move {
+                let _outcome = executor.execute(envelope).await;
+                std::process::exit(86);
+            });
+        self.inner
+            .execute_effect(envelope, crash_after_execution)
+            .await
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct TraceTool {
     marker: Option<std::path::PathBuf>,
@@ -1282,6 +1370,9 @@ enum ColdProcessTurnAction {
     EffectAfterExternalBeforeOutcome,
     FinalCommitBoundary,
     FinalCommitInsideCall,
+    CheckpointAfterExecuteBeforeOutcome,
+    RecoverFinalCommitBoundary,
+    PeerReclaim,
     Recover,
 }
 
@@ -1301,6 +1392,11 @@ impl ColdProcessTurnAction {
             Self::EffectAfterExternalBeforeOutcome => "turn_effect_after_external",
             Self::FinalCommitBoundary => "turn_final_commit_boundary",
             Self::FinalCommitInsideCall => "turn_final_commit_inside",
+            Self::CheckpointAfterExecuteBeforeOutcome => {
+                "turn_checkpoint_after_execute_before_outcome"
+            }
+            Self::RecoverFinalCommitBoundary => "turn_recover_final_commit_boundary",
+            Self::PeerReclaim => "turn_peer_reclaim",
             Self::Recover => "turn_recover",
         }
     }
@@ -1321,7 +1417,7 @@ impl ColdProcessTurnAction {
                 }),
                 placement: CrashPlacement::AfterExternalEffectBeforeOutcome,
             }),
-            Self::FinalCommitBoundary => Some(TurnCrashPoint {
+            Self::FinalCommitBoundary | Self::RecoverFinalCommitBoundary => Some(TurnCrashPoint {
                 operation: TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
                     settles_queue: true,
                     settles_turn_input: true,
@@ -1337,7 +1433,7 @@ impl ColdProcessTurnAction {
                 }),
                 placement: CrashPlacement::InsideCall,
             }),
-            Self::Recover => None,
+            Self::CheckpointAfterExecuteBeforeOutcome | Self::PeerReclaim | Self::Recover => None,
         }
     }
 }
@@ -1526,14 +1622,68 @@ pub async fn cold_process_real_turn_driver(
         "turn_effect_after_external" => ColdProcessTurnAction::EffectAfterExternalBeforeOutcome,
         "turn_final_commit_boundary" => ColdProcessTurnAction::FinalCommitBoundary,
         "turn_final_commit_inside" => ColdProcessTurnAction::FinalCommitInsideCall,
+        "turn_checkpoint_after_execute_before_outcome" => {
+            ColdProcessTurnAction::CheckpointAfterExecuteBeforeOutcome
+        }
+        "turn_recover_final_commit_boundary" => ColdProcessTurnAction::RecoverFinalCommitBoundary,
+        "turn_peer_reclaim" => ColdProcessTurnAction::PeerReclaim,
         "turn_recover" => ColdProcessTurnAction::Recover,
         other => panic!("unknown cold-process real-turn action `{other}`"),
     };
     let identity = ReferenceIdentity::for_scenario(scenario);
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    if action != ColdProcessTurnAction::Recover {
+    let recovers_existing_turn = matches!(
+        action,
+        ColdProcessTurnAction::Recover
+            | ColdProcessTurnAction::RecoverFinalCommitBoundary
+            | ColdProcessTurnAction::PeerReclaim
+    );
+    if !recovers_existing_turn {
         seed_reference_ingress(&store, &identity).await;
+    } else if action == ColdProcessTurnAction::PeerReclaim {
+        let owner =
+            LeaseOwnerIdentity::opaque("cold-process-peer", format!("{scenario}:peer-reclaim"));
+        let lease = tokio::time::timeout(RECOVERY_TIMEOUT, async {
+            loop {
+                super::bind_conformance_session(&store, &identity.session_id).await;
+                let outcome = store
+                    .try_claim_session_execution_lease(
+                        &identity.session_id,
+                        &owner,
+                        recovery_timings().ttl_ms(),
+                    )
+                    .await
+                    .expect("poll peer-reclaim lease");
+                if let Some(lease) = outcome.acquired() {
+                    break lease;
+                }
+                tokio::time::sleep(recovery_timings().renew_interval()).await;
+            }
+        })
+        .await
+        .expect("peer can acquire crashed turn lease");
+        let claim = store
+            .claim_ready_queued_work(
+                &identity.session_id,
+                &lease.fence(),
+                &owner,
+                crate::QueuedWorkClaimBoundary::Idle,
+                64,
+            )
+            .await
+            .expect("peer reclaims queued-work row")
+            .expect("crashed turn left one queued-work row");
+        assert_eq!(claim.batches.len(), 1, "peer reclaims exactly one row");
+        store
+            .release_session_execution_lease(&lease.completion())
+            .await
+            .expect("release peer lease without settling peer row");
+        println!(
+            "peer_claim row={} claim={} generation={}",
+            claim.batches[0].batch_id, claim.claim_id, claim.session_lease_generation
+        );
+        return;
     } else {
         let owner = LeaseOwnerIdentity::opaque(
             "cold-process-recovery-probe",
@@ -1585,11 +1735,25 @@ pub async fn cold_process_real_turn_driver(
     } else {
         control.clear();
     }
+    let effect_controller: Arc<dyn RuntimeEffectController> =
+        if action == ColdProcessTurnAction::CheckpointAfterExecuteBeforeOutcome {
+            Arc::new(CrashAfterCheckpointExecutionController {
+                inner: effect_controller,
+            })
+        } else {
+            effect_controller
+        };
     let task_identity = identity.clone();
     let task =
         crate::task::spawn(
             async move { drive_turn(runtime, effect_controller, &task_identity).await },
         );
+    if action == ColdProcessTurnAction::CheckpointAfterExecuteBeforeOutcome {
+        let result = task.await;
+        panic!(
+            "checkpoint crash controller returned instead of terminating the process: {result:?}"
+        );
+    }
     if action != ColdProcessTurnAction::Recover {
         control.wait_for_hit().await;
         println!("crash_ready");
@@ -1891,6 +2055,10 @@ mod tests {
     fn outcome_validation_rejects_a_known_defect_without_a_ticket() {
         let generated = generated_points(&golden_trace());
         let mut table = turn_crash_matrix_outcomes();
+        assert!(
+            validate_outcome_table(&generated, &table).is_ok(),
+            "the synthetic defect test must start from a valid oracle"
+        );
         let defect = install_known_defect_fixture(&mut table);
         defect.ticket.clear();
         assert!(
@@ -1903,6 +2071,10 @@ mod tests {
     fn outcome_validation_rejects_a_non_exact_known_defect() {
         let generated = generated_points(&golden_trace());
         let mut table = turn_crash_matrix_outcomes();
+        assert!(
+            validate_outcome_table(&generated, &table).is_ok(),
+            "the synthetic defect test must start from a valid oracle"
+        );
         let defect = install_known_defect_fixture(&mut table);
         defect.expected_defective.queued_work = None;
         assert!(

@@ -655,6 +655,9 @@ impl SessionCommitStore for PostgresSessionStore {
                 return Err(StoreError::QueuedWorkClaimSuperseded {
                     session_id: completed.session_id.clone(),
                     claim_id: completed.claim_id.clone(),
+                    row_id: None,
+                    superseding_claim_id: None,
+                    superseding_session_lease_generation: None,
                 });
             }
             ensure_queued_work_completion_tx(&mut tx, completed).await?;
@@ -664,6 +667,9 @@ impl SessionCommitStore for PostgresSessionStore {
                 return Err(StoreError::TurnInputClaimSuperseded {
                     session_id: completed.session_id.clone(),
                     claim_id: completed.claim_id.clone(),
+                    row_id: None,
+                    superseding_claim_id: None,
+                    superseding_session_lease_generation: None,
                 });
             }
             ensure_turn_input_completion_tx(&mut tx, completed).await?;
@@ -1127,6 +1133,9 @@ async fn complete_queued_work_claims_tx(
                 return Err(StoreError::QueuedWorkClaimSuperseded {
                     session_id: completed.session_id.clone(),
                     claim_id: completed.claim_id.clone(),
+                    row_id: Some(batch_id.clone().into_boxed_str()),
+                    superseding_claim_id: None,
+                    superseding_session_lease_generation: None,
                 });
             }
         }
@@ -1163,6 +1172,9 @@ pub(crate) async fn complete_turn_input_claims_tx(
                 return Err(StoreError::TurnInputClaimSuperseded {
                     session_id: completed.session_id.clone(),
                     claim_id: completed.claim_id.clone(),
+                    row_id: Some(input_id.clone().into_boxed_str()),
+                    superseding_claim_id: None,
+                    superseding_session_lease_generation: None,
                 });
             }
         }
@@ -2618,6 +2630,7 @@ async fn claim_pending_turn_inputs_postgres_tx(
     }
     let generation = session_execution_lease.fencing_token;
     let now = postgres_transaction_epoch_ms(tx).await?;
+    let active_turn = matches!(mode, lash_core::TurnInputClaimMode::ActiveTurn { .. });
     let wanted_state = match &mode {
         lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
             lash_core::TurnInputState::PendingActive
@@ -2634,8 +2647,11 @@ async fn claim_pending_turn_inputs_postgres_tx(
     );
     query
         .push_bind(session_id)
-        .push(" AND state = ")
+        .push(" AND (state = ")
         .push_bind(wanted_state.as_str())
+        .push(" OR (")
+        .push_bind(active_turn)
+        .push(" AND state = 'accepted'))")
         .push(
             "
            AND (
@@ -2753,6 +2769,7 @@ async fn claim_pending_turn_inputs_postgres(
     ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
     let generation = session_execution_lease.fencing_token;
     let now = postgres_transaction_epoch_ms(&mut tx).await?;
+    let active_turn = matches!(mode, lash_core::TurnInputClaimMode::ActiveTurn { .. });
     let wanted_state = match &mode {
         lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
             lash_core::TurnInputState::PendingActive
@@ -2769,8 +2786,11 @@ async fn claim_pending_turn_inputs_postgres(
     );
     query
         .push_bind(session_id)
-        .push(" AND state = ")
+        .push(" AND (state = ")
         .push_bind(wanted_state.as_str())
+        .push(" OR (")
+        .push_bind(active_turn)
+        .push(" AND state = 'accepted'))")
         .push(
             "
            AND (

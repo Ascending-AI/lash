@@ -210,6 +210,9 @@ pub fn ensure_completion_owns_all_batches(
         return Err(StoreError::QueuedWorkClaimSuperseded {
             session_id: completed.session_id.clone(),
             claim_id: completed.claim_id.clone(),
+            row_id: None,
+            superseding_claim_id: None,
+            superseding_session_lease_generation: None,
         });
     }
     Ok(())

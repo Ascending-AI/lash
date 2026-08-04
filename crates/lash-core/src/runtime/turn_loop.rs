@@ -569,6 +569,9 @@ impl LashRuntime {
                 commit_effects.originating_turn_input_claims,
                 commit_effects.completed_queue_claims,
                 commit_effects.completed_turn_input_claims,
+                commit_effects.queue_claim_generations,
+                commit_effects.turn_input_claim_generations,
+                session_execution_lease.map(|lease| lease.fence().fencing_token),
                 commit_effects.enqueued_queue_batches,
                 // Any active-turn input that missed the turn's final
                 // checkpoint must become the next ordinary user turn. The

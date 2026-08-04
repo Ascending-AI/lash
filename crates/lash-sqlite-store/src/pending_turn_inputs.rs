@@ -192,16 +192,3 @@ impl TurnInputClaimLease {
         }
     }
 }
-
-pub(crate) fn ensure_turn_input_completion_owns_all_inputs(
-    completed: &lash_core::TurnInputCompletion,
-    owned_rows: usize,
-) -> Result<(), StoreError> {
-    if owned_rows != completed.input_ids.len() {
-        return Err(StoreError::TurnInputClaimSuperseded {
-            session_id: completed.session_id.clone(),
-            claim_id: completed.claim_id.clone(),
-        });
-    }
-    Ok(())
-}

@@ -501,7 +501,10 @@ type CheckpointOutcome = Result<CheckpointDelivery, RuntimeEffectControllerError
 pub struct CheckpointClaimSet {
     // Checkpoint replay skips the local executor that acquired these claims.
     // Journal them with the delivery so the replaying turn carries the same
-    // settlement authority into its atomic final commit.
+    // settlement authority into its atomic final commit. Outcomes written by
+    // older binaries have no claim set: one queued-work row and one active
+    // turn-input row per in-flight turn can be redelivered by the next lease
+    // generation, without loss.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) queued_work_claims: Vec<crate::QueuedWorkClaim>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

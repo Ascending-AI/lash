@@ -46,6 +46,16 @@ impl LogicalTurnClaims {
             .collect();
         let originating_queue_claims = completed_queue_claims.clone();
         let originating_turn_input_claims = completed_turn_input_claims.clone();
+        let queue_claim_generations = self
+            .queued
+            .iter()
+            .map(|claim| (claim.claim_id.clone(), claim.session_lease_generation))
+            .collect();
+        let turn_input_claim_generations = self
+            .turn_inputs
+            .iter()
+            .map(|claim| (claim.claim_id.clone(), claim.session_lease_generation))
+            .collect();
         let enqueued_queue_batches = match outcome {
             TurnOutcome::AgentFrameSwitch { frame_id, task, .. } if claimed => {
                 vec![
@@ -69,6 +79,8 @@ impl LogicalTurnClaims {
             originating_turn_input_claims,
             completed_queue_claims,
             completed_turn_input_claims,
+            queue_claim_generations,
+            turn_input_claim_generations,
             enqueued_queue_batches,
         }
     }
@@ -79,6 +91,8 @@ pub(super) struct LogicalTurnCommitEffects {
     pub(super) originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
     pub(super) completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
     pub(super) completed_turn_input_claims: Vec<crate::TurnInputCompletion>,
+    pub(super) queue_claim_generations: std::collections::HashMap<String, u64>,
+    pub(super) turn_input_claim_generations: std::collections::HashMap<String, u64>,
     pub(super) enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
 }
 

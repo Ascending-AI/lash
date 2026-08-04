@@ -741,26 +741,39 @@ pub(crate) async fn ensure_queued_work_completion_tx(
     completed: &QueuedWorkCompletion,
 ) -> Result<(), StoreError> {
     for batch_id in &completed.batch_ids {
-        let exists: Option<i64> = sqlx::query_scalar(
-            "SELECT 1::BIGINT FROM lash_queued_work_batches
+        let authority: Option<(Option<String>, Option<String>, i64)> = sqlx::query_as(
+            "SELECT claim_id, claim_token, claim_session_lease_generation
+             FROM lash_queued_work_batches
              WHERE session_id = $1
                AND batch_id = $2
-               AND claim_id = $3
-               AND claim_token = $4
              LIMIT 1
              FOR UPDATE",
         )
         .bind(&completed.session_id)
         .bind(batch_id)
-        .bind(&completed.claim_id)
-        .bind(&completed.lease_token)
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-        if exists.is_none() {
+        let owns_row = authority
+            .as_ref()
+            .is_some_and(|(claim_id, claim_token, _)| {
+                claim_id.as_deref() == Some(completed.claim_id.as_str())
+                    && claim_token.as_deref() == Some(completed.lease_token.as_str())
+            });
+        if !owns_row {
             return Err(StoreError::QueuedWorkClaimSuperseded {
                 session_id: completed.session_id.clone(),
                 claim_id: completed.claim_id.clone(),
+                row_id: Some(batch_id.clone().into_boxed_str()),
+                superseding_claim_id: authority
+                    .as_ref()
+                    .and_then(|(claim_id, _, _)| claim_id.clone())
+                    .map(String::into_boxed_str),
+                superseding_session_lease_generation: authority.as_ref().and_then(
+                    |(claim_id, _, generation)| {
+                        claim_id.as_ref().map(|_| Box::new(*generation as u64))
+                    },
+                ),
             });
         }
     }
@@ -966,26 +979,39 @@ pub(crate) async fn ensure_turn_input_completion_tx(
     completed: &lash_core::TurnInputCompletion,
 ) -> Result<(), StoreError> {
     for input_id in &completed.input_ids {
-        let exists: Option<i64> = sqlx::query_scalar(
-            "SELECT 1::BIGINT FROM lash_pending_turn_inputs
+        let authority: Option<(Option<String>, Option<String>, i64)> = sqlx::query_as(
+            "SELECT claim_id, claim_token, claim_session_lease_generation
+             FROM lash_pending_turn_inputs
              WHERE session_id = $1
                AND input_id = $2
-               AND claim_id = $3
-               AND claim_token = $4
              LIMIT 1
              FOR UPDATE",
         )
         .bind(&completed.session_id)
         .bind(input_id)
-        .bind(&completed.claim_id)
-        .bind(&completed.lease_token)
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-        if exists.is_none() {
+        let owns_row = authority
+            .as_ref()
+            .is_some_and(|(claim_id, claim_token, _)| {
+                claim_id.as_deref() == Some(completed.claim_id.as_str())
+                    && claim_token.as_deref() == Some(completed.lease_token.as_str())
+            });
+        if !owns_row {
             return Err(StoreError::TurnInputClaimSuperseded {
                 session_id: completed.session_id.clone(),
                 claim_id: completed.claim_id.clone(),
+                row_id: Some(input_id.clone().into_boxed_str()),
+                superseding_claim_id: authority
+                    .as_ref()
+                    .and_then(|(claim_id, _, _)| claim_id.clone())
+                    .map(String::into_boxed_str),
+                superseding_session_lease_generation: authority.as_ref().and_then(
+                    |(claim_id, _, generation)| {
+                        claim_id.as_ref().map(|_| Box::new(*generation as u64))
+                    },
+                ),
             });
         }
     }

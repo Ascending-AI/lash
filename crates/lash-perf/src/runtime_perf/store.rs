@@ -396,18 +396,11 @@ impl RuntimePerfStore {
             .lock()
             .expect("lock perf pending turn inputs");
         pending.sort_by_key(|entry| entry.input.enqueue_seq);
-        let wanted_state = match &mode {
-            lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
-                lash_core::TurnInputState::PendingActive
-            }
-            lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
-        };
         let selected_indices = pending
             .iter()
             .enumerate()
             .filter(|(_, entry)| {
                 entry.input.session_id == session_id
-                    && entry.input.state == wanted_state
                     && (entry.claim_token.is_none()
                         || entry.claim_session_lease_generation != generation)
             })
@@ -416,7 +409,11 @@ impl RuntimePerfStore {
                     turn_id,
                     checkpoint,
                 } => {
-                    entry
+                    matches!(
+                        entry.input.state,
+                        lash_core::TurnInputState::PendingActive
+                            | lash_core::TurnInputState::Accepted
+                    ) && entry
                         .input
                         .ingress
                         .active_turn_id()
@@ -680,6 +677,9 @@ impl SessionCommitStore for RuntimePerfStore {
                     return Err(StoreError::TurnInputClaimSuperseded {
                         session_id: completed.session_id.clone(),
                         claim_id: completed.claim_id.clone(),
+                        row_id: None,
+                        superseding_claim_id: None,
+                        superseding_session_lease_generation: None,
                     });
                 }
             }
@@ -718,6 +718,9 @@ impl SessionCommitStore for RuntimePerfStore {
                 return Err(StoreError::QueuedWorkClaimSuperseded {
                     session_id: completed.session_id.clone(),
                     claim_id: completed.claim_id.clone(),
+                    row_id: None,
+                    superseding_claim_id: None,
+                    superseding_session_lease_generation: None,
                 });
             }
             queued.retain(|entry| {

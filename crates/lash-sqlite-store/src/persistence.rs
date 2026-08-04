@@ -505,6 +505,9 @@ impl SessionCommitStore for Store {
                             return Err(StoreError::QueuedWorkClaimSuperseded {
                                 session_id: completed.session_id.clone(),
                                 claim_id: completed.claim_id.clone(),
+                                row_id: None,
+                                superseding_claim_id: None,
+                                superseding_session_lease_generation: None,
                             });
                         }
                         ensure_queued_work_completion_conn(tx, completed)?;
@@ -514,24 +517,54 @@ impl SessionCommitStore for Store {
                             return Err(StoreError::TurnInputClaimSuperseded {
                                 session_id: completed.session_id.clone(),
                                 claim_id: completed.claim_id.clone(),
+                                row_id: None,
+                                superseding_claim_id: None,
+                                superseding_session_lease_generation: None,
                             });
                         }
-                        let owned_rows: usize = tx
-                            .query_row(
-                                "SELECT COUNT(*)
-                                 FROM pending_turn_inputs
-                                 WHERE session_id = ?1
-                                   AND claim_id = ?2
-                                   AND claim_token = ?3",
-                                params![
-                                    completed.session_id,
-                                    completed.claim_id,
-                                    completed.lease_token
-                                ],
-                                |row| row.get::<_, i64>(0),
-                            )
-                            .map_err(sqlite_error)? as usize;
-                        ensure_turn_input_completion_owns_all_inputs(completed, owned_rows)?;
+                        for input_id in &completed.input_ids {
+                            let authority = tx
+                                .query_row(
+                                    "SELECT claim_id, claim_token, claim_session_lease_generation
+                                     FROM pending_turn_inputs
+                                     WHERE session_id = ?1 AND input_id = ?2",
+                                    params![completed.session_id, input_id],
+                                    |row| {
+                                        Ok((
+                                            row.get::<_, Option<String>>(0)?,
+                                            row.get::<_, Option<String>>(1)?,
+                                            row.get::<_, i64>(2)?,
+                                        ))
+                                    },
+                                )
+                                .optional()
+                                .map_err(sqlite_error)?;
+                            let owns_row = authority.as_ref().is_some_and(
+                                |(claim_id, claim_token, _)| {
+                                    claim_id.as_deref() == Some(completed.claim_id.as_str())
+                                        && claim_token.as_deref()
+                                            == Some(completed.lease_token.as_str())
+                                },
+                            );
+                            if !owns_row {
+                                return Err(StoreError::TurnInputClaimSuperseded {
+                                    session_id: completed.session_id.clone(),
+                                    claim_id: completed.claim_id.clone(),
+                                    row_id: Some(input_id.clone().into_boxed_str()),
+                                    superseding_claim_id: authority
+                                        .as_ref()
+                                        .and_then(|(claim_id, _, _)| claim_id.clone())
+                                        .map(String::into_boxed_str),
+                                    superseding_session_lease_generation: authority
+                                        .as_ref()
+                                        .and_then(|(claim_id, _, generation)| {
+                                            claim_id
+                                                .as_ref()
+                                                .map(|_| Box::new(*generation as u64))
+                                        }),
+                                });
+                            }
+                        }
                     }
 
                     Self::validate_checkpoint_component_refs_conn(tx, &commit.checkpoint)?;
@@ -2702,6 +2735,7 @@ fn claim_pending_turn_inputs_sqlite_conn(
         return Ok(TxOutcome::Commit(None));
     }
     let generation = session_execution_lease.fencing_token;
+    let active_turn = matches!(mode, lash_core::TurnInputClaimMode::ActiveTurn { .. });
     let wanted_state = match &mode {
         lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
             lash_core::TurnInputState::PendingActive
@@ -2714,7 +2748,8 @@ fn claim_pending_turn_inputs_sqlite_conn(
                         claim_owner_id, claim_owner_incarnation_id,
                         claim_owner_liveness_json, claim_token, claim_session_lease_generation
                  FROM pending_turn_inputs
-                 WHERE session_id = ? AND state = ?
+                 WHERE session_id = ?
+                   AND (state = ? OR (? AND state = 'accepted'))
                    AND (
                         claim_token IS NULL
                         OR claim_session_lease_generation <> ?
@@ -2723,6 +2758,7 @@ fn claim_pending_turn_inputs_sqlite_conn(
         let mut values: Vec<rusqlite::types::Value> = vec![
             session_id.to_string().into(),
             wanted_state.as_str().to_string().into(),
+            i64::from(active_turn).into(),
             (generation as i64).into(),
         ];
         if let lash_core::TurnInputClaimMode::ActiveTurn {
@@ -2841,6 +2877,8 @@ async fn claim_pending_turn_inputs_sqlite(
                 now,
             )?;
             let generation = session_execution_lease.fencing_token;
+            let active_turn =
+                matches!(mode, lash_core::TurnInputClaimMode::ActiveTurn { .. });
             let wanted_state = match &mode {
                 lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
                     lash_core::TurnInputState::PendingActive
@@ -2856,7 +2894,8 @@ async fn claim_pending_turn_inputs_sqlite(
                             claim_owner_id, claim_owner_incarnation_id,
                             claim_owner_liveness_json, claim_token, claim_session_lease_generation
                      FROM pending_turn_inputs
-                     WHERE session_id = ? AND state = ?
+                     WHERE session_id = ?
+                       AND (state = ? OR (? AND state = 'accepted'))
                        AND (
                             claim_token IS NULL
                             OR claim_session_lease_generation <> ?
@@ -2865,6 +2904,7 @@ async fn claim_pending_turn_inputs_sqlite(
                 let mut values: Vec<rusqlite::types::Value> = vec![
                     session_id.clone().into(),
                     wanted_state.as_str().to_string().into(),
+                    i64::from(active_turn).into(),
                     (generation as i64).into(),
                 ];
                 if let lash_core::TurnInputClaimMode::ActiveTurn {
