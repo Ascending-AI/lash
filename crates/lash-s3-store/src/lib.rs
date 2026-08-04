@@ -15,6 +15,42 @@ use object_store::{ObjectStore, ObjectStoreExt};
 use std::sync::Arc;
 use url::Url;
 
+/// Maximum attachment-id length accepted by namespaced storage backends.
+const MAX_STORAGE_ATTACHMENT_ID_LEN: usize = 128;
+
+/// An attachment id proven safe to use as one object-key component.
+///
+/// Requiring this private type in `content_path` prevents future S3/MinIO call
+/// sites from deriving a key from a raw, potentially untrusted id.
+#[derive(Clone, Copy)]
+struct GuardedAttachmentId<'a>(&'a AttachmentId);
+
+impl<'a> GuardedAttachmentId<'a> {
+    fn new(id: &'a AttachmentId) -> Result<Self, AttachmentStoreError> {
+        let value = id.as_str();
+        let bytes = value.as_bytes();
+        let has_windows_drive_prefix =
+            bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+        let malformed = value.is_empty()
+            || value.len() > MAX_STORAGE_ATTACHMENT_ID_LEN
+            || !bytes
+                .iter()
+                .all(|byte| byte.is_ascii_graphic() || *byte == b' ')
+            || value.contains(['/', '\\'])
+            || matches!(value, "." | "..")
+            || has_windows_drive_prefix;
+
+        if malformed {
+            return Err(AttachmentStoreError::NotFound(id.clone()));
+        }
+        Ok(Self(id))
+    }
+
+    fn as_str(self) -> &'a str {
+        self.0.as_str()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct S3AttachmentStoreConfig {
     pub endpoint_url: Option<String>,
@@ -147,7 +183,7 @@ impl S3AttachmentStore {
 
     /// Flat, content-addressed key for a blob: `<prefix>/sha256/<first2>/<hash>`.
     /// No session namespace — identical bytes from any session share one object.
-    fn content_path(&self, id: &AttachmentId) -> Result<Path, AttachmentStoreError> {
+    fn content_path(&self, id: GuardedAttachmentId<'_>) -> Result<Path, AttachmentStoreError> {
         let hash = id.as_str();
         let first = hash.get(..2).unwrap_or(hash);
         let mut path = String::new();
@@ -160,7 +196,7 @@ impl S3AttachmentStore {
         path.push('/');
         path.push_str(hash);
         Path::parse(path).map_err(|err| {
-            AttachmentStoreError::Backend(format!("invalid S3 attachment path for `{id}`: {err}"))
+            AttachmentStoreError::Backend(format!("invalid S3 attachment path for `{hash}`: {err}"))
         })
     }
 
@@ -230,19 +266,35 @@ impl AttachmentStore for S3AttachmentStore {
             meta.type_metadata,
             meta.label,
         );
-        put_at_path(&*self.store, self.content_path(&meta.id)?, bytes, meta).await
+        put_at_path(
+            &*self.store,
+            self.content_path(GuardedAttachmentId::new(&meta.id)?)?,
+            bytes,
+            meta,
+        )
+        .await
     }
 
     async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        get_at_path(&*self.store, self.content_path(id)?, id).await
+        get_at_path(
+            &*self.store,
+            self.content_path(GuardedAttachmentId::new(id)?)?,
+            id,
+        )
+        .await
     }
 
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
-        delete_at_path(&*self.store, self.content_path(id)?).await
+        delete_at_path(
+            &*self.store,
+            self.content_path(GuardedAttachmentId::new(id)?)?,
+        )
+        .await
     }
 
     async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {
-        match self.store.head(&self.content_path(id)?).await {
+        let content_path = self.content_path(GuardedAttachmentId::new(id)?)?;
+        match self.store.head(&content_path).await {
             Ok(meta) => Ok(Some(StoredBlobRef {
                 id: id.clone(),
                 last_modified_epoch_ms: u64::try_from(meta.last_modified.timestamp_millis()).ok(),
@@ -357,6 +409,66 @@ mod tests {
     use super::*;
     use lash_core::testing::conformance::ReopenableAttachmentStore;
     use lash_core::{AttachmentTypeMetadata, MediaType};
+
+    #[test]
+    fn s3_store_guard_rejects_malformed_attachment_id_shapes() {
+        let overlong = "a".repeat(MAX_STORAGE_ATTACHMENT_ID_LEN + 1);
+        let cases = [
+            ("parent with separator", "../"),
+            ("parent component", ".."),
+            ("current component", "."),
+            ("absolute", "/abs"),
+            ("forward separator", "a/b"),
+            ("back separator", "a\\b"),
+            ("nul", "a\0b"),
+            ("empty", ""),
+            ("unicode", "snowman-☃"),
+            ("control", "a\nb"),
+            ("windows prefix", "C:escape"),
+            ("overlong", overlong.as_str()),
+        ];
+
+        for (shape, raw) in cases {
+            let id = AttachmentId::new(raw);
+            let error = GuardedAttachmentId::new(&id)
+                .err()
+                .unwrap_or_else(|| panic!("{shape} id must be rejected: {raw:?}"));
+            assert!(
+                matches!(error, AttachmentStoreError::NotFound(ref rejected) if rejected == &id),
+                "{shape} id returned the wrong error: {error:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn s3_store_rejects_malformed_ids_by_contract() {
+        let object_store = Arc::new(object_store::memory::InMemory::new());
+        let store = Arc::new(S3AttachmentStore::from_object_store(
+            object_store,
+            Some("contract".to_string()),
+        )) as Arc<dyn AttachmentStore>;
+        let malformed = AttachmentId::new("../outside");
+
+        let get_error = store
+            .get(&malformed)
+            .await
+            .expect_err("malformed attachment get must fail");
+        let delete_error = store
+            .delete(&malformed)
+            .await
+            .expect_err("malformed attachment delete must fail");
+        let head_error = store
+            .head(&malformed)
+            .await
+            .expect_err("malformed attachment head must fail");
+
+        for error in [get_error, delete_error, head_error] {
+            assert!(
+                matches!(error, AttachmentStoreError::NotFound(ref rejected) if rejected == &malformed),
+                "malformed attachment id must map to NotFound, got {error:?}"
+            );
+        }
+    }
 
     #[test]
     fn normalizes_prefixes() {

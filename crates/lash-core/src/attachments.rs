@@ -97,6 +97,15 @@ pub enum AttachmentStorePersistence {
 /// Conventions every backend upholds: `put` is idempotent (identical bytes are
 /// a no-op returning the same ref), `delete` is idempotent, and a missing blob
 /// maps to [`AttachmentStoreError::NotFound`].
+///
+/// Implementors that map an id into a namespaced storage path or object key
+/// must reject malformed ids *before* constructing that path or key. A storage
+/// id is 1 to 128 bytes of printable ASCII, contains no `/` or `\\`, is not `.`
+/// or `..`, and has no absolute or platform-prefix form. This keeps lookup and
+/// deletion inside the backend namespace even when an id came from an
+/// untrusted protocol. Such backends return their typed invalid-id error, or
+/// [`AttachmentStoreError::NotFound`] when they have no separate invalid-id
+/// variant.
 #[async_trait::async_trait]
 pub trait AttachmentStore: Send + Sync {
     fn persistence(&self) -> AttachmentStorePersistence {
@@ -109,12 +118,19 @@ pub trait AttachmentStore: Send + Sync {
         meta: AttachmentCreateMeta,
     ) -> Result<AttachmentRef, AttachmentStoreError>;
 
+    /// Fetch one blob.
+    ///
+    /// Namespaced-storage implementors must apply the trait-level id-shape
+    /// guard before deriving any path or key from `id`.
     async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError>;
 
     /// Remove one blob. Idempotent: deleting an absent blob is a no-op. This is
     /// the primitive mark-and-sweep GC uses to reclaim unreferenced content;
     /// per-session lifecycle is expressed by dropping manifest refs, never by
     /// calling this directly for a live session.
+    ///
+    /// Namespaced-storage implementors must apply the trait-level id-shape
+    /// guard before deriving any path or key from `id`.
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError>;
 
     /// Enumerate every blob currently held. Used only by mark-and-sweep GC.
@@ -130,6 +146,9 @@ pub trait AttachmentStore: Send + Sync {
     /// content id) touched *after* the snapshot must be spared. The default
     /// implementation scans `list`; backends override it with a cheap
     /// stat/`HEAD`.
+    ///
+    /// Overrides that derive a namespaced path or key from `id` must apply the
+    /// trait-level id-shape guard first.
     async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {
         Ok(self.list().await?.into_iter().find(|blob| &blob.id == id))
     }
