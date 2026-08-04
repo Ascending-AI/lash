@@ -496,6 +496,18 @@ fn boxed_process_execution_context_is_empty(context: &ProcessExecutionContext) -
 
 type CheckpointOutcome = Result<CheckpointDelivery, RuntimeEffectControllerError>;
 
+#[doc(hidden)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct CheckpointClaimSet {
+    // Checkpoint replay skips the local executor that acquired these claims.
+    // Journal them with the delivery so the replaying turn carries the same
+    // settlement authority into its atomic final commit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) queued_work_claims: Vec<crate::QueuedWorkClaim>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) turn_input_claim: Option<crate::TurnInputClaim>,
+}
+
 impl ProcessCommand {
     /// Derives the stable effect ID process-engine and effect-host implementors use to journal this
     /// process command without conflating command kinds.
@@ -668,6 +680,8 @@ pub enum RuntimeEffectOutcome {
     },
     Checkpoint {
         result: CheckpointOutcome,
+        #[serde(default)]
+        claims: Box<CheckpointClaimSet>,
     },
     SyncExecutionEnvironment {
         result: Result<Option<ExecutionEnvironmentSync>, String>,
@@ -898,9 +912,20 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    pub(crate) fn into_checkpoint(self) -> Result<CheckpointOutcome, RuntimeEffectControllerError> {
+    pub(crate) fn into_checkpoint(
+        self,
+    ) -> Result<
+        (
+            CheckpointOutcome,
+            Vec<crate::QueuedWorkClaim>,
+            Option<crate::TurnInputClaim>,
+        ),
+        RuntimeEffectControllerError,
+    > {
         match self {
-            Self::Checkpoint { result } => Ok(result),
+            Self::Checkpoint { result, claims } => {
+                Ok((result, claims.queued_work_claims, claims.turn_input_claim))
+            }
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::Checkpoint,
                 other.kind(),

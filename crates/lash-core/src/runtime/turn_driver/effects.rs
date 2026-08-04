@@ -1,6 +1,42 @@
 use super::*;
 
 impl RuntimeTurnDriver<'_> {
+    fn record_pending_queue_claim(&mut self, claim: crate::QueuedWorkClaim) {
+        // A later checkpoint can reclaim a replay-restored predecessor claim
+        // under the successor session-lease generation. Keep only the newer
+        // authority for any overlapping durable batch.
+        self.pending_queue_claims.retain(|pending| {
+            !pending.batches.iter().any(|pending_batch| {
+                claim
+                    .batches
+                    .iter()
+                    .any(|batch| batch.batch_id == pending_batch.batch_id)
+            })
+        });
+        self.pending_queue_claims.push(claim);
+    }
+
+    pub(in crate::runtime) async fn execute_checkpoint_locally(
+        &mut self,
+        messages: crate::MessageSequence,
+        protocol_iteration: usize,
+        checkpoint: CheckpointKind,
+        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+    ) -> RuntimeEffectOutcome {
+        let prior_queue_claim_count = self.pending_queue_claims.len();
+        let result = self
+            .run_checkpoint(messages, protocol_iteration, checkpoint, event_tx)
+            .await
+            .map_err(RuntimeEffectControllerError::from);
+        RuntimeEffectOutcome::Checkpoint {
+            result,
+            claims: Box::new(crate::runtime::effect::CheckpointClaimSet {
+                queued_work_claims: self.pending_queue_claims[prior_queue_claim_count..].to_vec(),
+                turn_input_claim: self.pending_checkpoint_turn_input_claim.clone(),
+            }),
+        }
+    }
+
     pub(super) async fn invoke_turn_checkpoint_effect(
         &mut self,
         machine: &mut TurnMachine,
@@ -12,16 +48,39 @@ impl RuntimeTurnDriver<'_> {
         let invocation = self
             .turn_effect_invocation(machine, id, RuntimeEffectKind::Checkpoint)
             .map_err(RuntimeEffectControllerError::into_runtime_error)?;
-        self.execute_typed_turn_effect(
-            machine,
-            event_tx,
-            cancel,
-            RuntimeEffectEnvelope::new(invocation, RuntimeEffectCommand::Checkpoint { checkpoint }),
-            RuntimeEffectOutcome::into_checkpoint,
-        )
-        .await
-        .and_then(|result| result)
-        .map_err(RuntimeEffectControllerError::into_runtime_error)
+        let (result, queued_work_claims, turn_input_claim) = self
+            .execute_typed_turn_effect(
+                machine,
+                event_tx,
+                cancel,
+                RuntimeEffectEnvelope::new(
+                    invocation,
+                    RuntimeEffectCommand::Checkpoint { checkpoint },
+                ),
+                RuntimeEffectOutcome::into_checkpoint,
+            )
+            .await
+            .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+        let delivery = result.map_err(RuntimeEffectControllerError::into_runtime_error)?;
+        for claim in queued_work_claims {
+            self.record_pending_queue_claim(claim);
+        }
+        if let Some(claim) = turn_input_claim {
+            match self.pending_checkpoint_turn_input_claim.as_ref() {
+                None => self.pending_checkpoint_turn_input_claim = Some(claim),
+                Some(pending) if pending.claim_id == claim.claim_id => {}
+                Some(pending) => {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::StoreCommitFailed,
+                        format!(
+                            "checkpoint replay returned turn-input claim `{}` while `{}` is pending",
+                            claim.claim_id, pending.claim_id
+                        ),
+                    ));
+                }
+            }
+        }
+        Ok(delivery)
     }
 
     pub(super) async fn invoke_turn_execution_environment_sync_effect(
@@ -167,7 +226,7 @@ impl RuntimeTurnDriver<'_> {
             committed.extend(materialized.messages);
             transient_messages.extend(materialized.transient_messages);
             turn_causes.extend(materialized.turn_causes);
-            self.pending_queue_claims.push(claim);
+            self.record_pending_queue_claim(claim);
         }
         let plugins = Arc::clone(self.session.plugins());
         let applied = plugins

@@ -7,7 +7,7 @@ pub mod promise_semantics;
 mod validation;
 
 pub use envelope::{
-    LlmAttachmentSpec, LlmRequestSpec, ProcessCommand, ProcessEffectOutcome,
+    CheckpointClaimSet, LlmAttachmentSpec, LlmRequestSpec, ProcessCommand, ProcessEffectOutcome,
     RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectKind,
     RuntimeEffectOutcome, RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay, RuntimeScope,
     RuntimeSubject, ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolBatchEffectOutcome,

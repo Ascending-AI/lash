@@ -113,14 +113,11 @@
   },
   {
     "point": { "operation": { "seam": "store", "operation": { "kind": "commit_final_head", "settles_queue": true, "settles_turn_input": true, "releases_lease": true } }, "placement": "boundary" },
-    "outcome": "KNOWN-DEFECT FIG-905: the final current-head CAS has not landed; level 2 currently commits the recovered terminal turn without settling stale queued work. Fixing FIG-905 must produce the correct durable end state terminal=1, pending_inputs=0, queued_work=0.",
+    "outcome": "The final current-head CAS has not landed; recovery replays the checkpoint prefix and atomically settles its durable ingress claims with the recovered terminal turn.",
     "effect_executions_l1": 2,
     "level_2": {
       "effect_executions": { "at_crash": 1, "after_recovery": 1 },
-      "known_defect": {
-        "ticket": "FIG-905",
-        "expected_defective": { "terminal": 1, "pending_inputs": 0, "queued_work": 1 }
-      }
+      "exact": { "terminal": 1, "pending_inputs": 0, "queued_work": 0 }
     }
   },
   {

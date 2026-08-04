@@ -1817,6 +1817,28 @@ where
 mod tests {
     use super::*;
 
+    fn install_known_defect_fixture(table: &mut [TurnCrashOutcome]) -> &mut KnownDefectExpectation {
+        let entry = table
+            .iter_mut()
+            .find(|entry| entry.level_2.is_some())
+            .expect("level-2 row");
+        let expectation = entry.level_2.as_mut().expect("level-2 expectation");
+        expectation.exact = None;
+        expectation.known_defect = Some(KnownDefectExpectation {
+            ticket: "FIG-999".to_string(),
+            expected_defective: DurableEndStateExpectation {
+                terminal: Some(1),
+                pending_inputs: Some(0),
+                queued_work: Some(1),
+            },
+        });
+        entry.outcome = "KNOWN-DEFECT FIG-999; correct durable end state terminal=1, pending_inputs=0, queued_work=0".to_string();
+        expectation
+            .known_defect
+            .as_mut()
+            .expect("installed known-defect fixture")
+    }
+
     #[test]
     fn golden_trace_generates_exactly_the_reviewed_outcome_table() {
         let generated = generated_points(&golden_trace());
@@ -1869,10 +1891,7 @@ mod tests {
     fn outcome_validation_rejects_a_known_defect_without_a_ticket() {
         let generated = generated_points(&golden_trace());
         let mut table = turn_crash_matrix_outcomes();
-        let defect = table
-            .iter_mut()
-            .find_map(|entry| entry.level_2.as_mut()?.known_defect.as_mut())
-            .expect("committed known-defect row");
+        let defect = install_known_defect_fixture(&mut table);
         defect.ticket.clear();
         assert!(
             validate_outcome_table(&generated, &table).is_err(),
@@ -1884,10 +1903,7 @@ mod tests {
     fn outcome_validation_rejects_a_non_exact_known_defect() {
         let generated = generated_points(&golden_trace());
         let mut table = turn_crash_matrix_outcomes();
-        let defect = table
-            .iter_mut()
-            .find_map(|entry| entry.level_2.as_mut()?.known_defect.as_mut())
-            .expect("committed known-defect row");
+        let defect = install_known_defect_fixture(&mut table);
         defect.expected_defective.queued_work = None;
         assert!(
             validate_outcome_table(&generated, &table).is_err(),
