@@ -7,11 +7,13 @@
 # renders identically on PostgreSQL 14 through 18; CI asserts that on all three.
 #
 # Columns are matched by name, never by ordinal position. Uniqueness guards and
-# foreign keys are identified by their column set and kind, never by constraint or
-# index name -- but identity is not equality: a guard whose key columns are in
-# another order is reported as a mismatch rather than accepted, because index
-# column order is operationally load-bearing. Every object is read from the one
-# namespace where lash_schema_versions resolves.
+# foreign keys are matched by their column SET and kind, never by constraint or
+# index name and never by column order -- UNIQUE (a, b) and UNIQUE (b, a) reject
+# the same rows, so one standing in for the other is not drift. What does differ
+# between same-set guards is compared: the partial predicate and null-distinctness
+# for guards, the delete action for foreign keys. Column order in this file records
+# how the DDL declares it and is documentation, not a requirement. Every object is
+# read from the one namespace where lash_schema_versions resolves.
 version 35
 table lash_attachment_manifest
   column attachment_id text not-null

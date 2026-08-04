@@ -378,28 +378,64 @@ async fn a_nulls_not_distinct_rebuild_of_a_nullable_guard_is_rejected() {
     .await;
 }
 
-/// A semantically identical guard whose key columns are in another order is still
-/// a mismatch — index column order is operationally load-bearing — but it must be
-/// diagnosed as one paired mismatch rather than as an unrelated
-/// missing-plus-unexpected pair, which is what column-set pairing buys.
+/// A guard whose key columns are in another order enforces exactly the same rule:
+/// `UNIQUE (a, b)` and `UNIQUE (b, a)` reject the same rows. A host that rebuilt
+/// the dedup index the other way round has not drifted, so it must open clean.
+/// Column order changes which index prefixes can be scanned, which is an
+/// access-path property — the same class this check leaves out when it ignores
+/// non-unique indexes entirely.
 #[tokio::test]
-async fn a_reordered_unique_guard_is_reported_as_one_paired_mismatch() {
+async fn a_reordered_unique_guard_opens_clean() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping reordered-guard tolerance: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply(
+            "DROP INDEX idx_lash_process_events_key;
+             CREATE UNIQUE INDEX host_reordered_dedup
+                 ON lash_process_events(idempotency_key, process_id)
+                 WHERE idempotency_key IS NOT NULL",
+        )
+        .await;
+    let report = PostgresStorage::verify_schema_for(&scratch.pool)
+        .await
+        .expect("verify the reordered-guard database");
+    assert!(
+        report.is_conformant(),
+        "a reordered key over the same column set enforces the same rule: {report}"
+    );
+    scratch
+        .open_host_provisioned(SchemaCheck::Enforce)
+        .await
+        .expect("a reordered guard must not block an open");
+    scratch.cleanup().await;
+}
+
+/// The tolerance above must not swallow a guard that covers a *different* row set.
+/// Same kind, same column set, different partial predicate — which is exactly the
+/// pair that set-based matching brings together, so it is exactly where a
+/// too-permissive comparison would go silent.
+#[tokio::test]
+async fn a_same_column_set_guard_with_another_predicate_is_rejected() {
     assert_mutation_is_rejected(
         "DROP INDEX idx_lash_process_events_key;
-         CREATE UNIQUE INDEX host_reordered_dedup
-             ON lash_process_events(idempotency_key, process_id)
-             WHERE idempotency_key IS NOT NULL",
+         CREATE UNIQUE INDEX host_narrowed_dedup
+             ON lash_process_events(process_id, idempotency_key)
+             WHERE idempotency_key <> ''",
         &[
             "UNIQUE GUARD DRIFT",
             "lash_process_events: expected unique (process_id, idempotency_key) where \
-             idempotency_key is not null, found unique (idempotency_key, process_id) where \
-             idempotency_key is not null",
+             idempotency_key is not null, found unique (process_id, idempotency_key) where \
+             idempotency_key <> ''::text",
         ],
         |finding| {
             matches!(
                 finding,
-                SchemaFinding::UniqueGuardMismatch { table, .. }
+                SchemaFinding::UniqueGuardMismatch { table, found, .. }
                     if table == "lash_process_events"
+                        && found.predicate.as_deref() != Some("idempotency_key is not null")
             )
         },
     )
@@ -1101,4 +1137,331 @@ async fn verify_schema_for_describes_a_database_that_cannot_be_opened() {
         "the report must render the diff a host's CI reads: {report}"
     );
     scratch.cleanup().await;
+}
+
+/// A seed table rebuilt with the right column names and the wrong types used to
+/// abort verification: the probe checked presence, then bound a boolean against a
+/// `text` column and raised `operator does not exist: text = boolean`. A method
+/// whose whole purpose is describing a broken schema must never do that — the
+/// column drift is already fully diagnosable from the catalog.
+#[tokio::test]
+async fn a_seed_table_with_mistyped_columns_reports_instead_of_aborting() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping mistyped-seed-column reporting: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply(
+            "DROP TABLE lash_await_event_meta;
+             CREATE TABLE lash_await_event_meta (
+                 singleton TEXT PRIMARY KEY,
+                 signing_secret BYTEA NOT NULL
+             );
+             INSERT INTO lash_await_event_meta (singleton, signing_secret)
+             VALUES ('t', decode('0102', 'hex'));",
+        )
+        .await;
+    let report = PostgresStorage::verify_schema_for(&scratch.pool)
+        .await
+        .expect("verification must report mistyped seed columns, not abort on them");
+    assert!(
+        report.findings.iter().any(|finding| matches!(
+            finding,
+            SchemaFinding::ColumnMismatch { table, expected, found }
+                if table == "lash_await_event_meta"
+                    && expected.name == "singleton"
+                    && found.sql_type == "text"
+        )),
+        "the mistyped column must be a structured finding: {:?}",
+        report.findings
+    );
+    assert!(
+        scratch
+            .open_host_provisioned(SchemaCheck::Enforce)
+            .await
+            .is_err(),
+        "a mistyped seed column must still refuse the open"
+    );
+    scratch.cleanup().await;
+}
+
+/// Same class on the version stamp itself. `read_component_version` decodes
+/// `version` as `i32`, so a `text` column would raise a decode error — and because
+/// the stamp is then unreadable rather than merely absent, the structural diff must
+/// *not* be short-circuited: the column drift is the diagnosis a host needs.
+#[tokio::test]
+async fn a_mistyped_version_stamp_reports_the_column_drift() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping mistyped-version-stamp reporting: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply("ALTER TABLE lash_schema_versions ALTER COLUMN version TYPE TEXT")
+        .await;
+    let report = PostgresStorage::verify_schema_for(&scratch.pool)
+        .await
+        .expect("verification must report a mistyped version column, not abort on it");
+    assert!(
+        report.findings.iter().any(|finding| matches!(
+            finding,
+            SchemaFinding::ColumnMismatch { table, expected, found }
+                if table == "lash_schema_versions"
+                    && expected.name == "version"
+                    && found.sql_type == "text"
+        )),
+        "an unreadable stamp must not suppress the column diff that explains it: {:?}",
+        report.findings
+    );
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|finding| matches!(finding, SchemaFinding::VersionMismatch { found: None, .. })),
+        "an undecodable stamp is also not a usable version: {:?}",
+        report.findings
+    );
+    let error = scratch
+        .open_host_provisioned(SchemaCheck::Enforce)
+        .await
+        .err()
+        .expect("an unreadable version stamp must refuse the open");
+    assert!(
+        error.to_string().contains("has no version stamp"),
+        "{error}"
+    );
+    scratch.cleanup().await;
+}
+
+/// The remedy a report prints has to be one a host can actually follow. A version
+/// mismatch is unconditional, so recommending `SchemaCheck::WarnOnly` there would
+/// send a host down a path that cannot open the database.
+#[tokio::test]
+async fn report_remedies_match_the_finding_class() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping remedy-truthfulness check: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply(
+            "UPDATE lash_schema_versions SET version = 1 WHERE component = 'lash-postgres-store'",
+        )
+        .await;
+    let version_report = PostgresStorage::verify_schema_for(&scratch.pool)
+        .await
+        .expect("verify the stale-version database")
+        .to_string();
+    assert!(
+        version_report.contains("reject-and-recreate")
+            && version_report.contains("no `SchemaCheck` relaxes it"),
+        "a version report must give the reject-and-recreate remedy: {version_report}"
+    );
+    assert!(
+        !version_report.contains("SchemaCheck::WarnOnly"),
+        "a version report must not recommend a valve that cannot open it: {version_report}"
+    );
+
+    scratch
+        .apply(
+            "UPDATE lash_schema_versions SET version = 35 WHERE component = 'lash-postgres-store';
+             DROP INDEX idx_lash_process_events_key",
+        )
+        .await;
+    let shape_report = PostgresStorage::verify_schema_for(&scratch.pool)
+        .await
+        .expect("verify the drifted database")
+        .to_string();
+    assert!(
+        shape_report.contains("SchemaCheck::WarnOnly"),
+        "a shape report may still offer the valve: {shape_report}"
+    );
+    assert!(
+        !shape_report.contains("reject-and-recreate"),
+        "a shape report must not claim the database needs recreating: {shape_report}"
+    );
+    scratch.cleanup().await;
+}
+
+/// Captures this crate's `tracing` events so a decision seam's evidence can be
+/// asserted the way a test asserts any other output.
+///
+/// Installed as the *global* subscriber rather than a thread-local one on purpose:
+/// `tracing` caches callsite interest process-wide, so a sibling test that reaches
+/// the same `warn!` with no subscriber installed can mark the callsite as
+/// permanently uninteresting and silence it for everyone. A global subscriber that
+/// is always interested in this crate's targets cannot be poisoned that way.
+#[derive(Clone, Default)]
+struct EventCapture(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+impl EventCapture {
+    /// Every captured event mentioning `schema`, which is unique per scratch
+    /// schema and so isolates one test's decisions from every other test's.
+    fn events_for(&self, schema: &str) -> Vec<String> {
+        self.0
+            .lock()
+            .expect("capture lock")
+            .iter()
+            .filter(|event| event.contains(&format!("schema={schema} ")))
+            .cloned()
+            .collect()
+    }
+}
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for EventCapture {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _context: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        if !event.metadata().target().starts_with("lash_postgres_store") {
+            return;
+        }
+        struct Visitor(String);
+        impl tracing::field::Visit for Visitor {
+            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                self.0.push_str(&format!("{}={value:?} ", field.name()));
+            }
+            fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+                self.0.push_str(&format!("{}={value} ", field.name()));
+            }
+            fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
+                self.0.push_str(&format!("{}={value} ", field.name()));
+            }
+            fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+                self.0.push_str(&format!("{}={value} ", field.name()));
+            }
+        }
+        let mut visitor = Visitor(format!("level={} ", event.metadata().level()));
+        event.record(&mut visitor);
+        self.0.lock().expect("capture lock").push(visitor.0);
+    }
+}
+
+/// The one global capture for this test binary.
+fn installed_capture() -> &'static EventCapture {
+    static CAPTURE: std::sync::OnceLock<EventCapture> = std::sync::OnceLock::new();
+    CAPTURE.get_or_init(|| {
+        use tracing_subscriber::layer::SubscriberExt;
+        let capture = EventCapture::default();
+        let subscriber = tracing_subscriber::registry().with(capture.clone());
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("install the decision-evidence capture");
+        capture
+    })
+}
+
+/// A gate that can deny must ship its decision basis, not just its verdict
+/// (`docs/agents/way-of-working.md`). "The code denies correctly but you cannot see
+/// why from a trace" is the failure this pins: each of the four outcomes has to
+/// carry the versions it compared, both policy knobs, and the finding counts.
+#[tokio::test]
+async fn the_schema_gate_emits_its_decision_basis() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping schema-gate decision evidence: database URL is not set");
+        return;
+    };
+    let capture = installed_capture();
+    let scratch = ScratchSchema::provision(&database_url).await;
+
+    // (a) admitted.
+    scratch
+        .open_host_provisioned(SchemaCheck::Enforce)
+        .await
+        .expect("open a conformant schema");
+    assert_evidence(
+        capture,
+        &scratch.name,
+        "allowed",
+        &["found_version=Some(35)", "finding_total=0"],
+    );
+
+    // (b) denied on shape.
+    scratch
+        .apply("DROP INDEX idx_lash_process_events_key")
+        .await;
+    let error = scratch
+        .open_host_provisioned(SchemaCheck::Enforce)
+        .await
+        .err()
+        .expect("a dropped dedup guard must deny the open");
+    assert!(
+        error.to_string().contains("UNIQUE GUARD DRIFT"),
+        "the denial must be the shape gate, not something else: {error}"
+    );
+    assert_evidence(
+        capture,
+        &scratch.name,
+        "denied_shape",
+        &[
+            "UNIQUE GUARD DRIFT=1",
+            "finding_total=1",
+            "schema_check=Enforce",
+        ],
+    );
+
+    // (c) admitted under the valve, carrying the same basis.
+    scratch
+        .open_host_provisioned(SchemaCheck::WarnOnly)
+        .await
+        .expect("WarnOnly opens the drifted schema");
+    assert_evidence(
+        capture,
+        &scratch.name,
+        "allowed_warn_only",
+        &["UNIQUE GUARD DRIFT=1", "schema_check=WarnOnly"],
+    );
+
+    // (d) denied on the version boundary, which no valve relaxes.
+    scratch
+        .apply(
+            "UPDATE lash_schema_versions SET version = 1 WHERE component = 'lash-postgres-store'",
+        )
+        .await;
+    assert!(
+        scratch
+            .open_host_provisioned(SchemaCheck::WarnOnly)
+            .await
+            .is_err()
+    );
+    assert_evidence(
+        capture,
+        &scratch.name,
+        "denied_version",
+        &[
+            "found_version=Some(1)",
+            "COMPONENT VERSION=1",
+            "schema_check=WarnOnly",
+        ],
+    );
+
+    scratch.cleanup().await;
+}
+
+/// Asserts one captured decision carries the named outcome plus the inputs the gate
+/// consulted to reach it.
+fn assert_evidence(capture: &EventCapture, schema: &str, outcome: &str, extra: &[&str]) {
+    let events = capture.events_for(schema);
+    let event = events
+        .iter()
+        .find(|event| event.contains(&format!("outcome={outcome} ")))
+        .unwrap_or_else(|| {
+            panic!(
+                "no schema-gate event with outcome={outcome} for {schema}; captured:\n{events:#?}"
+            )
+        });
+    for field in [
+        "component=lash-postgres-store",
+        "expected_version=35",
+        "provisioning=HostProvisioned",
+    ]
+    .iter()
+    .chain(extra)
+    {
+        assert!(
+            event.contains(field),
+            "the {outcome} decision must carry {field}; got:\n{event}"
+        );
+    }
 }

@@ -62,14 +62,25 @@ that is where lash would actually write.
 The scope is narrow and chosen for cross-version stability: per lash-owned table,
 columns as (name, type, nullability, value source), every uniqueness guarantee read
 from `pg_index.indisunique` including normalized partial predicates and
-`NULLS NOT DISTINCT`, and foreign keys with their on-delete action. Columns are
-matched by name and never by ordinal position; guards and keys are identified by
-their column set and kind and never by constraint name — though identity is not
-equality, and a guard whose key columns are in another order is a reported mismatch
-rather than an accepted equivalent. `CHECK` constraints, non-unique indexes,
-triggers, row-level security, and default expression text are out of scope. The
-predicate of a partial unique index is the only free-text element in the whole
-comparison.
+`NULLS NOT DISTINCT`, and foreign keys with their on-delete action. `CHECK`
+constraints, non-unique indexes, triggers, row-level security, and default
+expression text are out of scope. The predicate of a partial unique index is the
+only free-text element in the whole comparison.
+
+Objects are matched by **what they enforce**, never by how they were written.
+Columns are matched by name and never by ordinal position. Guards and keys are
+matched by their column *set* and kind, never by constraint name and never by column
+order: `UNIQUE (a, b)` and `UNIQUE (b, a)` reject exactly the same rows, so a host
+that rebuilt one as the other has not drifted. Key order does change which index
+prefixes can be scanned, which is an access-path property — the same class this check
+declines to verify when it leaves non-unique indexes out entirely. What a same-set
+pair *is* compared on is what changes the rows it covers: the partial predicate and
+null-distinctness for a guard, the delete action for a foreign key. Splitting
+matching from comparison this way is what lets a same-set guard with a different
+predicate report as one precise mismatch rather than an unrelated
+missing-plus-unexpected pair. For a composite foreign key the matched identity is
+the *set of column pairings*, so `(a, b) -> (x, y)` stays distinct from
+`(a, b) -> (y, x)` while `(b, a) -> (y, x)` is recognized as the same constraint.
 
 A column's **value source** is classified rather than reduced to a single
 has-an-auto-generated-value bit, because what lash's inserts depend on is two
@@ -139,15 +150,23 @@ version stamp and a usable signing secret, either of which can be exactly what a
 migration produced wrongly — so a check reachable only through a successful open
 could not describe the databases it exists to describe.
 
-lash holds an advisory lock (`PostgresStorage::schema_advisory_lock_key`) across
-provisioning and verification. It serializes lash's own openers and nothing else:
-a host migration that commits between two of the check's catalog reads can make an
-open succeed against a schema that has already drifted, or refuse one that is
-mid-migration and fine. Holding relation locks strong enough to close that would
-mean blocking a host's own DDL from inside lash's open path, which is a worse
-trade. The supported protocol is instead not to migrate concurrently with an open;
-for deployments that cannot guarantee it, the key is published so a migration can
-take it too.
+lash takes one published advisory key (`PostgresStorage::schema_advisory_lock_key`)
+for everything it does to the schema: exclusively while provisioning and opening,
+and in shared mode inside the single transaction `verify_schema_for` runs, so
+concurrent verifications do not conflict with each other while any exclusive holder
+excludes them all. Taking it in the verification path is not decoration — the same
+docs recommend that entry point for migration CI, and a key that covered opens but
+not verification would be a protocol with a hole exactly where hosts were told to
+use it.
+
+What the key cannot do by itself is coordinate a participant that ignores it: a host
+migration committing between two catalog reads can make an open succeed against a
+schema that has already drifted, or refuse one that is mid-migration and fine.
+Holding relation locks strong enough to close that would mean blocking a host's own
+DDL from inside lash's open path, which is a worse trade. The supported protocol is
+therefore to take this key around migrations — which is also what a migration CI job
+should wrap around its migrate-then-verify sequence — or to guarantee no migration
+runs concurrently with an open.
 
 The expectation artifact is regenerated from a live database rather than
 hand-written, and CI runs the Postgres lane on PostgreSQL 14, 16, and 18,
@@ -205,7 +224,19 @@ verify against; shape-checking there would be lash verifying itself.
 
 - The check cannot be made safe against a host migrating concurrently with an
   open. That is documented as a protocol rather than engineered around, and the
-  advisory key is published so a host that needs coordination has one.
+  advisory key is published so a host that needs coordination has one. Everything
+  lash itself does to the schema takes that key.
+
+- The gate emits its full decision basis — stamped and expected version, both policy
+  knobs, and finding counts per class — on every outcome it can reach, denial and
+  admission alike, per the decision-evidence standard in
+  `docs/agents/way-of-working.md`. A refused open is diagnosable from a trace
+  without reproducing it.
+
+- A report's remedy is chosen per finding class. Version findings get the
+  reject-and-recreate instruction and deliberately do *not* mention
+  `SchemaCheck::WarnOnly`, because that valve cannot open past the version
+  boundary; recommending it there would be advice a host cannot follow.
 - The await-event signing secret is a data precondition rather than a shape, so
   `SchemaCheck::WarnOnly` does not relax it: without the row there is no secret
   to authenticate promises with, and the store cannot construct itself.

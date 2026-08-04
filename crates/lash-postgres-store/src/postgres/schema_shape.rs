@@ -30,7 +30,8 @@
 //!   `pg_index.indisunique`, including normalized partial predicates and
 //!   `NULLS NOT DISTINCT`, because the exactly-once dedup guard
 //!   `idx_lash_process_events_key` is a partial unique *index* with no
-//!   `pg_constraint` row;
+//!   `pg_constraint` row — matched by column *set*, since key order changes which
+//!   index prefixes can be scanned rather than which rows are rejected;
 //! - foreign keys with their on-delete action.
 //!
 //! Deliberately out of scope: `CHECK` constraints, non-unique indexes, triggers,
@@ -595,11 +596,13 @@ const ARTIFACT_HEADER: &str = "\
 # renders identically on PostgreSQL 14 through 18; CI asserts that on all three.
 #
 # Columns are matched by name, never by ordinal position. Uniqueness guards and
-# foreign keys are identified by their column set and kind, never by constraint or
-# index name -- but identity is not equality: a guard whose key columns are in
-# another order is reported as a mismatch rather than accepted, because index
-# column order is operationally load-bearing. Every object is read from the one
-# namespace where lash_schema_versions resolves.
+# foreign keys are matched by their column SET and kind, never by constraint or
+# index name and never by column order -- UNIQUE (a, b) and UNIQUE (b, a) reject
+# the same rows, so one standing in for the other is not drift. What does differ
+# between same-set guards is compared: the partial predicate and null-distinctness
+# for guards, the delete action for foreign keys. Column order in this file records
+# how the DDL declares it and is documentation, not a requirement. Every object is
+# read from the one namespace where lash_schema_versions resolves.
 ";
 
 fn parse_column_line(rest: &str) -> Option<ColumnShape> {
@@ -719,26 +722,52 @@ fn diff_columns(
     }
 }
 
-/// An object class compared as a set, where a near-match should read as one
-/// mismatch rather than as two unrelated findings.
+/// An object class matched by *what it enforces* rather than by how it was
+/// written.
+///
+/// Two constraints that impose the same rule are the same constraint. Column
+/// order inside a uniqueness key is the clearest case: `UNIQUE (a, b)` and
+/// `UNIQUE (b, a)` reject exactly the same rows, so a host that rebuilt one as the
+/// other has not drifted and must not be refused. Names are the same story, and
+/// PostgreSQL generates them anyway.
+///
+/// Matching therefore happens on [`PairedObject::identity`], and a matched pair is
+/// compared on [`PairedObject::enforces_same_as`] — the attributes that do change
+/// which rows are accepted. Splitting the two is what lets a same-identity pair
+/// with a different partial predicate report as one precise mismatch instead of an
+/// unrelated missing/unexpected pair.
 trait PairedObject: Ord + Clone {
-    /// What makes two objects the same object for diagnostic purposes. Never a
-    /// name: PostgreSQL generates those and a host may legitimately choose its
-    /// own. Deliberately coarser than equality, so a difference *within* the
-    /// identity is what gets reported.
+    /// What makes two objects the same constraint. Order-insensitive, and never a
+    /// name.
     type Identity: Eq;
 
     fn identity(&self) -> Self::Identity;
+
+    /// Whether a found object imposes the same rule as the expected one it
+    /// matched. Only reached for objects that already share an identity.
+    fn enforces_same_as(&self, expected: &Self) -> bool;
+
     fn missing(table: &str, expected: &Self) -> SchemaFinding;
     fn mismatch(table: &str, expected: &Self, found: &Self) -> SchemaFinding;
     fn unexpected(table: &str, found: &Self) -> SchemaFinding;
 }
 
 impl PairedObject for UniqueGuard {
+    /// Kind plus the key column *set*. Column order affects which index prefixes
+    /// can be scanned, not which rows are rejected, and this check verifies
+    /// semantics rather than access-path performance — the same reason non-unique
+    /// indexes are out of scope entirely.
     type Identity = (bool, BTreeSet<String>);
 
     fn identity(&self) -> Self::Identity {
         (self.primary_key, self.columns.iter().cloned().collect())
+    }
+
+    /// The partial predicate and null-distinctness both change the row set the
+    /// guard covers, so they are compared even when the column set matches.
+    fn enforces_same_as(&self, expected: &Self) -> bool {
+        self.predicate == expected.predicate
+            && self.nulls_not_distinct == expected.nulls_not_distinct
     }
 
     fn missing(table: &str, expected: &Self) -> SchemaFinding {
@@ -765,14 +794,27 @@ impl PairedObject for UniqueGuard {
 }
 
 impl PairedObject for ForeignKeyShape {
-    type Identity = (Vec<String>, String, Vec<String>);
+    /// The parent table plus the *set of column pairings*. Declaration order is
+    /// irrelevant, but which child column references which parent column is not —
+    /// pairing the columns before collecting them keeps
+    /// `(a, b) -> (x, y)` distinct from `(a, b) -> (y, x)` while accepting
+    /// `(b, a) -> (y, x)` as the same constraint.
+    type Identity = (String, BTreeSet<(String, String)>);
 
     fn identity(&self) -> Self::Identity {
         (
-            self.columns.clone(),
             self.parent_table.clone(),
-            self.parent_columns.clone(),
+            self.columns
+                .iter()
+                .cloned()
+                .zip(self.parent_columns.iter().cloned())
+                .collect(),
         )
+    }
+
+    /// The delete action is what process pruning depends on.
+    fn enforces_same_as(&self, expected: &Self) -> bool {
+        self.on_delete == expected.on_delete
     }
 
     fn missing(table: &str, expected: &Self) -> SchemaFinding {
@@ -798,40 +840,36 @@ impl PairedObject for ForeignKeyShape {
     }
 }
 
-/// Diffs two sets of the same object class, pairing near-matches first.
+/// Matches two sets of the same object class by identity, then compares each
+/// matched pair on what it enforces.
 ///
-/// Unique guards and foreign keys want exactly this algorithm; having it once
-/// keeps the two from drifting apart as the finding vocabulary grows.
+/// Unique guards and foreign keys want exactly this walk; having it once keeps the
+/// two from drifting apart as the finding vocabulary grows.
 fn diff_paired_objects<T: PairedObject>(
     table: &str,
     expected: &BTreeSet<T>,
     found: &BTreeSet<T>,
     findings: &mut Vec<SchemaFinding>,
 ) {
-    let mut missing: Vec<&T> = expected.difference(found).collect();
-    let mut unexpected: Vec<&T> = found.difference(expected).collect();
-    missing.retain(|expected_object| {
-        let paired = unexpected
+    let mut unmatched: Vec<&T> = found.iter().collect();
+    for expected_object in expected {
+        let matched = unmatched
             .iter()
             .position(|found_object| found_object.identity() == expected_object.identity());
-        match paired {
+        match matched {
             Some(index) => {
-                let found_object = unexpected.remove(index);
-                findings.push(T::mismatch(table, expected_object, found_object));
-                false
+                let found_object = unmatched.remove(index);
+                if !found_object.enforces_same_as(expected_object) {
+                    findings.push(T::mismatch(table, expected_object, found_object));
+                }
             }
-            None => true,
+            None => findings.push(T::missing(table, expected_object)),
         }
-    });
+    }
     findings.extend(
-        missing
+        unmatched
             .into_iter()
-            .map(|object| T::missing(table, object))
-            .chain(
-                unexpected
-                    .into_iter()
-                    .map(|object| T::unexpected(table, object)),
-            ),
+            .map(|found_object| T::unexpected(table, found_object)),
     );
 }
 
@@ -1081,6 +1119,31 @@ impl SchemaReport {
     pub fn is_conformant(&self) -> bool {
         self.findings.is_empty()
     }
+
+    /// Whether any finding concerns the component version stamp, which no
+    /// [`SchemaCheck`] can relax.
+    fn has_version_finding(&self) -> bool {
+        self.findings
+            .iter()
+            .any(|finding| matches!(finding, SchemaFinding::VersionMismatch { .. }))
+    }
+
+    /// Whether any finding concerns the catalog's shape or seed data, which
+    /// [`SchemaCheck::WarnOnly`] does relax.
+    fn has_shape_finding(&self) -> bool {
+        self.findings
+            .iter()
+            .any(|finding| !matches!(finding, SchemaFinding::VersionMismatch { .. }))
+    }
+
+    /// Counts of findings by section, for the gate's decision evidence.
+    pub(crate) fn finding_counts(&self) -> BTreeMap<&'static str, usize> {
+        let mut counts = BTreeMap::new();
+        for finding in &self.findings {
+            *counts.entry(finding.section()).or_insert(0) += 1;
+        }
+        counts
+    }
 }
 
 impl fmt::Display for SchemaReport {
@@ -1123,25 +1186,46 @@ impl fmt::Display for SchemaReport {
                 write!(formatter, "\n  {finding}")?;
             }
         }
+        // The remedy has to match the findings. A version mismatch is
+        // unconditional — `SchemaCheck::WarnOnly` cannot open past it — so
+        // recommending the valve there would send a host down a path that cannot
+        // work. Both remedies appear when both classes are present, which is the
+        // unreadable-stamp case.
         write!(
             formatter,
             "\n\nProvision this database from the DDL artifact this build ships \
              (`PostgresStorage::schema_ddl()`, committed as \
-             crates/lash-postgres-store/schema.sql) rather than transcribing it. To open against \
-             a schema this build rejects, set \
-             `PostgresStoreConfig::schema_check = SchemaCheck::WarnOnly`."
-        )
+             crates/lash-postgres-store/schema.sql) rather than transcribing it."
+        )?;
+        if self.has_version_finding() {
+            write!(
+                formatter,
+                " The component schema is a reject-and-recreate boundary with no migration \
+                 chain, so a database stamped for another generation needs a fresh one: this \
+                 gate is unconditional and no `SchemaCheck` relaxes it."
+            )?;
+        }
+        if self.has_shape_finding() {
+            write!(
+                formatter,
+                " To open against a structurally drifted schema anyway, set \
+                 `PostgresStoreConfig::schema_check = SchemaCheck::WarnOnly`."
+            )?;
+        }
+        Ok(())
     }
 }
 
 #[path = "schema_shape/introspect.rs"]
 mod introspect;
 
+pub(crate) use introspect::{
+    ComponentVersion, read_component_version, resolve_installation, verify_schema_shape,
+};
 /// Reached only by the artifact-generation and catalog tests, which drive the
 /// introspection directly rather than through a full verification.
 #[cfg(test)]
 pub(crate) use introspect::{normalize_predicate, read_live_shape, resolve_tables};
-pub(crate) use introspect::{read_component_version, resolve_installation, verify_schema_shape};
 
 #[path = "schema_shape/tests.rs"]
 #[cfg(test)]

@@ -44,7 +44,8 @@ pub(crate) async fn ensure_schema(
         // Preflight before the DDL: a stale baseline must be rejected rather than
         // have this build's creation statements layered over it.
         if let Some(installation) = resolve_installation(&mut tx).await?
-            && let Some(version) = read_component_version(&mut tx, &installation).await?
+            && let ComponentVersion::Readable(Some(version)) =
+                read_component_version(&mut tx, &installation, &SchemaShape::expected()).await?
             && version != SCHEMA_VERSION
         {
             return Err(version_mismatch_error(Some(version)));
@@ -59,15 +60,24 @@ pub(crate) async fn ensure_schema(
     // into a path that silently runs one build against another schema generation,
     // which is exactly the cross-version corruption the boundary exists to stop.
     if report.found_version != Some(SCHEMA_VERSION) {
+        record_schema_gate_decision(&report, options, "denied_version");
         return Err(version_mismatch_error(report.found_version));
     }
-    if !report.is_conformant() {
+    if report.is_conformant() {
+        record_schema_gate_decision(&report, options, "allowed");
+    } else {
         match options.check {
-            SchemaCheck::Enforce => return Err(StoreError::Backend(report.to_string())),
-            SchemaCheck::WarnOnly => tracing::warn!(
-                "opening Postgres storage against a non-conformant schema because \
-                 SchemaCheck::WarnOnly is configured: {report}"
-            ),
+            SchemaCheck::Enforce => {
+                record_schema_gate_decision(&report, options, "denied_shape");
+                return Err(StoreError::Backend(report.to_string()));
+            }
+            SchemaCheck::WarnOnly => {
+                record_schema_gate_decision(&report, options, "allowed_warn_only");
+                tracing::warn!(
+                    "opening Postgres storage against a non-conformant schema because \
+                     SchemaCheck::WarnOnly is configured: {report}"
+                );
+            }
         }
     }
 
@@ -98,6 +108,82 @@ pub(crate) async fn ensure_schema(
     }
     tx.commit().await.map_err(store_sqlx_error)?;
     Ok(signing_secret)
+}
+
+/// Runs the structural check under the published advisory key, held in *shared*
+/// mode for the duration of one transaction.
+///
+/// The key is the coordination point lash publishes for hosts, so verification has
+/// to take it or the protocol is only half real: a migration that takes the key
+/// would exclude opens but not the migration-CI verification the same docs
+/// recommend. Shared mode is the right strength — concurrent verifications do not
+/// conflict with each other, an exclusive holder (a lash open, or a host migration
+/// following the protocol) excludes them all, and one transaction gives every
+/// catalog read a single snapshot.
+pub(crate) async fn verify_schema_under_advisory_lock(
+    pool: &PgPool,
+) -> Result<SchemaReport, StoreError> {
+    let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+    let (lock_namespace, lock_key) = SCHEMA_ADVISORY_LOCK_KEY;
+    sqlx::query("SELECT pg_advisory_xact_lock_shared($1, $2)")
+        .bind(lock_namespace)
+        .bind(lock_key)
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    let report = verify_schema_shape(&mut tx).await?;
+    // Read-only, but committing rather than rolling back keeps the transaction's
+    // disposition unambiguous in a host's own logs.
+    tx.commit().await.map_err(store_sqlx_error)?;
+    Ok(report)
+}
+
+/// Emits the schema gate's decision basis.
+///
+/// A gate that can deny ships the inputs it consulted, not just its verdict
+/// (`docs/agents/way-of-working.md`): the stamped and expected versions, both
+/// policy knobs, and the finding counts per class, so a refused open can be
+/// diagnosed from a trace without reproducing it.
+fn record_schema_gate_decision(
+    report: &SchemaReport,
+    options: SchemaOpenOptions,
+    outcome: &'static str,
+) {
+    let counts = report.finding_counts();
+    let fields = tracing::field::display(
+        counts
+            .iter()
+            .map(|(section, count)| format!("{section}={count}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    let schema = report.schema.as_deref().unwrap_or("<unresolved>");
+    match outcome {
+        "allowed" => tracing::debug!(
+            component = SCHEMA_COMPONENT,
+            schema,
+            expected_version = report.expected_version,
+            found_version = ?report.found_version,
+            provisioning = ?options.provisioning,
+            schema_check = ?options.check,
+            findings = %fields,
+            finding_total = report.findings.len(),
+            outcome,
+            "lash Postgres schema gate admitted the database"
+        ),
+        _ => tracing::warn!(
+            component = SCHEMA_COMPONENT,
+            schema,
+            expected_version = report.expected_version,
+            found_version = ?report.found_version,
+            provisioning = ?options.provisioning,
+            schema_check = ?options.check,
+            findings = %fields,
+            finding_total = report.findings.len(),
+            outcome,
+            "lash Postgres schema gate decided against admitting the database as-is"
+        ),
+    }
 }
 
 /// Renders the reject-and-recreate boundary error, naming the remedy rather than

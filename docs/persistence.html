@@ -65,7 +65,7 @@
       <aside class="contract">
         <strong>Provisioning Postgres yourself</strong>
         <p>Vendor <code>PostgresStorage::schema_ddl()</code> — the same bytes ship as <code>crates/lash-postgres-store/schema.sql</code>, seed rows included — into your own migration tooling and copy them rather than transcribing them. Open with <code>SchemaProvisioning::HostProvisioned</code> to run no DDL at all, and gate your migration CI on <code>PostgresStorage::verify_schema_for(&amp;pool)</code>, which reports without needing a successful open. Either way, open compares columns, unique guards (including partial unique indexes), and foreign-key delete actions against the shape the build requires, and rejects a mismatch with a per-object diff.</p>
-        <p>Provision every lash table into one schema, and do not run migrations concurrently with an open: lash anchors verification on the schema holding <code>lash_schema_versions</code> and its advisory lock serializes only its own openers. <code>PostgresStorage::schema_advisory_lock_key()</code> publishes that key for deployments that need to coordinate.</p>
+        <p>Provision every lash table into one schema: lash anchors verification on the schema holding <code>lash_schema_versions</code> and reports any lash table that resolves outside it, so two half-installations on one <code>search_path</code> are rejected rather than assembled. Do not run migrations concurrently with an open or a verification — lash takes <code>PostgresStorage::schema_advisory_lock_key()</code> for both, but only participants that take it are serialized. A migration CI job should wrap that key around its migrate-then-verify sequence.</p>
       </aside>
     </div>
 

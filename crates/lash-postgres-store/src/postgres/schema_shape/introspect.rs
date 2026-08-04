@@ -58,49 +58,106 @@ pub(crate) async fn resolve_installation(
     }))
 }
 
+/// Outcome of reading the component version stamp.
+///
+/// "Unreadable" is a third state on purpose. A `lash_schema_versions` whose own
+/// columns were mis-ported cannot be decoded, and collapsing that into "unstamped"
+/// would suppress the column diff that explains it — a version mismatch
+/// deliberately short-circuits the structural report, and that short-circuit must
+/// not fire on a database whose only real problem is drift.
+pub(crate) enum ComponentVersion {
+    /// The stamp columns are the shape this build reads. Carries the stamped
+    /// version, or `None` when the table holds no row for this component.
+    Readable(Option<i32>),
+    /// The stamp columns are absent or not the types this build decodes.
+    Unreadable,
+}
+
 /// Reads the component version stamp from the anchored installation.
 ///
 /// Qualified by namespace rather than resolved through `search_path`, so the
 /// version this reports is the version of the installation the rest of the check
-/// reads. Tolerates a `lash_schema_versions` whose own columns are mis-ported:
-/// that surfaces as an unstamped database plus the column diff, never as a raw
-/// Postgres error.
+/// reads.
+///
+/// The catalog is consulted for the stamp columns' *types* before the typed query
+/// runs, not merely for their names: binding `component` as text against a
+/// `bytea` column raises a Postgres error, and a verification whose whole purpose
+/// is to describe a broken schema must not abort on one.
 pub(crate) async fn read_component_version(
     connection: &mut PgConnection,
     installation: &Installation,
-) -> Result<Option<i32>, StoreError> {
-    let readable: bool = sqlx::query_scalar(
-        "SELECT count(*) = 2
-         FROM pg_catalog.pg_attribute
-         WHERE attrelid = ($1 || '.' || pg_catalog.quote_ident($2))::regclass
-           AND attname IN ('component', 'version')
-           AND attnum > 0
-           AND NOT attisdropped",
-    )
-    .bind(&installation.quoted_namespace)
-    .bind(ANCHOR_TABLE)
-    .fetch_one(&mut *connection)
-    .await
-    .map_err(store_sqlx_error)?;
-    if !readable {
-        return Ok(None);
+    expected: &SchemaShape,
+) -> Result<ComponentVersion, StoreError> {
+    let probed = ["component", "version"];
+    if !probe_columns_match_expected(connection, installation, expected, ANCHOR_TABLE, &probed)
+        .await?
+    {
+        return Ok(ComponentVersion::Unreadable);
     }
-    sqlx::query_scalar(&format!(
+    let version = sqlx::query_scalar(&format!(
         "SELECT version FROM {}.{ANCHOR_TABLE} WHERE component = $1",
         installation.quoted_namespace
     ))
     .bind(SCHEMA_COMPONENT)
     .fetch_optional(&mut *connection)
     .await
-    .map_err(store_sqlx_error)
+    .map_err(store_sqlx_error)?;
+    Ok(ComponentVersion::Readable(version))
+}
+
+/// Whether every column a typed probe binds exists in the live table with the type
+/// this build expects.
+///
+/// The expected types come from the shape artifact rather than being restated here,
+/// so a probe cannot drift from the schema it probes. Any mismatch is already
+/// reported as column drift by the structural diff; this only decides whether it is
+/// safe to execute the typed statement.
+async fn probe_columns_match_expected(
+    connection: &mut PgConnection,
+    installation: &Installation,
+    expected: &SchemaShape,
+    table: &str,
+    columns: &[&str],
+) -> Result<bool, StoreError> {
+    let Some(expected_table) = expected.tables.get(table) else {
+        return Ok(false);
+    };
+    let mut names = Vec::with_capacity(columns.len());
+    let mut types = Vec::with_capacity(columns.len());
+    for column in columns {
+        let Some(shape) = expected_table.columns.get(*column) else {
+            return Ok(false);
+        };
+        names.push((*column).to_string());
+        types.push(shape.sql_type.clone());
+    }
+    let matched: i64 = sqlx::query_scalar(
+        "SELECT count(*)
+         FROM unnest($3::text[], $4::text[]) AS want(name, sql_type)
+         JOIN pg_catalog.pg_attribute AS attribute
+             ON attribute.attname = want.name
+            AND pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) = want.sql_type
+         WHERE attribute.attrelid = ($1 || '.' || pg_catalog.quote_ident($2))::regclass
+           AND attribute.attnum > 0
+           AND NOT attribute.attisdropped",
+    )
+    .bind(&installation.quoted_namespace)
+    .bind(table)
+    .bind(&names)
+    .bind(&types)
+    .fetch_one(&mut *connection)
+    .await
+    .map_err(store_sqlx_error)?;
+    Ok(matched == names.len() as i64)
 }
 
 /// Reads the live shape of lash's tables and diffs it against this build's
 /// expectation, then checks the seed rows the structural diff cannot see.
 ///
-/// A version-stamp mismatch short-circuits the structural diff: the database is
-/// a different schema generation, so a per-column diff of it is noise rather
-/// than a diagnosis.
+/// A readable version stamp naming another generation short-circuits the
+/// structural diff: the database is a different schema generation, so a per-column
+/// diff of it is noise rather than a diagnosis. An *unreadable* stamp does not
+/// short-circuit — there the column diff is the diagnosis.
 pub(crate) async fn verify_schema_shape(
     connection: &mut PgConnection,
 ) -> Result<SchemaReport, StoreError> {
@@ -117,17 +174,23 @@ pub(crate) async fn verify_schema_shape(
             }],
         });
     };
-    let found_version = read_component_version(connection, &installation).await?;
+    let stamp = read_component_version(connection, &installation, &expected).await?;
+    let found_version = match stamp {
+        ComponentVersion::Readable(version) => version,
+        ComponentVersion::Unreadable => None,
+    };
     let mut report = SchemaReport {
         schema: Some(installation.namespace.clone()),
         expected_version: SCHEMA_VERSION,
         found_version,
         findings: Vec::new(),
     };
-    if found_version != Some(SCHEMA_VERSION) {
+    if let ComponentVersion::Readable(version) = stamp
+        && version != Some(SCHEMA_VERSION)
+    {
         report.findings.push(SchemaFinding::VersionMismatch {
             expected: SCHEMA_VERSION,
-            found: found_version,
+            found: version,
         });
         return Ok(report);
     }
@@ -137,7 +200,13 @@ pub(crate) async fn verify_schema_shape(
     report.findings.extend(expected.diff(&found));
     report
         .findings
-        .extend(read_seed_row_findings(connection, &installation, &found).await?);
+        .extend(read_seed_row_findings(connection, &installation, &expected, &found).await?);
+    if matches!(stamp, ComponentVersion::Unreadable) {
+        report.findings.push(SchemaFinding::VersionMismatch {
+            expected: SCHEMA_VERSION,
+            found: None,
+        });
+    }
     Ok(report)
 }
 
@@ -438,19 +507,29 @@ pub(crate) fn normalize_predicate(predicate: &str) -> String {
 /// non-emptiness. `CHECK (singleton)` is deliberately outside the verified scope,
 /// so nothing else would stop a host port from holding a `singleton = FALSE` row
 /// that satisfies "the table has rows" and fails every runtime read.
+///
+/// Every probe is gated on the catalog agreeing about the *types* of the columns it
+/// binds. A table whose `singleton` came back as `text` cannot be queried with a
+/// boolean predicate, and raising `operator does not exist: text = boolean` out of a
+/// verification would replace a structured finding — the column drift is already in
+/// the report — with a raw backend error.
 async fn read_seed_row_findings(
     connection: &mut PgConnection,
     installation: &Installation,
+    expected: &SchemaShape,
     found: &SchemaShape,
 ) -> Result<Vec<SchemaFinding>, StoreError> {
     let mut findings = Vec::new();
     for (table, detail) in SEED_ROWS {
-        // A mis-shaped table has already been reported column by column; probing
-        // it for a row it cannot hold would raise a raw Postgres error instead.
-        if !found
-            .tables
-            .get(table)
-            .is_some_and(|shape| shape.columns.contains_key("singleton"))
+        if !found.tables.contains_key(table)
+            || !probe_columns_match_expected(
+                connection,
+                installation,
+                expected,
+                table,
+                &["singleton"],
+            )
+            .await?
         {
             continue;
         }
@@ -473,10 +552,15 @@ async fn read_seed_row_findings(
     // carry it too: a host gating its migration CI on `verify_schema` would
     // otherwise pass a database whose secret it seeded at the wrong width and
     // fail at the production open instead.
-    if found
-        .tables
-        .get("lash_await_event_meta")
-        .is_some_and(|shape| shape.columns.contains_key("signing_secret"))
+    if found.tables.contains_key("lash_await_event_meta")
+        && probe_columns_match_expected(
+            connection,
+            installation,
+            expected,
+            "lash_await_event_meta",
+            &["singleton", "signing_secret"],
+        )
+        .await?
     {
         let secret: Option<Vec<u8>> = sqlx::query_scalar(&format!(
             "SELECT signing_secret FROM {}.lash_await_event_meta WHERE singleton = TRUE",
@@ -491,7 +575,8 @@ async fn read_seed_row_findings(
             findings.push(SchemaFinding::InvalidSeedRow {
                 table: "lash_await_event_meta".to_string(),
                 detail: format!(
-                    "await-event signing secret has {} bytes, expected {AWAIT_EVENT_SIGNING_SECRET_BYTES}",
+                    "await-event signing secret has {} bytes, expected \
+                     {AWAIT_EVENT_SIGNING_SECRET_BYTES}",
                     secret.len()
                 ),
             });
