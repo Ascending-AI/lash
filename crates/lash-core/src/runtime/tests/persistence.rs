@@ -1,57 +1,14 @@
 use super::*;
 use crate::SessionCommitStore as _;
 
-#[derive(Debug)]
-struct PersistenceConformanceClock(std::sync::atomic::AtomicU64);
-
-impl PersistenceConformanceClock {
-    fn new(timestamp_ms: u64) -> Self {
-        Self(std::sync::atomic::AtomicU64::new(timestamp_ms))
-    }
-
-    fn advance(&self, duration_ms: u64) {
-        self.0
-            .fetch_add(duration_ms, std::sync::atomic::Ordering::SeqCst);
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::Clock for PersistenceConformanceClock {
-    fn now(&self) -> std::time::Instant {
-        std::time::Instant::now()
-    }
-
-    fn timestamp_ms(&self) -> u64 {
-        self.0.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    fn timestamp_rfc3339(&self) -> String {
-        self.timestamp_datetime().to_rfc3339()
-    }
-
-    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        chrono::DateTime::from(
-            std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.timestamp_ms()),
-        )
-    }
-
-    async fn sleep(&self, duration: std::time::Duration) {
-        tokio::time::sleep(duration).await;
-    }
-
-    async fn sleep_until(&self, deadline: std::time::Instant) {
-        tokio::time::sleep_until(deadline.into()).await;
-    }
-}
-
 // The in-memory `RecordingStore` stands in for the real store across these
 // runtime tests; the conformance suite holds it to the same durability
 // contract as the durable backend so it can't silently drift.
 #[tokio::test]
 async fn recording_store_satisfies_runtime_persistence_conformance() {
-    let clock = Arc::new(PersistenceConformanceClock::new(10_000));
+    let clock = Arc::new(crate::testing::TestClock::new(10_000));
     let store_clock = Arc::clone(&clock);
-    crate::testing::conformance::runtime_persistence_with_lease_timing(
+    crate::testing::conformance::runtime_persistence(
         move || {
             std::sync::Arc::new(RecordingStore::with_clock(store_clock.clone()))
                 as std::sync::Arc<dyn crate::RuntimePersistence>
@@ -159,18 +116,33 @@ fn recording_runtime_persistence() -> Arc<dyn crate::RuntimePersistence> {
     Arc::new(RecordingStore::default())
 }
 
+fn controlled_recording_runtime_persistence() -> (
+    Arc<dyn crate::RuntimePersistence>,
+    crate::testing::conformance::RuntimePersistenceLeaseTiming,
+) {
+    let clock = Arc::new(crate::testing::TestClock::new(10_000));
+    let store =
+        Arc::new(RecordingStore::with_clock(clock.clone())) as Arc<dyn crate::RuntimePersistence>;
+    let timing = crate::testing::conformance::RuntimePersistenceLeaseTiming::controlled(
+        move |duration_ms| clock.advance(duration_ms),
+    );
+    (store, timing)
+}
+
 #[tokio::test]
 async fn queued_work_claims_supersede_across_session_lease_generations() {
+    let (store, timing) = controlled_recording_runtime_persistence();
     crate::testing::conformance::queued_work_claims_supersede_across_session_lease_generations(
-        recording_runtime_persistence(),
+        store, timing,
     )
     .await;
 }
 
 #[tokio::test]
 async fn turn_input_claims_supersede_across_session_lease_generations() {
+    let (store, timing) = controlled_recording_runtime_persistence();
     crate::testing::conformance::turn_input_claims_supersede_across_session_lease_generations(
-        recording_runtime_persistence(),
+        store, timing,
     )
     .await;
 }

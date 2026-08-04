@@ -31,24 +31,29 @@ impl RuntimePersistenceLeaseTiming {
         Self::Controlled(std::sync::Arc::new(advance))
     }
 
-    fn lease_ttl_ms(&self) -> u64 {
+    fn scaffolding_lease_ttl_ms(&self) -> u64 {
         match self {
             Self::Realtime => REALTIME_LEASE_STALL_ALLOWANCE.as_millis() as u64,
             Self::Controlled(_) => CONTROLLED_LEASE_TTL_MS,
         }
     }
 
-    fn observation_is_still_unexpired(&self, started: std::time::Instant) -> bool {
-        match self {
-            Self::Realtime => started.elapsed() < REALTIME_LEASE_STALL_ALLOWANCE,
-            Self::Controlled(_) => true,
+    fn advance_to_just_before_semantic_expiry(&self) {
+        if let Self::Controlled(advance) = self {
+            advance(CONTROLLED_LEASE_TTL_MS - 1);
+        }
+    }
+
+    fn advance_to_semantic_expiry(&self) {
+        if let Self::Controlled(advance) = self {
+            advance(1);
         }
     }
 
     async fn wait_until_expired(&self) {
         match self {
             Self::Realtime => tokio::time::sleep(REALTIME_LEASE_STALL_ALLOWANCE).await,
-            Self::Controlled(advance) => advance(CONTROLLED_LEASE_TTL_MS + 1),
+            Self::Controlled(advance) => advance(CONTROLLED_LEASE_TTL_MS),
         }
     }
 }
@@ -68,18 +73,8 @@ impl RuntimePersistenceLeaseTiming {
 /// lifecycle ([`TurnInputStore`](crate::TurnInputStore)); and tombstone/GC
 /// behavior ([`StoreMaintenance`](crate::StoreMaintenance)).
 /// Effect-host workflow history is deliberately outside this suite.
-pub async fn runtime_persistence<F>(make: F)
+pub async fn runtime_persistence<F>(make: F, lease_timing: RuntimePersistenceLeaseTiming)
 where
-    F: Fn() -> Arc<dyn RuntimePersistence>,
-{
-    runtime_persistence_with_lease_timing(make, RuntimePersistenceLeaseTiming::Realtime).await;
-}
-
-/// Run [`runtime_persistence`] with an explicit session-lease clock driver.
-pub async fn runtime_persistence_with_lease_timing<F>(
-    make: F,
-    lease_timing: RuntimePersistenceLeaseTiming,
-) where
     F: Fn() -> Arc<dyn RuntimePersistence>,
 {
     let first = make();
@@ -90,19 +85,8 @@ pub async fn runtime_persistence_with_lease_timing<F>(
 }
 
 /// Run the full [`RuntimePersistence`] suite plus durable reopen checks.
-pub async fn runtime_persistence_reopenable<F>(make: F)
+pub async fn runtime_persistence_reopenable<F>(make: F, lease_timing: RuntimePersistenceLeaseTiming)
 where
-    F: Fn() -> ReopenableRuntimePersistence,
-{
-    runtime_persistence_reopenable_with_lease_timing(make, RuntimePersistenceLeaseTiming::Realtime)
-        .await;
-}
-
-/// Run [`runtime_persistence_reopenable`] with an explicit lease clock driver.
-pub async fn runtime_persistence_reopenable_with_lease_timing<F>(
-    make: F,
-    lease_timing: RuntimePersistenceLeaseTiming,
-) where
     F: Fn() -> ReopenableRuntimePersistence,
 {
     let probe = make();
@@ -116,9 +100,11 @@ pub async fn runtime_persistence_reopenable_with_lease_timing<F>(
 
 /// Prove lease and claim expiry using an injected embedded-backend clock.
 ///
-/// This complements the full suite's real-time expiry check: the real-time
-/// proof guards production `SystemClock` wiring, while this variant proves an
-/// embedded store actually consults its injected [`Clock`](crate::Clock).
+/// This focused vector proves an embedded store consults its injected
+/// [`Clock`](crate::Clock) across session leases and both claim families. Full
+/// conformance suites state their timing mode explicitly; the `Realtime` mode
+/// keeps its expired-to-reclaimable direction on the production backend clock
+/// with bounded polling.
 pub async fn runtime_persistence_clock_expiry(
     store: Arc<dyn RuntimePersistence>,
     advance: impl FnOnce(u64),
@@ -166,7 +152,7 @@ pub async fn runtime_persistence_clock_expiry(
         .expect("claim clock-expiry turn input")
         .expect("clock-expiry turn input claim exists");
 
-    advance(TTL_MS + 1);
+    advance(TTL_MS);
 
     let successor_lease = store
         .try_claim_session_execution_lease(session_id, &successor, TTL_MS)
@@ -2041,37 +2027,44 @@ async fn session_execution_lease_expires_by_ttl_contract<F>(
         let session_id = format!("ttl-expiry-{attempt}");
         let holder_owner = lease_owner("stale-holder");
         let claimant = lease_owner("ttl-claimant");
-        let observation_started = std::time::Instant::now();
         let holder = store
-            .try_claim_session_execution_lease(
-                &session_id,
-                &holder_owner,
-                lease_timing.lease_ttl_ms(),
-            )
+            .try_claim_session_execution_lease(&session_id, &holder_owner, CONTROLLED_LEASE_TTL_MS)
             .await
             .expect("claim stale-holder lease")
             .acquired()
             .expect("stale-holder lease acquired");
 
-        let busy = store
+        lease_timing.advance_to_just_before_semantic_expiry();
+        let outcome = store
             .try_claim_session_execution_lease(&session_id, &claimant, 60_000)
             .await
             .expect("claimant observes stale-holder lease");
-        if !lease_timing.observation_is_still_unexpired(observation_started) {
-            continue;
+        match outcome {
+            crate::SessionExecutionLeaseClaimOutcome::Busy {
+                holder: busy_holder,
+            } => {
+                assert_eq!(
+                    busy_holder.lease_token, holder.lease_token,
+                    "the busy observation must name the stale-holder lease"
+                );
+            }
+            crate::SessionExecutionLeaseClaimOutcome::Acquired(acquired)
+                if acquired.claimed_at_epoch_ms < holder.expires_at_epoch_ms =>
+            {
+                panic!(
+                    "an unexpired stale lease must remain busy rather than being reclaimed: \
+                     successor claimed at {} before holder expiry {}",
+                    acquired.claimed_at_epoch_ms, holder.expires_at_epoch_ms
+                );
+            }
+            crate::SessionExecutionLeaseClaimOutcome::Acquired(lapsed_successor) => {
+                release_session_execution_lease_for_test(&store, &lapsed_successor).await;
+                continue;
+            }
         }
-        assert!(
-            matches!(
-                busy,
-                crate::SessionExecutionLeaseClaimOutcome::Busy {
-                    holder: ref busy_holder
-                }
-                    if busy_holder.lease_token == holder.lease_token
-            ),
-            "an unexpired stale lease must remain busy rather than being reclaimed"
-        );
 
-        let acquired = claim_session_execution_lease_after_expiry(
+        lease_timing.advance_to_semantic_expiry();
+        let acquired = claim_session_execution_lease_until_acquired(
             &store,
             &session_id,
             &claimant,
@@ -2100,6 +2093,17 @@ async fn claim_session_execution_lease_after_expiry(
     context: &str,
 ) -> crate::SessionExecutionLease {
     lease_timing.wait_until_expired().await;
+    claim_session_execution_lease_until_acquired(store, session_id, claimant, lease_timing, context)
+        .await
+}
+
+async fn claim_session_execution_lease_until_acquired(
+    store: &Arc<dyn RuntimePersistence>,
+    session_id: &str,
+    claimant: &crate::LeaseOwnerIdentity,
+    lease_timing: &RuntimePersistenceLeaseTiming,
+    context: &str,
+) -> crate::SessionExecutionLease {
     let deadline = std::time::Instant::now() + REALTIME_LEASE_STALL_ALLOWANCE;
     loop {
         match store
@@ -3162,12 +3166,10 @@ async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
 
 pub async fn queued_work_claims_supersede_across_session_lease_generations(
     store: Arc<dyn RuntimePersistence>,
+    lease_timing: RuntimePersistenceLeaseTiming,
 ) {
-    queued_work_claims_supersede_across_session_lease_generations_with_timing(
-        store,
-        &RuntimePersistenceLeaseTiming::Realtime,
-    )
-    .await;
+    queued_work_claims_supersede_across_session_lease_generations_with_timing(store, &lease_timing)
+        .await;
 }
 
 async fn queued_work_claims_supersede_across_session_lease_generations_with_timing(
@@ -3299,7 +3301,11 @@ async fn queued_work_claims_supersede_across_session_lease_generations_with_timi
     // successor's re-claim below is what supersedes the pre-takeover claim.
     let dead_owner = lease_owner("gen-stale");
     let dead_lease = store
-        .try_claim_session_execution_lease("root", &dead_owner, lease_timing.lease_ttl_ms())
+        .try_claim_session_execution_lease(
+            "root",
+            &dead_owner,
+            lease_timing.scaffolding_lease_ttl_ms(),
+        )
         .await
         .expect("claim dead-owner lease")
         .acquired()
@@ -3498,7 +3504,7 @@ async fn claim_liveness_for_lease_less_paths_tracks_session_generations(
         &store,
         "lease-less-expiry",
         &expiry_owner,
-        lease_timing.lease_ttl_ms(),
+        lease_timing.scaffolding_lease_ttl_ms(),
     )
     .await;
     lease_timing.wait_until_expired().await;
@@ -3518,7 +3524,7 @@ async fn claim_liveness_for_lease_less_paths_tracks_session_generations(
             &store,
             "lease-less-takeover",
             &dead_owner,
-            lease_timing.lease_ttl_ms(),
+            lease_timing.scaffolding_lease_ttl_ms(),
         )
         .await;
     let taker = lease_owner("lease-less-taker");
@@ -4885,12 +4891,10 @@ async fn pending_turn_input_claims_reclaim_complete_and_fence(store: Arc<dyn Run
 
 pub async fn turn_input_claims_supersede_across_session_lease_generations(
     store: Arc<dyn RuntimePersistence>,
+    lease_timing: RuntimePersistenceLeaseTiming,
 ) {
-    turn_input_claims_supersede_across_session_lease_generations_with_timing(
-        store,
-        &RuntimePersistenceLeaseTiming::Realtime,
-    )
-    .await;
+    turn_input_claims_supersede_across_session_lease_generations_with_timing(store, &lease_timing)
+        .await;
 }
 
 async fn turn_input_claims_supersede_across_session_lease_generations_with_timing(
@@ -4960,7 +4964,11 @@ async fn turn_input_claims_supersede_across_session_lease_generations_with_timin
     // (c) TTL takeover mints a new generation without a release.
     let dead_owner = lease_owner("tin-stale");
     let dead_lease = store
-        .try_claim_session_execution_lease("root", &dead_owner, lease_timing.lease_ttl_ms())
+        .try_claim_session_execution_lease(
+            "root",
+            &dead_owner,
+            lease_timing.scaffolding_lease_ttl_ms(),
+        )
         .await
         .expect("claim dead-owner lease")
         .acquired()

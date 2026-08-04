@@ -27,6 +27,7 @@ impl RuntimeScenarioContext {
             .acquired()
             .expect("stale-holder session execution lease");
         let claimant = local_lease_owner(self.host_behavior.lease_owner_id, "claimant-start");
+        self.clock.advance(STALE_HOLDER_TTL_MS - 1);
         let busy = self
             .store()
             .try_claim_session_execution_lease(self.session_id, &claimant, 60_000)
@@ -37,7 +38,7 @@ impl RuntimeScenarioContext {
             "{} expected the stale-holder lease to remain busy before TTL",
             self.name
         );
-        self.clock.advance(STALE_HOLDER_TTL_MS + 1);
+        self.clock.advance(1);
         let reclaimed = self
             .store()
             .try_claim_session_execution_lease(self.session_id, &claimant, 60_000)

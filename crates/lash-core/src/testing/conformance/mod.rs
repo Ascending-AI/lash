@@ -102,49 +102,6 @@ use lash_sansio::{AttachmentCreateMeta, AttachmentTypeMetadata, MediaType};
 mod tests {
     use super::*;
 
-    #[derive(Debug)]
-    struct ConformanceClock(std::sync::atomic::AtomicU64);
-
-    impl ConformanceClock {
-        fn new(timestamp_ms: u64) -> Self {
-            Self(std::sync::atomic::AtomicU64::new(timestamp_ms))
-        }
-
-        fn advance(&self, duration_ms: u64) {
-            self.0
-                .fetch_add(duration_ms, std::sync::atomic::Ordering::SeqCst);
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl crate::Clock for ConformanceClock {
-        fn now(&self) -> std::time::Instant {
-            std::time::Instant::now()
-        }
-
-        fn timestamp_ms(&self) -> u64 {
-            self.0.load(std::sync::atomic::Ordering::SeqCst)
-        }
-
-        fn timestamp_rfc3339(&self) -> String {
-            self.timestamp_datetime().to_rfc3339()
-        }
-
-        fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-            chrono::DateTime::from(
-                std::time::UNIX_EPOCH + Duration::from_millis(self.timestamp_ms()),
-            )
-        }
-
-        async fn sleep(&self, duration: Duration) {
-            tokio::time::sleep(duration).await;
-        }
-
-        async fn sleep_until(&self, deadline: std::time::Instant) {
-            tokio::time::sleep_until(deadline.into()).await;
-        }
-    }
-
     #[tokio::test]
     async fn in_memory_attachment_store_satisfies_conformance() {
         attachment_store(
@@ -366,7 +323,7 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_session_store_uses_injected_clock_for_expiry() {
-        let clock = Arc::new(ConformanceClock::new(10_000));
+        let clock = Arc::new(crate::testing::TestClock::new(10_000));
         let store = Arc::new(crate::InMemorySessionStore::with_clock(clock.clone()))
             as Arc<dyn crate::RuntimePersistence>;
         runtime_persistence_clock_expiry(store, |duration_ms| clock.advance(duration_ms)).await;

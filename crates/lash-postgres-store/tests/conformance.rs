@@ -109,23 +109,26 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
     };
     let storage = Arc::new(storage);
     let database_url = database_url().expect("configured Postgres database URL");
-    lash_core::testing::conformance::runtime_persistence_reopenable(|| {
-        let storage = Arc::clone(&storage);
-        let database_url = database_url.clone();
-        sync_await(async move {
-            reset(&storage).await;
-            let open_storage = PostgresStorage::connect(&database_url)
-                .await
-                .expect("open first Postgres conformance pool");
-            let reopen_storage = PostgresStorage::connect(&database_url)
-                .await
-                .expect("open independent Postgres conformance pool");
-            ReopenableRuntimePersistence {
-                open: Arc::new(open_storage.unbound_session_store()),
-                reopen: Arc::new(reopen_storage.unbound_session_store()),
-            }
-        })
-    })
+    lash_core::testing::conformance::runtime_persistence_reopenable(
+        || {
+            let storage = Arc::clone(&storage);
+            let database_url = database_url.clone();
+            sync_await(async move {
+                reset(&storage).await;
+                let open_storage = PostgresStorage::connect(&database_url)
+                    .await
+                    .expect("open first Postgres conformance pool");
+                let reopen_storage = PostgresStorage::connect(&database_url)
+                    .await
+                    .expect("open independent Postgres conformance pool");
+                ReopenableRuntimePersistence {
+                    open: Arc::new(open_storage.unbound_session_store()),
+                    reopen: Arc::new(reopen_storage.unbound_session_store()),
+                }
+            })
+        },
+        lash_core::testing::conformance::RuntimePersistenceLeaseTiming::Realtime,
+    )
     .await;
 }
 

@@ -641,6 +641,15 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
         renewed.expires_at_epoch_ms > short.expires_at_epoch_ms,
         "renewal must extend the persisted lease expiry"
     );
+    let persisted_renewed = registry
+        .get_process_lease("lease-renew")
+        .await
+        .expect("read renewed lease")
+        .expect("renewed lease remains persisted");
+    assert_eq!(
+        persisted_renewed.expires_at_epoch_ms, renewed.expires_at_epoch_ms,
+        "renewal must write the returned expiry to the persisted lease"
+    );
     registry
         .renew_process_lease(&renewed, 120_000)
         .await
