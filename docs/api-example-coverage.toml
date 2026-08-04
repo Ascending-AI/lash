@@ -49156,8 +49156,9 @@ symbol = "lash::tools::ToolCallOutput::cancelled"
 kind = "function"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::tools::ToolCallOutput::cancelled to the agent-workbench plugin/tool setup example and assert its externally observable result."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:9#lash::tools::ToolCallOutput::cancelled(lash::tools::ToolCancellation::runtime("
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:169#assert_eq!(cancellation_status, json!(\"cancelled\"));"
 
 [[api]]
 symbol = "lash::tools::ToolCallOutput::control"
@@ -49252,8 +49253,9 @@ symbol = "lash::tools::ToolCallOutput::with_control"
 kind = "function"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::tools::ToolCallOutput::with_control to the agent-workbench plugin/tool setup example and assert its externally observable result."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:14#lash::tools::ToolCallOutput::success(json!({ \"accepted\": true })).with_control("
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:186#lash::TurnOutcome::Finished(lash::TurnFinish::ToolValue { tool_name, value })"
 
 [[api]]
 symbol = "lash::tools::ToolCallRecord"
@@ -49302,6 +49304,133 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "unused-add"
 reason = "Add lash::tools::ToolCallRecord::tool to the agent-workbench plugin/tool setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::tools::ToolCancellation"
+kind = "struct"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:9#lash::tools::ToolCallOutput::cancelled(lash::tools::ToolCancellation::runtime("
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:171#cancellation_output.value_for_projection(),"
+
+[[api]]
+symbol = "lash::tools::ToolCancellation::message"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add a facade tool-implementor example that customizes ToolCancellation::message directly and asserts the recorded cancellation."
+
+[[api]]
+symbol = "lash::tools::ToolCancellation::raw"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add a facade tool-implementor example that attaches raw cancellation evidence and asserts its host-visible projection."
+
+[[api]]
+symbol = "lash::tools::ToolCancellation::runtime"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:9#lash::tools::ToolCallOutput::cancelled(lash::tools::ToolCancellation::runtime("
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:171#cancellation_output.value_for_projection(),"
+
+[[api]]
+symbol = "lash::tools::ToolCancellation::source"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add a facade tool-implementor example that customizes ToolCancellation::source directly and asserts the recorded cancellation."
+
+[[api]]
+symbol = "lash::tools::ToolCancellation::to_json_value"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add a facade tool-implementor example that projects ToolCancellation directly and asserts the structured JSON value."
+
+[[api]]
+symbol = "lash::tools::ToolControl"
+kind = "enum"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:15#lash::tools::ToolControl::Finish {"
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:186#lash::TurnOutcome::Finished(lash::TurnFinish::ToolValue { tool_name, value })"
+
+[[api]]
+symbol = "lash::tools::ToolControl::Fail"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:23#.with_control(lash::tools::ToolControl::Fail {"
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:199#lash::TurnOutcome::Stopped(lash::TurnStop::ToolError { tool_name, value })"
+
+[[api]]
+symbol = "lash::tools::ToolControl::Fail::failure"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:24#failure: lash::tools::ToolFailure::tool("
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:199#lash::TurnOutcome::Stopped(lash::TurnStop::ToolError { tool_name, value })"
+
+[[api]]
+symbol = "lash::tools::ToolControl::Finish"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:15#lash::tools::ToolControl::Finish {"
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:186#lash::TurnOutcome::Finished(lash::TurnFinish::ToolValue { tool_name, value })"
+
+[[api]]
+symbol = "lash::tools::ToolControl::Finish::value"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:16#value: lash::tools::ToolValue::from(json!({"
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:186#lash::TurnOutcome::Finished(lash::TurnFinish::ToolValue { tool_name, value })"
+
+[[api]]
+symbol = "lash::tools::ToolControl::SwitchAgentFrame"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add a facade tool-implementor example that requests an agent-frame switch and asserts the switched turn outcome."
+
+[[api]]
+symbol = "lash::tools::ToolControl::SwitchAgentFrame::frame_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add a facade tool-implementor agent-frame switch example that asserts the host-visible frame id."
+
+[[api]]
+symbol = "lash::tools::ToolControl::SwitchAgentFrame::initial_nodes"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add a facade tool-implementor agent-frame switch example that asserts the seeded frame nodes."
+
+[[api]]
+symbol = "lash::tools::ToolControl::SwitchAgentFrame::task"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add a facade tool-implementor agent-frame switch example that asserts the host-visible task."
 
 [[api]]
 symbol = "lash::tools::ToolContext"
@@ -50953,8 +51082,9 @@ symbol = "lash::tools::ToolResult::with_control"
 kind = "function"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::tools::ToolResult::with_control to the agent-workbench plugin/tool setup example and assert its externally observable result."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:23#.with_control(lash::tools::ToolControl::Fail {"
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:199#lash::TurnOutcome::Stopped(lash::TurnStop::ToolError { tool_name, value })"
 
 [[api]]
 symbol = "lash::tools::ToolRetryDisposition"

@@ -2480,4 +2480,5 @@ finish initial
 
     include!("tests/attachments_usage.rs");
     include!("tests/turn_input_application.rs");
+    include!("tests/tool_control.rs");
 }
