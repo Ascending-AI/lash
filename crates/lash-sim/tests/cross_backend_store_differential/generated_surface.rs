@@ -415,23 +415,25 @@ fn trigger_rows_from_memory(store: &InMemoryTriggerStore) -> TriggerRows {
         mutation_receipts: raw
             .mutation_receipts
             .into_iter()
-            .map(|(operation_id, request_fingerprint, result, _created_at_ms)| {
-                normalized_trigger_json(
-                    serde_json::json!({
-                        "operation_id": operation_id,
-                        "request_fingerprint": request_fingerprint,
-                        "result": result,
-                    }),
-                    &mut incarnations,
-                )
-            })
+            .map(
+                |(operation_id, request_fingerprint, result, _created_at_ms)| {
+                    normalized_trigger_json(
+                        serde_json::json!({
+                            "operation_id": operation_id,
+                            "request_fingerprint": request_fingerprint,
+                            "result": result,
+                        }),
+                        &mut incarnations,
+                    )
+                },
+            )
             .collect(),
         occurrences: raw
             .occurrences
             .into_iter()
-            .map(|(record, request_fingerprint)| {
+            .map(|(record, request_hash)| {
                 normalized_trigger_json(
-                    serde_json::json!({"request_fingerprint": request_fingerprint, "record": record}),
+                    serde_json::json!({"request_hash": request_hash, "record": record}),
                     &mut incarnations,
                 )
             })
@@ -1302,6 +1304,12 @@ async fn generated_cross_backend_surface_differential_agrees() {
         .await
         .unwrap();
     let storage = PostgresStorage::connect(&database_url).await.unwrap();
+    // CI seed 852 minimized to occurrence ingestion with no subscription state.
+    if let Some(divergence) =
+        first_divergence(&storage, &[SurfaceOperation::TriggerOccurrence { key: 0 }]).await
+    {
+        panic!("seed-852 minimized trigger-occurrence regression diverged: {divergence:#?}");
+    }
     let cases = std::env::var("LASH_CROSS_BACKEND_CASES")
         .ok()
         .and_then(|value| value.parse().ok())

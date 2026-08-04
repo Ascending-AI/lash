@@ -11,6 +11,7 @@ pub struct InMemoryTriggerStore {
 pub struct RawTriggerStateForTesting {
     pub subscriptions: Vec<TriggerSubscriptionRecord>,
     pub mutation_receipts: Vec<(String, String, TriggerEffectResult, u64)>,
+    /// Occurrence record paired with its legacy request hash.
     pub occurrences: Vec<(TriggerOccurrenceRecord, String)>,
     pub deliveries: Vec<(String, String, String, u64, TriggerSubscriptionRecord)>,
 }
@@ -51,12 +52,12 @@ impl InMemoryTriggerStore {
             .values()
             .cloned()
             .map(|occurrence| {
-                let request_fingerprint = state
+                let request_hash = state
                     .occurrence_hashes
                     .get(&occurrence.occurrence_id)
                     .cloned()
                     .unwrap_or_default();
-                (occurrence, request_fingerprint)
+                (occurrence, request_hash)
             })
             .collect();
         let deliveries = state
