@@ -1,0 +1,15 @@
+[
+  { "seam": "store", "operation": { "kind": "claim_session_execution_lease" } },
+  { "seam": "store", "operation": { "kind": "claim_next_turn_inputs" } },
+  { "seam": "store", "operation": { "kind": "load_session" } },
+  { "seam": "provider", "operation": { "kind": "initial_request" } },
+  { "seam": "provider", "operation": { "kind": "initial_mid_stream" } },
+  { "seam": "store", "operation": { "kind": "renew_session_execution_lease" } },
+  { "seam": "effect", "operation": { "kind": "tool_batch", "name": "trace_effect" } },
+  { "seam": "effect", "operation": { "kind": "tool_attempt", "name": "trace_effect" } },
+  { "seam": "store", "operation": { "kind": "claim_checkpoint_work", "checkpoint": "afterwork" } },
+  { "seam": "provider", "operation": { "kind": "after_tool_request" } },
+  { "seam": "provider", "operation": { "kind": "after_tool_mid_stream" } },
+  { "seam": "store", "operation": { "kind": "claim_checkpoint_work", "checkpoint": "beforecompletion" } },
+  { "seam": "store", "operation": { "kind": "commit_final_head", "settles_queue": true, "settles_turn_input": true, "releases_lease": true } }
+]
