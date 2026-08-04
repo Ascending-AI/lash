@@ -1395,10 +1395,27 @@ write_generated_postgres_dynamic_replay_skipped() {
 EOF
 }
 
+run_postgres_schema_gate() {
+  local database_url="$1"
+  # The DDL artifact hosts vendor and the expectation every open verifies against
+  # are two committed files; the drift gate that keeps them agreeing with each other
+  # and with a live catalog needs a real database, so it lives here rather than in
+  # the database-free lanes. Without it a green confidence gate would not imply
+  # `schema.sql` and `schema-shape.txt` still describe the same schema.
+  step "Postgres schema artifact drift and structural check"
+  LASH_POSTGRES_DATABASE_URL="$database_url" \
+    LASH_REQUIRE_POSTGRES=1 \
+    cargo test -p lash-postgres-store --locked --lib schema_shape
+  LASH_POSTGRES_DATABASE_URL="$database_url" \
+    LASH_REQUIRE_POSTGRES=1 \
+    cargo test -p lash-postgres-store --locked --test schema_drift
+}
+
 run_postgres_conformance() {
   step "Postgres backend conformance"
   if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
     LASH_REQUIRE_POSTGRES=1 cargo test -p lash-postgres-store --locked --test conformance
+    run_postgres_schema_gate "$LASH_POSTGRES_DATABASE_URL"
     run_cross_backend_store_soak "$LASH_POSTGRES_DATABASE_URL"
     run_generated_postgres_dynamic_replay "$LASH_POSTGRES_DATABASE_URL" "env"
     if area_selected sim; then
@@ -1453,6 +1470,7 @@ EOF
   LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
     LASH_REQUIRE_POSTGRES=1 \
     cargo test -p lash-postgres-store --locked --test conformance
+  run_postgres_schema_gate "postgres://lash:lash@127.0.0.1:${port}/lash"
   run_cross_backend_store_soak "postgres://lash:lash@127.0.0.1:${port}/lash"
   run_generated_postgres_dynamic_replay "postgres://lash:lash@127.0.0.1:${port}/lash" "docker"
   if area_selected sim; then
