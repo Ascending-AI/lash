@@ -284,8 +284,11 @@ table lash_trigger_subscriptions
   primary-key (subscription_id)
 table lash_usage_deltas
   column entry_json text not-null
+  column entry_ordinal bigint not-null
+  column operation_storage_key text not-null
   column seq bigint not-null default
   column session_id text not-null
+  unique (session_id, operation_storage_key, entry_ordinal)
   primary-key (seq)
 table lash_wake_allocation_floors
   column allocation_floor bigint not-null

@@ -168,6 +168,7 @@ where
     concurrent_head_revision_cas_applies_exactly_once(make()).await;
     commit_rejects_a_different_session_id(make()).await;
     load_hydrates_checkpoint_and_usage(make()).await;
+    usage_delta_identity_is_idempotent_across_commits(make()).await;
     checkpoint_rejects_unknown_component_ref(make()).await;
     session_read_loads_persisted_history(make()).await;
     session_metadata_round_trips(make()).await;
@@ -177,6 +178,7 @@ where
     final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(make()).await;
     append_request_receipt_replays_after_head_advance(make()).await;
     append_request_receipt_rejects_changed_content(make()).await;
+    append_request_exact_hash_rejects_changed_ancestor(make()).await;
     append_request_receipt_rejects_corrupt_node_count(make()).await;
     concurrent_same_append_operation_applies_exactly_once(make()).await;
     legacy_append_receipt_keeps_exact_hash_semantics(make()).await;
@@ -221,6 +223,57 @@ where
     turn_input_claims_supersede_across_session_lease_generations(make()).await;
     pending_turn_input_cancel_covers_active_and_deferred_states(make()).await;
     pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make()).await;
+}
+
+async fn usage_delta_identity_is_idempotent_across_commits(store: Arc<dyn RuntimePersistence>) {
+    let usage = TokenLedgerEntry {
+        source: "idempotent-republish".to_string(),
+        model: "usage-model".to_string(),
+        usage: crate::TokenUsage {
+            input_tokens: 11,
+            output_tokens: 7,
+            cache_read_input_tokens: 5,
+            cache_write_input_tokens: 3,
+            reasoning_output_tokens: 2,
+        },
+    };
+    let state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        ..RuntimeSessionState::default()
+    };
+    let first = RuntimeCommit::persisted_state_for_test(&state, std::slice::from_ref(&usage));
+    let durable_identity = first.usage_deltas[0].identity.clone();
+    let first_result = commit_runtime_state_for_test(&store, first, "usage identity first")
+        .await
+        .expect("publish first usage identity");
+
+    let mut next_state = loaded_conformance_state(&store).await;
+    next_state.head_revision = first_result.head_revision;
+    let mut republish = RuntimeCommit::persisted_state_for_test(&next_state, &[]);
+    republish.usage_deltas = vec![crate::store::RuntimeUsageDelta {
+        identity: durable_identity.clone(),
+        entry: usage.clone(),
+    }];
+    let republished = commit_runtime_state_for_test(&store, republish, "usage identity retry")
+        .await
+        .expect("republish existing usage identity");
+    assert_eq!(
+        republished.committed_usage_delta_identities,
+        vec![durable_identity]
+    );
+
+    let read = store
+        .load_session()
+        .await
+        .expect("load idempotent usage")
+        .expect("usage session exists");
+    let matching = read
+        .token_ledger
+        .iter()
+        .filter(|entry| entry.source == usage.source && entry.model == usage.model)
+        .collect::<Vec<_>>();
+    assert_eq!(matching.len(), 1);
+    assert_eq!(matching[0].usage, usage.usage);
 }
 
 fn append_request_commit(
@@ -407,6 +460,45 @@ async fn append_request_receipt_rejects_changed_content(store: Arc<dyn RuntimePe
             .iter()
             .all(|id| after.graph.find_node(id).is_some())
     );
+}
+
+async fn append_request_exact_hash_rejects_changed_ancestor(store: Arc<dyn RuntimePersistence>) {
+    let mut state = seed_append_receipt_state(&store).await;
+    let required = state.session_graph.leaf_node_id.clone().expect("seed leaf");
+    let nodes = vec![crate::SessionAppendNode::plugin(
+        "append-receipt",
+        serde_json::json!({"value": "changed-ancestor"}),
+    )];
+    let (first, _) = append_request_commit(
+        &mut state,
+        "changed-ancestor-exact-hash",
+        &nodes,
+        Some(&required),
+    );
+    let mut changed_ancestor = first.clone();
+    changed_ancestor.turn_commit = RuntimeTurnCommitStamp::append_session_nodes(
+        first.turn_commit.operation.clone(),
+        None,
+        &nodes,
+    )
+    .expect("changed ancestor identity");
+    assert_eq!(
+        first.turn_commit_hash().expect("first hash"),
+        changed_ancestor.turn_commit_hash().expect("retry hash"),
+        "ancestor metadata is intentionally outside the whole-commit hash"
+    );
+    commit_runtime_state_for_test(&store, first, "changed-ancestor-first")
+        .await
+        .expect("first changed-ancestor append");
+
+    let error = store
+        .commit_runtime_state(changed_ancestor)
+        .await
+        .expect_err("changed requested ancestor must conflict despite an exact commit hash");
+    assert!(matches!(
+        error,
+        StoreError::AppendOperationIdentityConflict { .. }
+    ));
 }
 
 async fn append_request_receipt_rejects_corrupt_node_count(store: Arc<dyn RuntimePersistence>) {

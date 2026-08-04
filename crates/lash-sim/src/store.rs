@@ -145,6 +145,7 @@ fn store_error_variant(error: &StoreError) -> &'static str {
         StoreError::AppendReceiptRequestedNodeCountCorrupt { .. } => {
             "AppendReceiptRequestedNodeCountCorrupt"
         }
+        StoreError::TokenUsageAccountingOverflow { .. } => "TokenUsageAccountingOverflow",
         StoreError::AppendAncestorNotActive { .. } => "AppendAncestorNotActive",
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch",
         StoreError::NodeIdCollision { .. } => "NodeIdCollision",

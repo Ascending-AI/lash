@@ -144,7 +144,7 @@ impl LashRuntime {
         let mut entries = self.state.token_ledger.clone();
         let drained = self.shared_token_ledger.lock().expect("token ledger lock");
         for entry in drained.iter().cloned() {
-            merge_ledger_entry(&mut entries, entry);
+            merge_ledger_entry(&mut entries, entry.entry);
         }
         SessionUsageReport::from_entries(&entries)
     }

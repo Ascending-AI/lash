@@ -39,8 +39,9 @@ pub enum RuntimeCommitReceiptDecision {
 
 /// Decide how an existing runtime commit receipt applies to one attempted commit.
 ///
-/// Exact commit hashes retain legacy replay precedence. When both exact-hash
-/// receipts carry a requested-node count, the count must agree. Otherwise,
+/// Exact commit hashes retain legacy replay precedence only after any
+/// comparable append identity agrees. When both exact-hash receipts carry a
+/// requested-node count, the count must agree. Otherwise,
 /// matching append identities replay only at the same encoding version and only
 /// when their contracted node-count cross-check agrees. Missing count metadata
 /// on an identity-bearing receipt is corruption; legacy receipts have no
@@ -60,6 +61,21 @@ pub fn decide_runtime_commit_receipt(
     attempted_requested_node_count: Option<u64>,
 ) -> RuntimeCommitReceiptDecision {
     if stored_commit_hash == attempted_commit_hash {
+        if let (
+            Some(stored_version),
+            Some(attempted_version),
+            Some(stored_identity),
+            Some(attempted_identity),
+        ) = (
+            stored_identity_encoding_version,
+            attempted_identity_encoding_version,
+            stored_request_identity_hash,
+            attempted_request_identity_hash,
+        ) && stored_version == attempted_version
+            && stored_identity != attempted_identity
+        {
+            return RuntimeCommitReceiptDecision::AppendIdentityConflict;
+        }
         if let (Some(stored), Some(attempted)) =
             (stored_requested_node_count, attempted_requested_node_count)
             && stored != attempted
@@ -548,13 +564,11 @@ fn append_node_identity_bytes(node: &crate::SessionAppendNode) -> Result<Vec<u8>
 /// No domain string, encoding version, node id, timestamp, head, or other
 /// environmental value is included. The version lives beside the digest in
 /// the receipt so a future encoder can fall back to exact commit hashes.
-pub(super) fn append_request_identity_hash(
+fn append_request_identity_bytes(
     operation: &OperationId,
     requested_ancestor_node_id: Option<&str>,
     nodes: &[crate::SessionAppendNode],
-) -> Result<String, StoreError> {
-    use sha2::Digest;
-
+) -> Result<Vec<u8>, StoreError> {
     let operation_key = operation.storage_key()?;
     let mut encoded = Vec::new();
     push_len_prefixed(&mut encoded, operation_key.as_bytes());
@@ -570,7 +584,24 @@ pub(super) fn append_request_identity_hash(
         let semantic_node = append_node_identity_bytes(node)?;
         push_len_prefixed(&mut encoded, &semantic_node);
     }
-    Ok(format!("{:x}", sha2::Sha256::digest(encoded)))
+    Ok(encoded)
+}
+
+pub(super) fn append_request_identity_hash(
+    operation: &OperationId,
+    requested_ancestor_node_id: Option<&str>,
+    nodes: &[crate::SessionAppendNode],
+) -> Result<String, StoreError> {
+    use sha2::Digest;
+
+    Ok(format!(
+        "{:x}",
+        sha2::Sha256::digest(append_request_identity_bytes(
+            operation,
+            requested_ancestor_node_id,
+            nodes,
+        )?)
+    ))
 }
 
 #[cfg(test)]
@@ -590,6 +621,18 @@ mod append_request_identity_tests {
 
     fn node_fixture(value: serde_json::Value) -> crate::SessionAppendNode {
         serde_json::from_value(value).expect("valid append-node fixture")
+    }
+
+    fn whole_request_variant_row(node: &crate::SessionAppendNode) -> &'static str {
+        match node {
+            crate::SessionAppendNode::Message { message: _ } => {
+                "whole_request_message_ancestor_absent"
+            }
+            crate::SessionAppendNode::ProtocolEvent { event: _ } => {
+                "whole_request_protocol_event_ancestor_present"
+            }
+            crate::SessionAppendNode::Plugin { .. } => "whole_request_plugin_multi_node",
+        }
     }
 
     #[test]
@@ -618,6 +661,20 @@ mod append_request_identity_tests {
             )
         };
 
+        assert_eq!(
+            decide(
+                "same",
+                "same",
+                Some(1),
+                Some(1),
+                Some("original-ancestor-identity"),
+                Some("changed-ancestor-identity"),
+                Some(1),
+                Some(1),
+            ),
+            AppendIdentityConflict,
+            "exact commit hashes cannot conceal comparable append identity drift"
+        );
         assert_eq!(
             decide(
                 "same",
@@ -874,6 +931,43 @@ mod append_request_identity_tests {
             "causal_variant_5",
             "causal_variant_6",
         ];
+        let whole_request_variants = [
+            crate::SessionAppendNode::message(crate::PluginMessage::text(
+                crate::MessageRole::User,
+                "whole message",
+            )),
+            crate::SessionAppendNode::protocol_event(crate::ProtocolEvent {
+                plugin_id: "whole-protocol".to_string(),
+                payload: serde_json::json!({"event": true}),
+            }),
+            crate::SessionAppendNode::plugin("whole-plugin", serde_json::json!({"plugin": "λ"})),
+        ];
+        let whole_requests = whole_request_variants.iter().map(|node| {
+            let name = whole_request_variant_row(node);
+            let (ancestor, nodes) = match node {
+                crate::SessionAppendNode::Message { message: _ } => (None, vec![node.clone()]),
+                crate::SessionAppendNode::ProtocolEvent { event: _ } => {
+                    (Some("whole-ancestor"), vec![node.clone()])
+                }
+                crate::SessionAppendNode::Plugin { .. } => (
+                    Some("multi-ancestor"),
+                    vec![
+                        node.clone(),
+                        crate::SessionAppendNode::message(crate::PluginMessage::text(
+                            crate::MessageRole::Assistant,
+                            "second node",
+                        )),
+                    ],
+                ),
+            };
+            (
+                name,
+                hex(
+                    &append_request_identity_bytes(&operation(name), ancestor, &nodes)
+                        .expect("encode whole request"),
+                ),
+            )
+        });
         let rendered = cases
             .iter()
             .map(|(name, node)| {
@@ -887,20 +981,21 @@ mod append_request_identity_tests {
                 push_causal_ref(&mut encoded, causal);
                 (causal_names[index], hex(&encoded))
             }))
+            .chain(whole_requests)
             .collect::<Vec<_>>();
         let expected = include_str!("testdata/append_request_identity_v1.hex")
             .lines()
             .filter(|line| !line.trim().is_empty())
             .map(|line| line.split_once('=').expect("name=hex golden corpus row"))
             .collect::<std::collections::BTreeMap<_, _>>();
-        assert_eq!(rendered.len(), expected.len(), "golden corpus row count");
+        let rendered_len = rendered.len();
         for (name, actual) in rendered {
-            assert_eq!(
-                actual,
-                *expected.get(name).expect("golden corpus case"),
-                "v1 bytes moved for {name}"
-            );
+            let Some(expected) = expected.get(name) else {
+                panic!("missing golden corpus row {name}={actual}");
+            };
+            assert_eq!(actual, **expected, "v1 bytes moved for {name}");
         }
+        assert_eq!(rendered_len, expected.len(), "golden corpus row count");
     }
 
     #[test]
@@ -982,7 +1077,7 @@ struct RuntimeCommitIntent<'a> {
     current_frame_node_id: Option<&'a str>,
     graph: GraphCommitIntent<'a>,
     checkpoint: CheckpointIntent<'a>,
-    usage_deltas: &'a [crate::TokenLedgerEntry],
+    usage_deltas: &'a [crate::store::RuntimeUsageDelta],
     completed_queue_batches: Vec<CompletedQueueIntent<'a>>,
     completed_turn_inputs: Vec<CompletedTurnInputIntent<'a>>,
     enqueued_queue_batches: Vec<QueuedBatchIntent<'a>>,

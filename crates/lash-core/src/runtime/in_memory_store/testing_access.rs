@@ -168,7 +168,12 @@ impl InMemorySessionStore {
     }
 
     pub fn raw_usage_deltas_for_testing(&self) -> Vec<crate::TokenLedgerEntry> {
-        self.usage_deltas.lock().expect("lock usage deltas").clone()
+        self.usage_deltas
+            .lock()
+            .expect("lock usage deltas")
+            .iter()
+            .map(|delta| delta.entry.clone())
+            .collect()
     }
 
     pub fn raw_session_meta_for_testing(&self) -> Option<crate::SessionMeta> {

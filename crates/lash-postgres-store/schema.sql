@@ -59,7 +59,10 @@ CREATE INDEX IF NOT EXISTS idx_lash_graph_nodes_parent
 CREATE TABLE IF NOT EXISTS lash_usage_deltas (
     seq BIGSERIAL PRIMARY KEY,
     session_id TEXT NOT NULL,
-    entry_json TEXT NOT NULL
+    operation_storage_key TEXT NOT NULL,
+    entry_ordinal BIGINT NOT NULL,
+    entry_json TEXT NOT NULL,
+    UNIQUE (session_id, operation_storage_key, entry_ordinal)
 );
 
 CREATE TABLE IF NOT EXISTS lash_session_meta (

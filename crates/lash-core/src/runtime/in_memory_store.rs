@@ -113,24 +113,6 @@ impl InMemoryPendingTurnInput {
     }
 }
 
-fn find_pending_turn_input_index(
-    pending: &[InMemoryPendingTurnInput],
-    session_id: &str,
-    target: &crate::PendingTurnInputCancelTarget,
-) -> Option<usize> {
-    pending.iter().position(|entry| {
-        entry.input.session_id == session_id
-            && match target {
-                crate::PendingTurnInputCancelTarget::InputId(input_id) => {
-                    entry.input.input_id == *input_id
-                }
-                crate::PendingTurnInputCancelTarget::SourceKey(source_key) => {
-                    entry.input.source_key.as_deref() == Some(source_key.as_str())
-                }
-            }
-    })
-}
-
 impl InMemorySessionExecutionLease {
     fn is_live(&self, now: u64) -> bool {
         self.lease_token.is_some() && self.expires_at_epoch_ms > now
@@ -181,7 +163,7 @@ pub struct InMemorySessionStore {
     tool_state_blobs: Mutex<HashMap<crate::BlobRef, crate::ToolState>>,
     plugin_snapshot_blobs: Mutex<HashMap<crate::BlobRef, crate::PluginSessionSnapshot>>,
     execution_state_blobs: Mutex<HashMap<crate::BlobRef, Vec<u8>>>,
-    pub(crate) usage_deltas: Mutex<Vec<crate::TokenLedgerEntry>>,
+    pub(crate) usage_deltas: Mutex<Vec<crate::store::RuntimeUsageDelta>>,
     pub(crate) runtime_commit_count: Mutex<usize>,
     runtime_turn_commits: Mutex<RuntimeTurnCommitMap>,
     session_execution_leases: Mutex<HashMap<String, InMemorySessionExecutionLease>>,
@@ -848,7 +830,12 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             checkpoint_ref: meta.checkpoint_ref,
             checkpoint: self.checkpoint.lock().expect("lock checkpoint").clone(),
             token_ledger: merge_usage_delta_entries(
-                self.usage_deltas.lock().expect("lock usage deltas").clone(),
+                self.usage_deltas
+                    .lock()
+                    .expect("lock usage deltas")
+                    .iter()
+                    .map(|delta| delta.entry.clone())
+                    .collect(),
             ),
         }))
     }
@@ -1350,10 +1337,17 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             global_node_owners.insert(node.node_id.clone(), commit.session_id.clone());
         }
         drop(global_node_owners);
-        self.usage_deltas
-            .lock()
-            .expect("lock usage deltas")
-            .extend(commit.usage_deltas.iter().cloned());
+        {
+            let mut usage_deltas = self.usage_deltas.lock().expect("lock usage deltas");
+            for delta in &commit.usage_deltas {
+                if !usage_deltas
+                    .iter()
+                    .any(|stored| stored.identity == delta.identity)
+                {
+                    usage_deltas.push(delta.clone());
+                }
+            }
+        }
         if let (Some(blob_ref), Some(body)) = (
             hydrated_checkpoint.tool_state_ref.clone(),
             hydrated_checkpoint.tool_state.clone(),
@@ -1406,6 +1400,11 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             manifest,
             committed_leaf_node_id: leaf_node_id,
             realized_node_timestamps,
+            committed_usage_delta_identities: commit
+                .usage_deltas
+                .iter()
+                .map(|delta| delta.identity.clone())
+                .collect(),
             enqueued_queue_batches: staged_enqueued_queue_batches,
             turn_input_applications,
             receipt_replayed: false,

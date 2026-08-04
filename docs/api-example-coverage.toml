@@ -4,6 +4,262 @@
 schema_version = 1
 
 [[api]]
+symbol = "lash::testing::conformance::append_usage_cancellation_publishes_exactly_once"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: queued-commit backend conformance embedders provide a deterministic post-send cancellation seam."
+
+[[api]]
+symbol = "lash::persistence::RuntimeCommitResult::committed_usage_delta_identities"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors return the exact usage identities carried by the stored receipt result."
+
+[[api]]
+symbol = "lash::persistence::RuntimeUsageDelta"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors persist identity-bearing usage rows from RuntimeCommit."
+
+[[api]]
+symbol = "lash::persistence::RuntimeUsageDelta::entry"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors encode the usage counters carried by an idempotent row."
+
+[[api]]
+symbol = "lash::persistence::RuntimeUsageDelta::identity"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors enforce uniqueness on this usage identity."
+
+[[api]]
+symbol = "lash::persistence::RuntimeUsageDeltaIdentity"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors use this compound identity for exactly-once usage publication."
+
+[[api]]
+symbol = "lash::persistence::RuntimeUsageDeltaIdentity::entry_ordinal"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors persist the row ordinal within its originating operation."
+
+[[api]]
+symbol = "lash::persistence::RuntimeUsageDeltaIdentity::operation_storage_key"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors persist the canonical operation key that originated the usage row."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDelta"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable substrates consume identity-bearing usage rows from RuntimeCommit."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDelta::entry"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable substrates encode the usage counters carried by an idempotent row."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDelta::identity"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable substrates enforce uniqueness on this usage identity."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDeltaIdentity"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable substrates use this compound identity for exactly-once usage publication."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDeltaIdentity::entry_ordinal"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable substrates persist the row ordinal within its originating operation."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDeltaIdentity::operation_storage_key"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable substrates persist the canonical operation key that originated the usage row."
+
+[[api]]
+symbol = "lash::persistence::StoreError::TokenUsageAccountingOverflow"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: hosts diagnose a retained usage batch that cannot be represented without counter overflow."
+
+[[api]]
+symbol = "lash::persistence::StoreError::TokenUsageAccountingOverflow::counter"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: hosts identify the overflowing usage counter."
+
+[[api]]
+symbol = "lash::persistence::StoreError::TokenUsageAccountingOverflow::model"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: hosts identify the model owning an overflowing retained usage row."
+
+[[api]]
+symbol = "lash::persistence::StoreError::TokenUsageAccountingOverflow::usage_source"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: hosts identify the source owning an overflowing retained usage row."
+
+[[api]]
+symbol = "lash_core::StoreError::TokenUsageAccountingOverflow"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: runtime and store hosts diagnose a retained usage batch that cannot be represented without overflow."
+
+[[api]]
+symbol = "lash_core::StoreError::TokenUsageAccountingOverflow::counter"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: runtime and store hosts identify the overflowing usage counter."
+
+[[api]]
+symbol = "lash_core::StoreError::TokenUsageAccountingOverflow::model"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: runtime and store hosts identify the model owning an overflowing retained usage row."
+
+[[api]]
+symbol = "lash_core::StoreError::TokenUsageAccountingOverflow::usage_source"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: runtime and store hosts identify the source owning an overflowing retained usage row."
+
+[[api]]
+symbol = "lash::plugins::PluginError::AppendReceiptRequestedNodeCountCorrupt"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: plugin hosts distinguish durable append receipt corruption without string matching."
+
+[[api]]
+symbol = "lash::plugins::PluginError::AppendReceiptRequestedNodeCountCorrupt::attempted"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: plugin hosts report the attempted append node count for corrupt receipts."
+
+[[api]]
+symbol = "lash::plugins::PluginError::AppendReceiptRequestedNodeCountCorrupt::operation_key"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: plugin hosts report the durable operation key for corrupt receipts."
+
+[[api]]
+symbol = "lash::plugins::PluginError::AppendReceiptRequestedNodeCountCorrupt::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: plugin hosts report the session owning a corrupt append receipt."
+
+[[api]]
+symbol = "lash::plugins::PluginError::AppendReceiptRequestedNodeCountCorrupt::stored"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: plugin hosts report the stored append node count for corrupt receipts."
+
+[[api]]
+symbol = "lash_core::PluginError::AppendReceiptRequestedNodeCountCorrupt"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: core plugin hosts distinguish durable append receipt corruption without string matching."
+
+[[api]]
+symbol = "lash_core::PluginError::AppendReceiptRequestedNodeCountCorrupt::attempted"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: core plugin hosts report the attempted append node count for corrupt receipts."
+
+[[api]]
+symbol = "lash_core::PluginError::AppendReceiptRequestedNodeCountCorrupt::operation_key"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: core plugin hosts report the durable operation key for corrupt receipts."
+
+[[api]]
+symbol = "lash_core::PluginError::AppendReceiptRequestedNodeCountCorrupt::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: core plugin hosts report the session owning a corrupt append receipt."
+
+[[api]]
+symbol = "lash_core::PluginError::AppendReceiptRequestedNodeCountCorrupt::stored"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: core plugin hosts report the stored append node count for corrupt receipts."
+
+[[api]]
 symbol = "lash::testing::conformance::append_receipt_mixed_usage_envelope"
 kind = "function"
 availability = "all-features"

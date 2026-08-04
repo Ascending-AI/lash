@@ -635,7 +635,7 @@ fn runtime_commit(
         session_id: session_id.to_string(),
         ..RuntimeSessionState::default()
     };
-    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &usage_deltas);
     commit.expected_head_revision = expected_head_revision;
     commit.graph = materialize_graph(session_id, graph);
     commit.current_frame_node_id = commit
@@ -653,7 +653,6 @@ fn runtime_commit(
         ));
     }
     commit.checkpoint = checkpoint;
-    commit.usage_deltas = usage_deltas;
     commit.committed_attachment_ids = committed_attachment_ids;
     commit
 }
@@ -2053,6 +2052,9 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         }
         StoreError::AppendReceiptRequestedNodeCountCorrupt { .. } => {
             "AppendReceiptRequestedNodeCountCorrupt".to_string()
+        }
+        StoreError::TokenUsageAccountingOverflow { .. } => {
+            "TokenUsageAccountingOverflow".to_string()
         }
         StoreError::AppendAncestorNotActive { .. } => "AppendAncestorNotActive".to_string(),
         StoreError::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded".to_string(),

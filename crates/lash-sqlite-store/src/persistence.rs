@@ -542,21 +542,30 @@ impl SessionCommitStore for Store {
                     if !commit.usage_deltas.is_empty() {
                         let mut stmt = tx
                             .prepare(
-                                "INSERT INTO usage_deltas (
-                                    session_id, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
-                                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                                "INSERT OR IGNORE INTO usage_deltas (
+                                    session_id, operation_storage_key, entry_ordinal, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
+                                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                             )
                             .map_err(sqlite_error)?;
                         for entry in &commit.usage_deltas {
+                            let entry_ordinal = i64::try_from(entry.identity.entry_ordinal)
+                                .map_err(|_| {
+                                    StoreError::Backend(
+                                        "usage delta ordinal does not fit SQLite INTEGER"
+                                            .to_string(),
+                                    )
+                                })?;
                             stmt.execute(params![
                                 commit.session_id,
-                                entry.source,
-                                entry.model,
-                                entry.usage.input_tokens,
-                                entry.usage.output_tokens,
-                                entry.usage.cache_read_input_tokens,
-                                entry.usage.cache_write_input_tokens,
-                                entry.usage.reasoning_output_tokens,
+                                entry.identity.operation_storage_key,
+                                entry_ordinal,
+                                entry.entry.source,
+                                entry.entry.model,
+                                entry.entry.usage.input_tokens,
+                                entry.entry.usage.output_tokens,
+                                entry.entry.usage.cache_read_input_tokens,
+                                entry.entry.usage.cache_write_input_tokens,
+                                entry.entry.usage.reasoning_output_tokens,
                             ])
                             .map_err(sqlite_error)?;
                         }
@@ -827,6 +836,11 @@ impl SessionCommitStore for Store {
                         manifest: stored_checkpoint.manifest,
                         committed_leaf_node_id: commit.graph.leaf_node_id.clone(),
                         realized_node_timestamps: realized_node_timestamps.clone(),
+                        committed_usage_delta_identities: commit
+                            .usage_deltas
+                            .iter()
+                            .map(|delta| delta.identity.clone())
+                            .collect(),
                         enqueued_queue_batches,
                         turn_input_applications: commit.turn_input_applications(),
                         receipt_replayed: false,

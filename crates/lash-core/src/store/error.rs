@@ -71,6 +71,18 @@ pub enum StoreError {
         /// Count carried by the retry, or `None` when corruptly absent.
         attempted: Option<u64>,
     },
+    /// Token usage counters overflowed while an in-memory batch was projected
+    /// for persistence. The batch remains staged and may be inspected or
+    /// corrected; no usage row is discarded.
+    #[error("token usage counter `{counter}` overflowed while staging ({usage_source}, {model})")]
+    TokenUsageAccountingOverflow {
+        /// Caller-defined usage source whose accumulated counter overflowed.
+        usage_source: String,
+        /// Model identifier for the overflowing ledger row.
+        model: String,
+        /// Name of the overflowing [`crate::TokenUsage`] counter.
+        counter: &'static str,
+    },
     /// A fresh append named an ancestor outside the durable active path.
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**

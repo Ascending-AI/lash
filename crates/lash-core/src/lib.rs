@@ -841,7 +841,10 @@ pub(crate) use store::{
     GraphAppend, PersistedSessionRead, RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
     SessionHeadPayload, ensure_supported_schema_version, load_persisted_session_state,
 };
-pub use store::{HydratedSessionCheckpoint, OperationId, RuntimeCommit, RuntimeTurnCommitStamp};
+pub use store::{
+    HydratedSessionCheckpoint, OperationId, RuntimeCommit, RuntimeTurnCommitStamp,
+    RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
+};
 pub use tool_provider::{
     PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall, ProgressSender, SandboxMessage,
     ToolCall, ToolContext, ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext, ToolProvider,

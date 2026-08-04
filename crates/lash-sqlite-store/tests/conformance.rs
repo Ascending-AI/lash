@@ -752,6 +752,35 @@ async fn sqlite_append_receipt_restores_mixed_usage_envelope() {
     lash_core::testing::conformance::append_receipt_mixed_usage_envelope(store).await;
 }
 
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn sqlite_cancelled_queued_append_publishes_usage_exactly_once() {
+    use lash_sqlite_store::testing::{SqliteFaultInjector, SqliteFaultPoint};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let injector = SqliteFaultInjector::default();
+    let factory = SqliteSessionStoreFactory::new(dir.path()).with_fault_injector(injector.clone());
+    let store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            session_id: "root".to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::default(),
+        })
+        .await
+        .expect("create cancellation store");
+    lash_core::testing::conformance::append_usage_cancellation_publishes_exactly_once(
+        store,
+        move || {
+            let pause = injector.pause_after(SqliteFaultPoint::BeforeCommit, 1);
+            async move {
+                pause.wait_until_reached().await;
+                move || pause.release()
+            }
+        },
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn sqlite_old_format_append_receipt_returns_public_leaf() {
     let dir = tempfile::tempdir().expect("tempdir");

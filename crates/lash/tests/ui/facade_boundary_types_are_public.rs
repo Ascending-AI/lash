@@ -13,7 +13,7 @@ use lash::persistence::{
     PersistedSessionRead, PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft,
     QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkStore, RealizedNodeTimestamp, RuntimeCommit,
     RuntimeCommitResult, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
-    SessionCheckpoint, SessionCommitStore, SessionExecutionLease,
+    RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
     SessionExecutionLeaseStore, SessionHeadMeta, SessionHeadPayload, SessionMeta,
     SessionNodeRecord, StoreError,
@@ -81,6 +81,11 @@ impl SessionCommitStore for FacadeStore {
             manifest,
             committed_leaf_node_id: commit.graph.leaf_node_id.clone(),
             realized_node_timestamps,
+            committed_usage_delta_identities: commit
+                .usage_deltas
+                .iter()
+                .map(|delta| delta.identity.clone())
+                .collect(),
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
             receipt_replayed: false,
@@ -306,6 +311,8 @@ fn persistence_types_are_nameable(
     graph: GraphAppend,
     ledger: Vec<TokenLedgerEntry>,
 ) -> RuntimeCommit {
+    let operation = OperationId::turn("facade", "turn", "final");
+    let operation_storage_key = operation.storage_key().expect("operation storage key");
     RuntimeCommit {
         session_id: "facade".to_string(),
         expected_head_revision: 0,
@@ -314,10 +321,18 @@ fn persistence_types_are_nameable(
         current_frame_node_id: None,
         graph,
         checkpoint: Default::default(),
-        usage_deltas: ledger,
-        turn_commit: RuntimeTurnCommitStamp::new(OperationId::turn(
-            "facade", "turn", "final",
-        )),
+        usage_deltas: ledger
+            .into_iter()
+            .enumerate()
+            .map(|(entry_ordinal, entry)| RuntimeUsageDelta {
+                identity: RuntimeUsageDeltaIdentity {
+                    operation_storage_key: operation_storage_key.clone(),
+                    entry_ordinal: entry_ordinal as u64,
+                },
+                entry,
+            })
+            .collect(),
+        turn_commit: RuntimeTurnCommitStamp::new(operation),
         completed_queue_claims: Vec::new(),
         completed_turn_input_claims: Vec::new(),
         enqueued_queue_batches: Vec::new(),

@@ -65,7 +65,7 @@ struct FinalCommitInput<'a> {
     plugins: Option<&'a PluginSession>,
     execution_state_snapshot: Option<Option<Vec<u8>>>,
     store: Option<&'a (dyn RuntimePersistence + 'a)>,
-    usage_deltas: &'a [crate::TokenLedgerEntry],
+    usage_deltas: &'a [crate::store::RuntimeUsageDelta],
     outcome: &'a TurnOutcome,
     originating_queue_claims: Vec<crate::QueuedWorkCompletion>,
     originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
@@ -77,6 +77,10 @@ struct FinalCommitInput<'a> {
 }
 
 impl TurnBoundary {
+    pub(super) fn final_operation(&self) -> crate::OperationId {
+        crate::OperationId::new(self.operation_scope.clone(), "final")
+    }
+
     #[cfg(test)]
     pub(super) fn from_state(state: RuntimeSessionState) -> Self {
         let scope = crate::ExecutionScope::turn(&state.session_id, "test-turn");
@@ -264,7 +268,7 @@ impl TurnBoundary {
         &mut self,
         returned_turn: &mut AssembledTurn,
         session: Option<&mut Session>,
-        usage_deltas: &[crate::TokenLedgerEntry],
+        usage_deltas: &[crate::store::RuntimeUsageDelta],
         originating_queue_claims: Vec<crate::QueuedWorkCompletion>,
         originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
         completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
@@ -272,7 +276,13 @@ impl TurnBoundary {
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<String>,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseCompletion>,
-    ) -> Result<Vec<crate::QueuedWorkBatch>, RuntimeError> {
+    ) -> Result<
+        (
+            Vec<crate::QueuedWorkBatch>,
+            Vec<crate::store::RuntimeUsageDeltaIdentity>,
+        ),
+        RuntimeError,
+    > {
         let (store, plugins, execution_state_snapshot) = match session {
             Some(session) => {
                 let store = session.history_store();
@@ -348,7 +358,13 @@ impl TurnBoundary {
     async fn final_commit_with_snapshots(
         &mut self,
         input: FinalCommitInput<'_>,
-    ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError> {
+    ) -> Result<
+        (
+            Vec<crate::QueuedWorkBatch>,
+            Vec<crate::store::RuntimeUsageDeltaIdentity>,
+        ),
+        StoreError,
+    > {
         let FinalCommitInput {
             returned_state,
             tool_calls,
@@ -369,8 +385,8 @@ impl TurnBoundary {
         let terminal_message_id = format!("m_turn_{}_assistant", self.operation_scope.id());
         let state = self.final_state_mut();
         state.apply_snapshot(returned_state);
-        for entry in usage_deltas.iter().cloned() {
-            merge_ledger_entry(&mut state.token_ledger, entry);
+        for delta in usage_deltas {
+            merge_ledger_entry(&mut state.token_ledger, delta.entry.clone());
         }
         if let Some(plugins) = plugins {
             state.refresh_plugin_snapshots(plugins);
@@ -389,7 +405,7 @@ impl TurnBoundary {
                 store,
                 graph,
                 usage_deltas,
-                crate::OperationId::new(self.operation_scope.clone(), "final"),
+                self.final_operation(),
                 originating_queue_claims,
                 originating_turn_input_claims,
                 completed_queue_claims,
@@ -402,7 +418,13 @@ impl TurnBoundary {
             .await
         } else {
             state.discard_runtime_snapshots();
-            Ok(Vec::new())
+            Ok((
+                Vec::new(),
+                usage_deltas
+                    .iter()
+                    .map(|delta| delta.identity.clone())
+                    .collect(),
+            ))
         }
     }
 
@@ -411,7 +433,7 @@ impl TurnBoundary {
         &mut self,
         store: &(dyn RuntimePersistence + '_),
         mut graph: GraphAppend,
-        usage_deltas: &[crate::TokenLedgerEntry],
+        usage_deltas: &[crate::store::RuntimeUsageDelta],
         operation: crate::OperationId,
         originating_queue_claims: Vec<crate::QueuedWorkCompletion>,
         originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
@@ -421,7 +443,13 @@ impl TurnBoundary {
         interrupted_turn_input_turn_id: Option<String>,
         committed_attachment_ids: Vec<crate::AttachmentId>,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseCompletion>,
-    ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError> {
+    ) -> Result<
+        (
+            Vec<crate::QueuedWorkBatch>,
+            Vec<crate::store::RuntimeUsageDeltaIdentity>,
+        ),
+        StoreError,
+    > {
         let session_id = self.state().session_id.clone();
         let node_id_mapping = graph.derive_node_ids(&session_id, &operation)?;
         match &mut self.stage {
@@ -449,7 +477,7 @@ impl TurnBoundary {
             .iter()
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();
-        let mut commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation(
+        let mut commit = RuntimeCommit::persisted_state_with_graph_commit_and_staged_usage(
             state,
             graph,
             usage_deltas,
@@ -467,12 +495,13 @@ impl TurnBoundary {
         commit.interrupted_turn_input_turn_id = interrupted_turn_input_turn_id;
         let result = crate::store::commit_runtime_state_verified(store, commit).await?;
         let enqueued_queue_batches = result.enqueued_queue_batches.clone();
+        let committed_usage_delta_identities = result.committed_usage_delta_identities.clone();
         state.apply_persisted_commit_result(result);
         state.mark_node_ids_persisted(persisted_node_ids.clone());
         if let TurnCommitStage::Drafting(draft) = &mut self.stage {
             draft.mark_node_ids_persisted(persisted_node_ids);
         }
-        Ok(enqueued_queue_batches)
+        Ok((enqueued_queue_batches, committed_usage_delta_identities))
     }
 
     async fn snapshot_dirty_execution_state(session: &mut Session) -> Option<Option<Vec<u8>>> {
@@ -1184,12 +1213,17 @@ mod tests {
     async fn final_commit_merges_usage_and_updates_persisted_graph_count() {
         let graph =
             SessionGraph::from_active_read_state(&[text_message("u0", MessageRole::User, "hello")]);
-        let usage = vec![
+        let usage_entries = vec![
             usage_entry("child", "gpt", 5),
             usage_entry("turn", "gpt", 17),
         ];
         let store = RecordingStore::default();
         let (mut pipeline, _lease) = leased_boundary(&store, state_with_graph(graph.clone())).await;
+        let usage = crate::store::RuntimeUsageDelta::for_operation(
+            &pipeline.final_operation(),
+            &usage_entries,
+        )
+        .expect("stage test usage");
         let returned_state = pipeline.export_state_for_assembly();
 
         pipeline

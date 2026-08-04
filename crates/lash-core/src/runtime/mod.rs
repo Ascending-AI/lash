@@ -28,6 +28,8 @@ mod session_execution_lease;
 mod session_manager;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use session_manager::append_receipt_mixed_usage_envelope_conformance;
+#[cfg(any(test, feature = "testing"))]
+pub(crate) use session_manager::append_usage_cancellation_exactly_once_conformance;
 mod session_ops;
 pub(crate) mod state;
 #[cfg(test)]
@@ -110,7 +112,8 @@ pub(super) fn session_commit_error(
 ) -> SessionError {
     match source {
         source @ (crate::store::StoreError::SessionDeleted { .. }
-        | crate::store::StoreError::AppendOperationIdentityConflict { .. }) => {
+        | crate::store::StoreError::AppendOperationIdentityConflict { .. }
+        | crate::store::StoreError::AppendReceiptRequestedNodeCountCorrupt { .. }) => {
             SessionError::Store {
                 context: context.to_string(),
                 source,
@@ -1363,7 +1366,8 @@ pub struct LashRuntime {
     /// `RuntimeSessionServices` instances created from this runtime
     /// (both per-turn and async maintenance). Entries accumulate here
     /// and are drained into `state.token_ledger` at turn-commit time.
-    pub(in crate::runtime) shared_token_ledger: Arc<std::sync::Mutex<Vec<TokenLedgerEntry>>>,
+    pub(in crate::runtime) shared_token_ledger:
+        Arc<std::sync::Mutex<Vec<session_manager::PendingTokenLedgerEntry>>>,
     pub(in crate::runtime) process_sync_needed: Arc<AtomicBool>,
     pub(in crate::runtime) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
     /// Lease-guard identity retained across a successful physical-turn commit.

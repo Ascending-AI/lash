@@ -19,6 +19,21 @@ pub enum PluginError {
         /// Canonical durable operation key that was reused incorrectly.
         operation_key: String,
     },
+    /// Durable append receipt metadata contradicts the retry's requested-node
+    /// count. This is store corruption, not a caller-recoverable conflict.
+    #[error(
+        "append receipt `{operation_key}` for session `{session_id}` has contradictory requested-node counts (stored {stored:?}, attempted {attempted:?})"
+    )]
+    AppendReceiptRequestedNodeCountCorrupt {
+        /// Session whose append receipt is corrupt.
+        session_id: String,
+        /// Canonical durable operation key of the corrupt receipt.
+        operation_key: String,
+        /// Count stored with the first attempt, when present.
+        stored: Option<u64>,
+        /// Count carried by the retry, when present.
+        attempted: Option<u64>,
+    },
     #[error("process handle `{process_id}` is not live or visible in this session")]
     ProcessNotVisible { process_id: String },
     #[error(transparent)]

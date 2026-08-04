@@ -17,6 +17,9 @@ pub(in crate::runtime) use usage::ChildUsageEventRelay;
 pub(in crate::runtime::session_manager) use usage::{
     ChannelEventSink, LiveChildUsageForwarder, subtract_usage,
 };
+pub(in crate::runtime) use usage::{
+    PendingTokenLedgerEntry, record_token_usage_shared, stage_token_ledger_shared,
+};
 
 #[derive(Clone)]
 enum CurrentSnapshot {
@@ -70,7 +73,7 @@ pub(in crate::runtime) struct UsageCapability {
     /// Session-scoped token cost ledger shared with the parent
     /// `LashRuntime`. All managers created from the same runtime
     /// write to the same Arc. Drained at turn-commit time.
-    token_ledger: Arc<std::sync::Mutex<Vec<TokenLedgerEntry>>>,
+    token_ledger: Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
     /// Maps child session_id → usage_source label.
     child_sources: Arc<std::sync::Mutex<HashMap<String, String>>>,
     /// Tracks live child-turn usage already bubbled into the shared
@@ -518,6 +521,125 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
     assert_eq!(read.token_ledger[0].source, "mixed-envelope-source");
     assert_eq!(read.token_ledger[0].model, "mixed-envelope-model");
     assert_eq!(read.token_ledger[0].usage, interleaved_usage);
+}
+
+#[cfg(any(test, feature = "testing"))]
+pub(crate) async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
+    store: Arc<dyn crate::RuntimePersistence>,
+    arm_and_wait: A,
+) where
+    A: FnOnce() -> W,
+    W: std::future::Future<Output = R>,
+    R: FnOnce(),
+{
+    let policy = crate::SessionPolicy {
+        provider_id: "cancelled-usage-provider".to_string(),
+        model: crate::ModelSpec::from_token_limits(
+            "cancelled-usage-model",
+            Default::default(),
+            200_000,
+            None,
+        )
+        .expect("cancelled usage model spec"),
+        ..crate::SessionPolicy::default()
+    };
+    let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
+        .build_session("root", None)
+        .expect("cancelled usage plugin session");
+    let mut runtime = crate::LashRuntime::from_persistent_embedded_state(
+        policy.clone(),
+        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory()),
+        crate::PersistentRuntimeServices::new(plugins, Arc::clone(&store)),
+        crate::RuntimeSessionState {
+            policy,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("cancelled usage runtime");
+    let services = Arc::new(
+        RuntimeSessionServices::new(&runtime, true, None)
+            .expect("cancelled usage session services"),
+    );
+    let usage = crate::TokenUsage {
+        input_tokens: 19,
+        output_tokens: 7,
+        cache_read_input_tokens: 3,
+        cache_write_input_tokens: 2,
+        reasoning_output_tokens: 1,
+    };
+    services
+        .usage
+        .record_token_usage("cancelled-usage-source", "cancelled-usage-model", &usage);
+    let request = crate::AppendSessionNodesRequest {
+        operation_id: "cancelled-usage-append".to_string(),
+        nodes: vec![crate::SessionAppendNode::plugin(
+            "cancelled-usage",
+            serde_json::json!({"attempt": 1}),
+        )],
+        requires_ancestor_node_id: None,
+    };
+    let wait_until_worker_queued = arm_and_wait();
+    let graph = services.graph_service();
+    let cancelled_request = request.clone();
+    let append =
+        crate::task::spawn(
+            async move { graph.append_session_nodes("root", cancelled_request).await },
+        );
+    let release_worker = wait_until_worker_queued.await;
+    append.abort();
+    let cancelled = append.await;
+    assert!(
+        cancelled.is_err(),
+        "append task must be cancelled post-send"
+    );
+    release_worker();
+
+    store
+        .load_session()
+        .await
+        .expect("flush queued SQLite commit")
+        .expect("cancelled append committed on worker");
+    services
+        .graph_service()
+        .append_session_nodes("root", request)
+        .await
+        .expect("cancelled append retry replays");
+    runtime
+        .await_background_work()
+        .await
+        .expect("refresh after cancelled append replay");
+    runtime
+        .session_graph_service()
+        .expect("fresh graph service")
+        .append_session_nodes(
+            "root",
+            crate::AppendSessionNodesRequest {
+                operation_id: "cancelled-usage-natural-commit".to_string(),
+                nodes: vec![crate::SessionAppendNode::plugin(
+                    "cancelled-usage",
+                    serde_json::json!({"attempt": 2}),
+                )],
+                requires_ancestor_node_id: None,
+            },
+        )
+        .await
+        .expect("next natural commit re-submits cancelled usage identity");
+
+    let read = store
+        .load_session()
+        .await
+        .expect("load cancelled usage session")
+        .expect("cancelled usage session exists");
+    let matching = read
+        .token_ledger
+        .iter()
+        .filter(|entry| {
+            entry.source == "cancelled-usage-source" && entry.model == "cancelled-usage-model"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(matching.len(), 1);
+    assert_eq!(matching[0].usage, usage);
 }
 
 pub(super) async fn emit_session_events_to_sink(

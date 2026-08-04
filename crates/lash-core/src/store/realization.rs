@@ -79,6 +79,11 @@ mod tests {
                 manifest,
                 committed_leaf_node_id: commit.graph.leaf_node_id.clone(),
                 realized_node_timestamps,
+                committed_usage_delta_identities: commit
+                    .usage_deltas
+                    .iter()
+                    .map(|delta| delta.identity.clone())
+                    .collect(),
                 enqueued_queue_batches: Vec::new(),
                 turn_input_applications: Vec::new(),
                 receipt_replayed: false,

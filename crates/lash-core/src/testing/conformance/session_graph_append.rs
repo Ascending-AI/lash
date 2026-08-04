@@ -411,6 +411,21 @@ pub async fn append_receipt_mixed_usage_envelope(store: Arc<dyn crate::RuntimePe
     crate::runtime::append_receipt_mixed_usage_envelope_conformance(store).await;
 }
 
+/// Cancel an append after a queued-commit backend has accepted its work, then
+/// prove retry plus a later natural commit publishes the staged usage exactly
+/// once. `arm_and_wait` arms the backend seam and resolves only after the
+/// background worker is paused; its result releases that worker.
+pub async fn append_usage_cancellation_publishes_exactly_once<A, W, R>(
+    store: Arc<dyn crate::RuntimePersistence>,
+    arm_and_wait: A,
+) where
+    A: FnOnce() -> W,
+    W: std::future::Future<Output = R>,
+    R: FnOnce(),
+{
+    crate::runtime::append_usage_cancellation_exactly_once_conformance(store, arm_and_wait).await;
+}
+
 /// Rewrite a committed receipt to a genuine pre-upgrade JSON shape and prove
 /// that the public runtime result still returns the original non-empty leaf.
 ///

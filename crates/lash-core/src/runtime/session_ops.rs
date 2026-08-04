@@ -149,6 +149,7 @@ impl LashRuntime {
                 )
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
             commit.turn_commit = append_stamp;
+            commit.debug_assert_append_envelope_scope();
             let result = match super::commit_runtime_state_with_fresh_session_execution_lease(
                 Arc::clone(&store),
                 commit,
@@ -160,8 +161,14 @@ impl LashRuntime {
             {
                 Ok(result) => result,
                 Err(crate::StoreError::AppendAncestorNotActive { required_node_id }) => {
-                    self.restore_protocol_session_from_state(state_before_append)
-                        .await?;
+                    if let Err(rollback_err) = self
+                        .restore_protocol_session_from_state(state_before_append)
+                        .await
+                    {
+                        return Err(SessionError::Protocol(format!(
+                            "append requires inactive ancestor `{required_node_id}`; failed to restore pre-append protocol session: {rollback_err}"
+                        )));
+                    }
                     return Ok(crate::AppendSessionNodesResult::StaleBranch { required_node_id });
                 }
                 Err(err) => {

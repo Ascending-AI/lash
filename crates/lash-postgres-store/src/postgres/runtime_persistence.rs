@@ -670,12 +670,24 @@ impl SessionCommitStore for PostgresSessionStore {
         }
         let (checkpoint_ref, manifest) = put_checkpoint_tx(&mut tx, &commit.checkpoint).await?;
         for entry in &commit.usage_deltas {
-            sqlx::query("INSERT INTO lash_usage_deltas (session_id, entry_json) VALUES ($1, $2)")
-                .bind(&commit.session_id)
-                .bind(encode_json(entry))
-                .execute(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
+            let entry_ordinal = i64::try_from(entry.identity.entry_ordinal).map_err(|_| {
+                StoreError::Backend(
+                    "usage delta ordinal does not fit PostgreSQL BIGINT".to_string(),
+                )
+            })?;
+            sqlx::query(
+                "INSERT INTO lash_usage_deltas (
+                    session_id, operation_storage_key, entry_ordinal, entry_json
+                 ) VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (session_id, operation_storage_key, entry_ordinal) DO NOTHING",
+            )
+            .bind(&commit.session_id)
+            .bind(&entry.identity.operation_storage_key)
+            .bind(entry_ordinal)
+            .bind(encode_json(&entry.entry))
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         }
         let old_leaf_node_id = existing.as_ref().and_then(|head| head.leaf_node_id.clone());
         match commit.graph.nodes.first() {
@@ -901,6 +913,11 @@ impl SessionCommitStore for PostgresSessionStore {
             manifest,
             committed_leaf_node_id: commit.graph.leaf_node_id.clone(),
             realized_node_timestamps,
+            committed_usage_delta_identities: commit
+                .usage_deltas
+                .iter()
+                .map(|delta| delta.identity.clone())
+                .collect(),
             enqueued_queue_batches,
             turn_input_applications: commit.turn_input_applications(),
             receipt_replayed: false,
