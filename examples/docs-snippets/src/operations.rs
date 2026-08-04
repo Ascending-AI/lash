@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash::durability::{InlineEffectHost, LeaseTimings};
-use lash::persistence::{LeaseOwnerIdentity, SessionStoreFactory};
+use lash::persistence::{LeaseOwnerIdentity, SessionLeaseRenewal, SessionStoreFactory};
 use lash::provider::ProviderHandle;
 use lash::{LashCore, LashSession, TurnInput, TurnOutput};
 
@@ -149,6 +149,44 @@ async fn run_turn_with_retry(session: &LashSession, text: &str) -> lash::Result<
         }
     }
     // docs:end:failure-classification
+}
+
+async fn triage_stuck_turn(core: &LashCore, session_id: &str) -> lash::Result<()> {
+    // docs:start:stuck-turn
+    // Step 1 — read the lane. Diagnostics only: this never claims, renews, or
+    // releases anything, so it is free to run against a live session. `None`
+    // means no durable session under this id at all.
+    let Some(lease) = core.session_lease_diagnostics(session_id).await? else {
+        // The host's own record of an in-flight turn is what is wrong here.
+        return Ok(());
+    };
+    let holder = lease.holder.as_ref().map(|holder| &holder.owner);
+    let generation = lease.holder.as_ref().map(|holder| holder.generation);
+    let _ = (holder, generation, lease.observed_at_epoch_ms);
+
+    match lease.renewal() {
+        // Nobody holds the lane. A turn the host still shows as running either
+        // already committed and released, or never claimed. Reconcile against
+        // the session's committed head.
+        SessionLeaseRenewal::Unheld => {}
+
+        // Renewals were current: the lane is healthy, so the turn is blocked
+        // inside itself. Look at the provider call — not the lease — and cancel
+        // the exact turn if it has to stop.
+        SessionLeaseRenewal::Current { expires_in_ms } => {
+            let _ = expires_in_ms;
+        }
+
+        // Renewals stopped. `session_execution_lease.renew_failed` followed by
+        // `session_execution_lease.taken_over` names the successor in the log.
+        // Do NOT kill the displaced runner: it may still win the commit CAS.
+        // Only `session_execution_lease.commit_cas_rejected` proves it lost.
+        SessionLeaseRenewal::Lapsed { expired_for_ms } => {
+            let _ = expired_for_ms;
+        }
+    }
+    Ok(())
+    // docs:end:stuck-turn
 }
 
 fn record_turn_metrics(output: &TurnOutput, session: &LashSession) {
