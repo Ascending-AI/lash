@@ -82,6 +82,18 @@ fn open_store(path: &Path) -> Arc<dyn RuntimePersistence> {
     })) as Arc<dyn RuntimePersistence>
 }
 
+fn open_store_with_clock(
+    path: &Path,
+    clock: Arc<dyn lash_core::Clock>,
+) -> Arc<dyn RuntimePersistence> {
+    let path = path.to_path_buf();
+    Arc::new(sync_await(async move {
+        Store::open_with_clock(&path, clock)
+            .await
+            .expect("file store with conformance clock")
+    })) as Arc<dyn RuntimePersistence>
+}
+
 fn artifact_store_handles(
     path: &Path,
 ) -> lash_lashlang_runtime::testing::conformance::ArtifactStoreHandles {
@@ -175,49 +187,6 @@ fn current_epoch_ms_for_test() -> u64 {
         .expect("system clock before unix epoch")
         .as_millis()
         .min(u128::from(u64::MAX)) as u64
-}
-
-#[derive(Debug)]
-struct ConformanceClock(std::sync::atomic::AtomicU64);
-
-impl ConformanceClock {
-    fn new(timestamp_ms: u64) -> Self {
-        Self(std::sync::atomic::AtomicU64::new(timestamp_ms))
-    }
-
-    fn advance(&self, duration_ms: u64) {
-        self.0
-            .fetch_add(duration_ms, std::sync::atomic::Ordering::SeqCst);
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::Clock for ConformanceClock {
-    fn now(&self) -> std::time::Instant {
-        std::time::Instant::now()
-    }
-
-    fn timestamp_ms(&self) -> u64 {
-        self.0.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    fn timestamp_rfc3339(&self) -> String {
-        self.timestamp_datetime().to_rfc3339()
-    }
-
-    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        chrono::DateTime::from(
-            std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.timestamp_ms()),
-        )
-    }
-
-    async fn sleep(&self, duration: std::time::Duration) {
-        tokio::time::sleep(duration).await;
-    }
-
-    async fn sleep_until(&self, deadline: std::time::Instant) {
-        tokio::time::sleep_until(deadline.into()).await;
-    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -369,9 +338,7 @@ async fn sqlite_process_continuation_store_satisfies_conformance() {
 async fn sqlite_wake_delivery_crash_matrix() {
     let dir = tempfile::tempdir().expect("tempdir");
     let process_registry_path = dir.path().join("processes.db");
-    let clock = Arc::new(
-        lash_core::testing::conformance::WakeDeliveryConformanceClock::new(1_800_000_000_000),
-    );
+    let clock = Arc::new(lash_core::testing::TestClock::new(1_800_000_000_000));
     let registry = Arc::new(
         SqliteProcessRegistry::open_with_clock(
             &process_registry_path,
@@ -457,7 +424,7 @@ async fn sqlite_session_graph_append_branch_liveness_conformance() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_attachment_owner_cold_replay_conformance() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let clock = Arc::new(ConformanceClock::new(
+    let clock = Arc::new(lash_core::testing::TestClock::new(
         current_epoch_ms_for_test().saturating_sub(100_000),
     ));
     let process_path = dir.path().join("processes.db");
@@ -541,7 +508,7 @@ async fn sqlite_process_prune_deletes_owned_session_stores() {
 
 #[tokio::test]
 async fn sqlite_store_uses_injected_clock_for_expiry() {
-    let clock = Arc::new(ConformanceClock::new(20_000));
+    let clock = Arc::new(lash_core::testing::TestClock::new(20_000));
     let store = Arc::new(
         Store::memory_with_clock(clock.clone())
             .await
@@ -681,13 +648,21 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
 #[tokio::test]
 async fn sqlite_store_satisfies_runtime_persistence_conformance() {
     let dirs = Arc::new(Mutex::new(Vec::new()));
-    lash_core::testing::conformance::runtime_persistence_reopenable(|| {
-        let path = fresh_db_path(&dirs, "session.db");
-        ReopenableRuntimePersistence {
-            open: open_store(&path),
-            reopen: open_store(&path),
-        }
-    })
+    let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
+    let store_clock = Arc::clone(&clock);
+    lash_core::testing::conformance::runtime_persistence_reopenable(
+        move || {
+            let path = fresh_db_path(&dirs, "session.db");
+            ReopenableRuntimePersistence {
+                open: open_store_with_clock(&path, store_clock.clone()),
+                reopen: open_store_with_clock(&path, store_clock.clone()),
+            }
+        },
+        lash_core::testing::conformance::RuntimePersistenceLeaseTiming::controlled({
+            let clock = Arc::clone(&clock);
+            move |duration_ms| clock.advance(duration_ms)
+        }),
+    )
     .await;
 }
 

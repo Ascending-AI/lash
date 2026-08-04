@@ -131,6 +131,7 @@ struct RuntimeScenarioContext {
     name: &'static str,
     session_id: &'static str,
     host_behavior: RuntimeHostBehavior,
+    clock: Arc<crate::testing::TestClock>,
     store: Arc<RecordingStore>,
     owner: Option<LeaseOwnerIdentity>,
     lease: Option<SessionExecutionLease>,
@@ -153,11 +154,13 @@ impl RuntimeScenarioContext {
             ..RuntimeSessionState::default()
         };
         state.ensure_agent_frame_initialized();
+        let clock = Arc::new(crate::testing::TestClock::new(10_000));
         Self {
             name,
             session_id,
             host_behavior,
-            store: Arc::new(RecordingStore::default()),
+            store: Arc::new(RecordingStore::with_clock(clock.clone())),
+            clock,
             owner: None,
             lease: None,
             state,

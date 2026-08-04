@@ -109,23 +109,26 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
     };
     let storage = Arc::new(storage);
     let database_url = database_url().expect("configured Postgres database URL");
-    lash_core::testing::conformance::runtime_persistence_reopenable(|| {
-        let storage = Arc::clone(&storage);
-        let database_url = database_url.clone();
-        sync_await(async move {
-            reset(&storage).await;
-            let open_storage = PostgresStorage::connect(&database_url)
-                .await
-                .expect("open first Postgres conformance pool");
-            let reopen_storage = PostgresStorage::connect(&database_url)
-                .await
-                .expect("open independent Postgres conformance pool");
-            ReopenableRuntimePersistence {
-                open: Arc::new(open_storage.unbound_session_store()),
-                reopen: Arc::new(reopen_storage.unbound_session_store()),
-            }
-        })
-    })
+    lash_core::testing::conformance::runtime_persistence_reopenable(
+        || {
+            let storage = Arc::clone(&storage);
+            let database_url = database_url.clone();
+            sync_await(async move {
+                reset(&storage).await;
+                let open_storage = PostgresStorage::connect(&database_url)
+                    .await
+                    .expect("open first Postgres conformance pool");
+                let reopen_storage = PostgresStorage::connect(&database_url)
+                    .await
+                    .expect("open independent Postgres conformance pool");
+                ReopenableRuntimePersistence {
+                    open: Arc::new(open_storage.unbound_session_store()),
+                    reopen: Arc::new(reopen_storage.unbound_session_store()),
+                }
+            })
+        },
+        lash_core::testing::conformance::RuntimePersistenceLeaseTiming::Realtime,
+    )
     .await;
 }
 
@@ -402,9 +405,7 @@ async fn postgres_wake_delivery_crash_matrix_when_configured() {
         return;
     };
     reset(&storage).await;
-    let clock = Arc::new(
-        lash_core::testing::conformance::WakeDeliveryConformanceClock::new(1_800_000_000_000),
-    );
+    let clock = Arc::new(lash_core::testing::TestClock::new(1_800_000_000_000));
     let factory = Arc::new(
         storage
             .session_store_factory()
@@ -773,12 +774,10 @@ async fn postgres_attachment_owner_cold_replay_conformance_when_configured() {
                 >
         })
     };
-    let clock = Arc::new(
-        lash_core::testing::conformance::AttachmentOwnerConformanceClock::new(
-            lash_core::Clock::timestamp_ms(&lash_core::facade_support::SystemClock)
-                .saturating_sub(100_000),
-        ),
-    );
+    let clock = Arc::new(lash_core::testing::TestClock::new(
+        lash_core::Clock::timestamp_ms(&lash_core::facade_support::SystemClock)
+            .saturating_sub(100_000),
+    ));
     let factory = Arc::new(
         storage
             .session_store_factory_with_shared_process_registry()
@@ -832,8 +831,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
     const SESSION_ID: &str = "postgres-injected-commit-clock";
     const TURN_ID: &str = "postgres-injected-clock-turn";
     const NOW_MS: u64 = 1_234_567;
-    let clock =
-        Arc::new(lash_core::testing::conformance::AttachmentOwnerConformanceClock::new(NOW_MS));
+    let clock = Arc::new(lash_core::testing::TestClock::new(NOW_MS));
     let factory = storage
         .session_store_factory_with_shared_process_registry()
         .with_clock(clock);

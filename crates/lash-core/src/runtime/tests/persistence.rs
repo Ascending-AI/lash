@@ -6,10 +6,18 @@ use crate::SessionCommitStore as _;
 // contract as the durable backend so it can't silently drift.
 #[tokio::test]
 async fn recording_store_satisfies_runtime_persistence_conformance() {
-    crate::testing::conformance::runtime_persistence(|| {
-        std::sync::Arc::new(RecordingStore::default())
-            as std::sync::Arc<dyn crate::RuntimePersistence>
-    })
+    let clock = Arc::new(crate::testing::TestClock::new(10_000));
+    let store_clock = Arc::clone(&clock);
+    crate::testing::conformance::runtime_persistence(
+        move || {
+            std::sync::Arc::new(RecordingStore::with_clock(store_clock.clone()))
+                as std::sync::Arc<dyn crate::RuntimePersistence>
+        },
+        crate::testing::conformance::RuntimePersistenceLeaseTiming::controlled({
+            let clock = Arc::clone(&clock);
+            move |duration_ms| clock.advance(duration_ms)
+        }),
+    )
     .await;
 }
 
@@ -108,18 +116,33 @@ fn recording_runtime_persistence() -> Arc<dyn crate::RuntimePersistence> {
     Arc::new(RecordingStore::default())
 }
 
+fn controlled_recording_runtime_persistence() -> (
+    Arc<dyn crate::RuntimePersistence>,
+    crate::testing::conformance::RuntimePersistenceLeaseTiming,
+) {
+    let clock = Arc::new(crate::testing::TestClock::new(10_000));
+    let store =
+        Arc::new(RecordingStore::with_clock(clock.clone())) as Arc<dyn crate::RuntimePersistence>;
+    let timing = crate::testing::conformance::RuntimePersistenceLeaseTiming::controlled(
+        move |duration_ms| clock.advance(duration_ms),
+    );
+    (store, timing)
+}
+
 #[tokio::test]
 async fn queued_work_claims_supersede_across_session_lease_generations() {
+    let (store, timing) = controlled_recording_runtime_persistence();
     crate::testing::conformance::queued_work_claims_supersede_across_session_lease_generations(
-        recording_runtime_persistence(),
+        store, timing,
     )
     .await;
 }
 
 #[tokio::test]
 async fn turn_input_claims_supersede_across_session_lease_generations() {
+    let (store, timing) = controlled_recording_runtime_persistence();
     crate::testing::conformance::turn_input_claims_supersede_across_session_lease_generations(
-        recording_runtime_persistence(),
+        store, timing,
     )
     .await;
 }

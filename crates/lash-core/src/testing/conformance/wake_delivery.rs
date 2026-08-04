@@ -1,52 +1,5 @@
 use super::*;
-
-#[derive(Debug)]
-pub struct WakeDeliveryConformanceClock(std::sync::atomic::AtomicU64);
-
-impl WakeDeliveryConformanceClock {
-    pub fn new(timestamp_ms: u64) -> Self {
-        Self(std::sync::atomic::AtomicU64::new(timestamp_ms))
-    }
-
-    pub fn set(&self, timestamp_ms: u64) {
-        self.0
-            .store(timestamp_ms, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    pub fn advance(&self, duration_ms: u64) {
-        self.0
-            .fetch_add(duration_ms, std::sync::atomic::Ordering::SeqCst);
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::Clock for WakeDeliveryConformanceClock {
-    fn now(&self) -> std::time::Instant {
-        std::time::Instant::now()
-    }
-
-    fn timestamp_ms(&self) -> u64 {
-        self.0.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    fn timestamp_rfc3339(&self) -> String {
-        self.timestamp_datetime().to_rfc3339()
-    }
-
-    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        chrono::DateTime::from(
-            std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.timestamp_ms()),
-        )
-    }
-
-    async fn sleep(&self, duration: std::time::Duration) {
-        tokio::time::sleep(duration).await;
-    }
-
-    async fn sleep_until(&self, deadline: std::time::Instant) {
-        tokio::time::sleep_until(deadline.into()).await;
-    }
-}
+use crate::testing::TestClock;
 
 #[derive(Default)]
 struct RecordingWakeTurnHandle {
@@ -94,7 +47,7 @@ impl RecordingWakeTurnHandle {
 pub async fn wake_delivery_crash_matrix(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
-    clock: Arc<WakeDeliveryConformanceClock>,
+    clock: Arc<TestClock>,
 ) {
     let target_session_id = "wake-crash-target";
     let request = crate::SessionStoreCreateRequest {
@@ -708,7 +661,7 @@ pub async fn wake_delivery_crash_matrix(
 async fn sender_floor_lifetime(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
-    clock: Arc<WakeDeliveryConformanceClock>,
+    clock: Arc<TestClock>,
 ) {
     let target_session_id = "wake-allocation-floor-lifetime-target";
     let target = factory
@@ -881,7 +834,7 @@ async fn complete_and_prune(registry: &Arc<dyn crate::ProcessRegistry>, process_
 async fn prune_reregister_sender_floor_delivers_through_driver(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
-    clock: Arc<WakeDeliveryConformanceClock>,
+    clock: Arc<TestClock>,
     target: Arc<dyn crate::RuntimePersistence>,
     target_session_id: &str,
 ) {
@@ -1021,7 +974,7 @@ async fn prune_reregister_sender_floor_delivers_through_driver(
 
 async fn replay_and_same_millisecond_allocation_are_deterministic(
     registry: Arc<dyn crate::ProcessRegistry>,
-    clock: Arc<WakeDeliveryConformanceClock>,
+    clock: Arc<TestClock>,
 ) {
     clock.set(1_800_000_020_000);
     let process_id = "wake-floor-replay";
@@ -1066,7 +1019,7 @@ async fn replay_and_same_millisecond_allocation_are_deterministic(
 async fn mixed_era_floor_and_ordering(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
-    clock: Arc<WakeDeliveryConformanceClock>,
+    clock: Arc<TestClock>,
     target: Arc<dyn crate::RuntimePersistence>,
     target_session_id: &str,
 ) {
@@ -1219,7 +1172,7 @@ async fn mixed_era_floor_and_ordering(
 async fn rewound_fresh_delivery_is_discarded_without_blocking(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
-    clock: Arc<WakeDeliveryConformanceClock>,
+    clock: Arc<TestClock>,
     target: Arc<dyn crate::RuntimePersistence>,
     target_session_id: &str,
 ) {
@@ -1345,7 +1298,7 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
 async fn target_gone_is_a_typed_discard(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
-    clock: Arc<WakeDeliveryConformanceClock>,
+    clock: Arc<TestClock>,
 ) {
     let target_session_id = "wake-target-gone-session";
     let target_request = crate::SessionStoreCreateRequest {
@@ -1412,7 +1365,7 @@ async fn target_gone_is_a_typed_discard(
 async fn expired_is_a_typed_discard(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
-    clock: Arc<WakeDeliveryConformanceClock>,
+    clock: Arc<TestClock>,
 ) {
     let target_session_id = "wake-crash-target";
     let process_id = "wake-expired-sender";

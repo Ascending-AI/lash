@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use lash_core::runtime::{QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkPayload};
-use lash_core::testing::conformance::AttachmentOwnerConformanceClock;
+use lash_core::testing::TestClock;
 use lash_core::{
     CheckpointKind, Clock, DeliveryPolicy, LeaseOwnerIdentity, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
@@ -154,9 +154,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
     };
     let session_id = unique_id("clock-contract-session");
     let server_before = db_now_ms(&storage).await;
-    let clock = Arc::new(AttachmentOwnerConformanceClock::new(
-        server_before.saturating_add(CLOCK_SKEW_MS),
-    ));
+    let clock = Arc::new(TestClock::new(server_before.saturating_add(CLOCK_SKEW_MS)));
     let factory = storage
         .session_store_factory()
         .with_clock(Arc::clone(&clock) as Arc<dyn Clock>);
@@ -359,7 +357,7 @@ async fn process_lease_decisions_follow_the_postgres_clock() {
     };
     let process_id = unique_id("clock-contract-process");
     let server_now = db_now_ms(&storage).await;
-    let clock = Arc::new(AttachmentOwnerConformanceClock::new(server_now));
+    let clock = Arc::new(TestClock::new(server_now));
     let registry = storage
         .process_registry()
         .with_clock(Arc::clone(&clock) as Arc<dyn Clock>);
@@ -433,7 +431,7 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
     };
     const INJECTED_COMMIT_MS: u64 = 1_234_567_890_000;
     let session_id = unique_id("clock-contract-final-commit");
-    let clock = Arc::new(AttachmentOwnerConformanceClock::new(INJECTED_COMMIT_MS));
+    let clock = Arc::new(TestClock::new(INJECTED_COMMIT_MS));
     let factory = storage
         .session_store_factory()
         .with_clock(clock as Arc<dyn Clock>);
