@@ -459,7 +459,9 @@ impl SessionCommitStore for PostgresSessionStore {
             let completed = &commit.turn_commit;
             let operation_key = completed.operation.storage_key()?;
             let prior = sqlx::query(
-                "SELECT turn_commit_hash, result_json
+                "SELECT turn_commit_hash, result_json,
+                        request_identity_hash, identity_encoding_version,
+                        requested_node_count
                  FROM lash_runtime_turn_commits
                  WHERE session_id = $1 AND turn_id = $2",
             )
@@ -471,17 +473,85 @@ impl SessionCommitStore for PostgresSessionStore {
             if let Some(row) = prior {
                 let hash: String = row.get(0);
                 let result_json: String = row.get(1);
-                if hash == turn_commit_hash {
-                    let result = store_decode_json(&result_json, "runtime turn commit result")?;
-                    if let Some(completion) = commit.release_session_execution_lease.as_ref() {
-                        release_session_execution_lease_tx(&mut tx, completion).await?;
+                let stored_identity: Option<String> = row.get(2);
+                let stored_version: Option<i32> = row.get(3);
+                let stored_requested_node_count: Option<i64> = row.get(4);
+                let stored_count = stored_requested_node_count
+                    .map(u64::try_from)
+                    .transpose()
+                    .map_err(|_| {
+                        StoreError::Backend(
+                            "stored append requested-node count is negative".to_string(),
+                        )
+                    })?;
+                let attempted_count = completed
+                    .requested_node_count
+                    .map(u64::try_from)
+                    .transpose()
+                    .map_err(|_| {
+                        StoreError::Backend(
+                            "attempted append requested-node count does not fit u64".to_string(),
+                        )
+                    })?;
+                match lash_core::store::decide_runtime_commit_receipt(
+                    &hash,
+                    &turn_commit_hash,
+                    stored_version.and_then(|version| u32::try_from(version).ok()),
+                    completed.identity_encoding_version,
+                    stored_identity.as_deref(),
+                    completed.request_identity_hash.as_deref(),
+                    stored_count,
+                    attempted_count,
+                ) {
+                    lash_core::store::RuntimeCommitReceiptDecision::Replay => {
+                        let mut result: RuntimeCommitResult =
+                            store_decode_json(&result_json, "runtime turn commit result")?;
+                        result.receipt_replayed = true;
+                        if let Some(completion) = commit.release_session_execution_lease.as_ref() {
+                            release_session_execution_lease_tx(&mut tx, completion).await?;
+                        }
+                        tx.commit().await.map_err(store_sqlx_error)?;
+                        return Ok(result);
                     }
-                    tx.commit().await.map_err(store_sqlx_error)?;
-                    return Ok(result);
+                    lash_core::store::RuntimeCommitReceiptDecision::AppendIdentityConflict => {
+                        return Err(StoreError::AppendOperationIdentityConflict {
+                            session_id: commit.session_id.clone(),
+                            operation_key,
+                        });
+                    }
+                    lash_core::store::RuntimeCommitReceiptDecision::RuntimeCommitConflict => {
+                        return Err(StoreError::RuntimeTurnCommitConflict {
+                            session_id: commit.session_id.clone(),
+                            turn_id: operation_key,
+                        });
+                    }
+                    lash_core::store::RuntimeCommitReceiptDecision::CorruptRequestedNodeCount {
+                        stored,
+                        attempted,
+                    } => {
+                        return Err(StoreError::AppendReceiptRequestedNodeCountCorrupt {
+                            session_id: commit.session_id.clone(),
+                            operation_key,
+                            stored,
+                            attempted,
+                        });
+                    }
                 }
-                return Err(StoreError::RuntimeTurnCommitConflict {
-                    session_id: commit.session_id.clone(),
-                    turn_id: operation_key,
+            }
+        }
+        if commit.turn_commit.request_identity_hash.is_some()
+            && let Some(required) = commit.turn_commit.requested_ancestor_node_id.as_deref()
+        {
+            let active_graph = load_graph_tx(
+                &mut tx,
+                &commit.session_id,
+                existing.as_ref().and_then(|meta| meta.leaf_node_id.clone()),
+                true,
+            )
+            .await?;
+            if !active_graph.active_path_contains(required) {
+                return Err(StoreError::AppendAncestorNotActive {
+                    required_node_id: required.to_string(),
                 });
             }
         }
@@ -600,12 +670,31 @@ impl SessionCommitStore for PostgresSessionStore {
         }
         let (checkpoint_ref, manifest) = put_checkpoint_tx(&mut tx, &commit.checkpoint).await?;
         for entry in &commit.usage_deltas {
-            sqlx::query("INSERT INTO lash_usage_deltas (session_id, entry_json) VALUES ($1, $2)")
-                .bind(&commit.session_id)
-                .bind(encode_json(entry))
-                .execute(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
+            let entry_ordinal = i64::try_from(entry.identity.entry_ordinal).map_err(|_| {
+                StoreError::Backend(
+                    "usage delta ordinal does not fit PostgreSQL BIGINT".to_string(),
+                )
+            })?;
+            sqlx::query(
+                "INSERT INTO lash_usage_deltas (
+                    session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash, entry_json
+                 ) VALUES ($1, $2, $3, $4, $5, $6)
+                 ON CONFLICT (session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash)
+                 DO NOTHING",
+            )
+            .bind(&commit.session_id)
+            .bind(&entry.identity.operation_storage_key)
+            .bind(entry_ordinal)
+            .bind(i32::try_from(entry.identity.payload_encoding_version).map_err(|_| {
+                StoreError::Backend(
+                    "usage payload encoding version does not fit PostgreSQL INTEGER".to_string(),
+                )
+            })?)
+            .bind(&entry.identity.payload_hash)
+            .bind(encode_json(&entry.entry))
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         }
         let old_leaf_node_id = existing.as_ref().and_then(|head| head.leaf_node_id.clone());
         match commit.graph.nodes.first() {
@@ -829,24 +918,41 @@ impl SessionCommitStore for PostgresSessionStore {
             head_revision: next_revision,
             checkpoint_ref,
             manifest,
+            committed_leaf_node_id: commit.graph.leaf_node_id.clone(),
             realized_node_timestamps,
+            committed_usage_delta_identities: commit
+                .usage_deltas
+                .iter()
+                .map(|delta| delta.identity.clone())
+                .collect(),
             enqueued_queue_batches,
             turn_input_applications: commit.turn_input_applications(),
+            receipt_replayed: false,
         };
         {
             let completed = &commit.turn_commit;
             let operation_key = completed.operation.storage_key()?;
             sqlx::query(
                 "INSERT INTO lash_runtime_turn_commits (
-                    session_id, turn_id, turn_commit_hash, result_json, committed_at_ms
+                    session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
+                    request_identity_hash, requested_node_count,
+                    requested_ancestor_node_id, identity_encoding_version
                  )
-                 VALUES ($1, $2, $3, $4, $5)",
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
             )
             .bind(&commit.session_id)
             .bind(operation_key)
             .bind(&turn_commit_hash)
             .bind(encode_json(&result))
             .bind(now as i64)
+            .bind(completed.request_identity_hash.as_deref())
+            .bind(completed.requested_node_count.map(|count| count as i64))
+            .bind(completed.requested_ancestor_node_id.as_deref())
+            .bind(
+                completed
+                    .identity_encoding_version
+                    .and_then(|version| i32::try_from(version).ok()),
+            )
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;

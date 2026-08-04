@@ -232,9 +232,23 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
         )));
     };
     let commit = commit.releasing_session_execution_lease(lease.completion());
-    let result = crate::store::commit_runtime_state_verified(store.as_ref(), commit).await?;
-    lease.mark_released();
-    Ok(result)
+    match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await {
+        Ok(result) => {
+            lease.mark_released();
+            Ok(result)
+        }
+        Err(error) => {
+            if let Err(release_error) = lease.release_if_live().await {
+                tracing::warn!(
+                    error = %release_error,
+                    original_error = %error,
+                    session_id,
+                    "failed to release fresh session execution lease after rejected commit"
+                );
+            }
+            Err(error)
+        }
+    }
 }
 
 impl Drop for SessionExecutionLeaseGuard {

@@ -17,6 +17,9 @@ pub(in crate::runtime) use usage::ChildUsageEventRelay;
 pub(in crate::runtime::session_manager) use usage::{
     ChannelEventSink, LiveChildUsageForwarder, subtract_usage,
 };
+pub(in crate::runtime) use usage::{
+    PendingTokenLedgerEntry, record_token_usage_shared, stage_token_ledger_shared,
+};
 
 #[derive(Clone)]
 enum CurrentSnapshot {
@@ -70,7 +73,7 @@ pub(in crate::runtime) struct UsageCapability {
     /// Session-scoped token cost ledger shared with the parent
     /// `LashRuntime`. All managers created from the same runtime
     /// write to the same Arc. Drained at turn-commit time.
-    token_ledger: Arc<std::sync::Mutex<Vec<TokenLedgerEntry>>>,
+    token_ledger: Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
     /// Maps child session_id → usage_source label.
     child_sources: Arc<std::sync::Mutex<HashMap<String, String>>>,
     /// Tracks live child-turn usage already bubbled into the shared
@@ -329,6 +332,436 @@ impl RuntimeSessionServices {
             direct: DirectCompletionCapability,
         })
     }
+}
+
+#[cfg(any(test, feature = "testing"))]
+pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
+    store: Arc<dyn crate::RuntimePersistence>,
+) {
+    let policy = crate::SessionPolicy {
+        provider_id: "mixed-envelope-provider".to_string(),
+        model: crate::ModelSpec::from_token_limits(
+            "mixed-envelope-model",
+            Default::default(),
+            200_000,
+            None,
+        )
+        .expect("mixed-envelope model spec"),
+        ..crate::SessionPolicy::default()
+    };
+    let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
+        .build_session("root", None)
+        .expect("mixed-envelope plugin session");
+    let mut runtime = crate::LashRuntime::from_persistent_embedded_state(
+        policy.clone(),
+        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory()),
+        crate::PersistentRuntimeServices::new(plugins, Arc::clone(&store)),
+        crate::RuntimeSessionState {
+            policy,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("mixed-envelope runtime");
+    super::state::append_session_nodes_to_state_with_clock(
+        &mut runtime.state,
+        &[crate::SessionAppendNode::plugin(
+            "mixed-envelope-preexisting-pending",
+            serde_json::json!({"pending": true}),
+        )],
+        "mixed-envelope-preexisting-pending",
+        &crate::SystemClock,
+    );
+    let services = Arc::new(
+        RuntimeSessionServices::new(&runtime, true, None).expect("mixed-envelope session services"),
+    );
+    let graph = services.graph_service();
+    let request = crate::AppendSessionNodesRequest {
+        operation_id: "mixed-envelope-lost-response".to_string(),
+        nodes: vec![crate::SessionAppendNode::plugin(
+            "mixed-envelope",
+            serde_json::json!({"attempt": 1}),
+        )],
+        requires_ancestor_node_id: None,
+    };
+    let first = graph
+        .append_session_nodes("root", request.clone())
+        .await
+        .expect("first mixed-envelope append");
+
+    let interleaved_usage = crate::TokenUsage {
+        input_tokens: 17,
+        output_tokens: 5,
+        cache_read_input_tokens: 3,
+        cache_write_input_tokens: 2,
+        reasoning_output_tokens: 1,
+    };
+    services.usage.record_token_usage(
+        "mixed-envelope-source",
+        "mixed-envelope-model",
+        &interleaved_usage,
+    );
+    runtime
+        .await_background_work()
+        .await
+        .expect("refresh between lost response and retry");
+    let retry_services = Arc::new(
+        RuntimeSessionServices::new(&runtime, true, None)
+            .expect("mixed-envelope retry session services"),
+    );
+    let replay = retry_services
+        .graph_service()
+        .append_session_nodes("root", request)
+        .await
+        .expect("lost-response retry replays");
+    let (
+        crate::AppendSessionNodesResult::Appended {
+            node_ids: first_node_ids,
+            leaf_node_id: first_leaf,
+        },
+        crate::AppendSessionNodesResult::Appended {
+            node_ids: replay_node_ids,
+            leaf_node_id: replay_leaf,
+        },
+    ) = (first, replay)
+    else {
+        panic!("both mixed-envelope attempts must append or replay")
+    };
+    let operation = super::state::boundary_operation(
+        "root",
+        "mixed-envelope-lost-response",
+        "append-session-nodes",
+    );
+    let locally_rederived_retry_id =
+        crate::store::derive_history_node_id("root", &operation, 0).expect("retry node derivation");
+    assert_ne!(
+        first_node_ids,
+        vec![locally_rederived_retry_id],
+        "the scenario must make retry-local node-id derivation differ from the stored result"
+    );
+    assert_eq!(replay_node_ids, first_node_ids);
+    assert_eq!(replay_leaf, first_leaf);
+    {
+        let ledger = retry_services
+            .usage
+            .token_ledger
+            .lock()
+            .expect("mixed-envelope ledger");
+        assert_eq!(ledger.len(), 1);
+        assert_eq!(ledger[0].source, "mixed-envelope-source");
+        assert_eq!(ledger[0].model, "mixed-envelope-model");
+        assert_eq!(ledger[0].usage, interleaved_usage);
+    }
+
+    let changed_content_error = retry_services
+        .graph_service()
+        .append_session_nodes(
+            "root",
+            crate::AppendSessionNodesRequest {
+                operation_id: "mixed-envelope-lost-response".to_string(),
+                nodes: vec![crate::SessionAppendNode::plugin(
+                    "mixed-envelope",
+                    serde_json::json!({"attempt": "changed"}),
+                )],
+                requires_ancestor_node_id: None,
+            },
+        )
+        .await
+        .expect_err("changed content for an existing operation must be rejected");
+    match changed_content_error {
+        crate::PluginError::AppendOperationIdentityConflict {
+            session_id,
+            operation_key,
+        } => {
+            assert_eq!(session_id, "root");
+            assert!(
+                operation_key.contains("\"key\":\"append-session-nodes\""),
+                "typed conflict must retain the durable append operation key: {operation_key}"
+            );
+        }
+        other => panic!("expected a typed append identity conflict, got {other:?}"),
+    }
+    {
+        let ledger = retry_services
+            .usage
+            .token_ledger
+            .lock()
+            .expect("mixed-envelope ledger after rejection");
+        assert_eq!(ledger.len(), 1);
+        assert_eq!(ledger[0].usage, interleaved_usage);
+    }
+
+    runtime
+        .await_background_work()
+        .await
+        .expect("refresh after receipt replay");
+    runtime
+        .session_graph_service()
+        .expect("fresh graph service")
+        .append_session_nodes(
+            "root",
+            crate::AppendSessionNodesRequest {
+                operation_id: "mixed-envelope-natural-commit".to_string(),
+                nodes: vec![crate::SessionAppendNode::plugin(
+                    "mixed-envelope",
+                    serde_json::json!({"attempt": 2}),
+                )],
+                requires_ancestor_node_id: None,
+            },
+        )
+        .await
+        .expect("next natural commit persists restored usage");
+
+    let read = store
+        .load_session()
+        .await
+        .expect("load mixed-envelope session")
+        .expect("mixed-envelope session exists");
+    assert_eq!(read.token_ledger.len(), 1);
+    assert_eq!(read.token_ledger[0].source, "mixed-envelope-source");
+    assert_eq!(read.token_ledger[0].model, "mixed-envelope-model");
+    assert_eq!(read.token_ledger[0].usage, interleaved_usage);
+
+    // Pin ordinal reuse after successful confirmation. U1 is committed and
+    // removed from the pending ledger under operation A at ordinal zero. U2
+    // then reuses A/0 with different content; replaying A must confirm only
+    // U1's full content-bound identity, leaving U2 staged for natural commit B.
+    runtime
+        .await_background_work()
+        .await
+        .expect("refresh before ordinal-reuse sequence");
+    let ordinal_services = Arc::new(
+        RuntimeSessionServices::new(&runtime, true, None).expect("ordinal-reuse session services"),
+    );
+    let first_usage = crate::TokenUsage {
+        input_tokens: 13,
+        output_tokens: 0,
+        cache_read_input_tokens: 0,
+        cache_write_input_tokens: 0,
+        reasoning_output_tokens: 0,
+    };
+    ordinal_services.usage.record_token_usage(
+        "ordinal-reuse-source",
+        "ordinal-reuse-model",
+        &first_usage,
+    );
+    let ordinal_request = crate::AppendSessionNodesRequest {
+        operation_id: "mixed-envelope-ordinal-reuse-a".to_string(),
+        nodes: vec![crate::SessionAppendNode::plugin(
+            "mixed-envelope-ordinal-reuse",
+            serde_json::json!({"append": "A"}),
+        )],
+        requires_ancestor_node_id: None,
+    };
+    ordinal_services
+        .graph_service()
+        .append_session_nodes("root", ordinal_request.clone())
+        .await
+        .expect("operation A commits U1");
+    assert!(
+        ordinal_services
+            .usage
+            .token_ledger
+            .lock()
+            .expect("ledger after U1 confirmation")
+            .is_empty(),
+        "U1 must be removed after its full identity is confirmed"
+    );
+
+    let later_usage = crate::TokenUsage {
+        input_tokens: 31,
+        output_tokens: 0,
+        cache_read_input_tokens: 0,
+        cache_write_input_tokens: 0,
+        reasoning_output_tokens: 0,
+    };
+    ordinal_services.usage.record_token_usage(
+        "ordinal-reuse-source",
+        "ordinal-reuse-model",
+        &later_usage,
+    );
+    ordinal_services
+        .graph_service()
+        .append_session_nodes("root", ordinal_request)
+        .await
+        .expect("operation A replay leaves U2 staged");
+    {
+        let ledger = ordinal_services
+            .usage
+            .token_ledger
+            .lock()
+            .expect("ledger after ordinal-reuse replay");
+        assert_eq!(ledger.len(), 1);
+        assert_eq!(ledger[0].usage, later_usage);
+        let identity = ledger[0]
+            .identity
+            .as_ref()
+            .expect("U2 remains staged under its full identity");
+        assert_eq!(identity.entry_ordinal, 0);
+        assert!(
+            identity
+                .operation_storage_key
+                .contains("mixed-envelope-ordinal-reuse-a")
+        );
+    }
+
+    ordinal_services
+        .graph_service()
+        .append_session_nodes(
+            "root",
+            crate::AppendSessionNodesRequest {
+                operation_id: "mixed-envelope-ordinal-reuse-b".to_string(),
+                nodes: vec![crate::SessionAppendNode::plugin(
+                    "mixed-envelope-ordinal-reuse",
+                    serde_json::json!({"append": "B"}),
+                )],
+                requires_ancestor_node_id: None,
+            },
+        )
+        .await
+        .expect("natural commit B persists U2");
+    assert!(
+        ordinal_services
+            .usage
+            .token_ledger
+            .lock()
+            .expect("ledger after U2 confirmation")
+            .is_empty(),
+        "U2 must clear only after natural commit B confirms its full identity"
+    );
+
+    let read = store
+        .load_session()
+        .await
+        .expect("load ordinal-reuse session")
+        .expect("ordinal-reuse session exists");
+    let durable = read
+        .token_ledger
+        .iter()
+        .find(|entry| {
+            entry.source == "ordinal-reuse-source" && entry.model == "ordinal-reuse-model"
+        })
+        .expect("U1 and U2 both remain durable");
+    assert_eq!(durable.usage.input_tokens, 44);
+}
+
+#[cfg(any(test, feature = "testing"))]
+pub(crate) async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
+    store: Arc<dyn crate::RuntimePersistence>,
+    arm_and_wait: A,
+) where
+    A: FnOnce() -> W,
+    W: std::future::Future<Output = R>,
+    R: FnOnce(),
+{
+    let policy = crate::SessionPolicy {
+        provider_id: "cancelled-usage-provider".to_string(),
+        model: crate::ModelSpec::from_token_limits(
+            "cancelled-usage-model",
+            Default::default(),
+            200_000,
+            None,
+        )
+        .expect("cancelled usage model spec"),
+        ..crate::SessionPolicy::default()
+    };
+    let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
+        .build_session("root", None)
+        .expect("cancelled usage plugin session");
+    let mut runtime = crate::LashRuntime::from_persistent_embedded_state(
+        policy.clone(),
+        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory()),
+        crate::PersistentRuntimeServices::new(plugins, Arc::clone(&store)),
+        crate::RuntimeSessionState {
+            policy,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("cancelled usage runtime");
+    let services = Arc::new(
+        RuntimeSessionServices::new(&runtime, true, None)
+            .expect("cancelled usage session services"),
+    );
+    let usage = crate::TokenUsage {
+        input_tokens: 19,
+        output_tokens: 7,
+        cache_read_input_tokens: 3,
+        cache_write_input_tokens: 2,
+        reasoning_output_tokens: 1,
+    };
+    services
+        .usage
+        .record_token_usage("cancelled-usage-source", "cancelled-usage-model", &usage);
+    let request = crate::AppendSessionNodesRequest {
+        operation_id: "cancelled-usage-append".to_string(),
+        nodes: vec![crate::SessionAppendNode::plugin(
+            "cancelled-usage",
+            serde_json::json!({"attempt": 1}),
+        )],
+        requires_ancestor_node_id: None,
+    };
+    let wait_until_worker_queued = arm_and_wait();
+    let graph = services.graph_service();
+    let cancelled_request = request.clone();
+    let append =
+        crate::task::spawn(
+            async move { graph.append_session_nodes("root", cancelled_request).await },
+        );
+    let release_worker = wait_until_worker_queued.await;
+    append.abort();
+    let cancelled = append.await;
+    assert!(
+        cancelled.is_err(),
+        "append task must be cancelled post-send"
+    );
+    release_worker();
+
+    store
+        .load_session()
+        .await
+        .expect("flush queued SQLite commit")
+        .expect("cancelled append committed on worker");
+    services
+        .graph_service()
+        .append_session_nodes("root", request)
+        .await
+        .expect("cancelled append retry replays");
+    runtime
+        .await_background_work()
+        .await
+        .expect("refresh after cancelled append replay");
+    runtime
+        .session_graph_service()
+        .expect("fresh graph service")
+        .append_session_nodes(
+            "root",
+            crate::AppendSessionNodesRequest {
+                operation_id: "cancelled-usage-natural-commit".to_string(),
+                nodes: vec![crate::SessionAppendNode::plugin(
+                    "cancelled-usage",
+                    serde_json::json!({"attempt": 2}),
+                )],
+                requires_ancestor_node_id: None,
+            },
+        )
+        .await
+        .expect("next natural commit re-submits cancelled usage identity");
+
+    let read = store
+        .load_session()
+        .await
+        .expect("load cancelled usage session")
+        .expect("cancelled usage session exists");
+    let matching = read
+        .token_ledger
+        .iter()
+        .filter(|entry| {
+            entry.source == "cancelled-usage-source" && entry.model == "cancelled-usage-model"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(matching.len(), 1);
+    assert_eq!(matching[0].usage, usage);
 }
 
 pub(super) async fn emit_session_events_to_sink(

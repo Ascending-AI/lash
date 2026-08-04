@@ -405,18 +405,14 @@ impl LashRuntime {
         turn_pipeline.state_mut().policy = self.policy.clone();
         turn_pipeline.state_mut().turn_index = turn_index;
 
-        let mut turn_usage_delta = {
-            let mut ledger = self.shared_token_ledger.lock().expect("token ledger lock");
-            std::mem::take(&mut *ledger)
-        };
         if assembler.token_usage.total() > 0 {
-            turn_usage_delta.push(TokenLedgerEntry {
-                source: "turn".to_string(),
-                model: policy.model.id.clone(),
-                usage: assembler.token_usage.clone(),
-            });
+            session_manager::record_token_usage_shared(
+                &self.shared_token_ledger,
+                "turn",
+                &policy.model.id,
+                &assembler.token_usage,
+            );
         }
-        let turn_usage_delta = merge_usage_delta_entries(turn_usage_delta);
 
         let assembled_cancelled = matches!(
             assembler.outcome,
@@ -546,11 +542,16 @@ impl LashRuntime {
         self.mark_phase_begin(RuntimeTurnPhase::FinalCommit);
         let queued_work_completion_trace = commit_effects.completed_queue_claims.clone();
         let turn_input_completion_trace = commit_effects.completed_turn_input_claims.clone();
-        let enqueued_queue_batches = match turn_pipeline
+        let staged_usage = session_manager::stage_token_ledger_shared(
+            &self.shared_token_ledger,
+            &turn_pipeline.final_operation(),
+        )
+        .map_err(runtime_error_from_store_commit)?;
+        let (enqueued_queue_batches, confirmed_usage) = match turn_pipeline
             .final_commit(
                 &mut returned_turn,
                 self.session.as_mut(),
-                &turn_usage_delta,
+                staged_usage.deltas(),
                 commit_effects.originating_queue_claims,
                 commit_effects.originating_turn_input_claims,
                 commit_effects.completed_queue_claims,
@@ -575,6 +576,7 @@ impl LashRuntime {
                 return Err(err);
             }
         };
+        staged_usage.confirm_identities(&confirmed_usage);
         if release_session_execution_lease && let Some(lease) = session_execution_lease {
             lease.mark_released();
         }

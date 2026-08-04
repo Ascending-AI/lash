@@ -226,7 +226,7 @@ fn export_observation_state(
         .lock()
         .expect("token ledger lock");
     for entry in shared_ledger.iter().cloned() {
-        super::merge_ledger_entry(&mut state.token_ledger, entry);
+        super::merge_ledger_entry(&mut state.token_ledger, entry.entry);
     }
     let usage_report = super::SessionUsageReport::from_entries(&state.token_ledger);
     (state, read_view, usage_report)

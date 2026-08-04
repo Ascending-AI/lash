@@ -453,20 +453,70 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
     ));
 }
 
+#[tokio::test]
+async fn storeless_append_rejects_inactive_ancestor_before_mutation() {
+    let store = Arc::new(RecordingStore::default());
+    let protocol_dirty = Arc::new(AtomicBool::new(false));
+    let restore_called = Arc::new(AtomicBool::new(false));
+    let plugin_host = crate::PluginHost::new(vec![Arc::new(AppendRollbackProtocolFactory {
+        store,
+        protocol_dirty: Arc::clone(&protocol_dirty),
+        restore_called: Arc::clone(&restore_called),
+        fail_restore: Arc::new(AtomicBool::new(false)),
+        advance_store_head: false,
+    })]);
+    let plugins = plugin_host.build_session("root", None).expect("plugins");
+    let mut runtime = LashRuntime::from_embedded_state(
+        standard_test_policy(),
+        test_host_config(),
+        crate::RuntimeServices::new(plugins),
+        RuntimeSessionState::default(),
+    )
+    .await
+    .expect("storeless runtime");
+    protocol_dirty.store(false, Ordering::SeqCst);
+    restore_called.store(false, Ordering::SeqCst);
+    let before = runtime.state.session_graph.clone();
+
+    let result = runtime
+        .append_session_nodes(crate::AppendSessionNodesRequest {
+            operation_id: "storeless-stale-ancestor".to_string(),
+            nodes: vec![crate::SessionAppendNode::plugin(
+                "storeless-stale-ancestor",
+                serde_json::json!({"value": 1}),
+            )],
+            requires_ancestor_node_id: Some("not-on-active-path".to_string()),
+        })
+        .await
+        .expect("storeless ancestor fence is a typed result");
+
+    assert!(matches!(
+        result,
+        crate::AppendSessionNodesResult::StaleBranch { ref required_node_id }
+            if required_node_id == "not-on-active-path"
+    ));
+    assert!(!protocol_dirty.load(Ordering::SeqCst));
+    assert!(!restore_called.load(Ordering::SeqCst));
+    assert_eq!(
+        serde_json::to_value(&runtime.state.session_graph).expect("encode storeless graph"),
+        serde_json::to_value(&before).expect("encode original storeless graph")
+    );
+}
+
 #[test]
-fn append_session_nodes_retry_after_head_advance_is_typed_and_bounded() {
-    const CHILD_ENV: &str = "LASH_FIG843_APPEND_RETRY_CHILD";
+fn append_session_nodes_lost_response_retry_replays_and_refreshes_resident_state() {
+    const CHILD_ENV: &str = "LASH_FIG850_APPEND_RETRY_CHILD";
     if std::env::var_os(CHILD_ENV).is_some() {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .expect("FIG-843 child runtime")
+            .expect("FIG-850 child runtime")
             .block_on(append_session_nodes_retry_after_head_advance_is_typed_scenario());
         return;
     }
 
     crate::test_watchdog::assert_exact_test_completes(
-        "runtime::tests::projection::append_session_nodes_retry_after_head_advance_is_typed_and_bounded",
+        "runtime::tests::projection::append_session_nodes_lost_response_retry_replays_and_refreshes_resident_state",
         CHILD_ENV,
         "append retry",
     );
@@ -519,10 +569,16 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
         .append_session_nodes(request.clone())
         .await
         .expect("first append");
-    let crate::AppendSessionNodesResult::Appended { node_ids, .. } = first else {
+    let crate::AppendSessionNodesResult::Appended {
+        node_ids: first_node_ids,
+        leaf_node_id: first_leaf_node_id,
+    } = first
+    else {
         panic!("first append must report its persisted node id");
     };
-    let expected_collision = node_ids.into_iter().next().expect("persisted node id");
+    let persisted_node_id = first_node_ids.first().cloned().expect("persisted node id");
+    // Model a response lost after the durable commit: the caller retains only
+    // its request and retries after unrelated work has advanced the head.
     runtime
         .append_session_nodes(crate::AppendSessionNodesRequest {
             operation_id: "advance-head".to_string(),
@@ -538,33 +594,110 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
     protocol_dirty.store(false, Ordering::SeqCst);
     restore_called.store(false, Ordering::SeqCst);
 
-    let error = runtime
+    let replay = runtime
         .append_session_nodes(request)
         .await
-        .expect_err("the retry is not idempotent until durable receipts land");
-    assert!(matches!(
-        error,
-        crate::SessionError::Store {
-            source: crate::StoreError::NodeIdCollision { node_id },
-            ..
-        } if node_id == expected_collision
-    ));
+        .expect("the lost-response retry must replay its durable receipt");
+    let crate::AppendSessionNodesResult::Appended {
+        node_ids: replayed_node_ids,
+        leaf_node_id: replayed_leaf_node_id,
+    } = replay
+    else {
+        panic!("the lost-response retry must report the original append");
+    };
+    assert_eq!(replayed_node_ids, first_node_ids);
+    assert_eq!(replayed_leaf_node_id, first_leaf_node_id);
     assert!(
         restore_called.load(Ordering::SeqCst),
-        "fallible identity derivation must restore the protocol session"
+        "receipt replay must restore the protocol session from durable history"
     );
     assert!(
         !protocol_dirty.load(Ordering::SeqCst),
-        "the protocol session must match the rolled-back runtime state"
+        "the protocol session must match the refreshed durable runtime state"
     );
     assert_eq!(
         runtime.state.head_revision, state_after_advance.head_revision,
-        "the rejected retry must not commit"
+        "receipt replay must not advance the durable head"
     );
     assert_eq!(
         serde_json::to_value(&runtime.state.session_graph).expect("encode rolled-back graph"),
         serde_json::to_value(&state_after_advance.session_graph).expect("encode expected graph"),
-        "fallible identity derivation must roll back the resident graph"
+        "resident graph must converge with durable history after receipt replay"
+    );
+    assert_eq!(
+        runtime
+            .state
+            .session_graph
+            .nodes
+            .iter()
+            .filter(|node| node.node_id == persisted_node_id)
+            .count(),
+        1,
+        "the replayed node must exist exactly once in resident history"
+    );
+}
+
+#[tokio::test]
+async fn replay_refresh_failure_restores_pre_append_runtime_and_protocol_state() {
+    let store = Arc::new(RecordingStore::default());
+    let protocol_dirty = Arc::new(AtomicBool::new(false));
+    let restore_called = Arc::new(AtomicBool::new(false));
+    let plugin_host = crate::PluginHost::new(vec![Arc::new(AppendRollbackProtocolFactory {
+        store: Arc::clone(&store),
+        protocol_dirty: Arc::clone(&protocol_dirty),
+        restore_called: Arc::clone(&restore_called),
+        fail_restore: Arc::new(AtomicBool::new(false)),
+        advance_store_head: false,
+    })]);
+    let plugins = plugin_host.build_session("root", None).expect("plugins");
+    let mut runtime = LashRuntime::from_persistent_embedded_state(
+        standard_test_policy(),
+        test_host_config(),
+        crate::PersistentRuntimeServices::new(
+            plugins,
+            Arc::clone(&store) as Arc<dyn crate::store::RuntimePersistence>,
+        ),
+        RuntimeSessionState::default(),
+    )
+    .await
+    .expect("runtime");
+    let request = crate::AppendSessionNodesRequest {
+        operation_id: "replay-refresh-failure".to_string(),
+        nodes: vec![crate::SessionAppendNode::plugin(
+            "replay-refresh-failure",
+            serde_json::json!({"value": 1}),
+        )],
+        requires_ancestor_node_id: None,
+    };
+    runtime
+        .append_session_nodes(request.clone())
+        .await
+        .expect("first append");
+    let state_before_retry = runtime.state.clone();
+    protocol_dirty.store(false, Ordering::SeqCst);
+    restore_called.store(false, Ordering::SeqCst);
+    store.fail_load_session_on_call(store.load_session_count() + 2);
+
+    let error = runtime
+        .append_session_nodes(request)
+        .await
+        .expect_err("post-replay refresh failure must reject and roll back");
+
+    assert!(matches!(
+        error,
+        crate::SessionError::Store { ref context, ref source }
+            if context.contains("failed to refresh resident state after append receipt replay")
+                && matches!(source, crate::StoreError::Backend(message) if message == "injected load-session failure")
+    ));
+    assert!(restore_called.load(Ordering::SeqCst));
+    assert!(!protocol_dirty.load(Ordering::SeqCst));
+    assert_eq!(
+        runtime.state.head_revision,
+        state_before_retry.head_revision
+    );
+    assert_eq!(
+        serde_json::to_value(&runtime.state.session_graph).expect("encode restored graph"),
+        serde_json::to_value(&state_before_retry.session_graph).expect("encode expected graph")
     );
 }
 

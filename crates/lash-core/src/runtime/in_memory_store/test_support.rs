@@ -41,6 +41,59 @@ impl SessionExecutionLeaseReleaseGate {
 }
 
 impl InMemorySessionStore {
+    pub(super) fn run_claim_after_lease_validation_hook(&self) {
+        let hook = self
+            .claim_after_lease_validation_hook
+            .lock()
+            .expect("lock claim validation hook")
+            .take();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+
+    pub(crate) fn set_claim_after_lease_validation_hook(&self, hook: Arc<dyn Fn() + Send + Sync>) {
+        *self
+            .claim_after_lease_validation_hook
+            .lock()
+            .expect("lock claim validation hook") = Some(hook);
+    }
+
+    pub(crate) fn fail_next_exact_queue_claim(&self) {
+        self.fail_next_exact_queue_claim
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub(crate) fn fail_next_runtime_commit(&self, error: crate::StoreError) {
+        *self
+            .fail_next_runtime_commit
+            .lock()
+            .expect("lock next runtime commit failure") = Some(error);
+    }
+
+    pub(crate) fn fail_next_runtime_commit_after_first_mutation(&self, error: crate::StoreError) {
+        *self
+            .fail_next_runtime_commit_after_first_mutation
+            .lock()
+            .expect("lock post-mutation runtime commit failure") = Some(error);
+    }
+
+    pub(super) fn fail_after_first_runtime_commit_mutation_if_requested(
+        &self,
+        session_meta_before_commit: Option<crate::SessionMeta>,
+    ) -> Result<(), crate::StoreError> {
+        if let Some(error) = self
+            .fail_next_runtime_commit_after_first_mutation
+            .lock()
+            .expect("lock post-mutation runtime commit failure")
+            .take()
+        {
+            *self.session_meta.lock().expect("lock session meta") = session_meta_before_commit;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     pub(crate) async fn save_session_head_meta(&self, meta: crate::SessionHeadMeta) {
         *self.session_head_meta.lock().expect("lock store") = Some(meta);
     }
@@ -48,6 +101,13 @@ impl InMemorySessionStore {
     pub(crate) fn load_session_count(&self) -> usize {
         self.load_session_count
             .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub(crate) fn fail_load_session_on_call(&self, call: usize) {
+        *self
+            .fail_load_session_on_call
+            .lock()
+            .expect("lock load-session failure injection") = Some(call);
     }
 
     pub(crate) fn checkpoint_claim_counts(&self) -> (usize, usize) {
@@ -110,6 +170,21 @@ impl InMemorySessionStore {
     pub(crate) fn commit_write_transaction_count(&self) -> usize {
         self.commit_write_transaction_count
             .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub(crate) fn force_active_leaf_for_testing(&self, leaf_node_id: String) {
+        let _transaction = self
+            .write_transaction
+            .lock()
+            .expect("lock in-memory test branch switch");
+        let mut meta = self.session_head_meta.lock().expect("lock session head");
+        let meta = meta.as_mut().expect("branch switch requires session head");
+        meta.head_revision += 1;
+        meta.leaf_node_id = Some(leaf_node_id.clone());
+        self.session_graph
+            .lock()
+            .expect("lock resident graph")
+            .set_leaf_node_id(Some(leaf_node_id));
     }
 }
 

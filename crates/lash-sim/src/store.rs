@@ -141,6 +141,12 @@ fn store_error_variant(error: &StoreError) -> &'static str {
         StoreError::SessionDeleted { .. } => "SessionDeleted",
         StoreError::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation",
         StoreError::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict",
+        StoreError::AppendOperationIdentityConflict { .. } => "AppendOperationIdentityConflict",
+        StoreError::AppendReceiptRequestedNodeCountCorrupt { .. } => {
+            "AppendReceiptRequestedNodeCountCorrupt"
+        }
+        StoreError::TokenUsageAccountingOverflow { .. } => "TokenUsageAccountingOverflow",
+        StoreError::AppendAncestorNotActive { .. } => "AppendAncestorNotActive",
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch",
         StoreError::NodeIdCollision { .. } => "NodeIdCollision",
         StoreError::InvalidGraphLeaf { .. } => "InvalidGraphLeaf",

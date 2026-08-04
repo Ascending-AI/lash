@@ -3,7 +3,7 @@
 //! This module only exists behind the crate's `testing` feature. Production
 //! factories have no injector, and production builds do not compile the hook.
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 
@@ -33,9 +33,71 @@ struct ArmedFault {
     point: SqliteFaultPoint,
 }
 
+#[derive(Clone, Debug)]
+struct ArmedPause {
+    point: SqliteFaultPoint,
+    remaining_matches: u64,
+    state: Arc<PauseState>,
+}
+
+#[derive(Debug, Default)]
+struct PauseState {
+    state: Mutex<PauseProgress>,
+    changed: Condvar,
+}
+
+#[derive(Debug, Default)]
+struct PauseProgress {
+    reached_ordinal: Option<u64>,
+    released: bool,
+}
+
+/// One-shot deterministic pause at a real SQLite transaction boundary.
+///
+/// Tests use this to drop an awaiting future after tokio-rusqlite has accepted
+/// its closure but before the background connection thread commits it.
+#[derive(Clone, Debug)]
+pub struct SqliteTransactionPause {
+    state: Arc<PauseState>,
+}
+
+impl SqliteTransactionPause {
+    /// Wait until the background SQLite thread reaches the armed boundary.
+    pub async fn wait_until_reached(&self) -> u64 {
+        let state = Arc::clone(&self.state);
+        tokio::task::spawn_blocking(move || {
+            let mut progress = state
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            while progress.reached_ordinal.is_none() {
+                progress = state
+                    .changed
+                    .wait(progress)
+                    .unwrap_or_else(|poison| poison.into_inner());
+            }
+            progress.reached_ordinal.expect("pause reached ordinal")
+        })
+        .await
+        .expect("SQLite pause waiter task")
+    }
+
+    /// Release the background SQLite transaction to continue to commit.
+    pub fn release(&self) {
+        let mut progress = self
+            .state
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        progress.released = true;
+        self.state.changed.notify_all();
+    }
+}
+
 #[derive(Debug, Default)]
 struct InjectorState {
     armed: Option<ArmedFault>,
+    pause: Option<ArmedPause>,
     write_transaction_ordinal: u64,
     observations: Vec<SqliteFaultObservation>,
 }
@@ -60,6 +122,28 @@ impl SqliteFaultInjector {
         self.lock_state().observations.clone()
     }
 
+    /// Pause the next transaction reaching `point` until the returned handle
+    /// is released.
+    pub fn pause(&self, point: SqliteFaultPoint) -> SqliteTransactionPause {
+        self.pause_after(point, 0)
+    }
+
+    /// Pause after `preceding_matches` earlier transactions pass the same
+    /// boundary. This targets a later write in a multi-transaction operation.
+    pub fn pause_after(
+        &self,
+        point: SqliteFaultPoint,
+        preceding_matches: u64,
+    ) -> SqliteTransactionPause {
+        let state = Arc::new(PauseState::default());
+        self.lock_state().pause = Some(ArmedPause {
+            point,
+            remaining_matches: preceding_matches,
+            state: Arc::clone(&state),
+        });
+        SqliteTransactionPause { state }
+    }
+
     pub(crate) fn begin_write(&self) -> u64 {
         let mut state = self.lock_state();
         state.write_transaction_ordinal += 1;
@@ -71,6 +155,33 @@ impl SqliteFaultInjector {
         point: SqliteFaultPoint,
         write_transaction_ordinal: u64,
     ) -> rusqlite::Result<()> {
+        let pause = {
+            let mut state = self.lock_state();
+            match state.pause.as_mut() {
+                Some(pause) if pause.point == point && pause.remaining_matches > 0 => {
+                    pause.remaining_matches -= 1;
+                    None
+                }
+                Some(pause) if pause.point == point => state.pause.take(),
+                _ => None,
+            }
+        };
+        if let Some(pause) = pause {
+            let mut progress = pause
+                .state
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            progress.reached_ordinal = Some(write_transaction_ordinal);
+            pause.state.changed.notify_all();
+            while !progress.released {
+                progress = pause
+                    .state
+                    .changed
+                    .wait(progress)
+                    .unwrap_or_else(|poison| poison.into_inner());
+            }
+        }
         let mut state = self.lock_state();
         let Some(armed) = state.armed else {
             return Ok(());

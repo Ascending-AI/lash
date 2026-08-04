@@ -67,13 +67,18 @@ CREATE INDEX IF NOT EXISTS idx_graph_nodes_parent
 CREATE TABLE IF NOT EXISTS usage_deltas (
     seq                  INTEGER PRIMARY KEY,
     session_id            TEXT NOT NULL,
+    operation_storage_key TEXT NOT NULL,
+    entry_ordinal         INTEGER NOT NULL,
+    payload_encoding_version INTEGER NOT NULL,
+    payload_hash          TEXT NOT NULL,
     source               TEXT NOT NULL,
     model                TEXT NOT NULL,
     input_tokens         INTEGER NOT NULL,
     output_tokens        INTEGER NOT NULL,
     cache_read_input_tokens  INTEGER NOT NULL,
     cache_write_input_tokens INTEGER NOT NULL,
-    reasoning_output_tokens     INTEGER NOT NULL
+    reasoning_output_tokens     INTEGER NOT NULL,
+    UNIQUE (session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash)
 );
 CREATE INDEX IF NOT EXISTS idx_usage_deltas_session_seq
     ON usage_deltas(session_id, seq);
@@ -88,11 +93,15 @@ CREATE TABLE IF NOT EXISTS session_meta (
 );
 
 CREATE TABLE IF NOT EXISTS runtime_turn_commits (
-    session_id        TEXT NOT NULL,
-    turn_id           TEXT NOT NULL,
-    turn_commit_hash  TEXT NOT NULL,
-    result_json       TEXT NOT NULL,
-    committed_at_ms   INTEGER NOT NULL,
+    session_id                  TEXT NOT NULL,
+    turn_id                     TEXT NOT NULL,
+    turn_commit_hash            TEXT NOT NULL,
+    result_json                 TEXT NOT NULL,
+    committed_at_ms             INTEGER NOT NULL,
+    request_identity_hash       TEXT,
+    requested_node_count        INTEGER,
+    requested_ancestor_node_id  TEXT,
+    identity_encoding_version   INTEGER,
     PRIMARY KEY (session_id, turn_id)
 );
 
@@ -264,7 +273,15 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// Bumped to 24 to rename consumed wake high-water marks as receiver allocation
 /// fences and add durable sender allocation floors. Process-event sequences
 /// remain small and monotone across pruned incarnations.
-pub(crate) const SCHEMA_VERSION: i32 = 24;
+///
+/// Bumped to 25 for FIG-850 append-request identity receipts and idempotent
+/// usage publication. Receipt identity columns are nullable so a pre-upgrade
+/// row copied into the new schema retains exact-commit-hash semantics; usage
+/// rows carry a required operation key, ordinal, payload-encoding version, and
+/// canonical payload hash unique within a session. This unreleased schema was
+/// completed in place; operators still use the store family's reject-and-
+/// recreate flow rather than an in-place migration.
+pub(crate) const SCHEMA_VERSION: i32 = 25;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

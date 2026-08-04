@@ -42,6 +42,54 @@ pub enum StoreError {
         "runtime operation `{turn_id}` for session `{session_id}` was retried with different commit content; reuse an operation identity only for the same logical operation"
     )]
     RuntimeTurnCommitConflict { session_id: String, turn_id: String },
+    /// One append operation id was reused for different semantic request content.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**
+    /// return this distinction so runtimes never absorb a caller identity bug as
+    /// an idempotent append replay.
+    #[error(
+        "append operation `{operation_key}` for session `{session_id}` was reused with different request content"
+    )]
+    AppendOperationIdentityConflict {
+        session_id: String,
+        operation_key: String,
+    },
+    /// A matching append receipt carries contradictory requested-node counts.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**
+    /// treat this as durable receipt corruption and must never replay it.
+    #[error(
+        "append receipt `{operation_key}` for session `{session_id}` has contradictory requested-node counts (stored {stored:?}, attempted {attempted:?})"
+    )]
+    AppendReceiptRequestedNodeCountCorrupt {
+        /// Session whose receipt failed its contracted count cross-check.
+        session_id: String,
+        /// Canonical operation storage key of the corrupt receipt.
+        operation_key: String,
+        /// Count stored with the first attempt, or `None` when corruptly absent.
+        stored: Option<u64>,
+        /// Count carried by the retry, or `None` when corruptly absent.
+        attempted: Option<u64>,
+    },
+    /// Token usage counters overflowed while an in-memory batch was projected
+    /// for persistence. The batch remains staged and may be inspected or
+    /// corrected; no usage row is discarded.
+    #[error("token usage counter `{counter}` overflowed while staging ({usage_source}, {model})")]
+    TokenUsageAccountingOverflow {
+        /// Caller-defined usage source whose accumulated counter overflowed.
+        usage_source: String,
+        /// Model identifier for the overflowing ledger row.
+        model: String,
+        /// Name of the overflowing [`crate::TokenUsage`] counter.
+        counter: &'static str,
+    },
+    /// A fresh append named an ancestor outside the durable active path.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**
+    /// enforce this after receipt lookup so an already-committed retry wins,
+    /// while runtimes translate a fresh rejection to `StaleBranch`.
+    #[error("append requires inactive ancestor `{required_node_id}`")]
+    AppendAncestorNotActive { required_node_id: String },
     #[error("runtime commit node `{node_id}` does not match derived node id `{expected_node_id}`")]
     NodeIdDerivationMismatch {
         node_id: String,

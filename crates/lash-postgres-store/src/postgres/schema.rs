@@ -44,25 +44,48 @@ pub(crate) async fn ensure_schema(
         // Preflight before the DDL: a stale baseline must be rejected rather than
         // have this build's creation statements layered over it.
         let search_path = read_search_path(&mut tx).await?;
-        if let Some(installation) = resolve_installation(&mut tx, &search_path).await?
-            && let ComponentVersion::Readable(Some(version)) =
-                read_component_version(&mut tx, &installation, &SchemaShape::expected()).await?
-            && version != SCHEMA_VERSION
-        {
+        let installation = resolve_installation(&mut tx, &search_path).await?;
+        let preflight_mismatch = if let Some(installation) = installation {
+            match read_component_version(&mut tx, &installation, &SchemaShape::expected()).await? {
+                ComponentVersion::Readable(found) if found != Some(SCHEMA_VERSION) => {
+                    Some((installation.namespace().to_string(), found))
+                }
+                ComponentVersion::Readable(_) | ComponentVersion::Unreadable => None,
+            }
+        } else {
+            let unstamped_schema: Option<String> = sqlx::query_scalar(
+                r#"SELECT current_schema()::text
+                   WHERE EXISTS (
+                       SELECT 1
+                       FROM pg_catalog.pg_class AS class
+                       JOIN pg_catalog.pg_namespace AS namespace
+                         ON namespace.oid = class.relnamespace
+                       WHERE namespace.nspname = current_schema()
+                         AND class.relname LIKE 'lash\_%' ESCAPE '\'
+                         AND class.relname <> 'lash_schema_versions'
+                         AND class.relkind IN ('r', 'p', 'v', 'm', 'S')
+                   )"#,
+            )
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            unstamped_schema.map(|schema| (schema, None))
+        };
+        if let Some((schema, found_version)) = preflight_mismatch {
             // Same field set as every other outcome, built from what the preflight
             // knows: it runs before the structural read, so the only finding it can
             // have is the version itself.
             let preflight = SchemaReport {
-                schema: Some(installation.namespace().to_string()),
+                schema: Some(schema),
                 expected_version: SCHEMA_VERSION,
-                found_version: Some(version),
+                found_version,
                 findings: vec![SchemaFinding::VersionMismatch {
                     expected: SCHEMA_VERSION,
-                    found: Some(version),
+                    found: found_version,
                 }],
             };
             record_schema_gate_decision(&preflight, options, "denied_version_preflight");
-            return Err(version_mismatch_error(Some(version)));
+            return Err(version_mismatch_error(found_version));
         }
         tx.execute(SCHEMA_DDL).await.map_err(store_sqlx_error)?;
     }
@@ -245,12 +268,18 @@ fn record_schema_gate_decision(
 /// Renders the reject-and-recreate boundary error, naming the remedy rather than
 /// only the numbers.
 fn version_mismatch_error(found: Option<i32>) -> StoreError {
-    let found = match found {
-        Some(version) => format!("has version {version}"),
-        None => "has no version stamp".to_string(),
+    let (found, expected) = match found {
+        Some(version) => (
+            format!("has version {version}"),
+            format!("expected {SCHEMA_VERSION}"),
+        ),
+        None => (
+            "has no version stamp".to_string(),
+            format!("expected version {SCHEMA_VERSION}"),
+        ),
     };
     StoreError::Backend(format!(
-        "Postgres schema component `{SCHEMA_COMPONENT}` {found}, expected {SCHEMA_VERSION}. \
+        "Postgres schema component `{SCHEMA_COMPONENT}` {found}, {expected}. \
          The component schema is a reject-and-recreate boundary with no migration chain: \
          provision a fresh database from this build's schema.sql artifact. This gate is \
          unconditional; SchemaCheck::WarnOnly does not relax it."

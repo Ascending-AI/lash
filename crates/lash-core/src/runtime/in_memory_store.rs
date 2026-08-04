@@ -22,12 +22,15 @@ mod maintenance;
 mod queued_work;
 mod reachability;
 mod reads;
+mod receipts;
 mod session_binding;
 #[cfg(test)]
 pub(crate) mod test_support;
 #[cfg(any(test, feature = "testing"))]
 mod testing_access;
 mod turn_input;
+
+use receipts::{RuntimeTurnCommitMap, RuntimeTurnCommitRecord};
 
 #[derive(Clone)]
 struct InMemoryQueuedBatch {
@@ -110,24 +113,6 @@ impl InMemoryPendingTurnInput {
     }
 }
 
-fn find_pending_turn_input_index(
-    pending: &[InMemoryPendingTurnInput],
-    session_id: &str,
-    target: &crate::PendingTurnInputCancelTarget,
-) -> Option<usize> {
-    pending.iter().position(|entry| {
-        entry.input.session_id == session_id
-            && match target {
-                crate::PendingTurnInputCancelTarget::InputId(input_id) => {
-                    entry.input.input_id == *input_id
-                }
-                crate::PendingTurnInputCancelTarget::SourceKey(source_key) => {
-                    entry.input.source_key.as_deref() == Some(source_key.as_str())
-                }
-            }
-    })
-}
-
 impl InMemorySessionExecutionLease {
     fn is_live(&self, now: u64) -> bool {
         self.lease_token.is_some() && self.expires_at_epoch_ms > now
@@ -178,7 +163,7 @@ pub struct InMemorySessionStore {
     tool_state_blobs: Mutex<HashMap<crate::BlobRef, crate::ToolState>>,
     plugin_snapshot_blobs: Mutex<HashMap<crate::BlobRef, crate::PluginSessionSnapshot>>,
     execution_state_blobs: Mutex<HashMap<crate::BlobRef, Vec<u8>>>,
-    pub(crate) usage_deltas: Mutex<Vec<crate::TokenLedgerEntry>>,
+    pub(crate) usage_deltas: Mutex<Vec<crate::store::RuntimeUsageDelta>>,
     pub(crate) runtime_commit_count: Mutex<usize>,
     runtime_turn_commits: Mutex<RuntimeTurnCommitMap>,
     session_execution_leases: Mutex<HashMap<String, InMemorySessionExecutionLease>>,
@@ -198,6 +183,8 @@ pub struct InMemorySessionStore {
     #[cfg(test)]
     load_session_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
+    fail_load_session_on_call: Mutex<Option<usize>>,
+    #[cfg(test)]
     checkpoint_probe_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     checkpoint_write_transaction_count: std::sync::atomic::AtomicUsize,
@@ -205,6 +192,8 @@ pub struct InMemorySessionStore {
     commit_write_transaction_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     fail_next_runtime_commit: Mutex<Option<crate::StoreError>>,
+    #[cfg(test)]
+    fail_next_runtime_commit_after_first_mutation: Mutex<Option<crate::StoreError>>,
     #[cfg(test)]
     fail_next_session_execution_lease_renewal: Mutex<Option<crate::StoreError>>,
     #[cfg(test)]
@@ -221,9 +210,6 @@ pub struct InMemorySessionStore {
     #[cfg(test)]
     pub(crate) session_admission_count: std::sync::atomic::AtomicUsize,
 }
-
-type RuntimeTurnCommitRecord = (String, crate::store::RuntimeCommitResult, u64);
-type RuntimeTurnCommitMap = HashMap<(String, String), RuntimeTurnCommitRecord>;
 
 impl InMemorySessionStore {
     pub fn new() -> Self {
@@ -294,6 +280,8 @@ impl InMemorySessionStore {
             #[cfg(test)]
             load_session_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
+            fail_load_session_on_call: Mutex::new(None),
+            #[cfg(test)]
             checkpoint_probe_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             checkpoint_write_transaction_count: std::sync::atomic::AtomicUsize::new(0),
@@ -301,6 +289,8 @@ impl InMemorySessionStore {
             commit_write_transaction_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             fail_next_runtime_commit: Mutex::new(None),
+            #[cfg(test)]
+            fail_next_runtime_commit_after_first_mutation: Mutex::new(None),
             #[cfg(test)]
             fail_next_session_execution_lease_renewal: Mutex::new(None),
             #[cfg(test)]
@@ -316,40 +306,6 @@ impl InMemorySessionStore {
             #[cfg(test)]
             session_admission_count: std::sync::atomic::AtomicUsize::new(0),
         }
-    }
-
-    #[cfg(test)]
-    fn run_claim_after_lease_validation_hook(&self) {
-        let hook = self
-            .claim_after_lease_validation_hook
-            .lock()
-            .expect("lock claim validation hook")
-            .take();
-        if let Some(hook) = hook {
-            hook();
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_claim_after_lease_validation_hook(&self, hook: Arc<dyn Fn() + Send + Sync>) {
-        *self
-            .claim_after_lease_validation_hook
-            .lock()
-            .expect("lock claim validation hook") = Some(hook);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn fail_next_exact_queue_claim(&self) {
-        self.fail_next_exact_queue_claim
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn fail_next_runtime_commit(&self, error: crate::StoreError) {
-        *self
-            .fail_next_runtime_commit
-            .lock()
-            .expect("lock next runtime commit failure") = Some(error);
     }
 
     fn verify_session_execution_lease(
@@ -769,8 +725,25 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         &self,
     ) -> Result<Option<crate::store::PersistedSessionRead>, crate::store::StoreError> {
         #[cfg(test)]
-        self.load_session_count
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let load_call = self
+            .load_session_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
+        #[cfg(test)]
+        if self
+            .fail_load_session_on_call
+            .lock()
+            .expect("lock load-session failure injection")
+            .is_some_and(|call| call == load_call)
+        {
+            self.fail_load_session_on_call
+                .lock()
+                .expect("lock load-session failure injection")
+                .take();
+            return Err(crate::StoreError::Backend(
+                "injected load-session failure".to_string(),
+            ));
+        }
         let _transaction = self
             .write_transaction
             .lock()
@@ -815,7 +788,12 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             checkpoint_ref: meta.checkpoint_ref,
             checkpoint: self.checkpoint.lock().expect("lock checkpoint").clone(),
             token_ledger: merge_usage_delta_entries(
-                self.usage_deltas.lock().expect("lock usage deltas").clone(),
+                self.usage_deltas
+                    .lock()
+                    .expect("lock usage deltas")
+                    .iter()
+                    .map(|delta| delta.entry.clone())
+                    .collect(),
             ),
         }))
     }
@@ -897,29 +875,36 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 .validate_process_wake_source()
                 .map_err(crate::store::StoreError::Backend)?;
         }
+        #[cfg(test)]
+        let session_meta_before_commit =
+            self.session_meta.lock().expect("lock session meta").clone();
         self.ensure_session_metadata_for_commit(&commit)?;
+        #[cfg(test)]
+        self.fail_after_first_runtime_commit_mutation_if_requested(session_meta_before_commit)?;
         commit.validate_node_derivation()?;
         let completed = &commit.turn_commit;
         let operation_key = completed.operation.storage_key()?;
         let key = (session_id.clone(), operation_key.clone());
-        if let Some((stored_hash, result, _committed_at_ms)) = self
+        if let Some(stored) = self
             .runtime_turn_commits
             .lock()
             .expect("lock runtime turn commits")
             .get(&key)
             .cloned()
         {
-            if stored_hash == turn_commit_hash {
-                if let Some(completion) = commit.release_session_execution_lease.as_ref() {
-                    self.release_session_execution_lease_in_memory(completion);
-                }
-                return Ok(result);
-            }
-            return Err(crate::store::StoreError::RuntimeTurnCommitConflict {
+            let result = receipts::replay_existing_runtime_commit(
+                stored,
+                &turn_commit_hash,
+                completed,
                 session_id,
-                turn_id: operation_key,
-            });
+                operation_key,
+            )?;
+            if let Some(completion) = commit.release_session_execution_lease.as_ref() {
+                self.release_session_execution_lease_in_memory(completion);
+            }
+            return Ok(result);
         }
+        receipts::enforce_fresh_append_ancestor(&self.session_graph, completed)?;
         let expected = commit.expected_head_revision;
         if expected != actual {
             return Err(crate::store::StoreError::HeadRevisionConflict {
@@ -1310,10 +1295,17 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             global_node_owners.insert(node.node_id.clone(), commit.session_id.clone());
         }
         drop(global_node_owners);
-        self.usage_deltas
-            .lock()
-            .expect("lock usage deltas")
-            .extend(commit.usage_deltas.iter().cloned());
+        {
+            let mut usage_deltas = self.usage_deltas.lock().expect("lock usage deltas");
+            for delta in &commit.usage_deltas {
+                if !usage_deltas
+                    .iter()
+                    .any(|stored| stored.identity == delta.identity)
+                {
+                    usage_deltas.push(delta.clone());
+                }
+            }
+        }
         if let (Some(blob_ref), Some(body)) = (
             hydrated_checkpoint.tool_state_ref.clone(),
             hydrated_checkpoint.tool_state.clone(),
@@ -1354,7 +1346,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             },
             head_revision,
             Some(checkpoint_ref.clone()),
-            leaf_node_id,
+            leaf_node_id.clone(),
         ));
         *self
             .runtime_commit_count
@@ -1364,16 +1356,34 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             head_revision,
             checkpoint_ref,
             manifest,
+            committed_leaf_node_id: leaf_node_id,
             realized_node_timestamps,
+            committed_usage_delta_identities: commit
+                .usage_deltas
+                .iter()
+                .map(|delta| delta.identity.clone())
+                .collect(),
             enqueued_queue_batches: staged_enqueued_queue_batches,
             turn_input_applications,
+            receipt_replayed: false,
         };
         self.runtime_turn_commits
             .lock()
             .expect("lock runtime turn commits")
             .insert(
                 (session_id, operation_key),
-                (turn_commit_hash, result.clone(), self.clock.timestamp_ms()),
+                RuntimeTurnCommitRecord {
+                    turn_commit_hash,
+                    result: result.clone(),
+                    committed_at_ms: self.clock.timestamp_ms(),
+                    request_identity_hash: commit.turn_commit.request_identity_hash.clone(),
+                    requested_node_count: commit.turn_commit.requested_node_count,
+                    _requested_ancestor_node_id: commit
+                        .turn_commit
+                        .requested_ancestor_node_id
+                        .clone(),
+                    identity_encoding_version: commit.turn_commit.identity_encoding_version,
+                },
             );
         if let Some(completion) = commit.release_session_execution_lease.as_ref() {
             self.release_session_execution_lease_in_memory(completion);

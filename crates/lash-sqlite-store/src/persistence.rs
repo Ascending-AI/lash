@@ -314,33 +314,121 @@ impl SessionCommitStore for Store {
                     commit.validate_node_derivation()?;
                     { let completed = &commit.turn_commit;
                         let operation_key = completed.operation.storage_key()?;
-                        let prior: Option<(String, String)> = tx
+                        let prior: Option<(
+                            String,
+                            String,
+                            Option<String>,
+                            Option<i64>,
+                            Option<i64>,
+                        )> = tx
                             .query_row(
-                                "SELECT turn_commit_hash, result_json FROM runtime_turn_commits
+                                "SELECT turn_commit_hash, result_json,
+                                        request_identity_hash, identity_encoding_version,
+                                        requested_node_count
+                                 FROM runtime_turn_commits
                                  WHERE session_id = ?1 AND turn_id = ?2",
                                 params![commit.session_id, operation_key],
-                                |row| Ok((row.get(0)?, row.get(1)?)),
+                                |row| {
+                                    Ok((
+                                        row.get(0)?,
+                                        row.get(1)?,
+                                        row.get(2)?,
+                                        row.get(3)?,
+                                        row.get(4)?,
+                                    ))
+                                },
                             )
                             .optional()
                             .map_err(sqlite_error)?;
-                        if let Some((stored_hash, result_json)) = prior {
-                            if stored_hash == turn_commit_hash {
-                                let result: RuntimeCommitResult =
-                                    serde_json::from_str(&result_json).map_err(|err| {
-                                        StoreError::Backend(format!(
-                                            "failed to decode runtime turn commit result: {err}"
-                                        ))
-                                    })?;
-                                if let Some(completion) =
-                                    commit.release_session_execution_lease.as_ref()
-                                {
-                                    release_session_execution_lease_conn(tx, completion)?;
+                        if let Some((
+                            stored_hash,
+                            result_json,
+                            stored_identity,
+                            stored_version,
+                            stored_requested_node_count,
+                        )) = prior
+                        {
+                            let stored_count = stored_requested_node_count
+                                .map(u64::try_from)
+                                .transpose()
+                                .map_err(|_| {
+                                    StoreError::Backend(
+                                        "stored append requested-node count is negative".to_string(),
+                                    )
+                                })?;
+                            let attempted_count = completed
+                                .requested_node_count
+                                .map(u64::try_from)
+                                .transpose()
+                                .map_err(|_| {
+                                    StoreError::Backend(
+                                        "attempted append requested-node count does not fit u64"
+                                            .to_string(),
+                                    )
+                                })?;
+                            match lash_core::store::decide_runtime_commit_receipt(
+                                &stored_hash,
+                                &turn_commit_hash,
+                                stored_version.and_then(|version| u32::try_from(version).ok()),
+                                completed.identity_encoding_version,
+                                stored_identity.as_deref(),
+                                completed.request_identity_hash.as_deref(),
+                                stored_count,
+                                attempted_count,
+                            ) {
+                                lash_core::store::RuntimeCommitReceiptDecision::Replay => {
+                                    let mut result: RuntimeCommitResult =
+                                        serde_json::from_str(&result_json).map_err(|err| {
+                                            StoreError::Backend(format!(
+                                                "failed to decode runtime turn commit result: {err}"
+                                            ))
+                                        })?;
+                                    result.receipt_replayed = true;
+                                    if let Some(completion) =
+                                        commit.release_session_execution_lease.as_ref()
+                                    {
+                                        release_session_execution_lease_conn(tx, completion)?;
+                                    }
+                                    return Ok(result);
                                 }
-                                return Ok(result);
+                                lash_core::store::RuntimeCommitReceiptDecision::AppendIdentityConflict => {
+                                    return Err(StoreError::AppendOperationIdentityConflict {
+                                        session_id: commit.session_id.clone(),
+                                        operation_key,
+                                    });
+                                }
+                                lash_core::store::RuntimeCommitReceiptDecision::RuntimeCommitConflict => {
+                                    return Err(StoreError::RuntimeTurnCommitConflict {
+                                        session_id: commit.session_id.clone(),
+                                        turn_id: operation_key,
+                                    });
+                                }
+                                lash_core::store::RuntimeCommitReceiptDecision::CorruptRequestedNodeCount {
+                                    stored,
+                                    attempted,
+                                } => {
+                                    return Err(StoreError::AppendReceiptRequestedNodeCountCorrupt {
+                                        session_id: commit.session_id.clone(),
+                                        operation_key,
+                                        stored,
+                                        attempted,
+                                    });
+                                }
                             }
-                            return Err(StoreError::RuntimeTurnCommitConflict {
-                                session_id: commit.session_id.clone(),
-                                turn_id: completed.operation.storage_key()?,
+                        }
+                    }
+                    if commit.turn_commit.request_identity_hash.is_some()
+                        && let Some(required) =
+                            commit.turn_commit.requested_ancestor_node_id.as_deref()
+                    {
+                        let active_graph = Self::load_active_path_session_graph_from_conn(
+                            tx,
+                            &commit.session_id,
+                            existing.as_ref().and_then(|meta| meta.leaf_node_id.clone()),
+                        )?;
+                        if !active_graph.active_path_contains(required) {
+                            return Err(StoreError::AppendAncestorNotActive {
+                                required_node_id: required.to_string(),
                             });
                         }
                     }
@@ -454,21 +542,32 @@ impl SessionCommitStore for Store {
                     if !commit.usage_deltas.is_empty() {
                         let mut stmt = tx
                             .prepare(
-                                "INSERT INTO usage_deltas (
-                                    session_id, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
-                                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                                "INSERT OR IGNORE INTO usage_deltas (
+                                    session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
+                                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                             )
                             .map_err(sqlite_error)?;
                         for entry in &commit.usage_deltas {
+                            let entry_ordinal = i64::try_from(entry.identity.entry_ordinal)
+                                .map_err(|_| {
+                                    StoreError::Backend(
+                                        "usage delta ordinal does not fit SQLite INTEGER"
+                                            .to_string(),
+                                    )
+                                })?;
                             stmt.execute(params![
                                 commit.session_id,
-                                entry.source,
-                                entry.model,
-                                entry.usage.input_tokens,
-                                entry.usage.output_tokens,
-                                entry.usage.cache_read_input_tokens,
-                                entry.usage.cache_write_input_tokens,
-                                entry.usage.reasoning_output_tokens,
+                                entry.identity.operation_storage_key,
+                                entry_ordinal,
+                                i64::from(entry.identity.payload_encoding_version),
+                                entry.identity.payload_hash,
+                                entry.entry.source,
+                                entry.entry.model,
+                                entry.entry.usage.input_tokens,
+                                entry.entry.usage.output_tokens,
+                                entry.entry.usage.cache_read_input_tokens,
+                                entry.entry.usage.cache_write_input_tokens,
+                                entry.entry.usage.reasoning_output_tokens,
                             ])
                             .map_err(sqlite_error)?;
                         }
@@ -737,23 +836,36 @@ impl SessionCommitStore for Store {
                         head_revision: next_revision,
                         checkpoint_ref: stored_checkpoint.checkpoint_ref,
                         manifest: stored_checkpoint.manifest,
+                        committed_leaf_node_id: commit.graph.leaf_node_id.clone(),
                         realized_node_timestamps: realized_node_timestamps.clone(),
+                        committed_usage_delta_identities: commit
+                            .usage_deltas
+                            .iter()
+                            .map(|delta| delta.identity.clone())
+                            .collect(),
                         enqueued_queue_batches,
                         turn_input_applications: commit.turn_input_applications(),
+                        receipt_replayed: false,
                     };
                     { let completed = &commit.turn_commit;
                         let operation_key = completed.operation.storage_key()?;
                         tx.execute(
                             "INSERT INTO runtime_turn_commits (
-                                session_id, turn_id, turn_commit_hash, result_json, committed_at_ms
+                                session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
+                                request_identity_hash, requested_node_count,
+                                requested_ancestor_node_id, identity_encoding_version
                              )
-                             VALUES (?1, ?2, ?3, ?4, ?5)",
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                             params![
                                 commit.session_id,
                                 operation_key,
                                 turn_commit_hash,
                                 encode_json(&result),
-                                now as i64
+                                now as i64,
+                                completed.request_identity_hash,
+                                completed.requested_node_count.map(|count| count as i64),
+                                completed.requested_ancestor_node_id,
+                                completed.identity_encoding_version.map(i64::from),
                             ],
                         )
                         .map_err(sqlite_error)?;

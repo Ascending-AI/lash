@@ -197,6 +197,101 @@ async fn postgres_checkpoint_component_refs_survive_cold_reopens_when_configured
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_runtime_turn_receipt_identity_columns_are_nullable_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres receipt-schema test: database is not configured");
+        return;
+    };
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT column_name, is_nullable
+         FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'lash_runtime_turn_commits'
+           AND column_name = ANY($1)",
+    )
+    .bind(
+        &[
+            "request_identity_hash",
+            "requested_node_count",
+            "requested_ancestor_node_id",
+            "identity_encoding_version",
+        ][..],
+    )
+    .fetch_all(storage.pool())
+    .await
+    .expect("read Postgres receipt schema");
+    assert_eq!(rows.len(), 4);
+    assert!(rows.iter().all(|(_, nullable)| nullable == "YES"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_append_receipt_replays_after_ancestor_superseded_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres append-receipt conformance: database is not configured");
+        return;
+    };
+    reset(&storage).await;
+    let pool = storage.pool().clone();
+    lash_core::testing::conformance::append_request_receipt_replays_after_ancestor_superseded(
+        Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>,
+        move |leaf_node_id| async move {
+            sqlx::query(
+                "UPDATE lash_sessions
+                 SET leaf_node_id = $1, head_revision = head_revision + 1
+                 WHERE session_id = 'root'",
+            )
+            .bind(leaf_node_id)
+            .execute(&pool)
+            .await
+            .expect("switch Postgres active branch");
+        },
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_append_receipt_restores_mixed_usage_envelope_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres mixed-envelope receipt conformance: database is not configured"
+        );
+        return;
+    };
+    reset(&storage).await;
+    lash_core::testing::conformance::append_receipt_mixed_usage_envelope(Arc::new(
+        storage.unbound_session_store(),
+    ))
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_old_format_append_receipt_returns_public_leaf_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres old-format receipt conformance: database is not configured");
+        return;
+    };
+    reset(&storage).await;
+    let pool = storage.pool().clone();
+    lash_core::testing::conformance::old_format_append_receipt_returns_public_leaf(
+        Arc::new(storage.unbound_session_store()),
+        move || async move {
+            sqlx::query(
+                "UPDATE lash_runtime_turn_commits
+                 SET result_json = ((result_json::jsonb
+                     - 'committed_leaf_node_id'
+                     - 'receipt_replayed')::text)
+                 WHERE turn_id LIKE '%old-format-append-receipt%'
+                   AND turn_id NOT LIKE '%old-format-append-receipt-seed%'",
+            )
+            .execute(&pool)
+            .await
+            .expect("install raw pre-upgrade Postgres receipt fixture");
+        },
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_artifact_store_satisfies_conformance_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
@@ -821,7 +916,42 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 35, "Postgres component schema pin");
+    assert_eq!(current_version, 36, "Postgres component schema pin");
+    let payload_hash_nullable: String = sqlx::query_scalar(
+        "SELECT is_nullable FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'lash_usage_deltas'
+           AND column_name = 'payload_hash'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("payload_hash column exists");
+    assert_eq!(payload_hash_nullable, "NO");
+    let payload_encoding_version_nullable: String = sqlx::query_scalar(
+        "SELECT is_nullable FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'lash_usage_deltas'
+           AND column_name = 'payload_encoding_version'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("payload_encoding_version column exists");
+    assert_eq!(payload_encoding_version_nullable, "NO");
+    let usage_identity_constraint: String = sqlx::query_scalar(
+        "SELECT pg_get_constraintdef(oid)
+         FROM pg_constraint
+         WHERE conrelid = 'lash_usage_deltas'::regclass
+           AND contype = 'u'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("read usage identity uniqueness constraint");
+    assert!(
+        usage_identity_constraint.contains(
+            "session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash"
+        ),
+        "usage identity uniqueness must include the payload encoding version and canonical hash: {usage_identity_constraint}"
+    );
     let stale_version = current_version - 1;
     // Force the recorded component version to a stale value.
     sqlx::query(
@@ -853,6 +983,49 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
         message.contains(&format!("version {stale_version}"))
             && message.contains(&format!("expected {current_version}")),
         "expected a schema-version mismatch error, got: {message}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_from_pool_rejects_unstamped_existing_schema_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres unstamped-schema gate test: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let pool = storage.pool().clone();
+    let current_version: i32 = sqlx::query_scalar(
+        "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("read current schema version");
+    sqlx::query("DELETE FROM lash_schema_versions WHERE component = 'lash-postgres-store'")
+        .execute(&pool)
+        .await
+        .expect("remove component version stamp");
+
+    let result = PostgresStorage::from_pool(pool.clone()).await;
+
+    sqlx::query(
+        "INSERT INTO lash_schema_versions (component, version)
+         VALUES ('lash-postgres-store', $1)
+         ON CONFLICT (component) DO UPDATE SET version = EXCLUDED.version",
+    )
+    .bind(current_version)
+    .execute(&pool)
+    .await
+    .expect("restore component version stamp");
+
+    let message = match result {
+        Ok(_) => panic!("from_pool must reject an unstamped existing Lash schema"),
+        Err(err) => err.to_string(),
+    };
+    assert!(
+        message.contains("has no version stamp")
+            && message.contains(&format!("expected version {current_version}")),
+        "expected an unstamped-schema error, got: {message}"
     );
 }
 

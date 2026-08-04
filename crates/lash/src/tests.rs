@@ -74,6 +74,8 @@ struct SnapshotStore {
             (String, lash_core::store::RuntimeCommitResult),
         >,
     >,
+    usage_delta_identities:
+        std::sync::Mutex<std::collections::HashSet<lash_core::store::RuntimeUsageDeltaIdentity>>,
     session_execution_leases: std::sync::Mutex<HashMap<String, lash_core::SessionExecutionLease>>,
 }
 
@@ -109,6 +111,7 @@ impl SnapshotStore {
             })),
             session_meta: std::sync::Mutex::new(Some(session_meta)),
             runtime_turn_commits: std::sync::Mutex::new(std::collections::HashMap::new()),
+            usage_delta_identities: std::sync::Mutex::new(std::collections::HashSet::new()),
             session_execution_leases: std::sync::Mutex::new(HashMap::new()),
         }
     }
@@ -186,19 +189,6 @@ impl lash_core::SessionCommitStore for SnapshotStore {
     {
         let turn_commit_hash = commit.turn_commit_hash()?;
         let session_id = commit.session_id.clone();
-        {
-            let mut session_meta = self.session_meta.lock().expect("session metadata lock");
-            if session_meta.is_none() {
-                *session_meta = Some(lash_core::SessionMeta {
-                    session_id: commit.session_id.clone(),
-                    session_name: commit.session_id.clone(),
-                    created_at: "test".to_string(),
-                    model: commit.config.model.id.clone(),
-                    cwd: None,
-                    relation: lash_core::SessionRelation::Root,
-                });
-            }
-        }
         let mut read = self.read.lock().expect("snapshot store lock");
         let realized_node_timestamps = commit
             .graph
@@ -226,6 +216,28 @@ impl lash_core::SessionCommitStore for SnapshotStore {
                 turn_id: operation_key,
             });
         }
+        if let Some(required_node_id) = commit.turn_commit.requested_ancestor_node_id.as_deref()
+            && !read
+                .as_ref()
+                .is_some_and(|read| read.graph.active_path_contains(required_node_id))
+        {
+            return Err(lash_core::store::StoreError::AppendAncestorNotActive {
+                required_node_id: required_node_id.to_string(),
+            });
+        }
+        {
+            let mut session_meta = self.session_meta.lock().expect("session metadata lock");
+            if session_meta.is_none() {
+                *session_meta = Some(lash_core::SessionMeta {
+                    session_id: commit.session_id.clone(),
+                    session_name: commit.session_id.clone(),
+                    created_at: "test".to_string(),
+                    model: commit.config.model.id.clone(),
+                    cwd: None,
+                    relation: lash_core::SessionRelation::Root,
+                });
+            }
+        }
         let existing_graph = read
             .as_ref()
             .map(|read| read.graph.clone())
@@ -233,6 +245,45 @@ impl lash_core::SessionCommitStore for SnapshotStore {
         let mut graph = existing_graph;
         graph.extend_node_records(commit.graph.nodes.iter().cloned());
         graph.set_leaf_node_id(commit.graph.leaf_node_id.clone());
+        let mut token_ledger = read
+            .as_ref()
+            .map(|read| read.token_ledger.clone())
+            .unwrap_or_default();
+        let mut usage_delta_identities = self
+            .usage_delta_identities
+            .lock()
+            .expect("usage delta identities lock");
+        for delta in &commit.usage_deltas {
+            if usage_delta_identities.insert(delta.identity.clone()) {
+                if let Some(existing) = token_ledger.iter_mut().find(|entry| {
+                    entry.source == delta.entry.source && entry.model == delta.entry.model
+                }) {
+                    existing.usage.input_tokens = existing
+                        .usage
+                        .input_tokens
+                        .saturating_add(delta.entry.usage.input_tokens);
+                    existing.usage.output_tokens = existing
+                        .usage
+                        .output_tokens
+                        .saturating_add(delta.entry.usage.output_tokens);
+                    existing.usage.cache_read_input_tokens = existing
+                        .usage
+                        .cache_read_input_tokens
+                        .saturating_add(delta.entry.usage.cache_read_input_tokens);
+                    existing.usage.cache_write_input_tokens = existing
+                        .usage
+                        .cache_write_input_tokens
+                        .saturating_add(delta.entry.usage.cache_write_input_tokens);
+                    existing.usage.reasoning_output_tokens = existing
+                        .usage
+                        .reasoning_output_tokens
+                        .saturating_add(delta.entry.usage.reasoning_output_tokens);
+                } else {
+                    token_ledger.push(delta.entry.clone());
+                }
+            }
+        }
+        drop(usage_delta_identities);
         *read = Some(lash_core::store::PersistedSessionRead {
             session_id: commit.session_id.clone(),
             head_revision: 8,
@@ -241,15 +292,22 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             graph,
             checkpoint_ref: Some(lash_core::BlobRef("checkpoint".to_string())),
             checkpoint: Some(commit.checkpoint),
-            token_ledger: commit.usage_deltas,
+            token_ledger,
         });
         let result = lash_core::store::RuntimeCommitResult {
             head_revision: 8,
             checkpoint_ref: lash_core::BlobRef("checkpoint".to_string()),
             manifest: lash_core::store::SessionCheckpoint::default(),
+            committed_leaf_node_id: commit.graph.leaf_node_id.clone(),
             realized_node_timestamps,
+            committed_usage_delta_identities: commit
+                .usage_deltas
+                .iter()
+                .map(|delta| delta.identity.clone())
+                .collect(),
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
+            receipt_replayed: false,
         };
         self.runtime_turn_commits
             .lock()

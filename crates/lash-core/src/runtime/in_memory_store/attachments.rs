@@ -153,8 +153,8 @@ impl crate::AttachmentManifest for InMemorySessionStore {
             .lock()
             .expect("lock runtime turn commits")
             .iter()
-            .map(|((session_id, turn_id), (_, _, committed_at_ms))| {
-                (session_id.clone(), turn_id.clone(), *committed_at_ms)
+            .map(|((session_id, turn_id), record)| {
+                (session_id.clone(), turn_id.clone(), record.committed_at_ms)
             })
             .collect::<Vec<_>>();
         // Age, owner death, and removal happen under the same transaction/lock
@@ -217,8 +217,8 @@ impl crate::AttachmentManifest for InMemorySessionStore {
             .lock()
             .expect("lock runtime turn commits")
             .iter()
-            .map(|((session_id, turn_id), (_, _, committed_at_ms))| {
-                (session_id.clone(), turn_id.clone(), *committed_at_ms)
+            .map(|((session_id, turn_id), record)| {
+                (session_id.clone(), turn_id.clone(), record.committed_at_ms)
             })
             .collect::<Vec<_>>();
         Ok(self

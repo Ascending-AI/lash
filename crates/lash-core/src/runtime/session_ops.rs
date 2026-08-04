@@ -65,14 +65,19 @@ impl LashRuntime {
             ));
         }
         self.refresh_session_graph_from_store().await?;
-        // Branch liveness, not a head compare-and-swap: a head that merely
-        // advanced is accepted and the nodes re-parent onto the current leaf.
-        // See `AppendSessionNodesRequest::requires_ancestor_node_id`.
-        if let Some(required) = request.requires_ancestor_node_id.as_deref()
-            && !self.state.session_graph.active_path_contains(required)
+        let history_store = self
+            .session
+            .as_ref()
+            .and_then(|session| session.history_store());
+        if history_store.is_none()
+            && let Some(required_node_id) = request.requires_ancestor_node_id.as_deref()
+            && !self
+                .state
+                .session_graph
+                .active_path_contains(required_node_id)
         {
             return Ok(crate::AppendSessionNodesResult::StaleBranch {
-                required_node_id: required.to_string(),
+                required_node_id: required_node_id.to_string(),
             });
         }
         let operation = boundary_operation(
@@ -80,6 +85,12 @@ impl LashRuntime {
             &request.operation_id,
             "append-session-nodes",
         );
+        let append_stamp = crate::RuntimeTurnCommitStamp::append_session_nodes(
+            operation.clone(),
+            request.requires_ancestor_node_id.as_deref(),
+            &request.nodes,
+        )
+        .map_err(|err| SessionError::Protocol(err.to_string()))?;
         let state_before_append = self.state.clone();
         let draft_namespace = operation
             .storage_key()
@@ -101,35 +112,35 @@ impl LashRuntime {
                 .await?;
         }
         self.stamp_live_plugin_state();
-        if let Some(store) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-        {
+        if let Some(store) = history_store {
             let requested_node_count = node_ids.len();
             let mut graph = self.state.pending_graph_commit();
-            let persisted_node_ids =
-                match derive_graph_commit_node_ids(&mut self.state, &mut graph, &operation) {
-                    Ok(node_ids) => node_ids,
-                    Err(source) => {
-                        let mut context =
-                            "failed to derive persisted session graph node identities".to_string();
-                        if let Err(rollback_err) = self
-                            .restore_protocol_session_after_failed_append(state_before_append)
-                            .await
-                        {
-                            context.push_str(&format!(
-                                "; failed to restore protocol session: {rollback_err}"
-                            ));
-                        }
-                        return Err(SessionError::Store { context, source });
+            let node_id_mapping = match graph.derive_node_ids(&self.state.session_id, &operation) {
+                Ok(mapping) => mapping,
+                Err(source) => {
+                    let mut context =
+                        "failed to derive persisted session graph node identities".to_string();
+                    if let Err(rollback_err) = self
+                        .restore_protocol_session_from_state(state_before_append)
+                        .await
+                    {
+                        context.push_str(&format!(
+                            "; failed to restore protocol session: {rollback_err}"
+                        ));
                     }
-                };
-            let node_ids = persisted_node_ids[persisted_node_ids
+                    return Err(SessionError::Store { context, source });
+                }
+            };
+            let persisted_node_ids = node_id_mapping
+                .iter()
+                .map(|(_, derived)| derived.clone())
+                .collect::<Vec<_>>();
+            let locally_derived_node_ids = persisted_node_ids[persisted_node_ids
                 .len()
                 .saturating_sub(requested_node_count)..]
                 .to_vec();
-            let commit =
+            let locally_derived_leaf_node_id = graph.leaf_node_id.clone().unwrap_or_default();
+            let mut commit =
                 crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
                     &self.state,
                     graph,
@@ -137,8 +148,10 @@ impl LashRuntime {
                     operation,
                 )
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
+            commit.turn_commit = append_stamp;
+            commit.debug_assert_append_envelope_scope();
             let result = match super::commit_runtime_state_with_fresh_session_execution_lease(
-                store,
+                Arc::clone(&store),
                 commit,
                 &self.runtime_lease_owner,
                 self.host.core.control.lease_timings,
@@ -147,9 +160,20 @@ impl LashRuntime {
             .await
             {
                 Ok(result) => result,
+                Err(crate::StoreError::AppendAncestorNotActive { required_node_id }) => {
+                    if let Err(rollback_err) = self
+                        .restore_protocol_session_from_state(state_before_append)
+                        .await
+                    {
+                        return Err(SessionError::Protocol(format!(
+                            "append requires inactive ancestor `{required_node_id}`; failed to restore pre-append protocol session: {rollback_err}"
+                        )));
+                    }
+                    return Ok(crate::AppendSessionNodesResult::StaleBranch { required_node_id });
+                }
                 Err(err) => {
                     if let Err(rollback_err) = self
-                        .restore_protocol_session_after_failed_append(state_before_append)
+                        .restore_protocol_session_from_state(state_before_append)
                         .await
                     {
                         let context = format!(
@@ -164,16 +188,63 @@ impl LashRuntime {
                     ));
                 }
             };
-            self.state.apply_persisted_commit_result(result);
-            self.state.mark_node_ids_persisted(persisted_node_ids);
+            let receipt_replayed = result.receipt_replayed;
+            let committed_leaf_node_id = result.committed_leaf_node_id.clone();
+            let node_ids = if receipt_replayed {
+                match super::state::receipt_append_node_ids(&result, requested_node_count) {
+                    Ok(node_ids) => node_ids,
+                    Err(source) => {
+                        let mut context =
+                            "append receipt contains an invalid stored node-id result".to_string();
+                        if let Err(rollback_err) = self
+                            .restore_protocol_session_from_state(state_before_append.clone())
+                            .await
+                        {
+                            context.push_str(&format!(
+                                "; failed to restore pre-append protocol session: {rollback_err}"
+                            ));
+                        }
+                        return Err(SessionError::Store { context, source });
+                    }
+                }
+            } else {
+                locally_derived_node_ids
+            };
+            if receipt_replayed {
+                let mut durable_state = state_before_append.clone();
+                if let Err(source) = crate::store::refresh_persisted_session_state(
+                    store.as_ref(),
+                    &mut durable_state,
+                )
+                .await
+                {
+                    let mut context =
+                        "failed to refresh resident state after append receipt replay".to_string();
+                    if let Err(rollback_err) = self
+                        .restore_protocol_session_from_state(state_before_append)
+                        .await
+                    {
+                        context.push_str(&format!(
+                            "; failed to restore pre-append protocol session: {rollback_err}"
+                        ));
+                    }
+                    return Err(SessionError::Store { context, source });
+                }
+                self.restore_protocol_session_from_state(durable_state)
+                    .await?;
+            } else {
+                super::state::apply_graph_commit_node_id_mapping(&mut self.state, &node_id_mapping)
+                    .map_err(|source| SessionError::Store {
+                        context: "failed to apply persisted session graph node identities"
+                            .to_string(),
+                        source,
+                    })?;
+                self.state.apply_persisted_commit_result(result);
+                self.state.mark_node_ids_persisted(persisted_node_ids);
+            }
             return Ok(crate::AppendSessionNodesResult::Appended {
                 node_ids,
-                leaf_node_id: self
-                    .state
-                    .session_graph
-                    .leaf_node_id
-                    .clone()
-                    .unwrap_or_default(),
+                leaf_node_id: committed_leaf_node_id.unwrap_or(locally_derived_leaf_node_id),
             });
         }
         Ok(crate::AppendSessionNodesResult::Appended {
@@ -187,11 +258,13 @@ impl LashRuntime {
         })
     }
 
-    async fn restore_protocol_session_after_failed_append(
+    async fn restore_protocol_session_from_state(
         &mut self,
         state_before_append: RuntimeSessionState,
     ) -> Result<(), SessionError> {
         self.state = state_before_append;
+        self.policy = self.state.policy.clone();
+        self.protocol_turn_options = self.state.protocol_turn_options.clone();
         let state_for_restore = self.state.clone();
         if let Some(session) = self.session.as_mut() {
             let protocol_session = Arc::clone(session.plugins().protocol_session());
@@ -585,9 +658,7 @@ impl LashRuntime {
                         let mut context =
                             format!("failed to derive plugin runtime event identity: {err}");
                         if let Err(rollback_err) = self
-                            .restore_protocol_session_after_failed_append(
-                                state_before_append.clone(),
-                            )
+                            .restore_protocol_session_from_state(state_before_append.clone())
                             .await
                         {
                             context.push_str(&format!(
@@ -623,7 +694,7 @@ impl LashRuntime {
                     let persistence_error =
                         format!("failed to persist plugin runtime events: {err}");
                     if let Err(rollback_err) = self
-                        .restore_protocol_session_after_failed_append(state_before_append)
+                        .restore_protocol_session_from_state(state_before_append)
                         .await
                     {
                         return Err(PluginOperationInvokeError::Failed(format!(

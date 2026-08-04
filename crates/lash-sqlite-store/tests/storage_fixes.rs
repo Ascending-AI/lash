@@ -408,8 +408,8 @@ async fn unsupported_schema_error_reports_real_versions() {
         "error must report the found version 99: {message}"
     );
     assert!(
-        message.contains("schema version 24"),
-        "error must report the real expected version 24: {message}"
+        message.contains("schema version 25"),
+        "error must report the real expected version 25: {message}"
     );
     assert!(
         !message.contains("version 1 only"),
@@ -445,7 +445,39 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
     let user_version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
-    assert_eq!(user_version, 24);
+    assert_eq!(user_version, 25);
+    let payload_hash_not_null: i32 = conn
+        .query_row(
+            "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')
+             WHERE name = 'payload_hash'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("payload_hash column exists");
+    assert_eq!(payload_hash_not_null, 1);
+    let payload_encoding_version_not_null: i32 = conn
+        .query_row(
+            "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')
+             WHERE name = 'payload_encoding_version'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("payload_encoding_version column exists");
+    assert_eq!(payload_encoding_version_not_null, 1);
+    let usage_schema: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master
+             WHERE type = 'table' AND name = 'usage_deltas'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read usage_deltas schema");
+    assert!(
+        usage_schema.contains(
+            "UNIQUE (session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash)"
+        ),
+        "usage identity uniqueness must include the payload encoding version and canonical hash: {usage_schema}"
+    );
 }
 
 #[tokio::test]

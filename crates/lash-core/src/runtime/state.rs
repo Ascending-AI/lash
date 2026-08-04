@@ -730,7 +730,7 @@ pub(super) fn apply_session_head(
     apply_persisted_session_config(&mut state.policy, &head.config);
 }
 
-pub(super) fn append_session_nodes_to_state_with_clock(
+pub(crate) fn append_session_nodes_to_state_with_clock(
     state: &mut RuntimeSessionState,
     nodes: &[crate::SessionAppendNode],
     draft_namespace: &str,
@@ -751,7 +751,7 @@ pub(super) fn append_session_nodes_to_state_with_clock(
         .append_node_drafts_at(draft_namespace, drafts, clock.timestamp_rfc3339())
 }
 
-pub(super) fn boundary_operation(
+pub(crate) fn boundary_operation(
     session_id: &str,
     boundary_id: &str,
     key: impl Into<String>,
@@ -764,15 +764,23 @@ pub(super) fn boundary_operation(
     )
 }
 
-pub(super) fn derive_graph_commit_node_ids(
+pub(crate) fn derive_graph_commit_node_ids(
     state: &mut RuntimeSessionState,
     graph: &mut crate::GraphAppend,
     operation: &crate::OperationId,
 ) -> Result<Vec<String>, crate::StoreError> {
     let mapping = graph.derive_node_ids(&state.session_id, operation)?;
+    apply_graph_commit_node_id_mapping(state, &mapping)?;
+    Ok(mapping.into_iter().map(|(_, derived)| derived).collect())
+}
+
+pub(crate) fn apply_graph_commit_node_id_mapping(
+    state: &mut RuntimeSessionState,
+    mapping: &[(String, String)],
+) -> Result<(), crate::StoreError> {
     state
         .session_graph
-        .remap_node_ids(&state.session_id, &mapping);
+        .remap_node_ids(&state.session_id, mapping);
     if let Some(current) = state.current_frame_node_id.as_mut()
         && let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current)
     {
@@ -781,7 +789,24 @@ pub(super) fn derive_graph_commit_node_ids(
     state.agent_frames = state
         .session_graph
         .try_agent_frame_records(&state.session_id)?;
-    Ok(mapping.into_iter().map(|(_, derived)| derived).collect())
+    Ok(())
+}
+
+pub(crate) fn receipt_append_node_ids(
+    result: &crate::store::RuntimeCommitResult,
+    requested_node_count: usize,
+) -> Result<Vec<String>, crate::StoreError> {
+    if result.realized_node_timestamps.len() < requested_node_count {
+        return Err(crate::StoreError::Backend(format!(
+            "append receipt returned {} realized node timestamps for {requested_node_count} requested nodes",
+            result.realized_node_timestamps.len()
+        )));
+    }
+    Ok(result.realized_node_timestamps
+        [result.realized_node_timestamps.len() - requested_node_count..]
+        .iter()
+        .map(|realized| realized.node_id.clone())
+        .collect())
 }
 
 pub(super) fn open_agent_frame_in_state_with_clock(

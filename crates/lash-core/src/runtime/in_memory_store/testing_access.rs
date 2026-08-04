@@ -135,11 +135,13 @@ impl InMemorySessionStore {
             .lock()
             .expect("lock runtime turn commits")
             .iter()
-            .map(
-                |((_session_id, operation), (hash, result, _committed_at_ms))| {
-                    (operation.clone(), hash.clone(), result.clone())
-                },
-            )
+            .map(|((_session_id, operation), record)| {
+                (
+                    operation.clone(),
+                    record.turn_commit_hash.clone(),
+                    record.result.clone(),
+                )
+            })
             .collect::<Vec<_>>();
         rows.sort_by(|left, right| left.0.cmp(&right.0));
         rows
@@ -166,7 +168,12 @@ impl InMemorySessionStore {
     }
 
     pub fn raw_usage_deltas_for_testing(&self) -> Vec<crate::TokenLedgerEntry> {
-        self.usage_deltas.lock().expect("lock usage deltas").clone()
+        self.usage_deltas
+            .lock()
+            .expect("lock usage deltas")
+            .iter()
+            .map(|delta| delta.entry.clone())
+            .collect()
     }
 
     pub fn raw_session_meta_for_testing(&self) -> Option<crate::SessionMeta> {

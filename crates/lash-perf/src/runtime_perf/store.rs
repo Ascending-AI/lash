@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use lash::usage::TokenLedgerEntry;
 use lash_core::runtime::{
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkItem,
 };
@@ -135,7 +134,7 @@ pub(crate) struct RuntimePerfStore {
     queued_work_next_seq: AtomicU64,
     session_head_meta: Mutex<Option<SessionHeadMeta>>,
     session_graph: Mutex<SessionGraph>,
-    usage_deltas: Mutex<Vec<TokenLedgerEntry>>,
+    usage_deltas: Mutex<Vec<store::RuntimeUsageDelta>>,
     session_meta: Mutex<Option<store::SessionMeta>>,
     runtime_turn_commits: Mutex<HashMap<(String, String), (String, RuntimeCommitResult)>>,
     session_execution_leases: Mutex<HashMap<String, RuntimePerfSessionExecutionLease>>,
@@ -562,7 +561,9 @@ impl SessionCommitStore for RuntimePerfStore {
                 .usage_deltas
                 .lock()
                 .expect("lock perf usage deltas")
-                .clone(),
+                .iter()
+                .map(|delta| delta.entry.clone())
+                .collect(),
         }))
     }
 
@@ -642,6 +643,17 @@ impl SessionCommitStore for RuntimePerfStore {
                 turn_id: operation_key,
             });
         }
+        if let Some(required_node_id) = turn_commit.requested_ancestor_node_id.as_deref()
+            && !self
+                .session_graph
+                .lock()
+                .expect("lock perf graph for append ancestor fence")
+                .active_path_contains(required_node_id)
+        {
+            return Err(StoreError::AppendAncestorNotActive {
+                required_node_id: required_node_id.to_string(),
+            });
+        }
         if expected_head_revision != actual {
             return Err(store::StoreError::HeadRevisionConflict {
                 expected: expected_head_revision,
@@ -675,11 +687,20 @@ impl SessionCommitStore for RuntimePerfStore {
         graph.extend_node_records(graph_delta.nodes);
         let leaf_node_id = graph_delta.leaf_node_id;
         graph.set_leaf_node_id(leaf_node_id.clone());
+        let committed_usage_delta_identities = usage_deltas
+            .iter()
+            .map(|delta| delta.identity.clone())
+            .collect::<Vec<_>>();
         if !usage_deltas.is_empty() {
-            self.usage_deltas
-                .lock()
-                .expect("lock perf usage deltas")
-                .extend(usage_deltas);
+            let mut stored_usage = self.usage_deltas.lock().expect("lock perf usage deltas");
+            for delta in usage_deltas {
+                if !stored_usage
+                    .iter()
+                    .any(|stored| stored.identity == delta.identity)
+                {
+                    stored_usage.push(delta);
+                }
+            }
         }
         for completed in &completed_queue_claims {
             let mut queued = self.queued_work.lock().expect("lock perf queued work");
@@ -774,7 +795,7 @@ impl SessionCommitStore for RuntimePerfStore {
             },
             head_revision,
             Some(checkpoint_ref.clone()),
-            leaf_node_id,
+            leaf_node_id.clone(),
         ));
         let turn_input_applications = completed_turn_input_claims
             .iter()
@@ -784,12 +805,15 @@ impl SessionCommitStore for RuntimePerfStore {
             head_revision,
             checkpoint_ref,
             manifest,
+            committed_leaf_node_id: leaf_node_id,
             realized_node_timestamps,
+            committed_usage_delta_identities,
             enqueued_queue_batches: enqueued_queue_batches
                 .into_iter()
                 .map(|batch| self.enqueue_queued_work_in_memory(batch))
                 .collect(),
             turn_input_applications,
+            receipt_replayed: false,
         };
         self.runtime_turn_commits
             .lock()

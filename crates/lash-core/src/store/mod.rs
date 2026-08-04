@@ -11,15 +11,23 @@ mod lease_timings;
 mod load;
 pub mod queued_work;
 mod realization;
+mod runtime_commit;
 
 pub use attachment_manifest::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
 };
-pub use commit_identity::{OperationId, derive_history_node_id};
+pub use commit_identity::{
+    OperationId, RuntimeCommitReceiptDecision, decide_runtime_commit_receipt,
+    derive_history_node_id,
+};
 pub use error::StoreError;
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use load::{load_persisted_session_state, refresh_persisted_session_state};
 pub use realization::{RealizedNodeTimestamp, commit_runtime_state_verified};
+pub use runtime_commit::{
+    RuntimeCommit, RuntimeCommitResult, RuntimeTurnCommitStamp, RuntimeUsageDelta,
+    RuntimeUsageDeltaIdentity,
+};
 
 fn default_root_session_id() -> String {
     "root".to_string()
@@ -428,54 +436,6 @@ impl GraphAppend {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct RuntimeCommit {
-    pub session_id: String,
-    pub expected_head_revision: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub release_session_execution_lease: Option<SessionExecutionLeaseCompletion>,
-    pub config: crate::PersistedSessionConfig,
-    pub current_frame_node_id: Option<String>,
-    pub graph: GraphAppend,
-    pub checkpoint: HydratedSessionCheckpoint,
-    pub usage_deltas: Vec<crate::TokenLedgerEntry>,
-    pub turn_commit: RuntimeTurnCommitStamp,
-    pub completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
-    pub completed_turn_input_claims: Vec<crate::TurnInputCompletion>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub interrupted_turn_input_turn_id: Option<String>,
-    /// Attachment ids explicitly adopted by this commit. In the same
-    /// transaction the backend also stamps every uncommitted manifest row owned
-    /// by the turn id in `turn_commit.operation`, including ids that appear only in plain tool
-    /// JSON. This list preserves typed-output and cross-turn re-references;
-    /// adoption updates existing rows only and deliberately no-ops when this
-    /// session has no matching intent.
-    pub committed_attachment_ids: Vec<crate::AttachmentId>,
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct RuntimeCommitResult {
-    pub head_revision: u64,
-    pub checkpoint_ref: BlobRef,
-    pub manifest: SessionCheckpoint,
-    /// Store-realized timestamps for nodes appended by this operation.
-    ///
-    /// Node timestamps are clock-derived and excluded from commit intent, so a
-    /// receipt replay must return the first attempt's values for the resident
-    /// graph to converge with durable history.
-    pub realized_node_timestamps: Vec<RealizedNodeTimestamp>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
-    /// Canonical input applications settled by this idempotent turn commit.
-    ///
-    /// Keeping these identities in the durable turn-commit result lets hosts
-    /// reconcile after the bounded live observation window has been lost.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub turn_input_applications: Vec<crate::TurnInputApplication>,
-}
-
 /// Stable identity for a lease holder.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LeaseOwnerIdentity {
@@ -647,19 +607,6 @@ where
         .map_err(|err| StoreError::Backend(format!("failed to decode {record_kind}: {err}")))
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct RuntimeTurnCommitStamp {
-    pub operation: OperationId,
-}
-
-impl RuntimeTurnCommitStamp {
-    /// Binds one operation identity to a runtime commit for store implementors enforcing replay and
-    /// idempotency at the atomic commit boundary.
-    pub fn new(operation: OperationId) -> Self {
-        Self { operation }
-    }
-}
-
 fn build_persisted_turn_state(state: &crate::RuntimeSessionState) -> crate::PersistedTurnState {
     crate::PersistedTurnState {
         turn_index: state.turn_index,
@@ -710,7 +657,77 @@ impl RuntimeCommit {
                 turn_id: completed.operation.storage_key()?,
             });
         }
+        commit_identity::validate_append_receipt_identity(completed)?;
+        self.validate_usage_delta_identities()?;
         Ok(())
+    }
+
+    fn validate_usage_delta_identities(&self) -> Result<(), StoreError> {
+        let mut seen = std::collections::HashSet::with_capacity(self.usage_deltas.len());
+        for delta in &self.usage_deltas {
+            if delta.identity.operation_storage_key.trim().is_empty() {
+                return Err(StoreError::Backend(
+                    "runtime usage delta identity requires a non-empty operation storage key"
+                        .to_string(),
+                ));
+            }
+            let expected = RuntimeUsageDeltaIdentity::for_entry(
+                delta.identity.operation_storage_key.clone(),
+                delta.identity.entry_ordinal,
+                &delta.entry,
+            );
+            if delta.identity.payload_encoding_version != expected.payload_encoding_version
+                || delta.identity.payload_hash != expected.payload_hash
+            {
+                return Err(StoreError::Backend(format!(
+                    "runtime usage delta identity payload encoding version or hash does not match canonical entry content ({}, {})",
+                    delta.identity.operation_storage_key, delta.identity.entry_ordinal
+                )));
+            }
+            if !seen.insert(&delta.identity) {
+                return Err(StoreError::Backend(format!(
+                    "runtime commit repeats usage delta identity ({}, {}, {}, {})",
+                    delta.identity.operation_storage_key,
+                    delta.identity.entry_ordinal,
+                    delta.identity.payload_encoding_version,
+                    delta.identity.payload_hash
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Exhaustive append-envelope allowlist. Adding a new commit member forces
+    /// this destructure to be reconsidered, while the checks keep append
+    /// commits from silently acquiring another unrelated settlement side
+    /// effect. Usage is deliberately allowed because it has its own durable
+    /// exactly-once identity.
+    pub(crate) fn debug_assert_append_envelope_scope(&self) {
+        let RuntimeCommit {
+            session_id: _,
+            expected_head_revision: _,
+            release_session_execution_lease: _,
+            config: _,
+            current_frame_node_id: _,
+            graph: _,
+            checkpoint: _,
+            usage_deltas: _,
+            turn_commit,
+            completed_queue_claims,
+            completed_turn_input_claims,
+            enqueued_queue_batches,
+            interrupted_turn_input_turn_id,
+            committed_attachment_ids,
+        } = self;
+        debug_assert!(turn_commit.request_identity_hash.is_some());
+        debug_assert!(
+            completed_queue_claims.is_empty()
+                && completed_turn_input_claims.is_empty()
+                && enqueued_queue_batches.is_empty()
+                && interrupted_turn_input_turn_id.is_none()
+                && committed_attachment_ids.is_empty(),
+            "append-session-nodes constructor gained unrelated settlement side effects"
+        );
     }
 
     /// Re-derives every appended node ID by ordinal for store implementors, using frame keys for
@@ -841,6 +858,28 @@ impl RuntimeCommit {
         Ok((commit, persisted_node_ids))
     }
 
+    pub(crate) fn persisted_state_with_operation_and_staged_usage(
+        state: &mut crate::RuntimeSessionState,
+        usage_deltas: &[RuntimeUsageDelta],
+        operation: OperationId,
+    ) -> Result<(Self, Vec<String>), StoreError> {
+        let mut graph = state.pending_graph_commit();
+        let mapping = graph.derive_node_ids(&state.session_id, &operation)?;
+        state
+            .session_graph
+            .remap_node_ids(&state.session_id, &mapping);
+        remap_optional_node_id(&mut state.current_frame_node_id, &mapping);
+        state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
+        let persisted_node_ids = mapping.iter().map(|(_, derived)| derived.clone()).collect();
+        let commit = Self::persisted_state_with_graph_commit_and_staged_usage(
+            state,
+            graph,
+            usage_deltas,
+            operation,
+        )?;
+        Ok((commit, persisted_node_ids))
+    }
+
     #[doc(hidden)]
     #[track_caller]
     #[cfg(any(test, feature = "testing"))]
@@ -870,6 +909,21 @@ impl RuntimeCommit {
         state: &crate::RuntimeSessionState,
         graph: GraphAppend,
         usage_deltas: &[crate::TokenLedgerEntry],
+        operation: OperationId,
+    ) -> Result<Self, StoreError> {
+        let usage_deltas = RuntimeUsageDelta::for_operation(&operation, usage_deltas)?;
+        Self::persisted_state_with_graph_commit_and_staged_usage(
+            state,
+            graph,
+            &usage_deltas,
+            operation,
+        )
+    }
+
+    pub(crate) fn persisted_state_with_graph_commit_and_staged_usage(
+        state: &crate::RuntimeSessionState,
+        graph: GraphAppend,
+        usage_deltas: &[RuntimeUsageDelta],
         operation: OperationId,
     ) -> Result<Self, StoreError> {
         let mut projected_graph = state.session_graph.clone();
@@ -1110,6 +1164,34 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
         node_id: &str,
     ) -> Result<Option<crate::SessionNodeRecord>, StoreError>;
 
+    /// Atomically persist one settled runtime commit and its durable receipt.
+    ///
+    /// Implementors must look up the `(session_id, operation storage key)`
+    /// receipt inside the write transaction before the fresh append ancestor
+    /// fence and head-revision compare-and-swap. Existing receipts must be
+    /// adjudicated with [`decide_runtime_commit_receipt`]: replay returns the
+    /// stored first-attempt [`RuntimeCommitResult`] with only
+    /// [`RuntimeCommitResult::receipt_replayed`] set transiently, applies none
+    /// of the attempted commit envelope, and may release the attempt's explicit
+    /// execution-lease completion. Conflicts and corrupt count cross-checks
+    /// mutate nothing.
+    ///
+    /// Every [`RuntimeUsageDelta`] is published idempotently on `(session_id,
+    /// operation_storage_key, entry_ordinal, payload_encoding_version,
+    /// payload_hash)`, where the versioned hand-written projection is
+    /// documented on [`RuntimeUsageDeltaIdentity`]. A duplicate full identity
+    /// is a no-op inside this same transaction. Fresh results list every
+    /// identity made durable by the commit in
+    /// [`RuntimeCommitResult::committed_usage_delta_identities`]; stored
+    /// receipt results retain the original attempt's list so callers do not
+    /// clear staged rows that the original transaction never carried.
+    ///
+    /// A fresh identity-bearing append enforces
+    /// [`RuntimeTurnCommitStamp::requested_ancestor_node_id`] against the
+    /// transaction's active path, then atomically publishes graph, checkpoint,
+    /// usage, queue/input settlements, attachment adoptions, and a receipt whose
+    /// stored replay bit is `false`. Receipt lookup, fresh-only ancestor fencing,
+    /// commit publication, and receipt insertion are one transaction.
     async fn commit_runtime_state(
         &self,
         commit: RuntimeCommit,
