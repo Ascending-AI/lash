@@ -2051,6 +2051,9 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::AppendOperationIdentityConflict { .. } => {
             "AppendOperationIdentityConflict".to_string()
         }
+        StoreError::AppendReceiptRequestedNodeCountCorrupt { .. } => {
+            "AppendReceiptRequestedNodeCountCorrupt".to_string()
+        }
         StoreError::AppendAncestorNotActive { .. } => "AppendAncestorNotActive".to_string(),
         StoreError::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded".to_string(),
         StoreError::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded".to_string(),
