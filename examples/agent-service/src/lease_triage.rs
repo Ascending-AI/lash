@@ -152,6 +152,15 @@ impl LeaseTriageReport {
 
 /// `GET /api/chats/{chat_id}/lease`, the operator read. Diagnostics only: this
 /// endpoint deliberately exposes no lever that acts on the lease.
+///
+/// The id routes the request; deployments exposing this endpoint beyond the
+/// local demo must authenticate the caller and authorize access to the chat.
+/// This route is operator-facing and leaks more than a chat route does: the
+/// response names the replica (`holder_owner_id`) and boot
+/// (`holder_incarnation_id`) currently executing the session, so an
+/// unauthenticated caller who can guess a chat id can enumerate fleet identity.
+/// It omits the lease token by design, and no returned field is a capability,
+/// but internal topology is still not public data.
 pub(crate) async fn chat_lease_triage(
     State(state): State<AppStateData>,
     AxumPath(chat_id): AxumPath<String>,

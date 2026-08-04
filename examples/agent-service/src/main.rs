@@ -366,7 +366,10 @@ async fn async_main() -> anyhow_like::Result<()> {
         )
         .route("/api/chats/{chat_id}/forks", axum::routing::post(fork_chat))
         // Operator triage read for a chat whose turn looks stuck. Diagnostics
-        // only: see docs/operations.html#stuck-turn.
+        // only: see docs/operations.html#stuck-turn. Operator-facing, and it
+        // names the replica and boot running the session, so any deployment
+        // beyond this localhost demo must authenticate and authorize the caller
+        // before this route is reachable.
         .route(
             "/api/chats/{chat_id}/lease",
             get(crate::lease_triage::chat_lease_triage),
