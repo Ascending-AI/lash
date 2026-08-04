@@ -110,7 +110,7 @@ fn emit(checkpoint: Value) {
 /// evidence: `taken_over` comes from the winner's claim, so in the flagship case
 /// it is the *only* lease event, the dead holder having emitted nothing. What
 /// establishes a handoff is that a `taken_over` names a displaced holder at a
-/// lower generation; a `renew_failed` from that holder is a separate, optional
+/// lower generation; a `session_execution_lease.lost` from that holder is a separate, optional
 /// notice that appears only if it was still alive to file one.
 #[derive(Clone, Default)]
 struct LeaseTraceCapture {
@@ -455,7 +455,7 @@ fn reading(diagnostics: Option<&SessionLeaseDiagnostics>) -> Value {
         "expired_for_ms": expired_for_ms,
         "holder_owner_id": holder.map(|holder| holder.owner.owner_id.clone()),
         "holder_incarnation_id": holder.map(|holder| holder.owner.incarnation_id.clone()),
-        "generation": holder.map(|holder| holder.generation),
+        "fencing_token": holder.map(|holder| holder.generation),
         "claimed_at_epoch_ms": holder.map(|holder| holder.claimed_at_epoch_ms),
         "expires_at_epoch_ms": holder.map(|holder| holder.expires_at_epoch_ms),
     })
@@ -499,7 +499,7 @@ async fn provider_hang(
     // point, not the running worker's.
     let observer = backend.core(scripted_provider(), None, quiet_timings())?;
     let claimed = capture
-        .await_event("session_execution_lease.claimed", GATE_TIMEOUT)
+        .await_event("session_execution_lease.acquired", GATE_TIMEOUT)
         .await?;
     // Gate on a landed renewal, so `Current` is evidence of a live renewal loop
     // rather than of the original claim's headroom.
@@ -538,14 +538,14 @@ async fn provider_hang(
         "backend": backend.name,
         "session_id": session_id,
         "expected_holder_owner_id": holder.owner_id,
-        "claimed_generation": claimed.get("generation"),
-        "renewed_generation": renewed.get("generation"),
+        "claimed_generation": claimed.get("fencing_token"),
+        "renewed_generation": renewed.get("fencing_token"),
         "holder_matches_running_worker": holder_matches,
         "renewals_current_while_parked": renewals_current,
         "reading_while_parked": reading(parked.as_ref()),
         "reading_after_commit": reading(after_commit.as_ref()),
         "turn_committed_after_release": committed,
-        "renew_failed_count": capture.named("session_execution_lease.renew_failed").len(),
+        "lease_lost_count": capture.named("session_execution_lease.lost").len(),
         "taken_over_count": capture.named("session_execution_lease.taken_over").len(),
         "commit_cas_rejected_count": capture
             .named("session_execution_lease.commit_cas_rejected")
@@ -569,7 +569,7 @@ async fn provider_hang(
 /// Deliberately not rigged: nothing releases the lane on the dead worker's behalf,
 /// and nothing waits for it to notice, because in this case it never will. The
 /// live-loser variant (a holder that is still running when its lane moves, which
-/// additionally logs its own `renew_failed`) is covered by the lash-core unit
+/// additionally logs its own `session_execution_lease.lost`) is covered by the lash-core unit
 /// tests; it is a strictly easier case and not the one that used to go unreported.
 async fn lease_takeover(
     backend: &Backend,
@@ -654,7 +654,7 @@ async fn lease_takeover(
         "taken_over_count": capture.named("session_execution_lease.taken_over").len(),
         // The dead holder runs nothing, so it reports nothing. This is precisely
         // the case a loser-emitted takeover event would have missed entirely.
-        "renew_failed_count": capture.named("session_execution_lease.renew_failed").len(),
+        "lease_lost_count": capture.named("session_execution_lease.lost").len(),
         "reading_before_takeover": reading(before.as_ref()),
         "reading_after_takeover": reading(after.as_ref()),
         "turn_committed_after_takeover": turn_committed,
@@ -782,7 +782,7 @@ async fn commit_cas_livelock(
         "rounds": rounds,
         "commit_cas_rejected_count": rejections.len(),
         "commit_cas_rejected": rejections,
-        "renew_failed_count": capture.named("session_execution_lease.renew_failed").len(),
+        "lease_lost_count": capture.named("session_execution_lease.lost").len(),
         "taken_over_count": capture.named("session_execution_lease.taken_over").len(),
         "reading_after_livelock": reading(after.as_ref()),
         "lease_trace": capture.timeline(),

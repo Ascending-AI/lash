@@ -67,8 +67,8 @@ artifacts = Path(sys.argv[1])
 backends = sys.argv[2].split(",")
 
 LEASE_EVENTS = (
-    "session_execution_lease.claimed",
-    "session_execution_lease.renew_failed",
+    "session_execution_lease.acquired",
+    "session_execution_lease.lost",
     "session_execution_lease.taken_over",
     "session_execution_lease.commit_cas_rejected",
 )
@@ -104,7 +104,7 @@ def event(record, name):
 
 
 def require_identity_fields(record, name, entry):
-    for field in ("session_id", "generation", "owner_id", "incarnation_id"):
+    for field in ("session_id", "fencing_token", "owner_id", "incarnation_id"):
         if entry.get(field) in (None, ""):
             fail(
                 f"{record['checkpoint']}/{record['backend']}: {name!r} omits {field!r}: {entry}"
@@ -113,7 +113,7 @@ def require_identity_fields(record, name, entry):
 
 # Phase 1: a healthy holder is the provider-hang shape, and it is silent.
 for backend, record in checkpoints("provider_hang_shape", "02-provider-hang.jsonl").items():
-    claimed = event(record, "session_execution_lease.claimed")
+    claimed = event(record, "session_execution_lease.acquired")
     require_identity_fields(record, "claimed", claimed)
     if claimed["level"] != "INFO":
         fail(f"{backend}: claimed must be operator-visible, got {claimed['level']}")
@@ -125,7 +125,7 @@ for backend, record in checkpoints("provider_hang_shape", "02-provider-hang.json
         fail(f"{backend}: parked reading was not current: {record['reading_while_parked']}")
     if not record["reading_while_parked"]["expires_in_ms"]:
         fail(f"{backend}: a current reading must carry positive headroom: {record}")
-    if record["renew_failed_count"] or record["taken_over_count"]:
+    if record["lease_lost_count"] or record["taken_over_count"]:
         fail(f"{backend}: a healthy lane must emit no lease-loss events: {record}")
     if record["commit_cas_rejected_count"]:
         fail(f"{backend}: the only writer must not lose the head CAS: {record}")
@@ -144,18 +144,18 @@ for backend, record in checkpoints("lease_takeover", "03-lease-takeover.jsonl").
         fail(f"{backend}: taken_over must be operator-visible, got {taken_over['level']}")
     if record["taken_over_count"] != 1:
         fail(f"{backend}: exactly one takeover must be reported: {record}")
-    if record["renew_failed_count"]:
+    if record["lease_lost_count"]:
         fail(
             f"{backend}: the abandoned holder runs nothing and must report nothing, so a "
-            f"renew_failed here means the scenario is not testing a dead loser: {record}"
+            f"session_execution_lease.lost here means the scenario is not testing a dead loser: {record}"
         )
     if taken_over["owner_id"] != record["successor_owner_id"]:
         fail(f"{backend}: the takeover was not emitted by the winner: {taken_over}")
     if taken_over["displaced_owner_id"] != record["abandoned_owner_id"]:
         fail(f"{backend}: the takeover named the wrong displaced holder: {taken_over}")
-    if taken_over["displaced_generation"] != record["abandoned_generation"]:
+    if taken_over["displaced_fencing_token"] != record["abandoned_generation"]:
         fail(f"{backend}: the takeover named the wrong displaced generation: {taken_over}")
-    if taken_over["generation"] <= taken_over["displaced_generation"]:
+    if taken_over["fencing_token"] <= taken_over["displaced_fencing_token"]:
         fail(f"{backend}: takeover did not advance the generation: {taken_over}")
     if taken_over["displaced_owner_id"] == taken_over["owner_id"]:
         fail(f"{backend}: a claim reported displacing itself: {taken_over}")
@@ -172,7 +172,7 @@ for backend, record in checkpoints("lease_takeover", "03-lease-takeover.jsonl").
         fail(f"{backend}: the operator read still names the displaced holder: {after}")
     if after["renewal"] not in ("unheld", "current"):
         fail(f"{backend}: unexpected post-sweep reading: {after}")
-    if after["generation"] is not None and after["generation"] <= before["generation"]:
+    if after["fencing_token"] is not None and after["fencing_token"] <= before["fencing_token"]:
         fail(f"{backend}: a still-held lane must show a higher generation: {before} -> {after}")
     # The doctrine under test: lease loss is not a turn verdict. Whichever way
     # the sweeping turn settled, the run must record it, self-consistently.
@@ -210,7 +210,7 @@ for backend, record in checkpoints("commit_cas_livelock", "04-commit-cas-liveloc
             fail(f"{backend}: these writers do hold the lane by reentry: {rejected}")
         if rejected["actual_head_revision"] <= rejected["expected_head_revision"]:
             fail(f"{backend}: the rejection did not name a head that had moved on: {rejected}")
-    if record["renew_failed_count"] or record["taken_over_count"]:
+    if record["lease_lost_count"] or record["taken_over_count"]:
         fail(f"{backend}: livelock must be distinguishable from a handoff: {record}")
 
 print(
