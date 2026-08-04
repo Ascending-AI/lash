@@ -1085,6 +1085,11 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// usage, queue/input settlements, attachment adoptions, and a receipt whose
     /// stored replay bit is `false`. Receipt lookup, fresh-only ancestor fencing,
     /// commit publication, and receipt insertion are one transaction.
+    ///
+    /// A queued-work completion that no longer owns a named row must return
+    /// [`StoreError::QueuedWorkClaimSuperseded`] with its `row_id`. If another
+    /// claim owns the live row, the error also carries its claim ID and lease
+    /// generation so recovery preserves peer rows without weakening fencing.
     async fn commit_runtime_state(
         &self,
         commit: RuntimeCommit,

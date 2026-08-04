@@ -234,6 +234,22 @@ struct TurnCrashOutcome {
     level_2: Option<Level2Expectation>,
 }
 
+/// Reviewable durable end-state ruling for a composed level-2 trajectory.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct DurableRecoveryRuling {
+    scenario: String,
+    outcome: String,
+    exact: DurableEndStateExpectation,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(untagged)]
+enum ReviewedTurnCrashRuling {
+    CrashPoint(TurnCrashOutcome),
+    DurableRecovery(DurableRecoveryRuling),
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct DurableEndState {
     terminal: usize,
@@ -1360,8 +1376,28 @@ fn golden_trace() -> Vec<TurnSeamOperation> {
 }
 
 /// Return the committed trace-derived matrix and its hand-written outcomes.
-fn turn_crash_matrix_outcomes() -> Vec<TurnCrashOutcome> {
+fn reviewed_turn_crash_rulings() -> Vec<ReviewedTurnCrashRuling> {
     serde_json::from_str(OUTCOME_TABLE).expect("committed turn crash outcome table is valid")
+}
+
+fn turn_crash_matrix_outcomes() -> Vec<TurnCrashOutcome> {
+    reviewed_turn_crash_rulings()
+        .into_iter()
+        .filter_map(|ruling| match ruling {
+            ReviewedTurnCrashRuling::CrashPoint(outcome) => Some(outcome),
+            ReviewedTurnCrashRuling::DurableRecovery(_) => None,
+        })
+        .collect()
+}
+
+fn durable_recovery_rulings() -> Vec<DurableRecoveryRuling> {
+    reviewed_turn_crash_rulings()
+        .into_iter()
+        .filter_map(|ruling| match ruling {
+            ReviewedTurnCrashRuling::CrashPoint(_) => None,
+            ReviewedTurnCrashRuling::DurableRecovery(ruling) => Some(ruling),
+        })
+        .collect()
 }
 
 /// Level-2 crash sites driven by the backend helper processes.
@@ -1531,6 +1567,42 @@ fn validate_outcome_table(
     Ok(())
 }
 
+fn validate_durable_recovery_rulings(rulings: &[DurableRecoveryRuling]) -> Result<(), String> {
+    const EXPECTED_SCENARIOS: [&str; 3] = [
+        "checkpoint_execute_finalize",
+        "checkpoint_replacement_double_crash",
+        "peer_reclaim",
+    ];
+    let actual = rulings
+        .iter()
+        .map(|ruling| ruling.scenario.as_str())
+        .collect::<Vec<_>>();
+    if actual.len() != EXPECTED_SCENARIOS.len()
+        || !EXPECTED_SCENARIOS
+            .iter()
+            .all(|expected| actual.contains(expected))
+    {
+        return Err(format!(
+            "reviewed durable recovery scenarios must be exactly {EXPECTED_SCENARIOS:?}; got {actual:?}"
+        ));
+    }
+    for ruling in rulings {
+        if ruling.outcome.trim().is_empty() {
+            return Err(format!(
+                "durable recovery scenario `{}` must explain its ruling",
+                ruling.scenario
+            ));
+        }
+        if ruling.exact.exact().is_none() {
+            return Err(format!(
+                "durable recovery scenario `{}` must pin an exact end state",
+                ruling.scenario
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn is_ticket_id(ticket: &str) -> bool {
     let Some((project, number)) = ticket.split_once('-') else {
         return false;
@@ -1552,6 +1624,8 @@ pub fn cold_process_turn_expectations() -> Vec<(&'static str, usize, usize, Stri
     let generated = generated_points(&golden_trace());
     let table = turn_crash_matrix_outcomes();
     validate_outcome_table(&generated, &table).expect("committed turn crash outcomes are valid");
+    validate_durable_recovery_rulings(&durable_recovery_rulings())
+        .expect("committed durable recovery rulings are valid");
     ColdProcessTurnAction::CRASH_ACTIONS
         .into_iter()
         .map(|action| {
@@ -1592,6 +1666,22 @@ pub fn cold_process_turn_expectations() -> Vec<(&'static str, usize, usize, Stri
             )
         })
         .collect()
+}
+
+/// Return the reviewed exact durable end state for a composed level-2 recovery
+/// trajectory in `turn_crash_outcomes.json`.
+pub fn cold_process_durable_recovery_expectation(scenario: &str) -> String {
+    let rulings = durable_recovery_rulings();
+    validate_durable_recovery_rulings(&rulings)
+        .expect("committed durable recovery rulings are valid");
+    rulings
+        .into_iter()
+        .find(|ruling| ruling.scenario == scenario)
+        .unwrap_or_else(|| panic!("unknown durable recovery scenario `{scenario}`"))
+        .exact
+        .exact()
+        .expect("validated exact durable recovery ruling")
+        .summary()
 }
 
 /// Return the stable execution scope used by a level-2 helper scenario.
@@ -1834,6 +1924,8 @@ where
     let table = turn_crash_matrix_outcomes();
     validate_outcome_table(&generated, &table)
         .unwrap_or_else(|error| panic!("invalid turn crash outcome table: {error}"));
+    validate_durable_recovery_rulings(&durable_recovery_rulings())
+        .unwrap_or_else(|error| panic!("invalid durable recovery rulings: {error}"));
 }
 
 async fn wait_for_recovery_lease<F>(make: &F, scenario: &str)
@@ -2011,6 +2103,8 @@ mod tests {
         let generated = generated_points(&golden_trace());
         let table = turn_crash_matrix_outcomes();
         validate_outcome_table(&generated, &table).expect("committed table is valid");
+        validate_durable_recovery_rulings(&durable_recovery_rulings())
+            .expect("committed durable recovery rulings are valid");
     }
 
     #[test]

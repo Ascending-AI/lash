@@ -3127,10 +3127,21 @@ pub async fn queued_work_claims_supersede_across_session_lease_generations(
         )
         .await
         .expect_err("superseded-generation completion must fail");
-    assert!(matches!(
-        stale_err,
-        StoreError::QueuedWorkClaimSuperseded { .. }
-    ));
+    assert!(
+        matches!(
+            stale_err,
+            StoreError::QueuedWorkClaimSuperseded {
+                ref row_id,
+                ref superseding_claim_id,
+                ref superseding_session_lease_generation,
+                ..
+            } if row_id.as_deref() == Some(batch.batch_id.as_str())
+                && superseding_claim_id.as_deref() == Some(claim_b.claim_id.as_str())
+                && superseding_session_lease_generation.as_deref()
+                    == Some(&claim_b.session_lease_generation)
+        ),
+        "a superseded queued-work completion must report the row and current authority: {stale_err:?}"
+    );
     assert_eq!(
         persisted_session_read_snapshot(
             store

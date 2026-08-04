@@ -7,6 +7,58 @@
 
 use super::{InMemoryPendingTurnInput, InMemorySessionStore};
 
+impl InMemoryPendingTurnInput {
+    fn claim_diagnostics(&self) -> Option<crate::PendingTurnInputClaimDiagnostics> {
+        (self.claim_id.is_some() || matches!(self.input.state, crate::TurnInputState::Accepted))
+            .then(|| crate::PendingTurnInputClaimDiagnostics {
+                state: self.input.state,
+                claim_id: self.claim_id.clone(),
+                claim_owner: self.claim_owner.clone(),
+                claim_session_lease_generation: self
+                    .claim_token
+                    .as_ref()
+                    .map(|_| self.claim_session_lease_generation),
+                claim_fencing_token: self.claim_fencing_token,
+            })
+    }
+
+    pub(super) fn clear_claim(&mut self) {
+        self.claim_id = None;
+        self.claim_token = None;
+        self.claim_owner = None;
+        self.claim_session_lease_generation = 0;
+    }
+
+    fn cancel_outcome(&mut self, claim_is_live: bool) -> crate::PendingTurnInputCancelOutcome {
+        match self.input.state {
+            crate::TurnInputState::Cancelled => {
+                crate::PendingTurnInputCancelOutcome::AlreadyCancelled(self.input.clone())
+            }
+            crate::TurnInputState::Completed => {
+                crate::PendingTurnInputCancelOutcome::AlreadyCompleted(self.input.clone())
+            }
+            crate::TurnInputState::Accepted => {
+                crate::PendingTurnInputCancelOutcome::AlreadyClaimed {
+                    input: self.input.clone(),
+                    claim: self.claim_diagnostics(),
+                }
+            }
+            crate::TurnInputState::PendingActive | crate::TurnInputState::DeferredNextTurn => {
+                if self.claim_token.is_some() && claim_is_live {
+                    crate::PendingTurnInputCancelOutcome::AlreadyClaimed {
+                        input: self.input.clone(),
+                        claim: self.claim_diagnostics(),
+                    }
+                } else {
+                    self.input.state = crate::TurnInputState::Cancelled;
+                    self.clear_claim();
+                    crate::PendingTurnInputCancelOutcome::Cancelled(self.input.clone())
+                }
+            }
+        }
+    }
+}
+
 fn find_pending_turn_input_index(
     pending: &[InMemoryPendingTurnInput],
     session_id: &str,

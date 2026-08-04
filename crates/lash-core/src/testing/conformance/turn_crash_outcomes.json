@@ -128,5 +128,20 @@
       "effect_executions": { "at_crash": 1, "after_recovery": 1 },
       "exact": { "terminal": 1, "pending_inputs": 0, "queued_work": 0 }
     }
+  },
+  {
+    "scenario": "checkpoint_execute_finalize",
+    "outcome": "A checkpoint executed before its outcome was finalized is reclaimed by the successor, which reaches the exact durable terminal state without stranding ingress.",
+    "exact": { "terminal": 1, "pending_inputs": 0, "queued_work": 0 }
+  },
+  {
+    "scenario": "checkpoint_replacement_double_crash",
+    "outcome": "After checkpoint authority is replaced and journaled by recovery, a second crash at final commit still recovers to the exact durable terminal state.",
+    "exact": { "terminal": 1, "pending_inputs": 0, "queued_work": 0 }
+  },
+  {
+    "scenario": "peer_reclaim",
+    "outcome": "A recovered commit reaches terminal state while leaving the queued-work row owned by the successor lease generation untouched for at-least-once redelivery.",
+    "exact": { "terminal": 1, "pending_inputs": 0, "queued_work": 1 }
   }
 ]

@@ -90,6 +90,49 @@ pub async fn assert_real_turn_kill_recovery(
         "checkpoint helper must die after local execution and before outcome finalization: {}",
         String::from_utf8_lossy(&crashed.stderr)
     );
+    let recovered = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        command("turn_recover", &nonce, &marker).output(),
+    )
+    .await
+    .expect("checkpoint outcome-gap recovery timed out")
+    .expect("spawn checkpoint outcome-gap recovery");
+    let stdout = String::from_utf8_lossy(&recovered.stdout);
+    let stderr = String::from_utf8_lossy(&recovered.stderr);
+    assert!(
+        recovered.status.success(),
+        "checkpoint outcome-gap recovery failed: {stderr}; stdout: {stdout}"
+    );
+    let expected_end_state =
+        lash_core::testing::conformance::cold_process_durable_recovery_expectation(
+            "checkpoint_execute_finalize",
+        );
+    let expected_summary = format!("turn_complete {expected_end_state}");
+    assert!(
+        stdout.lines().any(|line| line == expected_summary),
+        "checkpoint outcome-gap recovery did not match `{expected_summary}`: {stdout}"
+    );
+
+    let nonce = format!("checkpoint-double-crash-{}", uuid::Uuid::new_v4());
+    let marker = tempdir.join(format!("{nonce}.log"));
+    let crashed = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        command(
+            "turn_checkpoint_after_execute_before_outcome",
+            &nonce,
+            &marker,
+        )
+        .output(),
+    )
+    .await
+    .expect("checkpoint double-crash helper timed out")
+    .expect("spawn checkpoint double-crash helper");
+    assert_eq!(
+        crashed.status.code(),
+        Some(86),
+        "checkpoint double-crash helper must die after local execution and before outcome finalization: {}",
+        String::from_utf8_lossy(&crashed.stderr)
+    );
     kill_at_semantic_point(
         &mut command,
         "turn_recover_final_commit_boundary",
@@ -110,11 +153,14 @@ pub async fn assert_real_turn_kill_recovery(
         recovered.status.success(),
         "checkpoint outcome-gap final recovery failed: {stderr}; stdout: {stdout}"
     );
+    let expected_end_state =
+        lash_core::testing::conformance::cold_process_durable_recovery_expectation(
+            "checkpoint_replacement_double_crash",
+        );
+    let expected_summary = format!("turn_complete {expected_end_state}");
     assert!(
-        stdout
-            .lines()
-            .any(|line| line == "turn_complete terminal=1 pending_inputs=0 queued_work=0"),
-        "checkpoint outcome-gap double-crash recovery did not settle all ingress: {stdout}"
+        stdout.lines().any(|line| line == expected_summary),
+        "checkpoint outcome-gap double-crash recovery did not match `{expected_summary}`: {stdout}"
     );
 
     let nonce = format!("peer-reclaim-{}", uuid::Uuid::new_v4());
@@ -152,11 +198,12 @@ pub async fn assert_real_turn_kill_recovery(
         recovered.status.success(),
         "peer-reclaim recovery failed: {stderr}; stdout: {stdout}"
     );
+    let expected_end_state =
+        lash_core::testing::conformance::cold_process_durable_recovery_expectation("peer_reclaim");
+    let expected_summary = format!("turn_complete {expected_end_state}");
     assert!(
-        stdout
-            .lines()
-            .any(|line| line == "turn_complete terminal=1 pending_inputs=0 queued_work=1"),
-        "recovery must commit once while leaving the peer-owned row untouched: {stdout}"
+        stdout.lines().any(|line| line == expected_summary),
+        "peer-reclaim recovery did not match `{expected_summary}`: {stdout}"
     );
 }
 

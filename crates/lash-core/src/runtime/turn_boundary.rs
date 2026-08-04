@@ -510,96 +510,47 @@ impl TurnBoundary {
         commit.completed_turn_input_claims = completed_turn_input_claims;
         commit.enqueued_queue_batches = enqueued_queue_batches;
         commit.interrupted_turn_input_turn_id = interrupted_turn_input_turn_id;
-        let result = loop {
+        let can_retry_recovered_settlement =
+            current_session_lease_generation.is_some_and(|current| {
+                queue_claim_generations
+                    .values()
+                    .chain(turn_input_claim_generations.values())
+                    .any(|generation| *generation < current)
+            });
+        let result = if can_retry_recovered_settlement {
+            loop {
+                commit.validate_claim_settlement(
+                    &originating_queue_claims,
+                    &originating_turn_input_claims,
+                )?;
+                match crate::store::commit_runtime_state_verified(store, commit.clone()).await {
+                    Ok(result) => break result,
+                    Err(err) => {
+                        let dropped = drop_superseded_recovered_queue_settlement(
+                            &err,
+                            &queue_claim_generations,
+                            current_session_lease_generation,
+                            &mut commit.completed_queue_claims,
+                            &mut originating_queue_claims,
+                        ) || drop_superseded_recovered_turn_input_settlement(
+                            &err,
+                            &turn_input_claim_generations,
+                            current_session_lease_generation,
+                            &mut commit.completed_turn_input_claims,
+                            &mut originating_turn_input_claims,
+                        );
+                        if !dropped {
+                            return Err(err);
+                        }
+                    }
+                }
+            }
+        } else {
             commit.validate_claim_settlement(
                 &originating_queue_claims,
                 &originating_turn_input_claims,
             )?;
-            match crate::store::commit_runtime_state_verified(store, commit.clone()).await {
-                Ok(result) => break result,
-                Err(err) => {
-                    let dropped = match &err {
-                        StoreError::QueuedWorkClaimSuperseded {
-                            claim_id,
-                            row_id: Some(row_id),
-                            superseding_claim_id,
-                            superseding_session_lease_generation,
-                            ..
-                        } => queue_claim_generations.get(claim_id).is_some_and(|stale_generation| {
-                            let recovered = current_session_lease_generation
-                                .is_some_and(|current| *stale_generation < current);
-                            let removed = recovered
-                                && drop_queue_settlement_row(
-                                    &mut commit.completed_queue_claims,
-                                    claim_id,
-                                    row_id,
-                                )
-                                && drop_queue_settlement_row(
-                                    &mut originating_queue_claims,
-                                    claim_id,
-                                    row_id,
-                                );
-                            if removed {
-                                tracing::info!(
-                                    target: "lash::claim_settlement",
-                                    decision_basis = "superseded_recovered_claim",
-                                    row_kind = "queued_work",
-                                    row_id,
-                                    stale_claim_id = claim_id,
-                                    stale_session_lease_generation = *stale_generation,
-                                    superseding_claim_id = superseding_claim_id.as_deref().unwrap_or("settled_by_peer"),
-                                    superseding_session_lease_generation = ?superseding_session_lease_generation,
-                                    outcome = "drop_stale_settlement",
-                                    "recovered final commit dropped a queued-work row no longer owned by its restored claim"
-                                );
-                            }
-                            removed
-                        }),
-                        StoreError::TurnInputClaimSuperseded {
-                            claim_id,
-                            row_id: Some(row_id),
-                            superseding_claim_id,
-                            superseding_session_lease_generation,
-                            ..
-                        } => turn_input_claim_generations.get(claim_id).is_some_and(
-                            |stale_generation| {
-                                let recovered = current_session_lease_generation
-                                    .is_some_and(|current| *stale_generation < current);
-                                let removed = recovered
-                                    && drop_turn_input_settlement_row(
-                                        &mut commit.completed_turn_input_claims,
-                                        claim_id,
-                                        row_id,
-                                    )
-                                    && drop_turn_input_settlement_row(
-                                        &mut originating_turn_input_claims,
-                                        claim_id,
-                                        row_id,
-                                    );
-                                if removed {
-                                    tracing::info!(
-                                        target: "lash::claim_settlement",
-                                        decision_basis = "superseded_recovered_claim",
-                                        row_kind = "turn_input",
-                                        row_id,
-                                        stale_claim_id = claim_id,
-                                        stale_session_lease_generation = *stale_generation,
-                                        superseding_claim_id = superseding_claim_id.as_deref().unwrap_or("settled_by_peer"),
-                                        superseding_session_lease_generation = ?superseding_session_lease_generation,
-                                        outcome = "drop_stale_settlement",
-                                        "recovered final commit dropped a turn-input row no longer owned by its restored claim"
-                                    );
-                                }
-                                removed
-                            },
-                        ),
-                        _ => false,
-                    };
-                    if !dropped {
-                        return Err(err);
-                    }
-                }
-            }
+            crate::store::commit_runtime_state_verified(store, commit).await?
         };
         let enqueued_queue_batches = result.enqueued_queue_batches.clone();
         let committed_usage_delta_identities = result.committed_usage_delta_identities.clone();

@@ -12,9 +12,8 @@
 use sha2::{Digest, Sha256};
 
 use super::LeaseOwnerIdentity;
-use super::StoreError;
 use crate::runtime::QueuedWorkClass;
-use crate::{DeliveryPolicy, MergeKey, QueuedWorkClaimBoundary, QueuedWorkCompletion, SlotPolicy};
+use crate::{DeliveryPolicy, MergeKey, QueuedWorkClaimBoundary, SlotPolicy};
 
 /// Decoded claim-relevant fields of one ready queued-work batch row.
 ///
@@ -197,25 +196,6 @@ pub fn derive_batch_id(
         seed.push_str(&format!(":{nonce}"));
     }
     format!("qwb:{:x}", Sha256::digest(seed.as_bytes()))
-}
-
-/// Apply the shared completion-fencing decision: a completion may delete its
-/// batches only when the live store still shows the claim owning every one
-/// of them (`owned_rows` rows matched the claim id + lease token).
-pub fn ensure_completion_owns_all_batches(
-    completed: &QueuedWorkCompletion,
-    owned_rows: usize,
-) -> Result<(), StoreError> {
-    if owned_rows != completed.batch_ids.len() {
-        return Err(StoreError::QueuedWorkClaimSuperseded {
-            session_id: completed.session_id.clone(),
-            claim_id: completed.claim_id.clone(),
-            row_id: None,
-            superseding_claim_id: None,
-            superseding_session_lease_generation: None,
-        });
-    }
-    Ok(())
 }
 
 #[cfg(test)]

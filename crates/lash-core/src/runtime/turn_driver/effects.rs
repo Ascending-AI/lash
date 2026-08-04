@@ -147,6 +147,26 @@ fn merge_pending_turn_input_claim_authority(
     Ok(already_delivered)
 }
 
+fn merge_pending_checkpoint_turn_input_claim(
+    pending: &mut Option<crate::TurnInputClaim>,
+    incoming: crate::TurnInputClaim,
+) -> Result<(), RuntimeError> {
+    match pending.as_ref() {
+        None => *pending = Some(incoming),
+        Some(existing) if existing.claim_id == incoming.claim_id => {}
+        Some(existing) => {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::StoreCommitFailed,
+                format!(
+                    "checkpoint replay returned turn-input claim `{}` while `{}` is pending",
+                    incoming.claim_id, existing.claim_id
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl RuntimeTurnDriver<'_> {
     fn merge_pending_queue_claim_authority(
         &mut self,
@@ -207,19 +227,10 @@ impl RuntimeTurnDriver<'_> {
             self.merge_pending_queue_claim_authority(claim)?;
         }
         if let Some(claim) = turn_input_claim {
-            match self.pending_checkpoint_turn_input_claim.as_ref() {
-                None => self.pending_checkpoint_turn_input_claim = Some(claim),
-                Some(pending) if pending.claim_id == claim.claim_id => {}
-                Some(pending) => {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::StoreCommitFailed,
-                        format!(
-                            "checkpoint replay returned turn-input claim `{}` while `{}` is pending",
-                            claim.claim_id, pending.claim_id
-                        ),
-                    ));
-                }
-            }
+            merge_pending_checkpoint_turn_input_claim(
+                &mut self.pending_checkpoint_turn_input_claim,
+                claim,
+            )?;
         }
         Ok(delivery)
     }
@@ -631,6 +642,47 @@ mod claim_authority_tests {
         rows
     }
 
+    fn pending_turn_input(input_id: &str) -> crate::PendingTurnInput {
+        crate::PendingTurnInput {
+            input_id: input_id.to_string(),
+            session_id: "fig905".to_string(),
+            enqueue_seq: 1,
+            source_key: None,
+            ingress: crate::TurnInputIngress::active_turn(
+                "fig905-turn",
+                crate::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            state: crate::TurnInputState::Accepted,
+            enqueued_at_ms: 0,
+            input: crate::TurnInput::text("fig905 input"),
+        }
+    }
+
+    fn turn_input_claim(
+        claim_id: &str,
+        generation: u64,
+        fencing_token: u64,
+        input_ids: &[&str],
+    ) -> crate::TurnInputClaim {
+        crate::TurnInputClaim {
+            session_id: "fig905".to_string(),
+            claim_id: claim_id.to_string(),
+            owner: crate::LeaseOwnerIdentity::opaque("fig905", claim_id),
+            lease_token: format!("token:{claim_id}"),
+            fencing_token,
+            session_lease_generation: generation,
+            mode: crate::TurnInputClaimMode::ActiveTurn {
+                turn_id: "fig905-turn".to_string(),
+                checkpoint: crate::CheckpointKind::AfterWork,
+            },
+            inputs: input_ids
+                .iter()
+                .map(|input_id| pending_turn_input(input_id))
+                .collect(),
+            applications: Vec::new(),
+        }
+    }
+
     #[test]
     fn one_overlap_keeps_the_successor_in_the_complete_checkpoint_claim_set() {
         let mut pending = vec![claim("predecessor", 1, 1, &[("a", 1)])];
@@ -680,5 +732,45 @@ mod claim_authority_tests {
         .expect("ignore stale replay authority");
 
         assert_eq!(authorities(&pending), vec![("a", "successor")]);
+    }
+
+    #[test]
+    fn equal_queued_work_authority_with_different_claims_is_rejected() {
+        let mut pending = vec![claim("first", 2, 3, &[("a", 1)])];
+        let error = merge_pending_queue_claim_authority(
+            &mut pending,
+            claim("conflicting", 2, 3, &[("a", 1)]),
+        )
+        .expect_err("equal authority must not silently choose a queued-work claim");
+
+        assert_eq!(error.code, RuntimeErrorCode::StoreCommitFailed);
+        assert!(error.message.contains("conflicting claim authorities"));
+        assert_eq!(authorities(&pending), vec![("a", "first")]);
+    }
+
+    #[test]
+    fn equal_turn_input_authority_with_different_claims_is_rejected() {
+        let mut pending = vec![turn_input_claim("first", 2, 3, &["input-a"])];
+        let mut incoming = turn_input_claim("conflicting", 2, 3, &["input-a"]);
+        let error = merge_pending_turn_input_claim_authority(&mut pending, &mut incoming)
+            .expect_err("equal authority must not silently choose a turn-input claim");
+
+        assert_eq!(error.code, RuntimeErrorCode::StoreCommitFailed);
+        assert!(error.message.contains("conflicting claim authorities"));
+        assert_eq!(pending[0].claim_id, "first");
+    }
+
+    #[test]
+    fn checkpoint_replay_rejects_a_conflicting_pending_turn_input_claim() {
+        let mut pending = Some(turn_input_claim("pending", 2, 3, &["input-a"]));
+        let error = merge_pending_checkpoint_turn_input_claim(
+            &mut pending,
+            turn_input_claim("replayed", 1, 2, &["input-a"]),
+        )
+        .expect_err("replay must not replace a different pending checkpoint claim");
+
+        assert_eq!(error.code, RuntimeErrorCode::StoreCommitFailed);
+        assert!(error.message.contains("checkpoint replay returned"));
+        assert_eq!(pending.expect("pending claim survives").claim_id, "pending");
     }
 }
