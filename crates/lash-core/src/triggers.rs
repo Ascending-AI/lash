@@ -802,18 +802,110 @@ impl TriggerMutationReceipt {
     }
 }
 
+/// The complete verb vocabulary for reading and changing durable trigger
+/// subscription state.
+///
+/// A command paired with [`TriggerStore::execute_command`] is **the** supported
+/// route for a host to mutate trigger subscriptions. The durable tables behind
+/// a store — `lash_*` in the first-party SQL backends — are private to lash:
+/// their columns and the record JSON they hold are stable only within one
+/// schema version, and a hand-written `UPDATE` also bypasses the revision fence
+/// and the operation receipt the store writes in the same transaction. Trigger
+/// state corrupted that way has no supported repair.
+///
+/// Three properties make the surface safe to retry:
+///
+/// - **Fenced.** Every point mutation carries `expected_revision`, taken from a
+///   [`List`](Self::List) record or from an earlier receipt. A writer that lost
+///   the race receives [`TriggerOperationError::Conflict`] instead of silently
+///   overwriting the winner.
+/// - **Receipted.** `operation_id` journals the evaluated outcome — committed
+///   mutation or conflict — so replaying one operation returns its original
+///   [`TriggerMutationReceipt`] rather than re-evaluating against newer state.
+/// - **Keyed.** `subscription_key` is unique within a [`TriggerOwnerScope`], so
+///   a command names its target directly and never needs a store-assigned
+///   lookup handle.
+///
+/// [`Enable`](Self::Enable) is a first-class verb, so re-enabling is fully
+/// supported: read the live revision, then `Enable` against it. Registering the
+/// same definition again is deliberately *not* a re-enable — it reports
+/// [`TriggerMutationDisposition::Unchanged`] and leaves the row disabled.
+///
+/// ```no_run
+/// use lash_core::{
+///     ProcessOriginator, TriggerCommand, TriggerCommandOutcome, TriggerOperationError,
+///     TriggerOwnerScope, TriggerStore, TriggerSubscriptionFilter,
+/// };
+///
+/// /// Re-enable one subscription without touching a `lash_*` table.
+/// /// Returns `false` when the owner scope holds no live row for the key.
+/// async fn reenable(
+///     store: &dyn TriggerStore,
+///     owner_scope: TriggerOwnerScope,
+///     actor: ProcessOriginator,
+///     subscription_key: &str,
+/// ) -> Result<bool, TriggerOperationError> {
+///     // Read the live revision through the same command surface. `List` is
+///     // owner-scoped, excludes tombstones, and is never receipted.
+///     let TriggerCommandOutcome::List { records } = store
+///         .execute_command(
+///             "reenable-read",
+///             TriggerCommand::List {
+///                 owner_scope: owner_scope.clone(),
+///                 filter: TriggerSubscriptionFilter {
+///                     subscription_key: Some(subscription_key.to_string()),
+///                     ..TriggerSubscriptionFilter::default()
+///                 },
+///             },
+///         )
+///         .await??
+///     else {
+///         unreachable!("List returns list records")
+///     };
+///     let Some(record) = records.into_iter().next() else {
+///         return Ok(false);
+///     };
+///
+///     // Fence the write on that revision. A concurrent writer that moved the
+///     // row first turns this into a conflict; re-read and retry, never patch
+///     // the row by hand. The operation id makes the retry idempotent.
+///     let TriggerCommandOutcome::Mutation { receipt } = store
+///         .execute_command(
+///             &format!("reenable:{subscription_key}:{}", record.revision),
+///             TriggerCommand::Enable {
+///                 owner_scope,
+///                 actor,
+///                 subscription_key: subscription_key.to_string(),
+///                 expected_revision: record.revision,
+///             },
+///         )
+///         .await??
+///     else {
+///         unreachable!("Enable returns one mutation receipt")
+///     };
+///     assert!(receipt.enabled);
+///     assert!(receipt.revision > record.revision);
+///     Ok(true)
+/// }
+/// ```
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum TriggerCommand {
+    /// Create the subscription for `draft.subscription_key`. An identical
+    /// definition is idempotent; a changed one conflicts instead of upserting.
     Register {
         owner_scope: TriggerOwnerScope,
         actor: crate::ProcessOriginator,
         draft: TriggerSubscriptionDraft,
     },
+    /// Read the owner scope's live subscription records. This is the supported
+    /// lookup — by key, name, source, or enablement — and the read that
+    /// supplies `expected_revision` to every mutation below.
     List {
         owner_scope: TriggerOwnerScope,
         filter: TriggerSubscriptionFilter,
     },
+    /// Replace the definition of a live subscription at `expected_revision`.
     Update {
         owner_scope: TriggerOwnerScope,
         actor: crate::ProcessOriginator,
@@ -821,24 +913,32 @@ pub enum TriggerCommand {
         draft: TriggerSubscriptionDraft,
         expected_revision: u64,
     },
+    /// Resume occurrence delivery for a disabled subscription at
+    /// `expected_revision`. This is the re-enable verb.
     Enable {
         owner_scope: TriggerOwnerScope,
         actor: crate::ProcessOriginator,
         subscription_key: String,
         expected_revision: u64,
     },
+    /// Stop matching new occurrences at `expected_revision`, keeping the
+    /// definition and every already-reserved delivery.
     Disable {
         owner_scope: TriggerOwnerScope,
         actor: crate::ProcessOriginator,
         subscription_key: String,
         expected_revision: u64,
     },
+    /// Tombstone a live subscription at `expected_revision`, preserving the
+    /// delivery history that references its incarnation.
     Delete {
         owner_scope: TriggerOwnerScope,
         actor: crate::ProcessOriginator,
         subscription_key: String,
         expected_revision: u64,
     },
+    /// Bring a tombstoned key back under a new incarnation at
+    /// `expected_revision`, which plain [`Register`](Self::Register) refuses.
     Revive {
         owner_scope: TriggerOwnerScope,
         actor: crate::ProcessOriginator,
@@ -846,6 +946,8 @@ pub enum TriggerCommand {
         draft: TriggerSubscriptionDraft,
         expected_revision: u64,
     },
+    /// Delete several keys the caller owns in one journaled operation, skipping
+    /// keys that are absent or already tombstoned.
     Prune {
         owner_scope: TriggerOwnerScope,
         actor: crate::ProcessOriginator,
@@ -1073,8 +1175,35 @@ impl TriggerDeliveryReservation {
     }
 }
 
+/// Durable home for trigger subscriptions, occurrences, and delivery
+/// reservations, parallel to [`RuntimePersistence`](crate::RuntimePersistence)
+/// and separate from it.
+///
+/// This trait is the whole supported surface: a store's tables (`lash_*` in the
+/// first-party SQL backends) are private to lash for reads as well as writes,
+/// because column names and record-JSON shapes are only stable within one
+/// schema version. Hosts read subscriptions through
+/// [`list_subscriptions`](Self::list_subscriptions) or
+/// [`TriggerCommand::List`], and change them through
+/// [`execute_command`](Self::execute_command).
 #[async_trait::async_trait]
 pub trait TriggerStore: Send + Sync {
+    /// Evaluate one [`TriggerCommand`] and, for a mutation, commit its record
+    /// change and its receipt in a single transaction.
+    ///
+    /// This is **the** supported host mutation route for trigger subscriptions;
+    /// [`TriggerCommand`] documents the verb vocabulary and carries a worked
+    /// re-enable example. The outer `Result` reports store failure. The inner
+    /// [`TriggerEffectResult`] reports the domain outcome, so a losing revision
+    /// fence arrives as [`TriggerOperationError::Conflict`] rather than as an
+    /// opaque backend error.
+    ///
+    /// `operation_id` is the caller's idempotency key within the command's
+    /// [`TriggerOwnerScope`]. A mutation journals its evaluated outcome —
+    /// committed receipt or conflict — under that id, so replaying the same
+    /// operation returns the original outcome even after the row has moved on.
+    /// Reuse an id only for a retry of the same intent. [`TriggerCommand::List`]
+    /// is never receipted and always reads current state.
     async fn execute_command(
         &self,
         operation_id: &str,
