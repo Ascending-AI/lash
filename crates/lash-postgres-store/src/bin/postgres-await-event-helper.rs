@@ -26,6 +26,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | "turn_effect_after_external"
             | "turn_final_commit_boundary"
             | "turn_final_commit_inside"
+            | "turn_checkpoint_after_execute_before_outcome"
+            | "turn_recover_final_commit_boundary"
+            | "turn_peer_reclaim"
             | "turn_recover"
     ) {
         let marker = args.next().map(std::path::PathBuf::from);

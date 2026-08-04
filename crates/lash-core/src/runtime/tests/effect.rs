@@ -256,6 +256,7 @@ impl RuntimeEffectController for RecordingEffectController {
             }
             RuntimeEffectCommand::Checkpoint { .. } => Ok(RuntimeEffectOutcome::Checkpoint {
                 result: Ok(crate::CheckpointDelivery::default()),
+                claims: Box::default(),
             }),
             RuntimeEffectCommand::SyncExecutionEnvironment { .. } => {
                 Ok(RuntimeEffectOutcome::SyncExecutionEnvironment { result: Ok(None) })
@@ -1162,6 +1163,7 @@ async fn tool_emitted_trigger_redrive_reemits_reserved_start_without_appending_s
                 }
                 RuntimeEffectCommand::Checkpoint { .. } => Ok(RuntimeEffectOutcome::Checkpoint {
                     result: Ok(crate::CheckpointDelivery::default()),
+                    claims: Box::default(),
                 }),
                 RuntimeEffectCommand::Process { command } => {
                     self.process_starts.fetch_add(1, Ordering::SeqCst);

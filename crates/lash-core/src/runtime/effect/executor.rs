@@ -1116,20 +1116,15 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     result: Box::new(result),
                 })
             }
-            RuntimeEffectCommand::Checkpoint { checkpoint } => {
-                Ok(RuntimeEffectOutcome::Checkpoint {
-                    result: runner
-                        .driver
-                        .run_checkpoint(
-                            runner.messages.clone(),
-                            runner.protocol_iteration,
-                            checkpoint,
-                            &runner.event_tx,
-                        )
-                        .await
-                        .map_err(RuntimeEffectControllerError::from),
-                })
-            }
+            RuntimeEffectCommand::Checkpoint { checkpoint } => Ok(runner
+                .driver
+                .execute_checkpoint_locally(
+                    runner.messages.clone(),
+                    runner.protocol_iteration,
+                    checkpoint,
+                    &runner.event_tx,
+                )
+                .await),
             RuntimeEffectCommand::SyncExecutionEnvironment {
                 update_machine_config,
             } => Ok(RuntimeEffectOutcome::SyncExecutionEnvironment {

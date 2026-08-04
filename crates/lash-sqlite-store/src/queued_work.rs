@@ -280,24 +280,46 @@ pub(crate) fn ensure_queued_work_completion_conn(
     conn: &Connection,
     completed: &QueuedWorkCompletion,
 ) -> Result<(), StoreError> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT COUNT(*)
+    for batch_id in &completed.batch_ids {
+        let authority = conn
+            .query_row(
+                "SELECT claim_id, claim_token, claim_session_lease_generation
              FROM queued_work_batches
              WHERE session_id = ?1
-               AND claim_id = ?2
-               AND claim_token = ?3",
-        )
-        .map_err(sqlite_error)?;
-    let count: usize = stmt
-        .query_row(
-            params![
-                completed.session_id,
-                completed.claim_id,
-                completed.lease_token
-            ],
-            |row| row.get::<_, i64>(0),
-        )
-        .map_err(sqlite_error)? as usize;
-    ensure_completion_owns_all_batches(completed, count)
+               AND batch_id = ?2",
+                params![completed.session_id, batch_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        let owns_row = authority
+            .as_ref()
+            .is_some_and(|(claim_id, claim_token, _)| {
+                claim_id.as_deref() == Some(completed.claim_id.as_str())
+                    && claim_token.as_deref() == Some(completed.lease_token.as_str())
+            });
+        if !owns_row {
+            return Err(StoreError::QueuedWorkClaimSuperseded {
+                session_id: completed.session_id.clone(),
+                claim_id: completed.claim_id.clone(),
+                row_id: Some(batch_id.clone().into_boxed_str()),
+                superseding_claim_id: authority
+                    .as_ref()
+                    .and_then(|(claim_id, _, _)| claim_id.clone())
+                    .map(String::into_boxed_str),
+                superseding_session_lease_generation: authority.as_ref().and_then(
+                    |(claim_id, _, generation)| {
+                        claim_id.as_ref().map(|_| Box::new(*generation as u64))
+                    },
+                ),
+            });
+        }
+    }
+    Ok(())
 }

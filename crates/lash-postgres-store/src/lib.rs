@@ -905,7 +905,8 @@ mod tests {
             error,
             StoreError::TurnInputClaimSuperseded {
                 ref session_id,
-                ref claim_id
+                ref claim_id,
+                ..
             } if session_id == &stale.session_id && claim_id == &stale.claim_id
         ));
         stale_committer

@@ -69,6 +69,176 @@ pub async fn assert_real_turn_kill_recovery(
             "{action} external-effect recovery count"
         );
     }
+
+    let nonce = format!("checkpoint-outcome-gap-{}", uuid::Uuid::new_v4());
+    let marker = tempdir.join(format!("{nonce}.log"));
+    let crashed = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        command(
+            "turn_checkpoint_after_execute_before_outcome",
+            &nonce,
+            &marker,
+        )
+        .output(),
+    )
+    .await
+    .expect("checkpoint outcome-gap helper timed out")
+    .expect("spawn checkpoint outcome-gap helper");
+    assert_eq!(
+        crashed.status.code(),
+        Some(86),
+        "checkpoint helper must die after local execution and before outcome finalization: {}",
+        String::from_utf8_lossy(&crashed.stderr)
+    );
+    let recovered = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        command("turn_recover", &nonce, &marker).output(),
+    )
+    .await
+    .expect("checkpoint outcome-gap recovery timed out")
+    .expect("spawn checkpoint outcome-gap recovery");
+    let stdout = String::from_utf8_lossy(&recovered.stdout);
+    let stderr = String::from_utf8_lossy(&recovered.stderr);
+    assert!(
+        recovered.status.success(),
+        "checkpoint outcome-gap recovery failed: {stderr}; stdout: {stdout}"
+    );
+    let expected_end_state =
+        lash_core::testing::conformance::cold_process_durable_recovery_expectation(
+            "checkpoint_execute_finalize",
+        );
+    let expected_summary = format!("turn_complete {expected_end_state}");
+    assert!(
+        stdout.lines().any(|line| line == expected_summary),
+        "checkpoint outcome-gap recovery did not match `{expected_summary}`: {stdout}"
+    );
+
+    let nonce = format!("checkpoint-double-crash-{}", uuid::Uuid::new_v4());
+    let marker = tempdir.join(format!("{nonce}.log"));
+    let crashed = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        command(
+            "turn_checkpoint_after_execute_before_outcome",
+            &nonce,
+            &marker,
+        )
+        .output(),
+    )
+    .await
+    .expect("checkpoint double-crash helper timed out")
+    .expect("spawn checkpoint double-crash helper");
+    assert_eq!(
+        crashed.status.code(),
+        Some(86),
+        "checkpoint double-crash helper must die after local execution and before outcome finalization: {}",
+        String::from_utf8_lossy(&crashed.stderr)
+    );
+    kill_at_semantic_point(
+        &mut command,
+        "turn_recover_final_commit_boundary",
+        &nonce,
+        &marker,
+    )
+    .await;
+    let recovered = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        command("turn_recover", &nonce, &marker).output(),
+    )
+    .await
+    .expect("checkpoint outcome-gap final recovery timed out")
+    .expect("spawn checkpoint outcome-gap final recovery");
+    let stdout = String::from_utf8_lossy(&recovered.stdout);
+    let stderr = String::from_utf8_lossy(&recovered.stderr);
+    assert!(
+        recovered.status.success(),
+        "checkpoint outcome-gap final recovery failed: {stderr}; stdout: {stdout}"
+    );
+    let expected_end_state =
+        lash_core::testing::conformance::cold_process_durable_recovery_expectation(
+            "checkpoint_replacement_double_crash",
+        );
+    let expected_summary = format!("turn_complete {expected_end_state}");
+    assert!(
+        stdout.lines().any(|line| line == expected_summary),
+        "checkpoint outcome-gap double-crash recovery did not match `{expected_summary}`: {stdout}"
+    );
+
+    let nonce = format!("peer-reclaim-{}", uuid::Uuid::new_v4());
+    let marker = tempdir.join(format!("{nonce}.log"));
+    kill_at_semantic_point(&mut command, "turn_final_commit_boundary", &nonce, &marker).await;
+    let peer = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        command("turn_peer_reclaim", &nonce, &marker).output(),
+    )
+    .await
+    .expect("peer-reclaim helper timed out")
+    .expect("spawn peer-reclaim helper");
+    assert!(
+        peer.status.success(),
+        "peer-reclaim helper failed: {}; stdout: {}",
+        String::from_utf8_lossy(&peer.stderr),
+        String::from_utf8_lossy(&peer.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&peer.stdout)
+            .lines()
+            .any(|line| line.starts_with("peer_claim row=")),
+        "peer-reclaim helper did not report superseding authority"
+    );
+    let recovered = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        command("turn_recover", &nonce, &marker).output(),
+    )
+    .await
+    .expect("peer-reclaim recovery timed out")
+    .expect("spawn peer-reclaim recovery");
+    let stdout = String::from_utf8_lossy(&recovered.stdout);
+    let stderr = String::from_utf8_lossy(&recovered.stderr);
+    assert!(
+        recovered.status.success(),
+        "peer-reclaim recovery failed: {stderr}; stdout: {stdout}"
+    );
+    let expected_end_state =
+        lash_core::testing::conformance::cold_process_durable_recovery_expectation("peer_reclaim");
+    let expected_summary = format!("turn_complete {expected_end_state}");
+    assert!(
+        stdout.lines().any(|line| line == expected_summary),
+        "peer-reclaim recovery did not match `{expected_summary}`: {stdout}"
+    );
+}
+
+async fn kill_at_semantic_point<F>(
+    command: &mut F,
+    action: &str,
+    nonce: &str,
+    marker: &std::path::Path,
+) where
+    F: FnMut(&str, &str, &std::path::Path) -> tokio::process::Command,
+{
+    let mut child = command(action, nonce, marker)
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|error| panic!("spawn {action} helper: {error}"));
+    let stdout = child.stdout.take().expect("crash helper stdout");
+    let mut lines = BufReader::new(stdout).lines();
+    let ready = tokio::time::timeout(std::time::Duration::from_secs(30), lines.next_line())
+        .await
+        .unwrap_or_else(|_| panic!("{action} helper did not reach its semantic crash point"))
+        .expect("read crash helper signal")
+        .unwrap_or_else(|| panic!("{action} helper exited before its crash point"));
+    assert_eq!(ready, "crash_ready", "unexpected {action} helper signal");
+    child
+        .kill()
+        .await
+        .unwrap_or_else(|error| panic!("SIGKILL {action} helper: {error}"));
+    let status = child
+        .wait()
+        .await
+        .unwrap_or_else(|error| panic!("reap {action} helper: {error}"));
+    assert!(
+        !status.success(),
+        "SIGKILLed {action} helper exited successfully"
+    );
 }
 
 fn marker_lines(path: &std::path::Path) -> usize {

@@ -416,7 +416,7 @@ impl TurnInputClaim {
             .iter()
             .map(|message| message.id.as_str())
             .collect::<std::collections::HashSet<_>>();
-        self.applications = self
+        let recorded = self
             .inputs
             .iter()
             .filter_map(|input| {
@@ -431,7 +431,13 @@ impl TurnInputClaim {
                         checkpoint: Some(checkpoint),
                     })
             })
-            .collect();
+            .collect::<Vec<_>>();
+        self.applications.retain(|application| {
+            !recorded
+                .iter()
+                .any(|replacement| replacement.input_id == application.input_id)
+        });
+        self.applications.extend(recorded);
     }
 
     /// Exposes accepted turn inputs to store and durable-substrate implementors while claiming and

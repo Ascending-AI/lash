@@ -810,11 +810,11 @@ pub(crate) use session_model::plugin_runtime_protocol_event;
 // surface; the rest of the runtime block above stays crate-internal.
 
 pub use runtime::{
-    LlmRequestSpec, ProcessCommand, ProcessEffectOutcome, ProcessEventSemanticsSpec,
-    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeEffectReplayMismatchSummary, RuntimeInvocation, RuntimeScope, RuntimeSessionState,
-    ToolAttemptLaunch,
+    CheckpointClaimSet, LlmRequestSpec, ProcessCommand, ProcessEffectOutcome,
+    ProcessEventSemanticsSpec, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchSummary,
+    RuntimeInvocation, RuntimeScope, RuntimeSessionState, ToolAttemptLaunch,
 };
 pub(crate) use runtime::{ToolAttemptEffectOutcome, ToolBatchEffectOutcome};
 

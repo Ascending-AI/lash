@@ -125,6 +125,14 @@ async fn turn_input_claims_supersede_across_session_lease_generations() {
 }
 
 #[tokio::test]
+async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint() {
+    crate::testing::conformance::active_turn_input_claim_reacquires_after_unrecorded_checkpoint(
+        recording_runtime_persistence(),
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus() {
     crate::testing::conformance::same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(
         recording_runtime_persistence(),

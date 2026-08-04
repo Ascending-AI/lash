@@ -234,6 +234,22 @@ struct TurnCrashOutcome {
     level_2: Option<Level2Expectation>,
 }
 
+/// Reviewable durable end-state ruling for a composed level-2 trajectory.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct DurableRecoveryRuling {
+    scenario: String,
+    outcome: String,
+    exact: DurableEndStateExpectation,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(untagged)]
+enum ReviewedTurnCrashRuling {
+    CrashPoint(TurnCrashOutcome),
+    DurableRecovery(DurableRecoveryRuling),
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct DurableEndState {
     terminal: usize,
@@ -1048,6 +1064,97 @@ impl RuntimeEffectController for SeamEffectController {
     }
 }
 
+#[derive(Clone)]
+struct CrashAfterCheckpointExecutionController {
+    inner: Arc<dyn RuntimeEffectController>,
+}
+
+#[async_trait::async_trait]
+impl crate::AwaitEventResolver for CrashAfterCheckpointExecutionController {
+    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
+        self.inner.replay_ownership()
+    }
+
+    fn allows_process_lifetime_completion_keys(&self) -> bool {
+        self.inner.allows_process_lifetime_completion_keys()
+    }
+
+    async fn await_event_key(
+        &self,
+        scope: &crate::ExecutionScope,
+        wait: crate::AwaitEventWaitIdentity,
+    ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
+        self.inner.await_event_key(scope, wait).await
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+        resolution: crate::Resolution,
+    ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
+        self.inner.resolve_await_event(key, resolution).await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+    ) -> Result<Option<crate::Resolution>, crate::RuntimeError> {
+        self.inner.peek_await_event(key).await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+        cancel: tokio_util::sync::CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<crate::Resolution, crate::RuntimeError> {
+        self.inner.await_await_event(key, cancel, deadline).await
+    }
+
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), crate::RuntimeError> {
+        self.inner.revoke_await_events_for_session(session_id).await
+    }
+
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), crate::RuntimeError> {
+        self.inner.cancel_await_events_for_session(session_id).await
+    }
+}
+
+#[async_trait::async_trait]
+impl RuntimeEffectController for CrashAfterCheckpointExecutionController {
+    async fn execute_effect(
+        &self,
+        envelope: RuntimeEffectEnvelope,
+        executor: RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        if !matches!(
+            &envelope.command,
+            crate::RuntimeEffectCommand::Checkpoint {
+                // The recorded AfterWork outcome supplies predecessor
+                // authority. Crashing after BeforeCompletion executes forces
+                // recovery to reclaim and journal its replacement authority.
+                checkpoint: crate::CheckpointKind::BeforeCompletion,
+            }
+        ) {
+            return self.inner.execute_effect(envelope, executor).await;
+        }
+        let crash_after_execution =
+            RuntimeEffectLocalExecutor::testing(move |envelope| async move {
+                let _outcome = executor.execute(envelope).await;
+                std::process::exit(86);
+            });
+        self.inner
+            .execute_effect(envelope, crash_after_execution)
+            .await
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct TraceTool {
     marker: Option<std::path::PathBuf>,
@@ -1269,8 +1376,28 @@ fn golden_trace() -> Vec<TurnSeamOperation> {
 }
 
 /// Return the committed trace-derived matrix and its hand-written outcomes.
-fn turn_crash_matrix_outcomes() -> Vec<TurnCrashOutcome> {
+fn reviewed_turn_crash_rulings() -> Vec<ReviewedTurnCrashRuling> {
     serde_json::from_str(OUTCOME_TABLE).expect("committed turn crash outcome table is valid")
+}
+
+fn turn_crash_matrix_outcomes() -> Vec<TurnCrashOutcome> {
+    reviewed_turn_crash_rulings()
+        .into_iter()
+        .filter_map(|ruling| match ruling {
+            ReviewedTurnCrashRuling::CrashPoint(outcome) => Some(outcome),
+            ReviewedTurnCrashRuling::DurableRecovery(_) => None,
+        })
+        .collect()
+}
+
+fn durable_recovery_rulings() -> Vec<DurableRecoveryRuling> {
+    reviewed_turn_crash_rulings()
+        .into_iter()
+        .filter_map(|ruling| match ruling {
+            ReviewedTurnCrashRuling::CrashPoint(_) => None,
+            ReviewedTurnCrashRuling::DurableRecovery(ruling) => Some(ruling),
+        })
+        .collect()
 }
 
 /// Level-2 crash sites driven by the backend helper processes.
@@ -1282,6 +1409,9 @@ enum ColdProcessTurnAction {
     EffectAfterExternalBeforeOutcome,
     FinalCommitBoundary,
     FinalCommitInsideCall,
+    CheckpointAfterExecuteBeforeOutcome,
+    RecoverFinalCommitBoundary,
+    PeerReclaim,
     Recover,
 }
 
@@ -1301,6 +1431,11 @@ impl ColdProcessTurnAction {
             Self::EffectAfterExternalBeforeOutcome => "turn_effect_after_external",
             Self::FinalCommitBoundary => "turn_final_commit_boundary",
             Self::FinalCommitInsideCall => "turn_final_commit_inside",
+            Self::CheckpointAfterExecuteBeforeOutcome => {
+                "turn_checkpoint_after_execute_before_outcome"
+            }
+            Self::RecoverFinalCommitBoundary => "turn_recover_final_commit_boundary",
+            Self::PeerReclaim => "turn_peer_reclaim",
             Self::Recover => "turn_recover",
         }
     }
@@ -1321,7 +1456,7 @@ impl ColdProcessTurnAction {
                 }),
                 placement: CrashPlacement::AfterExternalEffectBeforeOutcome,
             }),
-            Self::FinalCommitBoundary => Some(TurnCrashPoint {
+            Self::FinalCommitBoundary | Self::RecoverFinalCommitBoundary => Some(TurnCrashPoint {
                 operation: TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
                     settles_queue: true,
                     settles_turn_input: true,
@@ -1337,7 +1472,7 @@ impl ColdProcessTurnAction {
                 }),
                 placement: CrashPlacement::InsideCall,
             }),
-            Self::Recover => None,
+            Self::CheckpointAfterExecuteBeforeOutcome | Self::PeerReclaim | Self::Recover => None,
         }
     }
 }
@@ -1432,6 +1567,42 @@ fn validate_outcome_table(
     Ok(())
 }
 
+fn validate_durable_recovery_rulings(rulings: &[DurableRecoveryRuling]) -> Result<(), String> {
+    const EXPECTED_SCENARIOS: [&str; 3] = [
+        "checkpoint_execute_finalize",
+        "checkpoint_replacement_double_crash",
+        "peer_reclaim",
+    ];
+    let actual = rulings
+        .iter()
+        .map(|ruling| ruling.scenario.as_str())
+        .collect::<Vec<_>>();
+    if actual.len() != EXPECTED_SCENARIOS.len()
+        || !EXPECTED_SCENARIOS
+            .iter()
+            .all(|expected| actual.contains(expected))
+    {
+        return Err(format!(
+            "reviewed durable recovery scenarios must be exactly {EXPECTED_SCENARIOS:?}; got {actual:?}"
+        ));
+    }
+    for ruling in rulings {
+        if ruling.outcome.trim().is_empty() {
+            return Err(format!(
+                "durable recovery scenario `{}` must explain its ruling",
+                ruling.scenario
+            ));
+        }
+        if ruling.exact.exact().is_none() {
+            return Err(format!(
+                "durable recovery scenario `{}` must pin an exact end state",
+                ruling.scenario
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn is_ticket_id(ticket: &str) -> bool {
     let Some((project, number)) = ticket.split_once('-') else {
         return false;
@@ -1453,6 +1624,8 @@ pub fn cold_process_turn_expectations() -> Vec<(&'static str, usize, usize, Stri
     let generated = generated_points(&golden_trace());
     let table = turn_crash_matrix_outcomes();
     validate_outcome_table(&generated, &table).expect("committed turn crash outcomes are valid");
+    validate_durable_recovery_rulings(&durable_recovery_rulings())
+        .expect("committed durable recovery rulings are valid");
     ColdProcessTurnAction::CRASH_ACTIONS
         .into_iter()
         .map(|action| {
@@ -1495,6 +1668,22 @@ pub fn cold_process_turn_expectations() -> Vec<(&'static str, usize, usize, Stri
         .collect()
 }
 
+/// Return the reviewed exact durable end state for a composed level-2 recovery
+/// trajectory in `turn_crash_outcomes.json`.
+pub fn cold_process_durable_recovery_expectation(scenario: &str) -> String {
+    let rulings = durable_recovery_rulings();
+    validate_durable_recovery_rulings(&rulings)
+        .expect("committed durable recovery rulings are valid");
+    rulings
+        .into_iter()
+        .find(|ruling| ruling.scenario == scenario)
+        .unwrap_or_else(|| panic!("unknown durable recovery scenario `{scenario}`"))
+        .exact
+        .exact()
+        .expect("validated exact durable recovery ruling")
+        .summary()
+}
+
 /// Return the stable execution scope used by a level-2 helper scenario.
 pub fn cold_process_turn_scope(scenario: &str) -> crate::ExecutionScope {
     let identity = ReferenceIdentity::for_scenario(scenario);
@@ -1526,14 +1715,68 @@ pub async fn cold_process_real_turn_driver(
         "turn_effect_after_external" => ColdProcessTurnAction::EffectAfterExternalBeforeOutcome,
         "turn_final_commit_boundary" => ColdProcessTurnAction::FinalCommitBoundary,
         "turn_final_commit_inside" => ColdProcessTurnAction::FinalCommitInsideCall,
+        "turn_checkpoint_after_execute_before_outcome" => {
+            ColdProcessTurnAction::CheckpointAfterExecuteBeforeOutcome
+        }
+        "turn_recover_final_commit_boundary" => ColdProcessTurnAction::RecoverFinalCommitBoundary,
+        "turn_peer_reclaim" => ColdProcessTurnAction::PeerReclaim,
         "turn_recover" => ColdProcessTurnAction::Recover,
         other => panic!("unknown cold-process real-turn action `{other}`"),
     };
     let identity = ReferenceIdentity::for_scenario(scenario);
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    if action != ColdProcessTurnAction::Recover {
+    let recovers_existing_turn = matches!(
+        action,
+        ColdProcessTurnAction::Recover
+            | ColdProcessTurnAction::RecoverFinalCommitBoundary
+            | ColdProcessTurnAction::PeerReclaim
+    );
+    if !recovers_existing_turn {
         seed_reference_ingress(&store, &identity).await;
+    } else if action == ColdProcessTurnAction::PeerReclaim {
+        let owner =
+            LeaseOwnerIdentity::opaque("cold-process-peer", format!("{scenario}:peer-reclaim"));
+        let lease = tokio::time::timeout(RECOVERY_TIMEOUT, async {
+            loop {
+                super::bind_conformance_session(&store, &identity.session_id).await;
+                let outcome = store
+                    .try_claim_session_execution_lease(
+                        &identity.session_id,
+                        &owner,
+                        recovery_timings().ttl_ms(),
+                    )
+                    .await
+                    .expect("poll peer-reclaim lease");
+                if let Some(lease) = outcome.acquired() {
+                    break lease;
+                }
+                tokio::time::sleep(recovery_timings().renew_interval()).await;
+            }
+        })
+        .await
+        .expect("peer can acquire crashed turn lease");
+        let claim = store
+            .claim_ready_queued_work(
+                &identity.session_id,
+                &lease.fence(),
+                &owner,
+                crate::QueuedWorkClaimBoundary::Idle,
+                64,
+            )
+            .await
+            .expect("peer reclaims queued-work row")
+            .expect("crashed turn left one queued-work row");
+        assert_eq!(claim.batches.len(), 1, "peer reclaims exactly one row");
+        store
+            .release_session_execution_lease(&lease.completion())
+            .await
+            .expect("release peer lease without settling peer row");
+        println!(
+            "peer_claim row={} claim={} generation={}",
+            claim.batches[0].batch_id, claim.claim_id, claim.session_lease_generation
+        );
+        return;
     } else {
         let owner = LeaseOwnerIdentity::opaque(
             "cold-process-recovery-probe",
@@ -1585,11 +1828,25 @@ pub async fn cold_process_real_turn_driver(
     } else {
         control.clear();
     }
+    let effect_controller: Arc<dyn RuntimeEffectController> =
+        if action == ColdProcessTurnAction::CheckpointAfterExecuteBeforeOutcome {
+            Arc::new(CrashAfterCheckpointExecutionController {
+                inner: effect_controller,
+            })
+        } else {
+            effect_controller
+        };
     let task_identity = identity.clone();
     let task =
         crate::task::spawn(
             async move { drive_turn(runtime, effect_controller, &task_identity).await },
         );
+    if action == ColdProcessTurnAction::CheckpointAfterExecuteBeforeOutcome {
+        let result = task.await;
+        panic!(
+            "checkpoint crash controller returned instead of terminating the process: {result:?}"
+        );
+    }
     if action != ColdProcessTurnAction::Recover {
         control.wait_for_hit().await;
         println!("crash_ready");
@@ -1667,6 +1924,8 @@ where
     let table = turn_crash_matrix_outcomes();
     validate_outcome_table(&generated, &table)
         .unwrap_or_else(|error| panic!("invalid turn crash outcome table: {error}"));
+    validate_durable_recovery_rulings(&durable_recovery_rulings())
+        .unwrap_or_else(|error| panic!("invalid durable recovery rulings: {error}"));
 }
 
 async fn wait_for_recovery_lease<F>(make: &F, scenario: &str)
@@ -1817,11 +2076,35 @@ where
 mod tests {
     use super::*;
 
+    fn install_known_defect_fixture(table: &mut [TurnCrashOutcome]) -> &mut KnownDefectExpectation {
+        let entry = table
+            .iter_mut()
+            .find(|entry| entry.level_2.is_some())
+            .expect("level-2 row");
+        let expectation = entry.level_2.as_mut().expect("level-2 expectation");
+        expectation.exact = None;
+        expectation.known_defect = Some(KnownDefectExpectation {
+            ticket: "FIG-999".to_string(),
+            expected_defective: DurableEndStateExpectation {
+                terminal: Some(1),
+                pending_inputs: Some(0),
+                queued_work: Some(1),
+            },
+        });
+        entry.outcome = "KNOWN-DEFECT FIG-999; correct durable end state terminal=1, pending_inputs=0, queued_work=0".to_string();
+        expectation
+            .known_defect
+            .as_mut()
+            .expect("installed known-defect fixture")
+    }
+
     #[test]
     fn golden_trace_generates_exactly_the_reviewed_outcome_table() {
         let generated = generated_points(&golden_trace());
         let table = turn_crash_matrix_outcomes();
         validate_outcome_table(&generated, &table).expect("committed table is valid");
+        validate_durable_recovery_rulings(&durable_recovery_rulings())
+            .expect("committed durable recovery rulings are valid");
     }
 
     #[test]
@@ -1869,10 +2152,11 @@ mod tests {
     fn outcome_validation_rejects_a_known_defect_without_a_ticket() {
         let generated = generated_points(&golden_trace());
         let mut table = turn_crash_matrix_outcomes();
-        let defect = table
-            .iter_mut()
-            .find_map(|entry| entry.level_2.as_mut()?.known_defect.as_mut())
-            .expect("committed known-defect row");
+        assert!(
+            validate_outcome_table(&generated, &table).is_ok(),
+            "the synthetic defect test must start from a valid oracle"
+        );
+        let defect = install_known_defect_fixture(&mut table);
         defect.ticket.clear();
         assert!(
             validate_outcome_table(&generated, &table).is_err(),
@@ -1884,10 +2168,11 @@ mod tests {
     fn outcome_validation_rejects_a_non_exact_known_defect() {
         let generated = generated_points(&golden_trace());
         let mut table = turn_crash_matrix_outcomes();
-        let defect = table
-            .iter_mut()
-            .find_map(|entry| entry.level_2.as_mut()?.known_defect.as_mut())
-            .expect("committed known-defect row");
+        assert!(
+            validate_outcome_table(&generated, &table).is_ok(),
+            "the synthetic defect test must start from a valid oracle"
+        );
+        let defect = install_known_defect_fixture(&mut table);
         defect.expected_defective.queued_work = None;
         assert!(
             validate_outcome_table(&generated, &table).is_err(),

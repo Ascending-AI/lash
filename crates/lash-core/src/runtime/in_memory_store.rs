@@ -62,58 +62,6 @@ struct InMemoryPendingTurnInput {
     claim_session_lease_generation: u64,
 }
 
-impl InMemoryPendingTurnInput {
-    fn claim_diagnostics(&self) -> Option<crate::PendingTurnInputClaimDiagnostics> {
-        (self.claim_id.is_some() || matches!(self.input.state, crate::TurnInputState::Accepted))
-            .then(|| crate::PendingTurnInputClaimDiagnostics {
-                state: self.input.state,
-                claim_id: self.claim_id.clone(),
-                claim_owner: self.claim_owner.clone(),
-                claim_session_lease_generation: self
-                    .claim_token
-                    .as_ref()
-                    .map(|_| self.claim_session_lease_generation),
-                claim_fencing_token: self.claim_fencing_token,
-            })
-    }
-
-    fn clear_claim(&mut self) {
-        self.claim_id = None;
-        self.claim_token = None;
-        self.claim_owner = None;
-        self.claim_session_lease_generation = 0;
-    }
-
-    fn cancel_outcome(&mut self, claim_is_live: bool) -> crate::PendingTurnInputCancelOutcome {
-        match self.input.state {
-            crate::TurnInputState::Cancelled => {
-                crate::PendingTurnInputCancelOutcome::AlreadyCancelled(self.input.clone())
-            }
-            crate::TurnInputState::Completed => {
-                crate::PendingTurnInputCancelOutcome::AlreadyCompleted(self.input.clone())
-            }
-            crate::TurnInputState::Accepted => {
-                crate::PendingTurnInputCancelOutcome::AlreadyClaimed {
-                    input: self.input.clone(),
-                    claim: self.claim_diagnostics(),
-                }
-            }
-            crate::TurnInputState::PendingActive | crate::TurnInputState::DeferredNextTurn => {
-                if self.claim_token.is_some() && claim_is_live {
-                    crate::PendingTurnInputCancelOutcome::AlreadyClaimed {
-                        input: self.input.clone(),
-                        claim: self.claim_diagnostics(),
-                    }
-                } else {
-                    self.input.state = crate::TurnInputState::Cancelled;
-                    self.clear_claim();
-                    crate::PendingTurnInputCancelOutcome::Cancelled(self.input.clone())
-                }
-            }
-        }
-    }
-}
-
 impl InMemorySessionExecutionLease {
     fn is_live(&self, now: u64) -> bool {
         self.lease_token.is_some() && self.expires_at_epoch_ms > now
@@ -605,12 +553,15 @@ impl InMemorySessionStore {
                             turn_id,
                             checkpoint,
                         } => {
-                            entry.input.state == crate::TurnInputState::PendingActive
-                                && entry
-                                    .input
-                                    .ingress
-                                    .active_turn_id()
-                                    .is_some_and(|active| active == turn_id)
+                            matches!(
+                                entry.input.state,
+                                crate::TurnInputState::PendingActive
+                                    | crate::TurnInputState::Accepted
+                            ) && entry
+                                .input
+                                .ingress
+                                .active_turn_id()
+                                .is_some_and(|active| active == turn_id)
                                 && entry.input.ingress.admits_checkpoint(*checkpoint)
                         }
                         crate::TurnInputClaimMode::NextTurn => {
@@ -676,7 +627,10 @@ impl InMemorySessionStore {
                 .iter()
                 .any(|entry| {
                     entry.input.session_id == session_id
-                        && entry.input.state == crate::TurnInputState::PendingActive
+                        && matches!(
+                            entry.input.state,
+                            crate::TurnInputState::PendingActive | crate::TurnInputState::Accepted
+                        )
                         && (entry.claim_token.is_none()
                             || entry.claim_session_lease_generation != generation)
                         && entry
@@ -1111,9 +1065,34 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     })
                     .count();
                 if matches != completed.batch_ids.len() {
+                    let row_id = completed.batch_ids.iter().find(|batch_id| {
+                        !queued.iter().any(|entry| {
+                            entry.batch.session_id == completed.session_id
+                                && entry.batch.batch_id == **batch_id
+                                && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
+                                && entry.claim_token.as_deref()
+                                    == Some(completed.lease_token.as_str())
+                        })
+                    });
+                    let current = row_id.and_then(|batch_id| {
+                        queued.iter().find(|entry| {
+                            entry.batch.session_id == completed.session_id
+                                && entry.batch.batch_id == *batch_id
+                        })
+                    });
                     return Err(crate::store::StoreError::QueuedWorkClaimSuperseded {
                         session_id: completed.session_id.clone(),
                         claim_id: completed.claim_id.clone(),
+                        row_id: row_id.cloned().map(String::into_boxed_str),
+                        superseding_claim_id: current
+                            .and_then(|entry| entry.claim_id.clone())
+                            .map(String::into_boxed_str),
+                        superseding_session_lease_generation: current.and_then(|entry| {
+                            entry
+                                .claim_token
+                                .as_ref()
+                                .map(|_| Box::new(entry.claim_session_lease_generation))
+                        }),
                     });
                 }
             }
@@ -1134,9 +1113,34 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     })
                     .count();
                 if matches != completed.input_ids.len() {
+                    let row_id = completed.input_ids.iter().find(|input_id| {
+                        !pending.iter().any(|entry| {
+                            entry.input.session_id == completed.session_id
+                                && entry.input.input_id == **input_id
+                                && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
+                                && entry.claim_token.as_deref()
+                                    == Some(completed.lease_token.as_str())
+                        })
+                    });
+                    let current = row_id.and_then(|input_id| {
+                        pending.iter().find(|entry| {
+                            entry.input.session_id == completed.session_id
+                                && entry.input.input_id == *input_id
+                        })
+                    });
                     return Err(crate::store::StoreError::TurnInputClaimSuperseded {
                         session_id: completed.session_id.clone(),
                         claim_id: completed.claim_id.clone(),
+                        row_id: row_id.cloned().map(String::into_boxed_str),
+                        superseding_claim_id: current
+                            .and_then(|entry| entry.claim_id.clone())
+                            .map(String::into_boxed_str),
+                        superseding_session_lease_generation: current.and_then(|entry| {
+                            entry
+                                .claim_token
+                                .as_ref()
+                                .map(|_| Box::new(entry.claim_session_lease_generation))
+                        }),
                     });
                 }
             }

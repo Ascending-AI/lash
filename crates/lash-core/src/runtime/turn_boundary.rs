@@ -14,6 +14,8 @@ use super::{RuntimeError, RuntimeSessionState, TurnCommitDraft, merge_ledger_ent
 
 mod materialize;
 use materialize::*;
+mod settlement;
+use settlement::*;
 
 #[derive(Debug)]
 pub(super) struct ProgressBoundaryResult {
@@ -71,6 +73,9 @@ struct FinalCommitInput<'a> {
     originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
     completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
     completed_turn_input_claims: Vec<crate::TurnInputCompletion>,
+    queue_claim_generations: std::collections::HashMap<String, u64>,
+    turn_input_claim_generations: std::collections::HashMap<String, u64>,
+    current_session_lease_generation: Option<u64>,
     enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
     interrupted_turn_input_turn_id: Option<String>,
     session_execution_lease_completion: Option<crate::SessionExecutionLeaseCompletion>,
@@ -273,6 +278,9 @@ impl TurnBoundary {
         originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
         completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
         completed_turn_input_claims: Vec<crate::TurnInputCompletion>,
+        queue_claim_generations: std::collections::HashMap<String, u64>,
+        turn_input_claim_generations: std::collections::HashMap<String, u64>,
+        current_session_lease_generation: Option<u64>,
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<String>,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseCompletion>,
@@ -305,6 +313,9 @@ impl TurnBoundary {
                 originating_turn_input_claims,
                 completed_queue_claims,
                 completed_turn_input_claims,
+                queue_claim_generations,
+                turn_input_claim_generations,
+                current_session_lease_generation,
                 enqueued_queue_batches,
                 interrupted_turn_input_turn_id,
                 session_execution_lease_completion,
@@ -376,6 +387,9 @@ impl TurnBoundary {
             originating_turn_input_claims,
             completed_queue_claims,
             completed_turn_input_claims,
+            queue_claim_generations,
+            turn_input_claim_generations,
+            current_session_lease_generation,
             enqueued_queue_batches,
             interrupted_turn_input_turn_id,
             session_execution_lease_completion,
@@ -409,6 +423,9 @@ impl TurnBoundary {
                 originating_turn_input_claims,
                 completed_queue_claims,
                 completed_turn_input_claims,
+                queue_claim_generations,
+                turn_input_claim_generations,
+                current_session_lease_generation,
                 enqueued_queue_batches,
                 interrupted_turn_input_turn_id,
                 committed_attachment_ids,
@@ -434,10 +451,13 @@ impl TurnBoundary {
         mut graph: GraphAppend,
         usage_deltas: &[crate::store::RuntimeUsageDelta],
         operation: crate::OperationId,
-        originating_queue_claims: Vec<crate::QueuedWorkCompletion>,
-        originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
+        mut originating_queue_claims: Vec<crate::QueuedWorkCompletion>,
+        mut originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
         completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
         completed_turn_input_claims: Vec<crate::TurnInputCompletion>,
+        queue_claim_generations: std::collections::HashMap<String, u64>,
+        turn_input_claim_generations: std::collections::HashMap<String, u64>,
+        current_session_lease_generation: Option<u64>,
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<String>,
         committed_attachment_ids: Vec<crate::AttachmentId>,
@@ -488,11 +508,50 @@ impl TurnBoundary {
         }
         commit.completed_queue_claims = completed_queue_claims;
         commit.completed_turn_input_claims = completed_turn_input_claims;
-        commit
-            .validate_claim_settlement(&originating_queue_claims, &originating_turn_input_claims)?;
         commit.enqueued_queue_batches = enqueued_queue_batches;
         commit.interrupted_turn_input_turn_id = interrupted_turn_input_turn_id;
-        let result = crate::store::commit_runtime_state_verified(store, commit).await?;
+        let can_retry_recovered_settlement =
+            current_session_lease_generation.is_some_and(|current| {
+                queue_claim_generations
+                    .values()
+                    .chain(turn_input_claim_generations.values())
+                    .any(|generation| *generation < current)
+            });
+        let result = if can_retry_recovered_settlement {
+            loop {
+                commit.validate_claim_settlement(
+                    &originating_queue_claims,
+                    &originating_turn_input_claims,
+                )?;
+                match crate::store::commit_runtime_state_verified(store, commit.clone()).await {
+                    Ok(result) => break result,
+                    Err(err) => {
+                        let dropped = drop_superseded_recovered_queue_settlement(
+                            &err,
+                            &queue_claim_generations,
+                            current_session_lease_generation,
+                            &mut commit.completed_queue_claims,
+                            &mut originating_queue_claims,
+                        ) || drop_superseded_recovered_turn_input_settlement(
+                            &err,
+                            &turn_input_claim_generations,
+                            current_session_lease_generation,
+                            &mut commit.completed_turn_input_claims,
+                            &mut originating_turn_input_claims,
+                        );
+                        if !dropped {
+                            return Err(err);
+                        }
+                    }
+                }
+            }
+        } else {
+            commit.validate_claim_settlement(
+                &originating_queue_claims,
+                &originating_turn_input_claims,
+            )?;
+            crate::store::commit_runtime_state_verified(store, commit).await?
+        };
         let enqueued_queue_batches = result.enqueued_queue_batches.clone();
         let committed_usage_delta_identities = result.committed_usage_delta_identities.clone();
         state.apply_persisted_commit_result(result);
@@ -1041,6 +1100,9 @@ mod tests {
                 originating_turn_input_claims: Vec::new(),
                 completed_queue_claims: Vec::new(),
                 completed_turn_input_claims: Vec::new(),
+                queue_claim_generations: std::collections::HashMap::new(),
+                turn_input_claim_generations: std::collections::HashMap::new(),
+                current_session_lease_generation: None,
                 enqueued_queue_batches: Vec::new(),
                 interrupted_turn_input_turn_id: None,
                 session_execution_lease_completion: None,
@@ -1101,6 +1163,9 @@ mod tests {
                 originating_turn_input_claims: Vec::new(),
                 completed_queue_claims: Vec::new(),
                 completed_turn_input_claims: Vec::new(),
+                queue_claim_generations: std::collections::HashMap::new(),
+                turn_input_claim_generations: std::collections::HashMap::new(),
+                current_session_lease_generation: None,
                 enqueued_queue_batches: Vec::new(),
                 interrupted_turn_input_turn_id: None,
                 session_execution_lease_completion: None,
@@ -1238,6 +1303,9 @@ mod tests {
                 originating_turn_input_claims: Vec::new(),
                 completed_queue_claims: Vec::new(),
                 completed_turn_input_claims: Vec::new(),
+                queue_claim_generations: std::collections::HashMap::new(),
+                turn_input_claim_generations: std::collections::HashMap::new(),
+                current_session_lease_generation: None,
                 enqueued_queue_batches: Vec::new(),
                 interrupted_turn_input_turn_id: None,
                 session_execution_lease_completion: None,
@@ -1252,6 +1320,116 @@ mod tests {
         assert_eq!(pipeline.state_mut().token_ledger.len(), 2);
         assert!(pipeline.state_mut().execution_state_snapshot().is_none());
         assert!(pipeline.state_mut().head_revision > 0);
+    }
+
+    #[tokio::test]
+    async fn recovered_final_commit_drops_only_the_peer_superseded_queue_row() {
+        let store = RecordingStore::default();
+        let graph = SessionGraph::from_active_read_state(&[text_message(
+            "u0",
+            MessageRole::User,
+            "recovered content",
+        )]);
+        let state = state_with_graph(graph);
+        let (mut pipeline, predecessor_lease) = leased_boundary(&store, state).await;
+        let batch = crate::QueuedWorkStore::enqueue_queued_work(
+            &store,
+            crate::QueuedWorkBatchDraft::new(
+                "session-1",
+                crate::DeliveryPolicy::EarliestSafeBoundary,
+                crate::SlotPolicy::Exclusive,
+                vec![crate::QueuedWorkPayload::agent_frame_task(
+                    "fig905-frame",
+                    "peer-owned row",
+                    None,
+                )],
+            ),
+        )
+        .await
+        .expect("enqueue FIG-905 row");
+        let predecessor_claim = crate::QueuedWorkStore::claim_ready_queued_work(
+            &store,
+            "session-1",
+            &predecessor_lease.fence(),
+            &predecessor_lease.owner,
+            crate::QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
+            64,
+        )
+        .await
+        .expect("claim predecessor row")
+        .expect("predecessor claim exists");
+        assert_eq!(predecessor_claim.batches[0].batch_id, batch.batch_id);
+        store
+            .release_session_execution_lease(&predecessor_lease.completion())
+            .await
+            .expect("release crashed predecessor lease");
+
+        let peer_owner = lease_owner("fig905-peer");
+        let peer_lease = store
+            .try_claim_session_execution_lease("session-1", &peer_owner, 60_000)
+            .await
+            .expect("claim peer lease")
+            .acquired()
+            .expect("peer lease acquired");
+        let peer_claim = crate::QueuedWorkStore::claim_ready_queued_work(
+            &store,
+            "session-1",
+            &peer_lease.fence(),
+            &peer_owner,
+            crate::QueuedWorkClaimBoundary::Idle,
+            64,
+        )
+        .await
+        .expect("peer reclaims row")
+        .expect("peer claim exists");
+        store
+            .release_session_execution_lease(&peer_lease.completion())
+            .await
+            .expect("release peer lease without settling its row");
+
+        let recovery_owner = lease_owner("fig905-recovery");
+        let recovery_lease = store
+            .try_claim_session_execution_lease("session-1", &recovery_owner, 60_000)
+            .await
+            .expect("claim recovery lease")
+            .acquired()
+            .expect("recovery lease acquired");
+        let returned_state = pipeline.export_state_for_assembly();
+        pipeline
+            .final_commit_with_snapshots(FinalCommitInput {
+                returned_state: &returned_state,
+                tool_calls: &[],
+                plugins: None,
+                execution_state_snapshot: None,
+                store: Some(&store),
+                usage_deltas: &[],
+                outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
+                originating_queue_claims: vec![predecessor_claim.completion()],
+                originating_turn_input_claims: Vec::new(),
+                completed_queue_claims: vec![predecessor_claim.completion()],
+                completed_turn_input_claims: Vec::new(),
+                queue_claim_generations: std::iter::once((
+                    predecessor_claim.claim_id.clone(),
+                    predecessor_claim.session_lease_generation,
+                ))
+                .collect(),
+                turn_input_claim_generations: std::collections::HashMap::new(),
+                current_session_lease_generation: Some(recovery_lease.fencing_token),
+                enqueued_queue_batches: Vec::new(),
+                interrupted_turn_input_turn_id: None,
+                session_execution_lease_completion: Some(recovery_lease.completion()),
+            })
+            .await
+            .expect("recovered commit drops stale settlement and reaches terminal state");
+
+        let queued = crate::QueuedWorkStore::list_queued_work(&store, "session-1")
+            .await
+            .expect("list peer-owned row");
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].batch_id, peer_claim.batches[0].batch_id);
+        let raw = store.raw_queued_work_for_testing();
+        assert_eq!(raw.len(), 1);
+        assert_eq!(raw[0].5, Some(peer_claim.session_lease_generation));
     }
 
     #[tokio::test]
@@ -1291,6 +1469,9 @@ mod tests {
                 originating_turn_input_claims: Vec::new(),
                 completed_queue_claims: Vec::new(),
                 completed_turn_input_claims: Vec::new(),
+                queue_claim_generations: std::collections::HashMap::new(),
+                turn_input_claim_generations: std::collections::HashMap::new(),
+                current_session_lease_generation: None,
                 enqueued_queue_batches: Vec::new(),
                 interrupted_turn_input_turn_id: None,
                 session_execution_lease_completion: None,
@@ -1318,6 +1499,9 @@ mod tests {
                 originating_turn_input_claims: vec![turn_input_origin],
                 completed_queue_claims: Vec::new(),
                 completed_turn_input_claims: Vec::new(),
+                queue_claim_generations: std::collections::HashMap::new(),
+                turn_input_claim_generations: std::collections::HashMap::new(),
+                current_session_lease_generation: None,
                 enqueued_queue_batches: Vec::new(),
                 interrupted_turn_input_turn_id: None,
                 session_execution_lease_completion: None,
@@ -1365,6 +1549,9 @@ mod tests {
                 originating_turn_input_claims: Vec::new(),
                 completed_queue_claims: Vec::new(),
                 completed_turn_input_claims: Vec::new(),
+                queue_claim_generations: std::collections::HashMap::new(),
+                turn_input_claim_generations: std::collections::HashMap::new(),
+                current_session_lease_generation: None,
                 enqueued_queue_batches: Vec::new(),
                 interrupted_turn_input_turn_id: None,
                 session_execution_lease_completion: None,

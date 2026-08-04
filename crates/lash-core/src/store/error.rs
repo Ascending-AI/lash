@@ -114,18 +114,24 @@ pub enum StoreError {
     )]
     MissingFrameOpenAncestor { leaf_node_id: String },
     #[error(
-        "queued work claim `{claim_id}` for session `{session_id}` is superseded by a newer session-lease generation"
+        "queued work claim `{claim_id}` for session `{session_id}` is superseded at row {row_id:?} by claim {superseding_claim_id:?} in session-lease generation {superseding_session_lease_generation:?}"
     )]
     QueuedWorkClaimSuperseded {
         session_id: String,
         claim_id: String,
+        row_id: Option<Box<str>>,
+        superseding_claim_id: Option<Box<str>>,
+        superseding_session_lease_generation: Option<Box<u64>>,
     },
     #[error(
-        "turn input claim `{claim_id}` for session `{session_id}` is superseded by a newer session-lease generation"
+        "turn input claim `{claim_id}` for session `{session_id}` is superseded at row {row_id:?} by claim {superseding_claim_id:?} in session-lease generation {superseding_session_lease_generation:?}"
     )]
     TurnInputClaimSuperseded {
         session_id: String,
         claim_id: String,
+        row_id: Option<Box<str>>,
+        superseding_claim_id: Option<Box<str>>,
+        superseding_session_lease_generation: Option<Box<u64>>,
     },
     #[error(
         "runtime commit for session `{session_id}` includes queued-work-derived content without settling claim `{claim_id}`"

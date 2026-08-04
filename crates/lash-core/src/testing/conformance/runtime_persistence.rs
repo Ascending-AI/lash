@@ -224,6 +224,7 @@ where
     pending_turn_input_claims_reclaim_complete_and_fence(make()).await;
     turn_input_application_identity_survives_pending_tombstone_vacuum(make()).await;
     turn_input_claims_supersede_across_session_lease_generations(make()).await;
+    active_turn_input_claim_reacquires_after_unrecorded_checkpoint(make()).await;
     pending_turn_input_cancel_covers_active_and_deferred_states(make()).await;
     pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make()).await;
 }
@@ -3126,10 +3127,21 @@ pub async fn queued_work_claims_supersede_across_session_lease_generations(
         )
         .await
         .expect_err("superseded-generation completion must fail");
-    assert!(matches!(
-        stale_err,
-        StoreError::QueuedWorkClaimSuperseded { .. }
-    ));
+    assert!(
+        matches!(
+            stale_err,
+            StoreError::QueuedWorkClaimSuperseded {
+                ref row_id,
+                ref superseding_claim_id,
+                ref superseding_session_lease_generation,
+                ..
+            } if row_id.as_deref() == Some(batch.batch_id.as_str())
+                && superseding_claim_id.as_deref() == Some(claim_b.claim_id.as_str())
+                && superseding_session_lease_generation.as_deref()
+                    == Some(&claim_b.session_lease_generation)
+        ),
+        "a superseded queued-work completion must report the row and current authority: {stale_err:?}"
+    );
     assert_eq!(
         persisted_session_read_snapshot(
             store
@@ -4828,6 +4840,94 @@ pub async fn turn_input_claims_supersede_across_session_lease_generations(
         takeover_err,
         StoreError::TurnInputClaimSuperseded { .. }
     ));
+}
+
+/// A checkpoint executor can durably move an active input to `accepted` and
+/// crash before its effect outcome journals the claim. The successor must be
+/// able to reacquire that same turn/input pair under its newer generation.
+pub async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    const SESSION_ID: &str = "fig905-active-reacquire";
+    const TURN_ID: &str = "fig905-active-reacquire:turn";
+    let input = store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            SESSION_ID,
+            TURN_ID,
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "accepted before checkpoint outcome",
+        ))
+        .await
+        .expect("enqueue active input");
+
+    let predecessor =
+        claim_session_execution_lease_for_test(&store, SESSION_ID, "fig905-active-predecessor")
+            .await;
+    let predecessor_claim = store
+        .claim_active_turn_inputs(
+            SESSION_ID,
+            &predecessor.fence(),
+            &lease_owner("fig905-active-predecessor"),
+            TURN_ID,
+            crate::CheckpointKind::AfterWork,
+            10,
+        )
+        .await
+        .expect("claim active input before simulated crash")
+        .expect("active input claim exists");
+    assert_eq!(
+        predecessor_claim.inputs[0].state,
+        crate::TurnInputState::Accepted
+    );
+    release_session_execution_lease_for_test(&store, &predecessor).await;
+
+    let successor =
+        claim_session_execution_lease_for_test(&store, SESSION_ID, "fig905-active-successor").await;
+    let (successor_claim, queued_claim) = store
+        .claim_checkpoint_work(
+            SESSION_ID,
+            &successor.fence(),
+            &lease_owner("fig905-active-successor"),
+            TURN_ID,
+            crate::CheckpointKind::AfterWork,
+            10,
+            10,
+        )
+        .await
+        .expect("reacquire accepted input after unrecorded checkpoint");
+    let successor_claim = successor_claim.expect("successor reacquires accepted input");
+    assert!(
+        queued_claim.is_none(),
+        "accepted-only checkpoint fixture must not rely on queued work to open the claim path"
+    );
+    assert_eq!(successor_claim.inputs[0].input_id, input.input_id);
+    assert!(successor_claim.session_lease_generation > predecessor_claim.session_lease_generation);
+    assert!(successor_claim.fencing_token > predecessor_claim.fencing_token);
+
+    let stale_state = RuntimeSessionState {
+        session_id: SESSION_ID.to_string(),
+        ..RuntimeSessionState::default()
+    };
+    let stale_error = store
+        .commit_runtime_state(
+            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
+                .completing_turn_input_claim(predecessor_claim.completion()),
+        )
+        .await
+        .expect_err("reacquisition supersedes the unjournaled predecessor claim");
+    assert!(matches!(
+        stale_error,
+        StoreError::TurnInputClaimSuperseded { .. }
+    ));
+
+    store
+        .commit_runtime_state(
+            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
+                .releasing_session_execution_lease(successor.completion())
+                .completing_turn_input_claim(successor_claim.completion()),
+        )
+        .await
+        .expect("successor settles reacquired active input");
 }
 
 async fn pending_turn_input_cancel_covers_active_and_deferred_states(
