@@ -14,10 +14,9 @@ keywords = ["lash", "agent", "llm", "anthropic", "claude"]
 categories = ["api-bindings", "asynchronous"]
 
 [features]
-# Enables the cross-provider response-normalization conformance test, which
-# needs `lash-llm-transport`'s `testing` module. On by default so the suite
-# runs under a plain `cargo test`.
-default = ["testing"]
+# Enables public test support and the cross-provider response-normalization
+# conformance test. CI opts in explicitly; production builds keep it disabled.
+default = []
 testing = ["lash-llm-transport/testing"]
 
 [lints]
@@ -34,6 +33,6 @@ serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-lash-llm-transport = { workspace = true, features = ["proptest-support"] }
+lash-llm-transport = { workspace = true, features = ["proptest-support", "testing"] }
 proptest = "1"
 tokio = { workspace = true, features = ["rt", "time"] }

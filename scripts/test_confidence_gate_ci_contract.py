@@ -1049,6 +1049,16 @@ derive_mutation_jobs() {{
         for snippet in required_snippets:
             self.assertIn(snippet, gate)
 
+    def test_provider_conformance_is_explicitly_featured_in_ci(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        test_doc = workflow_job_block(workflow, "test-doc")
+
+        for provider in ("openai", "anthropic", "google"):
+            self.assertIn(
+                f"cargo test -p lash-provider-{provider} --features testing --locked conformance",
+                test_doc,
+            )
+
     def test_publish_time_version_injection_has_only_post_release_docs_commit(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
