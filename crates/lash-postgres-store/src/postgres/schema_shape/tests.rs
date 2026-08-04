@@ -12,10 +12,7 @@ async fn provision_scratch_schema(database_url: &str) -> (sqlx::PgConnection, St
     let mut connection = sqlx::PgConnection::connect(database_url)
         .await
         .expect("connect scratch schema");
-    let scratch = format!(
-        "lash_shape_{}",
-        uuid::Uuid::new_v4().simple().to_string()[..12].to_string()
-    );
+    let scratch = format!("lash_shape_{}", uuid::Uuid::new_v4().simple());
     sqlx::query(&format!("CREATE SCHEMA {scratch}"))
         .execute(&mut connection)
         .await

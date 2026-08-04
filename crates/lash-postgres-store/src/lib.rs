@@ -4,6 +4,23 @@
 //! implementations for the runtime session store, process registry, trigger
 //! store, Lashlang artifact store, process execution environment store, and
 //! attachment manifest.
+//!
+//! # Who provisions the schema
+//!
+//! By default lash applies its own DDL at open, which needs `CREATE` on the
+//! target schema. A host that owns its migrations instead vendors
+//! [`PostgresStorage::schema_ddl`] — the same bytes are committed as this crate's
+//! `schema.sql` — into its own tooling and opens with
+//! [`SchemaProvisioning::HostProvisioned`], which runs no DDL at all. Copy those
+//! bytes; never transcribe them.
+//!
+//! Either way, open ends by reading the live catalog and comparing it against the
+//! shape this build requires, so a database whose version stamp is right but whose
+//! tables are not is rejected at open with a per-object diff rather than failing at
+//! the first query — or silently losing a guard, which is what a dropped unique
+//! index or a dropped cascade does. [`SchemaCheck`] controls whether a mismatch is
+//! fatal, and [`PostgresStorage::verify_schema`] exposes the same check as a
+//! structured report so a host can gate its own migration CI on it. See ADR 0052.
 
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -550,7 +567,7 @@ pub use effect_replay::{
 use schema_shape::verify_schema_shape;
 pub use schema_shape::{
     ColumnShape, ForeignKeyAction, ForeignKeyShape, SchemaCheck, SchemaFinding, SchemaProvisioning,
-    SchemaReport, SchemaShape, TableShape, UniqueGuard,
+    SchemaReport, UniqueGuard,
 };
 use {process_helpers::*, runtime_persistence::*, schema::*, session_factory::*, support::*};
 

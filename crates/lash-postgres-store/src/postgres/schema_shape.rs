@@ -267,21 +267,21 @@ impl ForeignKeyShape {
 
 /// The shape of one lash-owned table.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct TableShape {
+pub(crate) struct TableShape {
     /// Columns keyed by name, so declaration order never enters the comparison.
-    pub columns: BTreeMap<String, ColumnShape>,
+    pub(crate) columns: BTreeMap<String, ColumnShape>,
     /// Every uniqueness guarantee on the table.
-    pub unique_guards: BTreeSet<UniqueGuard>,
+    pub(crate) unique_guards: BTreeSet<UniqueGuard>,
     /// Every foreign key declared on the table.
-    pub foreign_keys: BTreeSet<ForeignKeyShape>,
+    pub(crate) foreign_keys: BTreeSet<ForeignKeyShape>,
 }
 
 /// The shape of every table lash owns, as either expected by this build or read
 /// from a live database.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SchemaShape {
+pub(crate) struct SchemaShape {
     /// Tables keyed by unqualified name.
-    pub tables: BTreeMap<String, TableShape>,
+    pub(crate) tables: BTreeMap<String, TableShape>,
 }
 
 impl SchemaShape {
@@ -292,7 +292,7 @@ impl SchemaShape {
     /// Panics if the compiled-in artifact is malformed or stamped with a
     /// component version other than the one this build implements. Both are
     /// build-time defects in this crate, not host conditions.
-    pub fn expected() -> Self {
+    pub(crate) fn expected() -> Self {
         let (version, shape) =
             Self::parse(SHAPE_ARTIFACT).expect("the compiled-in schema shape artifact must parse");
         assert_eq!(
@@ -362,7 +362,11 @@ impl SchemaShape {
 
     /// Renders the artifact format. Output is fully sorted, so regenerating an
     /// unchanged schema is a byte-identical no-op.
-    pub fn render(&self, version: i32) -> String {
+    ///
+    /// Rendering exists to regenerate the committed artifact from a live database;
+    /// nothing at runtime ever writes the format, only parses it.
+    #[cfg(test)]
+    pub(crate) fn render(&self, version: i32) -> String {
         let mut out = String::new();
         out.push_str(ARTIFACT_HEADER);
         out.push_str(&format!("version {version}\n"));
@@ -424,6 +428,7 @@ impl SchemaShape {
     }
 }
 
+#[cfg(test)]
 const ARTIFACT_HEADER: &str = "\
 # lash-postgres-store expected schema shape.
 #
