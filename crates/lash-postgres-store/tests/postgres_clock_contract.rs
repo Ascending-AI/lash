@@ -469,7 +469,7 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
 /// this row is not atomic under READ COMMITTED. If the *diagnostic* read joined
 /// them, an operator polling a stuck session would queue behind (and make wait)
 /// the very holder or claimant they are trying to observe: watching the lease
-/// would delay the lane. This proves both halves — the query plans no `LockRows`,
+/// would delay the lane. This proves both halves: the query plans no `LockRows`,
 /// and the read completes promptly while another connection holds the row locked.
 #[tokio::test]
 async fn diagnostic_lease_read_neither_locks_the_row_nor_waits_for_a_holder() {
