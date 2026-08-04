@@ -35,6 +35,36 @@ pub async fn attachment_store_reopenable<F>(
     attachment_store_survives_reopen(make()).await;
 }
 
+/// Hold a namespaced backend to the [`AttachmentStore`] malformed-id contract.
+///
+/// This is separate from [`attachment_store`] because pure in-memory stores do
+/// not derive storage paths or object keys from ids and therefore have no
+/// namespace boundary to enforce.
+#[cfg(test)]
+pub(crate) async fn attachment_store_rejects_malformed_ids(store: Arc<dyn AttachmentStore>) {
+    let malformed = AttachmentId::new("../outside");
+
+    let get_error = store
+        .get(&malformed)
+        .await
+        .expect_err("malformed attachment get must fail");
+    let delete_error = store
+        .delete(&malformed)
+        .await
+        .expect_err("malformed attachment delete must fail");
+    let head_error = store
+        .head(&malformed)
+        .await
+        .expect_err("malformed attachment head must fail");
+
+    for error in [get_error, delete_error, head_error] {
+        assert!(
+            matches!(error, AttachmentStoreError::NotFound(ref rejected) if rejected == &malformed),
+            "malformed attachment id must map to NotFound, got {error:?}"
+        );
+    }
+}
+
 fn attachment_meta() -> AttachmentCreateMeta {
     AttachmentCreateMeta::new(
         MediaType::parse("image/png").unwrap(),
