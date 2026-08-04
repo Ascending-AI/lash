@@ -11,6 +11,8 @@ use lash_sqlite_store::{
 
 #[path = "../../../lash-core/tests/support/cold_process_effect_driver.rs"]
 mod cold_process_effect_driver;
+#[path = "../../../lash-core/tests/support/cold_process_turn_driver.rs"]
+mod cold_process_turn_driver;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,6 +20,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database = PathBuf::from(args.next().ok_or("missing SQLite database path")?);
     let action = args.next().ok_or("missing action or identity")?;
     let nonce = args.next().ok_or("missing vector nonce")?;
+    if matches!(
+        action.as_str(),
+        "turn_provider_mid_stream"
+            | "turn_provider_after_tool_mid_stream"
+            | "turn_effect_after_external"
+            | "turn_final_commit_boundary"
+            | "turn_final_commit_inside"
+            | "turn_recover"
+    ) {
+        let marker = args.next().map(PathBuf::from);
+        if args.next().is_some() {
+            return Err("unexpected helper arguments".into());
+        }
+        return run_turn_action(&database, &action, &nonce, marker).await;
+    }
     if action.starts_with("effect_") {
         let marker = PathBuf::from(args.next().ok_or("missing effect marker path")?);
         if args.next().is_some() {
@@ -72,6 +89,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     waiter.await??;
     Ok(())
+}
+
+async fn run_turn_action(
+    database: &std::path::Path,
+    action: &str,
+    nonce: &str,
+    marker: Option<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let store = Arc::new(lash_sqlite_store::Store::open(database).await?)
+        as Arc<dyn lash_core::RuntimePersistence>;
+    let effect_database = database.with_extension("effects.db");
+    let scope = lash_core::testing::conformance::cold_process_turn_scope(nonce);
+    let controller = Arc::new(
+        SqliteRuntimeEffectController::open_with_options(
+            &effect_database,
+            scope,
+            SqliteEffectReplayOptions {
+                lease_timings: lash_core::facade_support::LeaseTimings::new(
+                    cold_process_effect_driver::RECOVERY_TTL,
+                    cold_process_effect_driver::RECOVERY_RENEW,
+                )?,
+            },
+        )
+        .await?,
+    );
+    cold_process_turn_driver::run_real_turn_action(store, controller, action, nonce, marker).await
 }
 
 async fn run_effect_action(
