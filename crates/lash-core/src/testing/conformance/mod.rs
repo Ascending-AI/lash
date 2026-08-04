@@ -197,7 +197,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn in_memory_runtime_persistence_state_machine_properties() {
         runtime_persistence_state_machine("in-memory", |_| async {
-            Arc::new(crate::InMemorySessionStore::default()) as Arc<dyn RuntimePersistence>
+            RuntimePersistenceStateMachineHandles::create(Arc::new(
+                crate::InMemorySessionStoreFactory::new(),
+            ))
+            .await
+            .expect("create in-memory runtime-persistence property handles")
         })
         .await;
     }
