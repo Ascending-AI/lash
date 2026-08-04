@@ -144,8 +144,8 @@ Release-Notes:
   must recreate their stores (and the effect journal alongside them); lash
   maintains no migration chain.
 - Adopting this release is forward-only. Once stores are recreated, the previous
-  version refuses to open them and will not boot — there is no rollback and no
-  restore procedure. Recovery from a failed bump is fix-forward.
+  version refuses to open them and will not boot. There is no rollback and no
+  restore procedure; recovery from a failed bump is fix-forward.
 - Pre-flight checklist and the store/journal coupling: docs `operations.html`,
   "Bumping lash".
 ```
