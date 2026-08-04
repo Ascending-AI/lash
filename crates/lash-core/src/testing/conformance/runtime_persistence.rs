@@ -1137,6 +1137,34 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         ),
         "stale release must not clear the live lease"
     );
+    // A completion identifies the lease *slot*, not one grant: the
+    // same-incarnation re-entry above returned the identical owner, token and
+    // fence, so releasing a completion retained from before that re-entry
+    // clears the *successor's* live lease and no backend predicate can tell the
+    // two apart. lash-core relies on this: a `SessionExecutionLeaseGuard` never
+    // releases out of band (a dropped guard leaves the lease to TTL), because
+    // only a guard that still tracks the lease knows the release is its own.
+    // Rotating the lease token on every claim would make stale completions
+    // distinguishable and is the change to make here if that behavior is ever
+    // wanted — it must be a deliberate, suite-wide decision.
+    let retained_stale_completion = first.completion();
+    store
+        .release_session_execution_lease(&retained_stale_completion)
+        .await
+        .expect("release with a completion retained across a same-incarnation re-claim");
+    let stolen = store
+        .try_claim_session_execution_lease("root", &owner_b, 60_000)
+        .await
+        .expect("claim after releasing a retained completion")
+        .acquired()
+        .expect(
+            "releasing a completion retained across a same-incarnation re-claim frees the \
+             successor's live lease; owners must never release a completion they stopped tracking",
+        );
+    assert!(stolen.fencing_token > first.fencing_token);
+    release_session_execution_lease_for_test(&store, &stolen).await;
+    let renewed = claim_session_execution_lease_for_test(&store, "root", "owner-a").await;
+
     release_session_execution_lease_for_test(&store, &renewed).await;
     let second = claim_session_execution_lease_for_test(&store, "root", "owner-b").await;
     assert!(

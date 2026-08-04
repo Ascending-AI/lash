@@ -206,7 +206,7 @@ pub struct InMemorySessionStore {
     #[cfg(test)]
     fail_next_runtime_commit: Mutex<Option<crate::StoreError>>,
     #[cfg(test)]
-    fail_next_session_execution_lease_renewal: std::sync::atomic::AtomicBool,
+    fail_next_session_execution_lease_renewal: Mutex<Option<crate::StoreError>>,
     #[cfg(test)]
     session_execution_lease_renewal_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
@@ -302,7 +302,7 @@ impl InMemorySessionStore {
             #[cfg(test)]
             fail_next_runtime_commit: Mutex::new(None),
             #[cfg(test)]
-            fail_next_session_execution_lease_renewal: std::sync::atomic::AtomicBool::new(false),
+            fail_next_session_execution_lease_renewal: Mutex::new(None),
             #[cfg(test)]
             session_execution_lease_renewal_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
@@ -1496,13 +1496,13 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
         {
             self.session_execution_lease_renewal_count
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            if self
+            let injected = self
                 .fail_next_session_execution_lease_renewal
-                .swap(false, std::sync::atomic::Ordering::SeqCst)
-            {
-                return Err(crate::store::StoreError::Backend(
-                    "injected session execution lease renewal rejection".to_string(),
-                ));
+                .lock()
+                .expect("lock injected renewal failure")
+                .take();
+            if let Some(error) = injected {
+                return Err(error);
             }
         }
         let _transaction = self

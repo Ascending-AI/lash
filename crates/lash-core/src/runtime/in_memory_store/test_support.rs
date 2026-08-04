@@ -59,9 +59,20 @@ impl InMemorySessionStore {
         )
     }
 
+    /// Inject a transient renewal rejection (the lease stays durably ours).
     pub(crate) fn fail_next_session_execution_lease_renewal(&self) {
-        self.fail_next_session_execution_lease_renewal
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.fail_next_session_execution_lease_renewal_with(crate::StoreError::Backend(
+            "injected session execution lease renewal rejection".to_string(),
+        ));
+    }
+
+    /// Inject a specific renewal rejection. Transient errors and a definitive
+    /// `SessionExecutionLeaseExpired` mean different things to a lease guard.
+    pub(crate) fn fail_next_session_execution_lease_renewal_with(&self, error: crate::StoreError) {
+        *self
+            .fail_next_session_execution_lease_renewal
+            .lock()
+            .expect("lock injected renewal failure") = Some(error);
     }
 
     /// Suspend every subsequent `release_session_execution_lease` at its
