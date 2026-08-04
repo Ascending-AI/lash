@@ -365,7 +365,7 @@ mod process_work_tests {
         use lash::process::{
             CausalRef, ProcessAwaitOutput, ProcessChangeCursor, ProcessCompletionAuthority,
             ProcessEventAppendRequest, ProcessEventType, ProcessExecutionEnvRef,
-            ProcessExternalRef, ProcessHandleSummary, ProcessIdentity, ProcessInput,
+            ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleSummary, ProcessIdentity, ProcessInput,
             ProcessLeaseClaimOutcome, ProcessListFilter, ProcessListMode, ProcessObserverBy,
             ProcessOriginator, ProcessProvenance, ProcessRegistration, ProcessRegistry,
             ProcessStarted, ProcessStatus, ProcessStatusFilter, ProjectionWatermark,
@@ -416,6 +416,17 @@ mod process_work_tests {
         assert_eq!(identity.kind, "report-export");
         assert_eq!(identity.label.as_deref(), Some("Nightly invoice export"));
         assert_eq!(identity.definition.as_ref().unwrap()["revision"], 7);
+        let execution_env_ref = ProcessExecutionEnvSpec::new(Default::default(), Default::default())
+            .stable_ref()
+            .expect("derive process execution environment identity");
+        let execution_env_digest = execution_env_ref
+            .as_str()
+            .strip_prefix("process-env:v2:sha256:")
+            .expect("process execution environment uses the v2 identity family");
+        assert_eq!(execution_env_digest.len(), 64);
+        assert!(execution_env_digest
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
 
         let registration = ProcessRegistration::new(
             process_id,
@@ -426,9 +437,7 @@ mod process_work_tests {
         .with_process_provenance(provenance)
         .with_identity(identity)
         .with_max_attempts(Some(3))
-        .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(
-            "process-env:sha256:invoice-export-v7",
-        )))
+        .with_execution_env_ref(Some(execution_env_ref.clone()))
         .with_extra_event_types([ProcessEventType {
             name: "progress".to_string(),
             payload_schema: lash::triggers::LashSchema::any(),
@@ -440,7 +449,7 @@ mod process_work_tests {
         assert_eq!(registration.max_attempts, Some(3));
         assert_eq!(
             registration.env_ref.as_ref().map(ProcessExecutionEnvRef::as_str),
-            Some("process-env:sha256:invoice-export-v7")
+            Some(execution_env_ref.as_str())
         );
         assert_eq!(registration.wake_session_id.as_deref(), Some("session-finance"));
         assert_eq!(registration.input.engine_specific_kind(), Some("report-export"));
@@ -451,11 +460,10 @@ mod process_work_tests {
         let initial_cursor = ProcessChangeCursor::initial();
         assert_eq!(initial_cursor.store_sequence(), 0);
         assert_eq!(ProcessChangeCursor::from_store_sequence(9).store_sequence(), 9);
+        let replay_registration = registration.clone();
+        let initial_observers = ["session-finance".to_string(), "session-ops".to_string()];
         let record = registry
-            .register_process_with_observers(
-                registration,
-                &["session-finance".to_string(), "session-ops".to_string()],
-            )
+            .register_process_with_observers(registration, &initial_observers)
             .await
             .expect("register process and initial observers");
         assert_eq!(record.id, process_id);
@@ -471,7 +479,7 @@ mod process_work_tests {
         });
         assert_eq!(
             record.env_ref.as_ref().map(ProcessExecutionEnvRef::as_str),
-            Some("process-env:sha256:invoice-export-v7")
+            Some(execution_env_ref.as_str())
         );
         assert!(record.event_types.iter().any(|event| event.name == "progress"));
         assert!(record.updated_at_ms >= record.created_at_ms);
@@ -480,8 +488,23 @@ mod process_work_tests {
         assert!(record.abandon_request.is_none());
         assert!(record.wait.is_none());
         assert!(record.outcome.is_none());
-        assert_eq!(record.registration_fingerprint.len(), 64);
-        assert!(record.registration_fingerprint.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        let registration_digest = record
+            .registration_fingerprint
+            .strip_prefix("process-registration-definition:v2:sha256:")
+            .expect("process registration uses the v2 definition-fingerprint family");
+        assert_eq!(registration_digest.len(), 64);
+        assert!(registration_digest
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
+        let replay = registry
+            .register_process_with_observers(
+                replay_registration,
+                &["session-ops".to_string(), "session-finance".to_string()],
+            )
+            .await
+            .expect("replay process registration by lookup id");
+        assert_eq!(replay.id, process_id);
+        assert_eq!(replay.registration_fingerprint, record.registration_fingerprint);
 
         let observers = registry
             .observers_for_process(process_id)
@@ -669,7 +692,7 @@ mod process_work_tests {
                 .env_ref
                 .as_ref()
                 .map(ProcessExecutionEnvRef::as_str),
-            Some("process-env:sha256:invoice-export-v7")
+            Some(execution_env_ref.as_str())
         );
         assert_eq!(
             registry
