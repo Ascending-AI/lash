@@ -74,7 +74,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
 
     async fn renew_session_execution_lease(
         &self,
-        fence: &crate::SessionExecutionLeaseFence,
+        fence: &crate::SessionExecutionLeaseAuthority,
         lease_ttl_ms: u64,
     ) -> Result<crate::SessionExecutionLease, crate::store::StoreError> {
         #[cfg(test)]
@@ -129,7 +129,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
 
     async fn release_session_execution_lease(
         &self,
-        completion: &crate::SessionExecutionLeaseCompletion,
+        completion: &crate::SessionExecutionLeaseAuthority,
     ) -> Result<(), crate::store::StoreError> {
         #[cfg(test)]
         {

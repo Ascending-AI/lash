@@ -125,7 +125,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
     async fn claim_leading_ready_session_command(
         &self,
         session_id: &str,
-        session_execution_lease: &crate::SessionExecutionLeaseFence,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
     ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
         self.claim_ready_queued_work_in_memory(
@@ -139,7 +139,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
     async fn claim_ready_queued_work(
         &self,
         session_id: &str,
-        session_execution_lease: &crate::SessionExecutionLeaseFence,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
         max_batches: usize,
@@ -158,9 +158,9 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
     async fn claim_checkpoint_work(
         &self,
         session_id: &str,
-        session_execution_lease: &crate::SessionExecutionLeaseFence,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
-        turn_id: &str,
+        turn_id: &crate::TurnId,
         checkpoint: crate::CheckpointKind,
         max_inputs: usize,
         max_batches: usize,
@@ -201,7 +201,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             owner,
             max_inputs,
             crate::TurnInputClaimMode::ActiveTurn {
-                turn_id: turn_id.to_string(),
+                turn_id: turn_id.clone(),
                 checkpoint,
             },
         )?;
@@ -220,7 +220,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         session_id: &str,
-        session_execution_lease: &crate::SessionExecutionLeaseFence,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
         batch_ids: &[String],
@@ -287,7 +287,11 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         }
         let first = &queued[indices[0]];
         let fencing_token = first.claim_fencing_token.saturating_add(1);
-        let claim_id = format!("recording-qwc:{}:{fencing_token}", first.batch.enqueue_seq);
+        let claim_id = crate::store::queued_work::derive_claim_id(
+            crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
+            first.batch.enqueue_seq,
+            fencing_token,
+        );
         let lease_token = format!(
             "{}:{}:{}:{claim_id}:{now}",
             session_id, owner.owner_id, owner.incarnation_id
@@ -309,7 +313,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             lease_token,
             fencing_token,
             session_lease_generation: generation,
-            batches,
+            data: crate::QueuedWorkClaimData { batches },
         }))
     }
 

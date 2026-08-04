@@ -281,9 +281,9 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
     async fn claim_active_turn_inputs(
         &self,
         session_id: &str,
-        session_execution_lease: &crate::SessionExecutionLeaseFence,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
-        turn_id: &str,
+        turn_id: &crate::TurnId,
         checkpoint: crate::CheckpointKind,
         max_inputs: usize,
     ) -> Result<Option<crate::TurnInputClaim>, crate::store::StoreError> {
@@ -293,7 +293,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             owner,
             max_inputs,
             crate::TurnInputClaimMode::ActiveTurn {
-                turn_id: turn_id.to_string(),
+                turn_id: turn_id.clone(),
                 checkpoint,
             },
         )
@@ -302,7 +302,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
     async fn claim_next_turn_inputs(
         &self,
         session_id: &str,
-        session_execution_lease: &crate::SessionExecutionLeaseFence,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         max_inputs: usize,
     ) -> Result<Option<crate::TurnInputClaim>, crate::store::StoreError> {

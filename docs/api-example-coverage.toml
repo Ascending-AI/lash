@@ -11430,115 +11430,11 @@ reason = "Add lash::persistence::QueuedWorkBatchDraft::work_class to the agent-s
 
 [[api]]
 symbol = "lash::persistence::QueuedWorkClaim"
-kind = "struct"
+kind = "type_alias"
 availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::QueuedWorkClaim to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkClaim::batches"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClaim::batches to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkClaim::claim_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClaim::claim_id to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkClaim::completion"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClaim::completion to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkClaim::exclusive_session_command"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClaim::exclusive_session_command to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkClaim::fencing_token"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClaim::fencing_token to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkClaim::is_empty"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClaim::is_empty to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkClaim::lease_token"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClaim::lease_token to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkClaim::materialize_for_checkpoint"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClaim::materialize_for_checkpoint to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkClaim::materialize_for_checkpoint_with_attachments"
-kind = "function"
-availability = "default+all-features"
-area = "attachments"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClaim::materialize_for_checkpoint_with_attachments to the agent-workbench attachment upload example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkClaim::materialize_for_turn"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClaim::materialize_for_turn to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkClaim::owner"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClaim::owner to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkClaim::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClaim::session_id to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkClaim::session_lease_generation"
-kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClaim::session_lease_generation to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::persistence::QueuedWorkClaimBoundary"
@@ -11565,68 +11461,44 @@ disposition = "unused-add"
 reason = "Add lash::persistence::QueuedWorkClaimBoundary::Idle to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::persistence::QueuedWorkClass"
-kind = "enum"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClass to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkClass::SessionCommand"
-kind = "variant"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClass::SessionCommand to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkClass::TurnWork"
-kind = "variant"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClass::TurnWork to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkCompletion"
+symbol = "lash::persistence::QueuedWorkClaimData"
 kind = "struct"
 availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkCompletion to the agent-service persistence setup example and assert its externally observable result."
+reason = "Add lash::persistence::QueuedWorkClaim to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::persistence::QueuedWorkCompletion::batch_ids"
+symbol = "lash::persistence::QueuedWorkClaimData::batches"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkCompletion::batch_ids to the agent-service persistence setup example and assert its externally observable result."
+reason = "Add lash::persistence::QueuedWorkClaimData::batches to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::persistence::QueuedWorkCompletion::claim_id"
+symbol = "lash::persistence::QueuedWorkCompletion"
+kind = "type_alias"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::QueuedWorkCompletionData"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::QueuedWorkCompletionData::batch_ids"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkCompletion::claim_id to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkCompletion::lease_token"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkCompletion::lease_token to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkCompletion::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkCompletion::session_id to the agent-service persistence setup example and assert its externally observable result."
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
 
 [[api]]
 symbol = "lash::persistence::QueuedWorkItem"
@@ -12975,6 +12847,14 @@ disposition = "unused-add"
 reason = "Add lash::persistence::SessionExecutionLease to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::persistence::SessionExecutionLease::authority"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
 symbol = "lash::persistence::SessionExecutionLease::claimed_at_epoch_ms"
 kind = "field"
 availability = "default+all-features"
@@ -13079,6 +12959,46 @@ disposition = "unused-justify"
 reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
 
 [[api]]
+symbol = "lash::persistence::SessionExecutionLeaseAuthority"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::SessionExecutionLeaseAuthority to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseAuthority::fencing_token"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::SessionExecutionLeaseAuthority::fencing_token to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseAuthority::lease_token"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::SessionExecutionLeaseAuthority::lease_token to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseAuthority::owner"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::SessionExecutionLeaseAuthority::owner to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseAuthority::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::SessionExecutionLeaseAuthority::session_id to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::persistence::SessionExecutionLeaseClaimOutcome"
 kind = "enum"
 availability = "default+all-features"
@@ -13135,46 +13055,6 @@ disposition = "unused-justify"
 reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
 
 [[api]]
-symbol = "lash::persistence::SessionExecutionLeaseCompletion"
-kind = "struct"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::SessionExecutionLeaseCompletion to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::SessionExecutionLeaseCompletion::fencing_token"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::SessionExecutionLeaseCompletion::fencing_token to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::SessionExecutionLeaseCompletion::lease_token"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::SessionExecutionLeaseCompletion::lease_token to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::SessionExecutionLeaseCompletion::owner"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::SessionExecutionLeaseCompletion::owner to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::SessionExecutionLeaseCompletion::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::SessionExecutionLeaseCompletion::session_id to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::persistence::SessionExecutionLeaseDisplacement"
 kind = "struct"
 availability = "default+all-features"
@@ -13205,46 +13085,6 @@ availability = "default+all-features"
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
-
-[[api]]
-symbol = "lash::persistence::SessionExecutionLeaseFence"
-kind = "struct"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::SessionExecutionLeaseFence to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::SessionExecutionLeaseFence::fencing_token"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::SessionExecutionLeaseFence::fencing_token to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::SessionExecutionLeaseFence::lease_token"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::SessionExecutionLeaseFence::lease_token to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::SessionExecutionLeaseFence::owner"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::SessionExecutionLeaseFence::owner to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::SessionExecutionLeaseFence::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::SessionExecutionLeaseFence::session_id to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::persistence::SessionExecutionLeaseStore"
@@ -15208,6 +15048,30 @@ disposition = "unused-add"
 reason = "Add lash::persistence::StoredBlobRef::last_modified_epoch_ms to the agent-workbench attachment upload example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::persistence::TurnId"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
+symbol = "lash::persistence::TurnId::as_str"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
+symbol = "lash::persistence::TurnId::into_inner"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
 symbol = "lash::persistence::TurnInputCheckpointBoundary"
 kind = "enum"
 availability = "default+all-features"
@@ -15243,6 +15107,14 @@ reason = "Add lash::persistence::TurnInputCheckpointBoundary::admits to the agen
 
 [[api]]
 symbol = "lash::persistence::TurnInputClaim"
+kind = "type_alias"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::TurnInputClaim to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::TurnInputClaimData"
 kind = "struct"
 availability = "default+all-features"
 area = "stores"
@@ -15250,172 +15122,60 @@ disposition = "unused-add"
 reason = "Add lash::persistence::TurnInputClaim to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::persistence::TurnInputClaim::accepted_turn_inputs"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputClaim::accepted_turn_inputs to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::TurnInputClaim::applications"
+symbol = "lash::persistence::TurnInputClaimData::applications"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputClaim::applications to the agent-service persistence setup example and assert its externally observable result."
+reason = "Add lash::persistence::TurnInputClaimData::applications to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::persistence::TurnInputClaim::claim_id"
+symbol = "lash::persistence::TurnInputClaimData::inputs"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputClaim::claim_id to the agent-service persistence setup example and assert its externally observable result."
+reason = "Add lash::persistence::TurnInputClaimData::inputs to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::persistence::TurnInputClaim::completion"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputClaim::completion to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::TurnInputClaim::fencing_token"
+symbol = "lash::persistence::TurnInputClaimData::mode"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputClaim::fencing_token to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::TurnInputClaim::inputs"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputClaim::inputs to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::TurnInputClaim::lease_token"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputClaim::lease_token to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::TurnInputClaim::materialize_for_checkpoint"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputClaim::materialize_for_checkpoint to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::TurnInputClaim::materialize_for_turn"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputClaim::materialize_for_turn to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::TurnInputClaim::mode"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputClaim::mode to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::TurnInputClaim::owner"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputClaim::owner to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::TurnInputClaim::record_checkpoint_applications"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputClaim::record_checkpoint_applications to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::TurnInputClaim::record_initial_turn_application"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputClaim::record_initial_turn_application to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::TurnInputClaim::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputClaim::session_id to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::TurnInputClaim::session_lease_generation"
-kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputClaim::session_lease_generation to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
+reason = "Add lash::persistence::TurnInputClaimData::mode to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::persistence::TurnInputCompletion"
+kind = "type_alias"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::TurnInputCompletionData"
 kind = "struct"
 availability = "default+all-features"
 area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputCompletion to the agent-service persistence setup example and assert its externally observable result."
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
 
 [[api]]
-symbol = "lash::persistence::TurnInputCompletion::applications"
+symbol = "lash::persistence::TurnInputCompletionData::applications"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputCompletion::applications to the agent-service persistence setup example and assert its externally observable result."
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
 
 [[api]]
-symbol = "lash::persistence::TurnInputCompletion::claim_id"
+symbol = "lash::persistence::TurnInputCompletionData::input_ids"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputCompletion::claim_id to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::TurnInputCompletion::input_ids"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputCompletion::input_ids to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::TurnInputCompletion::lease_token"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputCompletion::lease_token to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::TurnInputCompletion::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::TurnInputCompletion::session_id to the agent-service persistence setup example and assert its externally observable result."
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
 
 [[api]]
 symbol = "lash::persistence::TurnInputIngress"
@@ -15685,6 +15445,198 @@ disposition = "unused-add"
 reason = "Add lash::persistence::VacuumReport::removed_pending_turn_input_tombstone_count to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::persistence::WorkClaim"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::QueuedWorkClaim to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::accepted_turn_inputs"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::WorkClaim::accepted_turn_inputs to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::claim_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::WorkClaim::claim_id to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::completion"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::WorkClaim::completion to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::data"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::exclusive_session_command"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::WorkClaim::exclusive_session_command to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::fencing_token"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::WorkClaim::fencing_token to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::is_empty"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::WorkClaim::is_empty to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::lease_token"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::WorkClaim::lease_token to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::materialize_checkpoint_turn_input"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::materialize_queued_checkpoint_work"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::materialize_queued_checkpoint_work_with_attachments"
+kind = "function"
+availability = "default+all-features"
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::materialize_queued_turn_work"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::materialize_turn_input"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::owner"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::WorkClaim::owner to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::record_checkpoint_applications"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::WorkClaim::record_checkpoint_applications to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::record_initial_turn_application"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::WorkClaim::record_initial_turn_application to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::persistence::WorkClaim::session_id to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::session_lease_generation"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-add"
+reason = "Add lash::persistence::WorkClaim::session_lease_generation to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::WorkCompletion"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::WorkCompletion::claim_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::WorkCompletion::data"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::WorkCompletion::lease_token"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::WorkCompletion::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
 symbol = "lash::persistence::commit_runtime_state_verified"
 kind = "function"
 availability = "default+all-features"
@@ -15779,54 +15731,6 @@ availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::queued_work::QueuedWorkClass::TurnWork to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::queued_work::QueuedWorkClaimLease"
-kind = "struct"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::queued_work::QueuedWorkClaimLease to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::queued_work::QueuedWorkClaimLease::claim_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::queued_work::QueuedWorkClaimLease::claim_id to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::queued_work::QueuedWorkClaimLease::derive"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::queued_work::QueuedWorkClaimLease::derive to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::queued_work::QueuedWorkClaimLease::fencing_token"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::queued_work::QueuedWorkClaimLease::fencing_token to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::queued_work::QueuedWorkClaimLease::lease_token"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::queued_work::QueuedWorkClaimLease::lease_token to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::queued_work::QueuedWorkClaimLease::session_lease_generation"
-kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::persistence::queued_work::QueuedWorkClaimLease::session_lease_generation to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::persistence::queued_work::claim_scan_limit"
@@ -50340,6 +50244,14 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::StoreContractScenario::new to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::active_turn_input_claim_reacquires_after_unrecorded_checkpoint"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store conformance embedders verify accepted checkpoint inputs can be reacquired after an unrecorded outcome."
+
+[[api]]
 symbol = "lash::testing::conformance::append_receipt_mixed_usage_envelope"
 kind = "function"
 availability = "all-features"
@@ -50428,20 +50340,20 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::checkpoint_rejects_unknown_component_ref to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::testing::conformance::cold_process_real_turn_driver"
-kind = "function"
-availability = "all-features"
-area = "sessions-turns"
-disposition = "unused-justify"
-reason = "Conformance-only class 4 helper for durable backend test binaries that prove full-turn recovery across a real process kill."
-
-[[api]]
 symbol = "lash::testing::conformance::cold_process_durable_recovery_expectation"
 kind = "function"
 availability = "all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Conformance-only class 4 oracle consumed by bundled backend test binaries so cold-process recovery assertions share the committed durable end-state table."
+
+[[api]]
+symbol = "lash::testing::conformance::cold_process_real_turn_driver"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Conformance-only class 4 helper for durable backend test binaries that prove full-turn recovery across a real process kill."
 
 [[api]]
 symbol = "lash::testing::conformance::cold_process_turn_expectations"
@@ -50690,14 +50602,6 @@ availability = "all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::testing::conformance::runtime_persistence_recovery_laws to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::testing::conformance::active_turn_input_claim_reacquires_after_unrecorded_checkpoint"
-kind = "function"
-availability = "all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: durable store conformance embedders verify accepted checkpoint inputs can be reacquired after an unrecorded outcome."
 
 [[api]]
 symbol = "lash::testing::conformance::runtime_persistence_reopenable"
@@ -76184,6 +76088,14 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
+symbol = "lash_core::SessionExecutionLease::authority"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
 symbol = "lash_core::SessionExecutionLease::claimed_at_epoch_ms"
 kind = "field"
 availability = "default+all-features"
@@ -76288,6 +76200,46 @@ disposition = "unused-justify"
 reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
 
 [[api]]
+symbol = "lash_core::SessionExecutionLeaseAuthority"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseAuthority::fencing_token"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseAuthority::lease_token"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseAuthority::owner"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseAuthority::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
 symbol = "lash_core::SessionExecutionLeaseClaimOutcome"
 kind = "enum"
 availability = "default+all-features"
@@ -76344,46 +76296,6 @@ disposition = "unused-justify"
 reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
 
 [[api]]
-symbol = "lash_core::SessionExecutionLeaseCompletion"
-kind = "struct"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
-
-[[api]]
-symbol = "lash_core::SessionExecutionLeaseCompletion::fencing_token"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
-
-[[api]]
-symbol = "lash_core::SessionExecutionLeaseCompletion::lease_token"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
-
-[[api]]
-symbol = "lash_core::SessionExecutionLeaseCompletion::owner"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
-
-[[api]]
-symbol = "lash_core::SessionExecutionLeaseCompletion::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
-
-[[api]]
 symbol = "lash_core::SessionExecutionLeaseDisplacement"
 kind = "struct"
 availability = "default+all-features"
@@ -76414,46 +76326,6 @@ availability = "default+all-features"
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
-
-[[api]]
-symbol = "lash_core::SessionExecutionLeaseFence"
-kind = "struct"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
-
-[[api]]
-symbol = "lash_core::SessionExecutionLeaseFence::fencing_token"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
-
-[[api]]
-symbol = "lash_core::SessionExecutionLeaseFence::lease_token"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
-
-[[api]]
-symbol = "lash_core::SessionExecutionLeaseFence::owner"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
-
-[[api]]
-symbol = "lash_core::SessionExecutionLeaseFence::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
 symbol = "lash_core::SessionExecutionLeaseStore"
@@ -85563,6 +85435,30 @@ disposition = "used-unasserted"
 usage = "examples/docs-snippets/src/embedding_turns.rs:153#usage, cumulative, .."
 
 [[api]]
+symbol = "lash_core::TurnId"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
+symbol = "lash_core::TurnId::as_str"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
+symbol = "lash_core::TurnId::into_inner"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
 symbol = "lash_core::TurnInput"
 kind = "struct"
 availability = "default+all-features"
@@ -85741,6 +85637,14 @@ reason = "Concrete host class: custom durable store or attachment backend implem
 
 [[api]]
 symbol = "lash_core::TurnInputClaim"
+kind = "type_alias"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/effect/executor.rs:230 imports or uses lash_core::TurnInputClaim directly; retain this low-level alias until that caller migrates to the lash facade."
+
+[[api]]
+symbol = "lash_core::TurnInputClaimData"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
@@ -85748,124 +85652,28 @@ disposition = "unused-justify"
 reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/effect/executor.rs:230 imports or uses lash_core::TurnInputClaim directly; retain this low-level alias until that caller migrates to the lash facade."
 
 [[api]]
-symbol = "lash_core::TurnInputClaim::accepted_turn_inputs"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputClaim::accepted_turn_inputs. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::TurnInputClaim::applications"
+symbol = "lash_core::TurnInputClaimData::applications"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputClaim::applications. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputClaimData::applications. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
-symbol = "lash_core::TurnInputClaim::claim_id"
+symbol = "lash_core::TurnInputClaimData::inputs"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputClaim::claim_id. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputClaimData::inputs. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
-symbol = "lash_core::TurnInputClaim::completion"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputClaim::completion. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::TurnInputClaim::fencing_token"
+symbol = "lash_core::TurnInputClaimData::mode"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputClaim::fencing_token. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::TurnInputClaim::inputs"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputClaim::inputs. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::TurnInputClaim::lease_token"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
-
-[[api]]
-symbol = "lash_core::TurnInputClaim::materialize_for_checkpoint"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
-
-[[api]]
-symbol = "lash_core::TurnInputClaim::materialize_for_turn"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputClaim::materialize_for_turn. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::TurnInputClaim::mode"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputClaim::mode. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::TurnInputClaim::owner"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputClaim::owner. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::TurnInputClaim::record_checkpoint_applications"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
-
-[[api]]
-symbol = "lash_core::TurnInputClaim::record_initial_turn_application"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputClaim::record_initial_turn_application. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::TurnInputClaim::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputClaim::session_id. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::TurnInputClaim::session_lease_generation"
-kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
+reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputClaimData::mode. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
 symbol = "lash_core::TurnInputClaimMode"
@@ -85909,51 +85717,35 @@ reason = "No example or concrete unrepresented host class establishes a need for
 
 [[api]]
 symbol = "lash_core::TurnInputCompletion"
+kind = "type_alias"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash_core::TurnInputCompletionData"
 kind = "struct"
 availability = "default+all-features"
-area = "sessions-turns"
+area = "stores"
 disposition = "unused-justify"
-reason = "Concrete consumer: Lash workspace crate at crates/lash-core/src/runtime/in_memory_store/test_support.rs:52 imports or uses lash_core::TurnInputCompletion directly; retain this low-level alias until that caller migrates to the lash facade."
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
 
 [[api]]
-symbol = "lash_core::TurnInputCompletion::applications"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputCompletion::applications. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::TurnInputCompletion::claim_id"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputCompletion::claim_id. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::TurnInputCompletion::input_ids"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputCompletion::input_ids. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::TurnInputCompletion::lease_token"
+symbol = "lash_core::TurnInputCompletionData::applications"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
 
 [[api]]
-symbol = "lash_core::TurnInputCompletion::session_id"
+symbol = "lash_core::TurnInputCompletionData::input_ids"
 kind = "field"
 availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TurnInputCompletion::session_id. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
 
 [[api]]
 symbol = "lash_core::TurnInputIngress"
@@ -86714,6 +86506,198 @@ availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::WorkClaim"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkClaim::accepted_turn_inputs"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-remove"
+reason = "No example or concrete unrepresented host class establishes a need for lash_core::WorkClaim::accepted_turn_inputs. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+
+[[api]]
+symbol = "lash_core::WorkClaim::claim_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkClaim::completion"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkClaim::data"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkClaim::exclusive_session_command"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkClaim::fencing_token"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkClaim::is_empty"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkClaim::lease_token"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkClaim::materialize_checkpoint_turn_input"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-remove"
+reason = "No example or concrete unrepresented host class establishes a need for lash_core::WorkClaim::materialize_checkpoint_turn_input. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+
+[[api]]
+symbol = "lash_core::WorkClaim::materialize_queued_checkpoint_work"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkClaim::materialize_queued_checkpoint_work_with_attachments"
+kind = "function"
+availability = "default+all-features"
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkClaim::materialize_queued_turn_work"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkClaim::materialize_turn_input"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-remove"
+reason = "No example or concrete unrepresented host class establishes a need for lash_core::WorkClaim::materialize_turn_input. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+
+[[api]]
+symbol = "lash_core::WorkClaim::owner"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkClaim::record_checkpoint_applications"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash_core::WorkClaim::record_initial_turn_application"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-remove"
+reason = "No example or concrete unrepresented host class establishes a need for lash_core::WorkClaim::record_initial_turn_application. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+
+[[api]]
+symbol = "lash_core::WorkClaim::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkClaim::session_lease_generation"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 exposes one shared lease authority, one parameterized work-claim record, typed turn identity, and centralized claim-id spelling; repository backends and conformance suites exercise these structural contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkCompletion"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkCompletion::claim_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkCompletion::data"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkCompletion::lease_token"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash_core::WorkCompletion::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
 
 [[api]]
 symbol = "lash_core::impl_noop_attachment_manifest"

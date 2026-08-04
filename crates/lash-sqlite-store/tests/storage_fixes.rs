@@ -329,7 +329,7 @@ fn concurrent_claims_never_double_own_a_batch() {
     let barrier = Arc::new(std::sync::Barrier::new(2));
     let run = |owner: &'static str,
                path: std::path::PathBuf,
-               session_fence: lash_core::SessionExecutionLeaseFence,
+               session_fence: lash_core::SessionExecutionLeaseAuthority,
                barrier: Arc<std::sync::Barrier>| {
         std::thread::spawn(move || {
             block_on(async move {

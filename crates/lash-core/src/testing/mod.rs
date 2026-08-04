@@ -688,7 +688,7 @@ impl crate::plugin::SessionLifecycleService for MockSessionManager {
         let (turn, scoped_effect_controller) = request.into_parts();
         self.turns.lock().expect("turns lock").push((
             turn.session_id,
-            turn.turn_id,
+            turn.turn_id.to_string(),
             turn.input.trace_turn_id,
             scoped_effect_controller.execution_scope().clone(),
         ));

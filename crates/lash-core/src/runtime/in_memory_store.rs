@@ -81,9 +81,19 @@ type InMemoryNodeAnchorRecord = (crate::BlobRef, crate::HydratedSessionCheckpoin
 type InMemoryNodeAnchors = Arc<Mutex<HashMap<String, InMemoryNodeAnchorRecord>>>;
 
 #[cfg(any(test, feature = "testing"))]
+pub type RawPendingTurnInputForTesting = (
+    String,
+    u64,
+    crate::TurnInputState,
+    Option<String>,
+    u64,
+    Option<u64>,
+);
+
+#[cfg(any(test, feature = "testing"))]
 pub type RawQueuedWorkForTesting = (
     crate::QueuedWorkBatch,
-    bool,
+    Option<String>,
     Option<crate::LeaseOwnerIdentity>,
     bool,
     u64,
@@ -260,7 +270,7 @@ impl InMemorySessionStore {
     fn verify_session_execution_lease(
         &self,
         session_id: &str,
-        fence: &crate::SessionExecutionLeaseFence,
+        fence: &crate::SessionExecutionLeaseAuthority,
     ) -> Result<(), crate::store::StoreError> {
         if fence.session_id != session_id {
             return Err(crate::store::StoreError::SessionExecutionLeaseExpired {
@@ -310,7 +320,7 @@ impl InMemorySessionStore {
 
     fn release_session_execution_lease_in_memory(
         &self,
-        completion: &crate::SessionExecutionLeaseCompletion,
+        completion: &crate::SessionExecutionLeaseAuthority,
     ) {
         let mut leases = self
             .session_execution_leases
@@ -377,7 +387,7 @@ impl InMemorySessionStore {
     fn claim_ready_queued_work_in_memory(
         &self,
         session_id: &str,
-        session_execution_lease: &crate::SessionExecutionLeaseFence,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         kind: InMemoryQueuedWorkClaimKind,
     ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
@@ -399,7 +409,7 @@ impl InMemorySessionStore {
     fn claim_ready_queued_work_after_lease_validation(
         &self,
         session_id: &str,
-        session_execution_lease: &crate::SessionExecutionLeaseFence,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         kind: InMemoryQueuedWorkClaimKind,
     ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
@@ -467,7 +477,11 @@ impl InMemorySessionStore {
         let first_index = claimable_indices[0];
         let first = queued[first_index].batch.clone();
         let fencing_token = queued[first_index].claim_fencing_token.saturating_add(1);
-        let claim_id = format!("recording-qwc:{}:{fencing_token}", first.enqueue_seq);
+        let claim_id = crate::store::queued_work::derive_claim_id(
+            crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
+            first.enqueue_seq,
+            fencing_token,
+        );
         let lease_token = format!(
             "{}:{}:{}:{claim_id}:{now}",
             session_id, owner.owner_id, owner.incarnation_id
@@ -489,14 +503,14 @@ impl InMemorySessionStore {
             lease_token,
             fencing_token,
             session_lease_generation: generation,
-            batches,
+            data: crate::QueuedWorkClaimData { batches },
         }))
     }
 
     fn claim_pending_turn_inputs_in_memory(
         &self,
         session_id: &str,
-        session_execution_lease: &crate::SessionExecutionLeaseFence,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         max_inputs: usize,
         mode: crate::TurnInputClaimMode,
@@ -520,7 +534,7 @@ impl InMemorySessionStore {
     fn claim_pending_turn_inputs_after_lease_validation(
         &self,
         session_id: &str,
-        session_execution_lease: &crate::SessionExecutionLeaseFence,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         max_inputs: usize,
         mode: crate::TurnInputClaimMode,
@@ -561,7 +575,7 @@ impl InMemorySessionStore {
                                 .input
                                 .ingress
                                 .active_turn_id()
-                                .is_some_and(|active| active == turn_id)
+                                .is_some_and(|active| active == turn_id.as_str())
                                 && entry.input.ingress.admits_checkpoint(*checkpoint)
                         }
                         crate::TurnInputClaimMode::NextTurn => {
@@ -576,9 +590,10 @@ impl InMemorySessionStore {
             return Ok(None);
         };
         let fencing_token = pending[first_index].claim_fencing_token.saturating_add(1);
-        let claim_id = format!(
-            "recording-tic:{}:{fencing_token}",
-            pending[first_index].input.enqueue_seq
+        let claim_id = crate::store::queued_work::derive_claim_id(
+            crate::store::queued_work::ClaimIdDialect::RecordingTurnInput,
+            pending[first_index].input.enqueue_seq,
+            fencing_token,
         );
         let lease_token = format!(
             "{}:{}:{}:{claim_id}:{now}",
@@ -604,9 +619,11 @@ impl InMemorySessionStore {
             lease_token,
             fencing_token,
             session_lease_generation: generation,
-            mode,
-            inputs,
-            applications: Vec::new(),
+            data: crate::TurnInputClaimData {
+                mode,
+                inputs,
+                applications: Vec::new(),
+            },
         }))
     }
 

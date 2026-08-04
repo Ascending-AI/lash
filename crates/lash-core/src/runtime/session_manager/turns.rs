@@ -42,7 +42,7 @@ impl ManagedSessionCapability {
         let sink = ChannelEventSink {
             tx: event_tx,
             live_usage: Some(LiveChildUsageForwarder {
-                turn_id: turn_id.to_string(),
+                turn_id: turn_id.clone(),
                 session_id: session_id.to_string(),
                 source: usage_source,
                 model: policy.model.id.clone(),
@@ -235,7 +235,7 @@ impl ManagedTurnLease {
             } => {
                 tracing::debug!(
                     session_id,
-                    turn_id,
+                    turn_id = %turn_id,
                     registered_turns,
                     holder_session_id = %holder_session_id,
                     holder_registration,
@@ -254,7 +254,7 @@ impl ManagedTurnLease {
             } => {
                 tracing::debug!(
                     session_id,
-                    turn_id,
+                    turn_id = %turn_id,
                     registered_turns,
                     holder_turn_id = %holder_turn_id,
                     holder_registration,
@@ -268,7 +268,7 @@ impl ManagedTurnLease {
             }
             ManagedTurnAdmission::Admitted { registered_turns } => tracing::debug!(
                 session_id,
-                turn_id,
+                turn_id = %turn_id,
                 registration,
                 registered_turns,
                 outcome = "admitted",

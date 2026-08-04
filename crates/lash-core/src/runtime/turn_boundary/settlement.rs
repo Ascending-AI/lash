@@ -122,7 +122,9 @@ mod tests {
             session_id: "fig905".to_string(),
             claim_id: "stale-claim".to_string(),
             lease_token: "stale-token".to_string(),
-            batch_ids: vec!["fig905-row".to_string()],
+            data: crate::QueuedWorkCompletionData {
+                batch_ids: vec!["fig905-row".to_string()],
+            },
         }
     }
 

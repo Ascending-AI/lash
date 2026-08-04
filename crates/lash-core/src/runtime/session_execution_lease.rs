@@ -46,8 +46,7 @@ use super::Clock;
 use crate::LeaseTimings;
 use crate::store::{
     RuntimeCommit, RuntimeCommitResult, RuntimePersistence, SessionExecutionLease,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    StoreError,
+    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome, StoreError,
 };
 
 static NEXT_LEASE_GUARD_ID: AtomicU64 = AtomicU64::new(1);
@@ -181,7 +180,7 @@ impl SessionExecutionLeaseGuard {
         }
     }
 
-    pub(super) fn fence(&self) -> SessionExecutionLeaseFence {
+    pub(super) fn fence(&self) -> SessionExecutionLeaseAuthority {
         self.lease
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -192,7 +191,7 @@ impl SessionExecutionLeaseGuard {
     /// panic would escalate an unwind into an abort. The lease behind the mutex
     /// is only ever replaced wholesale, so a poisoned lock still holds a
     /// complete lease.
-    pub(super) fn completion(&self) -> SessionExecutionLeaseCompletion {
+    pub(super) fn completion(&self) -> SessionExecutionLeaseAuthority {
         self.lease
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

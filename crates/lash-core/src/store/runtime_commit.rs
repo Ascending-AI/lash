@@ -2,7 +2,7 @@
 
 use super::{
     BlobRef, GraphAppend, HydratedSessionCheckpoint, OperationId, RealizedNodeTimestamp,
-    SessionCheckpoint, SessionExecutionLeaseCompletion, StoreError, commit_identity,
+    SessionCheckpoint, SessionExecutionLeaseAuthority, StoreError, commit_identity,
 };
 
 pub(super) const USAGE_PAYLOAD_ENCODING_V1: u32 = 1;
@@ -69,7 +69,7 @@ pub struct RuntimeCommit {
     pub session_id: String,
     pub expected_head_revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub release_session_execution_lease: Option<SessionExecutionLeaseCompletion>,
+    pub release_session_execution_lease: Option<SessionExecutionLeaseAuthority>,
     pub config: crate::PersistedSessionConfig,
     pub current_frame_node_id: Option<String>,
     pub graph: GraphAppend,

@@ -15,10 +15,10 @@ use lash::persistence::{
     RuntimeCommitResult, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
     RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionCommitStore,
     SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseClaimOutcome,
-    SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
+    SessionExecutionLeaseAuthority, SessionExecutionLeaseStore,
     SessionHeadMeta, SessionHeadPayload, SessionMeta,
     SessionNodeRecord, StoreError,
-    StoreMaintenance, TurnInputClaim, TurnInputCheckpointBoundary, TurnInputIngress,
+    StoreMaintenance, TurnId, TurnInputClaim, TurnInputCheckpointBoundary, TurnInputIngress,
     TurnInputState, TurnInputStore, VacuumReport, commit_runtime_state_verified,
     load_persisted_session_state,
 };
@@ -124,7 +124,7 @@ impl SessionExecutionLeaseStore for FacadeStore {
 
     async fn renew_session_execution_lease(
         &self,
-        fence: &SessionExecutionLeaseFence,
+        fence: &SessionExecutionLeaseAuthority,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLease, StoreError> {
         Ok(SessionExecutionLease {
@@ -139,7 +139,7 @@ impl SessionExecutionLeaseStore for FacadeStore {
 
     async fn release_session_execution_lease(
         &self,
-        _completion: &SessionExecutionLeaseCompletion,
+        _completion: &SessionExecutionLeaseAuthority,
     ) -> Result<(), StoreError> {
         Ok(())
     }
@@ -189,9 +189,9 @@ impl TurnInputStore for FacadeStore {
     async fn claim_active_turn_inputs(
         &self,
         _session_id: &str,
-        _session_execution_lease: &SessionExecutionLeaseFence,
+        _session_execution_lease: &SessionExecutionLeaseAuthority,
         _owner: &LeaseOwnerIdentity,
-        _turn_id: &str,
+        _turn_id: &TurnId,
         _checkpoint: CheckpointKind,
         _max_inputs: usize,
     ) -> Result<Option<TurnInputClaim>, StoreError> {
@@ -201,7 +201,7 @@ impl TurnInputStore for FacadeStore {
     async fn claim_next_turn_inputs(
         &self,
         _session_id: &str,
-        _session_execution_lease: &SessionExecutionLeaseFence,
+        _session_execution_lease: &SessionExecutionLeaseAuthority,
         _owner: &LeaseOwnerIdentity,
         _max_inputs: usize,
     ) -> Result<Option<TurnInputClaim>, StoreError> {
@@ -225,7 +225,7 @@ impl QueuedWorkStore for FacadeStore {
     async fn claim_leading_ready_session_command(
         &self,
         _session_id: &str,
-        _session_execution_lease: &SessionExecutionLeaseFence,
+        _session_execution_lease: &SessionExecutionLeaseAuthority,
         _owner: &LeaseOwnerIdentity,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         Ok(None)
@@ -234,7 +234,7 @@ impl QueuedWorkStore for FacadeStore {
     async fn claim_ready_queued_work(
         &self,
         _session_id: &str,
-        _session_execution_lease: &SessionExecutionLeaseFence,
+        _session_execution_lease: &SessionExecutionLeaseAuthority,
         _owner: &LeaseOwnerIdentity,
         _boundary: QueuedWorkClaimBoundary,
         _max_batches: usize,
@@ -245,9 +245,9 @@ impl QueuedWorkStore for FacadeStore {
     async fn claim_checkpoint_work(
         &self,
         _session_id: &str,
-        _session_execution_lease: &SessionExecutionLeaseFence,
+        _session_execution_lease: &SessionExecutionLeaseAuthority,
         _owner: &LeaseOwnerIdentity,
-        _turn_id: &str,
+        _turn_id: &TurnId,
         _checkpoint: CheckpointKind,
         _max_inputs: usize,
         _max_batches: usize,
@@ -258,7 +258,7 @@ impl QueuedWorkStore for FacadeStore {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         _session_id: &str,
-        _session_execution_lease: &SessionExecutionLeaseFence,
+        _session_execution_lease: &SessionExecutionLeaseAuthority,
         _owner: &LeaseOwnerIdentity,
         _boundary: QueuedWorkClaimBoundary,
         _batch_ids: &[String],

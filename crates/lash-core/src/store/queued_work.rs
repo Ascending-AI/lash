@@ -22,6 +22,34 @@ pub enum QueuedWorkClass {
     TurnWork,
 }
 
+/// Claim-id spelling selected by each store family.
+///
+/// These prefixes are durable bytes. SQLite and Postgres share the production
+/// spellings; recording and performance stores retain their existing diagnostic
+/// dialects. Centralizing them prevents backend-local construction drift.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClaimIdDialect {
+    QueuedWork,
+    TurnInput,
+    RecordingQueuedWork,
+    RecordingTurnInput,
+    PerformanceQueuedWork,
+    PerformanceTurnInput,
+}
+
+/// Builds a claim id without changing the chosen dialect's exact spelling.
+pub fn derive_claim_id(dialect: ClaimIdDialect, enqueue_seq: u64, fencing_token: u64) -> String {
+    let prefix = match dialect {
+        ClaimIdDialect::QueuedWork => "qwc",
+        ClaimIdDialect::TurnInput => "tic",
+        ClaimIdDialect::RecordingQueuedWork => "recording-qwc",
+        ClaimIdDialect::RecordingTurnInput => "recording-tic",
+        ClaimIdDialect::PerformanceQueuedWork => "perf-qwc",
+        ClaimIdDialect::PerformanceTurnInput => "perf-tic",
+    };
+    format!("{prefix}:{enqueue_seq}:{fencing_token}")
+}
+
 /// Decoded claim-relevant fields of one ready queued-work batch row.
 ///
 /// Backends build these from their candidate rows, presented in
@@ -152,23 +180,47 @@ fn record_turn_claim_decision(
 /// re-claim the row. Settlement is always keyed by claim id + lease token; a
 /// re-claim replaces those ownership values (see ADR 0029).
 #[derive(Clone, Debug)]
-pub struct QueuedWorkClaimLease {
+pub struct WorkClaimLease {
     pub claim_id: String,
     pub lease_token: String,
     pub fencing_token: u64,
     pub session_lease_generation: u64,
 }
 
-impl QueuedWorkClaimLease {
-    pub fn derive(
+impl WorkClaimLease {
+    pub fn derive_queued_work(
         head: &ClaimCandidate,
         session_id: &str,
         owner: &LeaseOwnerIdentity,
         now_epoch_ms: u64,
         session_lease_generation: u64,
     ) -> Self {
-        let fencing_token = head.claim_fencing_token.saturating_add(1);
-        let claim_id = format!("qwc:{}:{fencing_token}", head.enqueue_seq);
+        Self::derive(
+            ClaimIdDialect::QueuedWork,
+            head.enqueue_seq,
+            head.claim_fencing_token,
+            session_id,
+            owner,
+            now_epoch_ms,
+            session_lease_generation,
+        )
+    }
+
+    /// Derives byte-identical production claim authority for either durable
+    /// work family. Keeping the claim-id and lease-token seeds together makes
+    /// SQLite and PostgreSQL consume one byte contract.
+    #[allow(clippy::too_many_arguments)]
+    pub fn derive(
+        dialect: ClaimIdDialect,
+        enqueue_seq: u64,
+        claim_fencing_token: u64,
+        session_id: &str,
+        owner: &LeaseOwnerIdentity,
+        now_epoch_ms: u64,
+        session_lease_generation: u64,
+    ) -> Self {
+        let fencing_token = claim_fencing_token.saturating_add(1);
+        let claim_id = derive_claim_id(dialect, enqueue_seq, fencing_token);
         let lease_token = format!(
             "{:x}",
             Sha256::digest(
@@ -208,6 +260,21 @@ pub fn derive_batch_id(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claim_id_dialects_preserve_existing_spelling() {
+        let cases = [
+            (ClaimIdDialect::QueuedWork, "qwc:7:3"),
+            (ClaimIdDialect::TurnInput, "tic:7:3"),
+            (ClaimIdDialect::RecordingQueuedWork, "recording-qwc:7:3"),
+            (ClaimIdDialect::RecordingTurnInput, "recording-tic:7:3"),
+            (ClaimIdDialect::PerformanceQueuedWork, "perf-qwc:7:3"),
+            (ClaimIdDialect::PerformanceTurnInput, "perf-tic:7:3"),
+        ];
+        for (dialect, expected) in cases {
+            assert_eq!(derive_claim_id(dialect, 7, 3), expected);
+        }
+    }
 
     fn candidate(
         enqueue_seq: u64,
@@ -420,12 +487,16 @@ mod tests {
             merge_key: MergeKey::Never,
         };
         let owner = LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
-        let lease = QueuedWorkClaimLease::derive(&head, "session", &owner, 1_000, 5);
+        let lease = WorkClaimLease::derive_queued_work(&head, "session", &owner, 1_000, 5);
         assert_eq!(lease.fencing_token, 3);
         assert_eq!(lease.claim_id, "qwc:7:3");
         assert_eq!(lease.session_lease_generation, 5);
-        let again = QueuedWorkClaimLease::derive(&head, "session", &owner, 1_000, 5);
+        let again = WorkClaimLease::derive_queued_work(&head, "session", &owner, 1_000, 5);
         assert_eq!(lease.lease_token, again.lease_token);
+        assert_eq!(
+            lease.lease_token,
+            "1f1c63a8753631156dc9fd52d5493cd8855684f3a28d65dded7f8f1a57c7c48e"
+        );
     }
 
     #[test]

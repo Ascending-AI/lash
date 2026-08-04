@@ -1034,23 +1034,20 @@ impl TurnInputClaimLease {
         now_epoch_ms: u64,
         session_lease_generation: u64,
     ) -> Self {
-        let fencing_token = head.claim_fencing_token.saturating_add(1);
-        let claim_id = format!("tic:{}:{fencing_token}", head.enqueue_seq);
-        let lease_token = format!(
-            "{:x}",
-            Sha256::digest(
-                format!(
-                    "{}:{}:{}:{}:{}",
-                    session_id, owner.owner_id, owner.incarnation_id, claim_id, now_epoch_ms
-                )
-                .as_bytes(),
-            )
+        let lease = lash_core::store::queued_work::WorkClaimLease::derive(
+            lash_core::store::queued_work::ClaimIdDialect::TurnInput,
+            head.enqueue_seq,
+            head.claim_fencing_token,
+            session_id,
+            owner,
+            now_epoch_ms,
+            session_lease_generation,
         );
         Self {
-            claim_id,
-            lease_token,
-            fencing_token,
-            session_lease_generation,
+            claim_id: lease.claim_id,
+            lease_token: lease.lease_token,
+            fencing_token: lease.fencing_token,
+            session_lease_generation: lease.session_lease_generation,
         }
     }
 }

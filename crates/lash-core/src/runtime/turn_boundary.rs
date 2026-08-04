@@ -78,7 +78,7 @@ struct FinalCommitInput<'a> {
     current_session_lease_generation: Option<u64>,
     enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
     interrupted_turn_input_turn_id: Option<String>,
-    session_execution_lease_completion: Option<crate::SessionExecutionLeaseCompletion>,
+    session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
 }
 
 impl TurnBoundary {
@@ -283,7 +283,7 @@ impl TurnBoundary {
         current_session_lease_generation: Option<u64>,
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<String>,
-        session_execution_lease_completion: Option<crate::SessionExecutionLeaseCompletion>,
+        session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
     ) -> Result<
         (
             Vec<crate::QueuedWorkBatch>,
@@ -461,7 +461,7 @@ impl TurnBoundary {
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<String>,
         committed_attachment_ids: Vec<crate::AttachmentId>,
-        session_execution_lease_completion: Option<crate::SessionExecutionLeaseCompletion>,
+        session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
     ) -> Result<
         (
             Vec<crate::QueuedWorkBatch>,
@@ -1443,14 +1443,18 @@ mod tests {
             session_id: "session-1".to_string(),
             claim_id: "queue-claim".to_string(),
             lease_token: "queue-token".to_string(),
-            batch_ids: vec!["queue-batch".to_string()],
+            data: crate::QueuedWorkCompletionData {
+                batch_ids: vec!["queue-batch".to_string()],
+            },
         };
         let turn_input_origin = crate::TurnInputCompletion {
             session_id: "session-1".to_string(),
             claim_id: "turn-input-claim".to_string(),
             lease_token: "turn-input-token".to_string(),
-            input_ids: vec!["turn-input".to_string()],
-            applications: Vec::new(),
+            data: crate::TurnInputCompletionData {
+                input_ids: vec!["turn-input".to_string()],
+                applications: Vec::new(),
+            },
         };
         let store = RecordingStore::default();
         let (mut queue_pipeline, _lease) =

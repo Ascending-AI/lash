@@ -349,7 +349,7 @@ impl RuntimeTurnDriver<'_> {
                 .inputs
                 .retain(|input| !already_delivered.contains(&input.input_id));
             let materialized = delivery_claim
-                .materialize_for_checkpoint(
+                .materialize_checkpoint_turn_input(
                     self.host.core.durability.attachment_store.as_ref(),
                     self.host.core.attachment_source_policy.as_ref(),
                 )
@@ -360,7 +360,7 @@ impl RuntimeTurnDriver<'_> {
         }
         if let Some(claim) = queue_claim {
             let materialized = claim
-                .materialize_for_checkpoint_with_attachments(
+                .materialize_queued_checkpoint_work_with_attachments(
                     self.host.core.durability.attachment_store.as_ref(),
                 )
                 .await
@@ -621,10 +621,12 @@ mod claim_authority_tests {
             lease_token: format!("token:{claim_id}"),
             fencing_token,
             session_lease_generation: generation,
-            batches: batches
-                .iter()
-                .map(|(batch_id, enqueue_seq)| coalesced_batch(batch_id, *enqueue_seq))
-                .collect(),
+            data: crate::QueuedWorkClaimData {
+                batches: batches
+                    .iter()
+                    .map(|(batch_id, enqueue_seq)| coalesced_batch(batch_id, *enqueue_seq))
+                    .collect(),
+            },
         }
     }
 
@@ -671,15 +673,17 @@ mod claim_authority_tests {
             lease_token: format!("token:{claim_id}"),
             fencing_token,
             session_lease_generation: generation,
-            mode: crate::TurnInputClaimMode::ActiveTurn {
-                turn_id: "fig905-turn".to_string(),
-                checkpoint: crate::CheckpointKind::AfterWork,
+            data: crate::TurnInputClaimData {
+                mode: crate::TurnInputClaimMode::ActiveTurn {
+                    turn_id: crate::TurnId::from("fig905-turn"),
+                    checkpoint: crate::CheckpointKind::AfterWork,
+                },
+                inputs: input_ids
+                    .iter()
+                    .map(|input_id| pending_turn_input(input_id))
+                    .collect(),
+                applications: Vec::new(),
             },
-            inputs: input_ids
-                .iter()
-                .map(|input_id| pending_turn_input(input_id))
-                .collect(),
-            applications: Vec::new(),
         }
     }
 

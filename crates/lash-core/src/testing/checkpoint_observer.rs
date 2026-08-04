@@ -15,10 +15,10 @@ use crate::{
     AttachmentId, BlobRef, CheckpointKind, ForkPoint, ForkSessionRequest, ForkSessionResult,
     GcReport, LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelResult, PendingTurnInputCancelTarget, PendingTurnInputDraft,
-    SessionAdmission, SessionBinding, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
-    SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
-    SessionMeta, SessionStoreCreateRequest, SessionStoreFactory, StoreMaintenance,
-    TurnInputApplication, TurnInputClaim, TurnInputStore, VacuumReport,
+    SessionAdmission, SessionBinding, SessionExecutionLease, SessionExecutionLeaseAuthority,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionMeta,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreMaintenance, TurnInputApplication,
+    TurnInputClaim, TurnInputStore, VacuumReport,
 };
 use serde::{Deserialize, Serialize};
 
@@ -574,9 +574,9 @@ impl TurnInputStore for ObservedSessionStore {
     async fn claim_active_turn_inputs(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
-        turn_id: &str,
+        turn_id: &crate::TurnId,
         checkpoint: CheckpointKind,
         max_inputs: usize,
     ) -> Result<Option<TurnInputClaim>, StoreError> {
@@ -595,7 +595,7 @@ impl TurnInputStore for ObservedSessionStore {
     async fn claim_next_turn_inputs(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
     ) -> Result<Option<TurnInputClaim>, StoreError> {
@@ -628,7 +628,7 @@ impl SessionExecutionLeaseStore for ObservedSessionStore {
 
     async fn renew_session_execution_lease(
         &self,
-        fence: &SessionExecutionLeaseFence,
+        fence: &SessionExecutionLeaseAuthority,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLease, StoreError> {
         self.inner
@@ -638,7 +638,7 @@ impl SessionExecutionLeaseStore for ObservedSessionStore {
 
     async fn release_session_execution_lease(
         &self,
-        completion: &SessionExecutionLeaseCompletion,
+        completion: &SessionExecutionLeaseAuthority,
     ) -> Result<(), StoreError> {
         self.inner.release_session_execution_lease(completion).await
     }
@@ -663,7 +663,7 @@ impl crate::QueuedWorkStore for ObservedSessionStore {
     async fn claim_leading_ready_session_command(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         self.inner
@@ -674,7 +674,7 @@ impl crate::QueuedWorkStore for ObservedSessionStore {
     async fn claim_ready_queued_work(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         max_batches: usize,
@@ -693,9 +693,9 @@ impl crate::QueuedWorkStore for ObservedSessionStore {
     async fn claim_checkpoint_work(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
-        turn_id: &str,
+        turn_id: &crate::TurnId,
         checkpoint: CheckpointKind,
         max_inputs: usize,
         max_batches: usize,
@@ -716,7 +716,7 @@ impl crate::QueuedWorkStore for ObservedSessionStore {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         batch_ids: &[String],

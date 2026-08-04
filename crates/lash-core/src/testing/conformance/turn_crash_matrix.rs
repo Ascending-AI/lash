@@ -58,10 +58,9 @@ use crate::{
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimePersistence, SessionAdmission,
-    SessionBinding, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
-    SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
-    SessionMeta, StoreError, StoreMaintenance, TurnInputApplication, TurnInputClaim,
-    TurnInputStore, VacuumReport,
+    SessionBinding, SessionExecutionLease, SessionExecutionLeaseAuthority,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionMeta, StoreError,
+    StoreMaintenance, TurnInputApplication, TurnInputClaim, TurnInputStore, VacuumReport,
 };
 
 const GOLDEN_TRACE: &str = include_str!("turn_crash_trace.json");
@@ -538,9 +537,9 @@ impl TurnInputStore for SeamStore {
     async fn claim_active_turn_inputs(
         &self,
         session_id: &str,
-        fence: &SessionExecutionLeaseFence,
+        fence: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
-        turn_id: &str,
+        turn_id: &crate::TurnId,
         checkpoint: CheckpointKind,
         max_inputs: usize,
     ) -> Result<Option<TurnInputClaim>, StoreError> {
@@ -552,7 +551,7 @@ impl TurnInputStore for SeamStore {
     async fn claim_next_turn_inputs(
         &self,
         session_id: &str,
-        fence: &SessionExecutionLeaseFence,
+        fence: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
     ) -> Result<Option<TurnInputClaim>, StoreError> {
@@ -595,7 +594,7 @@ impl SessionExecutionLeaseStore for SeamStore {
 
     async fn renew_session_execution_lease(
         &self,
-        fence: &SessionExecutionLeaseFence,
+        fence: &SessionExecutionLeaseAuthority,
         ttl: u64,
     ) -> Result<SessionExecutionLease, StoreError> {
         let operation = TurnSeamOperation::Store(StoreOperation::RenewSessionExecutionLease);
@@ -609,7 +608,7 @@ impl SessionExecutionLeaseStore for SeamStore {
 
     async fn release_session_execution_lease(
         &self,
-        completion: &SessionExecutionLeaseCompletion,
+        completion: &SessionExecutionLeaseAuthority,
     ) -> Result<(), StoreError> {
         let operation = TurnSeamOperation::Store(StoreOperation::ReleaseSessionExecutionLease);
         self.control
@@ -651,7 +650,7 @@ impl crate::QueuedWorkStore for SeamStore {
     async fn claim_leading_ready_session_command(
         &self,
         session_id: &str,
-        fence: &SessionExecutionLeaseFence,
+        fence: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         let operation = TurnSeamOperation::Store(StoreOperation::ClaimLeadingSessionCommand);
@@ -667,7 +666,7 @@ impl crate::QueuedWorkStore for SeamStore {
     async fn claim_ready_queued_work(
         &self,
         session_id: &str,
-        fence: &SessionExecutionLeaseFence,
+        fence: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         max_batches: usize,
@@ -687,9 +686,9 @@ impl crate::QueuedWorkStore for SeamStore {
     async fn claim_checkpoint_work(
         &self,
         session_id: &str,
-        fence: &SessionExecutionLeaseFence,
+        fence: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
-        turn_id: &str,
+        turn_id: &crate::TurnId,
         checkpoint: CheckpointKind,
         max_inputs: usize,
         max_batches: usize,
@@ -716,7 +715,7 @@ impl crate::QueuedWorkStore for SeamStore {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         session_id: &str,
-        fence: &SessionExecutionLeaseFence,
+        fence: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         ids: &[String],

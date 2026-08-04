@@ -280,7 +280,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
             &session_id,
             &lease.fence(),
             &owner,
-            "clock-contract-turn",
+            &lash_core::TurnId::from("clock-contract-turn"),
             CheckpointKind::AfterWork,
             1,
         )

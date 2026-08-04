@@ -351,14 +351,18 @@ mod tests {
             session_id: "session".to_string(),
             claim_id: "queue-claim".to_string(),
             lease_token: "queue-token".to_string(),
-            batch_ids: vec!["batch".to_string()],
+            data: crate::QueuedWorkCompletionData {
+                batch_ids: vec!["batch".to_string()],
+            },
         }];
         commit.completed_turn_input_claims = vec![TurnInputCompletion {
             session_id: "session".to_string(),
             claim_id: "stale-input-claim".to_string(),
             lease_token: "stale-input-token".to_string(),
-            input_ids: vec!["missing-input".to_string()],
-            applications: Vec::new(),
+            data: crate::TurnInputCompletionData {
+                input_ids: vec!["missing-input".to_string()],
+                applications: Vec::new(),
+            },
         }];
 
         let error = store

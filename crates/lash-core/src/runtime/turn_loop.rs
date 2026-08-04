@@ -1012,7 +1012,7 @@ impl LashRuntime {
                 .await
                 .map_err(super::runtime_error_from_store_commit)?;
             if let Some(input_claim) = input_claim {
-                let mut input = input_claim.materialize_for_turn();
+                let mut input = input_claim.materialize_turn_input();
                 if let Some(hint) = opts.local_cancel_origin_hint() {
                     input.turn_context.set_local_cancel_origin_hint(hint);
                 }
@@ -1094,7 +1094,7 @@ impl LashRuntime {
                 })?;
             return Ok(None);
         };
-        let mut work = claim.materialize_for_turn();
+        let mut work = claim.materialize_queued_turn_work();
         if selected_batch_ids.is_some() {
             // A host-selected drain is closed over the rendered batch set. Without this guard,
             // an EarliestSafeBoundary checkpoint in the selected turn could pull unrelated
@@ -1323,11 +1323,11 @@ impl LashRuntime {
         let queued_turn_work = materialize_initial_claims
             .then(|| queued_claims.first())
             .flatten()
-            .map(crate::QueuedWorkClaim::materialize_for_turn);
+            .map(crate::QueuedWorkClaim::materialize_queued_turn_work);
         let pending_turn_input = materialize_initial_claims
             .then(|| turn_input_claims.first())
             .flatten()
-            .map(crate::TurnInputClaim::materialize_for_turn);
+            .map(crate::TurnInputClaim::materialize_turn_input);
         if let Some(work) = pending_turn_input.as_ref()
             && input.items.is_empty()
         {
@@ -1554,7 +1554,7 @@ impl LashRuntime {
         }
         let mut initial_turn_input_applications = Vec::new();
         for claim in &mut turn_input_claims {
-            claim.record_initial_turn_application(&trace_turn_id, &user_id);
+            claim.record_initial_turn_application(&crate::TurnId::from(&trace_turn_id), &user_id);
             initial_turn_input_applications.extend(claim.applications.clone());
         }
         if !initial_turn_input_applications.is_empty() {
@@ -1797,7 +1797,7 @@ impl LashRuntime {
         cancel: &CancellationToken,
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
         session_execution_lease_release_policy: SessionExecutionLeaseReleasePolicy,
-        _session_execution_fence: Option<crate::SessionExecutionLeaseFence>,
+        _session_execution_fence: Option<crate::SessionExecutionLeaseAuthority>,
         turn_control: &ActiveTurnControl,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let Some(abort) = prepared.abort else {
@@ -2038,7 +2038,7 @@ impl LashRuntime {
             session,
             policy: resolved_turn_policy,
             host: self.host.clone(),
-            turn_id: scoped_effect_controller.scope_id().to_string(),
+            turn_id: crate::TurnId::from(scoped_effect_controller.scope_id()),
             scoped_effect_controller,
             session_id: self.state.session_id.clone(),
             turn_index,

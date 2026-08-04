@@ -14,10 +14,9 @@ use lash_core::store::{
 use lash_core::{
     BlobRef, GcReport, LeaseOwnerIdentity, QueuedWorkStore, RuntimeCommit, RuntimePersistence,
     SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    SessionExecutionLeaseStore, SessionGraph, SessionNodeRecord, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
-    facade_support::current_epoch_ms,
+    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore,
+    SessionGraph, SessionNodeRecord, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
+    StoreMaintenance, TurnInputStore, VacuumReport, facade_support::current_epoch_ms,
 };
 
 #[derive(Clone)]
@@ -200,7 +199,7 @@ impl RuntimePerfStore {
     fn verify_session_execution_lease(
         &self,
         session_id: &str,
-        fence: &SessionExecutionLeaseFence,
+        fence: &SessionExecutionLeaseAuthority,
     ) -> Result<(), StoreError> {
         if fence.session_id != session_id {
             return Err(StoreError::SessionExecutionLeaseExpired {
@@ -246,7 +245,7 @@ impl RuntimePerfStore {
 
     fn release_session_execution_lease_in_memory(
         &self,
-        completion: &SessionExecutionLeaseCompletion,
+        completion: &SessionExecutionLeaseAuthority,
     ) {
         let mut leases = self
             .session_execution_leases
@@ -278,7 +277,7 @@ impl RuntimePerfStore {
     fn claim_ready_queued_work_perf(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         kind: RuntimePerfQueuedWorkClaimKind,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
@@ -347,7 +346,11 @@ impl RuntimePerfStore {
         let first_index = claimable_indices[0];
         let first = queued[first_index].batch.clone();
         let fencing_token = queued[first_index].claim_fencing_token.saturating_add(1);
-        let claim_id = format!("perf-qwc:{}:{fencing_token}", first.enqueue_seq);
+        let claim_id = store::queued_work::derive_claim_id(
+            store::queued_work::ClaimIdDialect::PerformanceQueuedWork,
+            first.enqueue_seq,
+            fencing_token,
+        );
         let lease_token = format!(
             "{session_id}:{}:{}:{claim_id}:{now}",
             owner.owner_id, owner.incarnation_id
@@ -369,14 +372,14 @@ impl RuntimePerfStore {
             lease_token,
             fencing_token,
             session_lease_generation: generation,
-            batches,
+            data: lash_core::runtime::QueuedWorkClaimData { batches },
         }))
     }
 
     fn claim_pending_turn_inputs_perf(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
         mode: lash_core::TurnInputClaimMode,
@@ -417,7 +420,7 @@ impl RuntimePerfStore {
                         .input
                         .ingress
                         .active_turn_id()
-                        .is_some_and(|active| active == turn_id)
+                        .is_some_and(|active| active == turn_id.as_str())
                         && entry.input.ingress.admits_checkpoint(*checkpoint)
                 }
                 lash_core::TurnInputClaimMode::NextTurn => entry.input.state.is_next_turn_pending(),
@@ -430,7 +433,11 @@ impl RuntimePerfStore {
         };
         let first = pending[first_index].input.clone();
         let fencing_token = pending[first_index].claim_fencing_token.saturating_add(1);
-        let claim_id = format!("perf-tic:{}:{fencing_token}", first.enqueue_seq);
+        let claim_id = store::queued_work::derive_claim_id(
+            store::queued_work::ClaimIdDialect::PerformanceTurnInput,
+            first.enqueue_seq,
+            fencing_token,
+        );
         let lease_token = format!(
             "{session_id}:{}:{}:{claim_id}:{now}",
             owner.owner_id, owner.incarnation_id
@@ -457,9 +464,11 @@ impl RuntimePerfStore {
             lease_token,
             fencing_token,
             session_lease_generation: generation,
-            mode,
-            inputs,
-            applications: Vec::new(),
+            data: lash_core::runtime::TurnInputClaimData {
+                mode,
+                inputs,
+                applications: Vec::new(),
+            },
         }))
     }
 }
@@ -932,7 +941,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
 
     async fn renew_session_execution_lease(
         &self,
-        fence: &SessionExecutionLeaseFence,
+        fence: &SessionExecutionLeaseAuthority,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLease, StoreError> {
         let now = current_epoch_ms();
@@ -967,7 +976,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
 
     async fn release_session_execution_lease(
         &self,
-        completion: &SessionExecutionLeaseCompletion,
+        completion: &SessionExecutionLeaseAuthority,
     ) -> Result<(), StoreError> {
         self.release_session_execution_lease_in_memory(completion);
         Ok(())
@@ -1183,9 +1192,9 @@ impl TurnInputStore for RuntimePerfStore {
     async fn claim_active_turn_inputs(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
-        turn_id: &str,
+        turn_id: &lash_core::TurnId,
         checkpoint: lash_core::CheckpointKind,
         max_inputs: usize,
     ) -> Result<Option<lash_core::TurnInputClaim>, StoreError> {
@@ -1195,7 +1204,7 @@ impl TurnInputStore for RuntimePerfStore {
             owner,
             max_inputs,
             lash_core::TurnInputClaimMode::ActiveTurn {
-                turn_id: turn_id.to_string(),
+                turn_id: turn_id.clone(),
                 checkpoint,
             },
         )
@@ -1204,7 +1213,7 @@ impl TurnInputStore for RuntimePerfStore {
     async fn claim_next_turn_inputs(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
     ) -> Result<Option<lash_core::TurnInputClaim>, StoreError> {
@@ -1262,7 +1271,7 @@ impl QueuedWorkStore for RuntimePerfStore {
     async fn claim_leading_ready_session_command(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
         self.claim_ready_queued_work_perf(
@@ -1276,7 +1285,7 @@ impl QueuedWorkStore for RuntimePerfStore {
     async fn claim_ready_queued_work(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         max_batches: usize,
@@ -1295,9 +1304,9 @@ impl QueuedWorkStore for RuntimePerfStore {
     async fn claim_checkpoint_work(
         &self,
         session_id: &str,
-        session_execution_lease: &store::SessionExecutionLeaseFence,
+        session_execution_lease: &store::SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
-        turn_id: &str,
+        turn_id: &lash_core::TurnId,
         checkpoint: lash_core::CheckpointKind,
         max_inputs: usize,
         max_batches: usize,
@@ -1327,7 +1336,7 @@ impl QueuedWorkStore for RuntimePerfStore {
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseFence,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         batch_ids: &[String],
@@ -1381,7 +1390,11 @@ impl QueuedWorkStore for RuntimePerfStore {
         }
         let first = &queued[indices[0]];
         let fencing_token = first.claim_fencing_token.saturating_add(1);
-        let claim_id = format!("perf-qwc:{}:{fencing_token}", first.batch.enqueue_seq);
+        let claim_id = store::queued_work::derive_claim_id(
+            store::queued_work::ClaimIdDialect::PerformanceQueuedWork,
+            first.batch.enqueue_seq,
+            fencing_token,
+        );
         let lease_token = format!(
             "{}:{}:{}:{claim_id}:{now}",
             session_id, owner.owner_id, owner.incarnation_id
@@ -1403,7 +1416,7 @@ impl QueuedWorkStore for RuntimePerfStore {
             lease_token,
             fencing_token,
             session_lease_generation: generation,
-            batches,
+            data: lash_core::runtime::QueuedWorkClaimData { batches },
         }))
     }
 

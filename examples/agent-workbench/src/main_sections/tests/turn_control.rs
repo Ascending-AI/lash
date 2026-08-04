@@ -108,7 +108,7 @@ mod turn_control_timeout_tests {
             lash::persistence::TurnInputIngress::ActiveTurn {
                 ref turn_id,
                 min_boundary: lash::persistence::TurnInputCheckpointBoundary::AfterWork,
-            } if turn_id == "running-turn"
+            } if turn_id.as_str() == "running-turn"
         ));
         assert_eq!(
             injected.state,

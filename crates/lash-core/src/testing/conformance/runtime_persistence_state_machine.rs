@@ -884,7 +884,7 @@ async fn commit_operation(
         .flatten();
     if let Some(claim) = input_claim.as_mut() {
         claim.record_initial_turn_application(
-            &format!("property-turn-{}", model.operation_sequence),
+            &crate::TurnId::from(format!("property-turn-{}", model.operation_sequence)),
             &format!("property-message-{}", model.operation_sequence),
         );
     }
@@ -1240,7 +1240,7 @@ async fn settle_stale_input(
     model
         .crashed_inputs
         .retain(|input_id| !settled.contains(input_id.as_str()));
-    model.applications.extend(completion.applications);
+    model.applications.extend(completion.data.applications);
     model.stale_input_claims.pop();
     model.head_revision = result.head_revision;
     model.has_session = true;
@@ -2243,7 +2243,7 @@ async fn law_turn_inputs_apply_once_in_order(
             .collect::<Vec<_>>(),
         vec![first.input_id.as_str(), second.input_id.as_str()]
     );
-    claim.record_initial_turn_application("ordered-turn", "ordered-message");
+    claim.record_initial_turn_application(&crate::TurnId::from("ordered-turn"), "ordered-message");
     let expected = claim.applications.clone();
     let state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
