@@ -260,11 +260,16 @@ impl LashRuntime {
                     "unknown managed session `{session_id}`"
                 )));
             };
+            // Reference count observed while the registry lock is held: the
+            // extraction below can only succeed at 1, so this is the input that
+            // decides the outcome.
+            let runtime_references = handle.runtime_reference_count();
             match handle.try_into_runtime() {
                 Ok(child) => {
                     tracing::debug!(
                         session_id,
                         managed_sessions = registered,
+                        runtime_references,
                         consulted = "managed_session_handle_references",
                         outcome = "activated",
                         event = "managed_session.activation",
@@ -273,15 +278,18 @@ impl LashRuntime {
                     child
                 }
                 Err(handle) => {
+                    let runtime_references_on_refusal = handle.runtime_reference_count();
                     registry.insert(session_id.to_string(), handle);
                     tracing::debug!(
                         session_id,
                         managed_sessions = registered,
+                        runtime_references,
+                        runtime_references_on_refusal,
                         consulted = "managed_session_handle_references",
                         outcome = "in_use_handle_restored",
                         event = "managed_session.activation",
-                        "managed session activation denied: the handle is still in use; \
-                         its registration was restored and activation stays retryable"
+                        "managed session activation denied: the runtime is still referenced \
+                         elsewhere; its registration was restored and activation stays retryable"
                     );
                     return Err(SessionError::Protocol(format!(
                         "managed session `{session_id}` is still in use"

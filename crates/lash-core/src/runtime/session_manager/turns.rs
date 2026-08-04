@@ -163,6 +163,24 @@ struct ManagedTurnLease {
     released: Arc<AtomicBool>,
 }
 
+/// Admission outcome plus the state it was decided from, carried out of the
+/// registry lock so the trace is emitted without holding it.
+enum ManagedTurnAdmission {
+    Admitted {
+        registered_turns: usize,
+    },
+    TurnIdBusy {
+        registered_turns: usize,
+        holder_session_id: String,
+        holder_registration: u64,
+    },
+    SessionBusy {
+        registered_turns: usize,
+        holder_turn_id: String,
+        holder_registration: u64,
+    },
+}
+
 impl ManagedTurnLease {
     fn register(
         turns: &ManagedTurnRegistry,
@@ -172,38 +190,74 @@ impl ManagedTurnLease {
     ) -> Result<Self, crate::PluginError> {
         let registration =
             NEXT_MANAGED_TURN_REGISTRATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        {
+        // Decide under the lock, then emit the decision basis outside it: no
+        // tracing subscriber runs while the registry is held.
+        let decision = {
             let mut registered = lock_turns(turns);
+            let registered_turns = registered.len();
             // A turn id identifies at most one live managed turn: live usage is
             // keyed by turn id alone, so admitting two concurrent turns under
             // one id would cross their usage accounting whatever the registry
-            // is keyed by. Both denials emit their consulted state below.
+            // is keyed by.
             if let Some(occupied) = registered.get(turn_id) {
+                ManagedTurnAdmission::TurnIdBusy {
+                    registered_turns,
+                    holder_session_id: occupied.session_id.clone(),
+                    holder_registration: occupied.registration,
+                }
+            } else if let Some((holder_turn_id, holder)) = registered
+                .iter()
+                .find(|(_, turn)| turn.session_id == session_id)
+            {
+                ManagedTurnAdmission::SessionBusy {
+                    registered_turns,
+                    holder_turn_id: holder_turn_id.clone(),
+                    holder_registration: holder.registration,
+                }
+            } else {
+                registered.insert(
+                    turn_id.to_string(),
+                    ManagedSessionTurn {
+                        session_id: session_id.to_string(),
+                        registration,
+                    },
+                );
+                ManagedTurnAdmission::Admitted {
+                    registered_turns: registered_turns + 1,
+                }
+            }
+        };
+        match decision {
+            ManagedTurnAdmission::TurnIdBusy {
+                registered_turns,
+                holder_session_id,
+                holder_registration,
+            } => {
                 tracing::debug!(
                     session_id,
                     turn_id,
-                    registered_turns = registered.len(),
-                    holder_session_id = %occupied.session_id,
-                    holder_registration = occupied.registration,
+                    registered_turns,
+                    holder_session_id = %holder_session_id,
+                    holder_registration,
                     outcome = "denied",
                     event = "managed_turn.admission",
                     "managed turn denied: turn id already registered"
                 );
                 return Err(crate::PluginError::Session(format!(
-                    "turn `{turn_id}` is already running on session `{}`",
-                    occupied.session_id
+                    "turn `{turn_id}` is already running on session `{holder_session_id}`"
                 )));
             }
-            if let Some((holder_turn_id, holder)) = registered
-                .iter()
-                .find(|(_, turn)| turn.session_id == session_id)
-            {
+            ManagedTurnAdmission::SessionBusy {
+                registered_turns,
+                holder_turn_id,
+                holder_registration,
+            } => {
                 tracing::debug!(
                     session_id,
                     turn_id,
-                    registered_turns = registered.len(),
+                    registered_turns,
                     holder_turn_id = %holder_turn_id,
-                    holder_registration = holder.registration,
+                    holder_registration,
                     outcome = "denied",
                     event = "managed_turn.admission",
                     "managed turn denied: session already has a running turn"
@@ -212,22 +266,15 @@ impl ManagedTurnLease {
                     "session `{session_id}` already has a running turn"
                 )));
             }
-            registered.insert(
-                turn_id.to_string(),
-                ManagedSessionTurn {
-                    session_id: session_id.to_string(),
-                    registration,
-                },
-            );
-            tracing::debug!(
+            ManagedTurnAdmission::Admitted { registered_turns } => tracing::debug!(
                 session_id,
                 turn_id,
                 registration,
-                registered_turns = registered.len(),
+                registered_turns,
                 outcome = "admitted",
                 event = "managed_turn.admission",
                 "managed turn admitted"
-            );
+            ),
         }
         Ok(Self {
             turns: Arc::clone(turns),
@@ -251,24 +298,34 @@ impl ManagedTurnLease {
         if self.released.swap(true, Ordering::AcqRel) {
             return TokenUsage::default();
         }
-        let owned = {
+        // Capture the holder that decided the outcome before the entry is
+        // dropped, so a superseded release can name what superseded it.
+        let (owned, holder) = {
             let mut registered = lock_turns(&self.turns);
-            let owned = registered
+            let holder = registered
                 .get(&self.turn_id)
-                .is_some_and(|turn| turn.registration == self.registration);
+                .map(|turn| (turn.session_id.clone(), turn.registration));
+            let owned = holder
+                .as_ref()
+                .is_some_and(|(_, registration)| *registration == self.registration);
             if owned {
                 registered.remove(&self.turn_id);
             }
-            owned
+            (owned, holder)
         };
         if !owned {
-            // A successor owns this id pair now. Releasing either entry would
-            // evict live work, so this lease releases nothing.
+            // A successor owns this turn id now, or nothing does. Releasing
+            // either entry would evict live work, so this lease releases
+            // nothing.
             tracing::debug!(
                 session_id = %self.session_id,
                 turn_id = %self.turn_id,
                 registration = self.registration,
+                holder_registration = holder.as_ref().map(|(_, registration)| *registration),
+                holder_session_id = holder.as_ref().map(|(session_id, _)| session_id.as_str()),
+                holder_present = holder.is_some(),
                 reason,
+                consulted = "managed_turn_registry",
                 outcome = "superseded",
                 event = "managed_turn.release",
                 "managed turn release skipped: registration was superseded"
@@ -311,7 +368,7 @@ impl Drop for ManagedTurnLease {
 /// poisoned mutex must not turn one panic into a double-panic abort. Nothing is
 /// ever left half-written under this lock: every critical section is a single
 /// map operation.
-fn lock_turns(
+pub(in crate::runtime::session_manager) fn lock_turns(
     turns: &ManagedTurnRegistry,
 ) -> std::sync::MutexGuard<'_, HashMap<String, ManagedSessionTurn>> {
     turns
@@ -435,17 +492,47 @@ mod tests {
 
     /// The ABA a `(session_id, turn_id)` check cannot see: the stale lease's own
     /// id pair is registered again by a successor, so identity has to come from
-    /// the registration nonce. Reproduces the interleaving found in review —
-    /// a foreign turn takes the same turn id, completes, the original session
-    /// re-registers, and only then does the stale lease drop.
+    /// the registration nonce.
+    ///
+    /// This walks the sequence found in review, step by step:
+    /// 1. `A` registers `(S, T)` and keeps running.
+    /// 2. A foreign session `X` tries to register `T`. In the original sequence
+    ///    this overwrote `A`'s entry; admission now **rejects** it, which is the
+    ///    guard that makes the rest of that sequence unreachable — asserted
+    ///    here so relaxing it fails this test.
+    /// 3. `A`'s registration is vacated without `A` noticing. No in-tree path
+    ///    does this today (only the owning lease removes an entry), so the test
+    ///    vacates the slot directly: the nonce must protect the successor for
+    ///    *any* future removal path, not just the ones that exist now.
+    /// 4. The original session re-registers `(S, T)` as `B`, with live usage.
+    /// 5. Stale `A` drops — and must release neither of `B`'s entries.
     #[test]
     fn stale_managed_turn_lease_does_not_evict_a_same_identity_successor() {
         let (turns, live_usage) = shared_maps();
         let stale =
             ManagedTurnLease::register(&turns, &live_usage, "session", "turn").expect("register");
-        // Whatever removes the stale registration — here a foreign turn that
-        // took the id and completed — leaves `stale` alive with a released slot.
+        // Step 2: the foreign-session overwrite is now denied outright.
+        let foreign =
+            match ManagedTurnLease::register(&turns, &live_usage, "foreign-session", "turn") {
+                Ok(_) => {
+                    panic!("a foreign session must not take a turn id that is already running")
+                }
+                Err(err) => err,
+            };
+        assert!(
+            foreign
+                .to_string()
+                .contains("turn `turn` is already running on session `session`"),
+            "unexpected denial: {foreign}"
+        );
+        assert_eq!(
+            lock_turns(&turns).get("turn").map(|turn| turn.registration),
+            Some(stale.registration),
+            "the denied foreign registration must leave the live entry untouched"
+        );
+        // Step 3.
         lock_turns(&turns).remove("turn");
+        // Step 4.
         let successor = ManagedTurnLease::register(&turns, &live_usage, "session", "turn")
             .expect("re-register");
         live_usage.lock().expect("live usage").insert(
@@ -456,6 +543,7 @@ mod tests {
             },
         );
 
+        // Step 5.
         drop(stale);
 
         assert_eq!(

@@ -266,6 +266,12 @@ impl Drop for SessionExecutionLeaseGuard {
             return;
         }
         let completion = self.completion();
+        let expires_at_epoch_ms = self
+            .lease
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .expires_at_epoch_ms;
+        let observed_at_epoch_ms = self.clock.timestamp_ms();
         tracing::debug!(
             session_id = %completion.session_id,
             owner_id = %completion.owner.owner_id,
@@ -277,6 +283,9 @@ impl Drop for SessionExecutionLeaseGuard {
                 "release_not_requested"
             },
             lease_lost = self.is_lost(),
+            expires_at_epoch_ms,
+            observed_at_epoch_ms,
+            remaining_ttl_ms = expires_at_epoch_ms.saturating_sub(observed_at_epoch_ms),
             outcome = "left_to_ttl",
             event = "session_execution_lease.release",
             "dropped session execution lease guard without an acknowledged \
@@ -471,6 +480,13 @@ mod tests {
     /// place with the identical token and fence — so an out-of-band release
     /// would clear a successor's live lease. The successor here is the one that
     /// releases; the stale guard's drop must be inert.
+    ///
+    /// This test is the enforcement half of a pair: the backend fact it rests on
+    /// (that releasing a completion retained across a same-incarnation re-claim
+    /// really does free the refreshed lease, on every backend) is pinned by
+    /// `session_execution_lease_contract` in the store conformance suite. That
+    /// law cannot host this prohibition — it never constructs a guard — so the
+    /// two must be changed together.
     #[tokio::test]
     async fn guard_dropped_mid_release_never_releases_a_successors_lease() {
         let (store, guard, gate) = acquire_gated_guard().await;

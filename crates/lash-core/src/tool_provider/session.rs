@@ -65,6 +65,14 @@ impl<'run> ToolSessionAdmin<'run> {
         self.session_lifecycle.close_session(session_id).await
     }
 
+    /// Run one turn on a managed session, scoping its durable effects to
+    /// `turn_id`.
+    ///
+    /// `turn_id` must be unique across every managed turn running in this
+    /// process (a process id or another already-unique handle); a duplicate is
+    /// rejected with `` turn `<id>` is already running on session `<other>` ``.
+    /// A session runs at most one turn at a time, and both registrations are
+    /// released even when this future is dropped mid-turn.
     pub async fn start_turn(
         &self,
         session_id: &str,
