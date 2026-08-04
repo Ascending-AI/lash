@@ -1325,9 +1325,9 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         &self,
         session_id: &str,
     ) -> Result<Option<SessionExecutionLease>, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        let current = load_session_execution_lease_tx(&mut tx, session_id).await?;
-        tx.commit().await.map_err(store_sqlx_error)?;
+        // Non-locking on purpose: observation must never be able to delay the
+        // lane it observes. See `read_session_execution_lease_unlocked`.
+        let current = read_session_execution_lease_unlocked(&self.pool, session_id).await?;
         // A released row keeps its generation but clears owner and token; only a
         // held row is reported. Expiry stays a raw fact for the caller.
         let Some(current) =
@@ -2880,6 +2880,33 @@ pub(crate) struct SessionExecutionLeaseRow {
     pub(crate) fencing_token: u64,
     claimed_at_ms: u64,
     pub(crate) expires_at_ms: u64,
+}
+
+/// Read the lease row without locking it, for diagnostics.
+///
+/// The mutation paths deliberately take a `FOR UPDATE` row lock (see
+/// [`load_session_execution_lease_tx`]) because check-then-act on this row is not
+/// atomic under READ COMMITTED. A diagnostic read must never take that lock: an
+/// operator polling a stuck session would otherwise make the holder's renewal or
+/// a peer's claim wait behind the observer's transaction, so watching the lease
+/// could itself delay the lane it is watching. This runs as a single autocommit
+/// statement on the pool with no `FOR UPDATE` and no surrounding transaction.
+pub(crate) async fn read_session_execution_lease_unlocked(
+    pool: &PgPool,
+    session_id: &str,
+) -> Result<Option<SessionExecutionLeaseRow>, StoreError> {
+    let row = sqlx::query(
+        "SELECT lease_owner_id, lease_token, lease_fencing_token,
+                lease_claimed_at_ms, lease_expires_at_ms,
+                lease_owner_incarnation_id, lease_owner_liveness_json
+         FROM lash_session_execution_leases
+         WHERE session_id = $1",
+    )
+    .bind(session_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(store_sqlx_error)?;
+    Ok(row.map(session_execution_lease_row_from_columns))
 }
 
 pub(crate) async fn load_session_execution_lease_tx(
