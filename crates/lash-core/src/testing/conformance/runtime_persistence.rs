@@ -2085,14 +2085,21 @@ async fn session_execution_lease_diagnostic_read_contract(store: Arc<dyn Runtime
 /// replaced; a takeover inferred from its own renewal-failure path is missing in
 /// exactly that case, and can name whichever holder happens to be current by the
 /// time it wakes rather than the one that displaced it.
-async fn session_execution_lease_displacement_contract(store: Arc<dyn RuntimePersistence>) {
-    let session = "lease-displacement";
+///
+/// Every implementation of [`crate::store::SessionExecutionLeaseStore`] answers this, including
+/// in-process doubles: a double that reports no displacement silently disables the
+/// takeover event for whatever it stands in for. Callers pass a session id they
+/// own, because a claim mutates the lane.
+pub async fn session_execution_lease_displacement(
+    store: &(dyn crate::store::SessionExecutionLeaseStore + '_),
+    session_id: &str,
+) {
     let first = lease_owner("displacement-first");
     let second = lease_owner("displacement-second");
 
     // A first claim on a row nobody ever held displaces nobody.
     let opening = store
-        .try_claim_session_execution_lease(session, &first, 0)
+        .try_claim_session_execution_lease(session_id, &first, 0)
         .await
         .expect("first claim")
         .acquisition()
@@ -2105,15 +2112,17 @@ async fn session_execution_lease_displacement_contract(store: Arc<dyn RuntimePer
 
     // Taking over a lapsed holder must name that exact holder and generation.
     let takeover = store
-        .try_claim_session_execution_lease(session, &second, 60_000)
+        .try_claim_session_execution_lease(session_id, &second, 60_000)
         .await
         .expect("claim the lapsed lane")
         .acquisition()
         .expect("a lapsed lane is claimable");
-    let displaced = takeover
-        .displaced
-        .as_ref()
-        .expect("displacing a lapsed holder must be reported on the claim");
+    let displaced = takeover.displaced.as_ref().unwrap_or_else(|| {
+        panic!(
+            "displacing a lapsed holder must be reported on the claim; \
+             this store reported nothing, which disables the takeover event"
+        )
+    });
     assert_eq!(
         displaced.owner, opening.lease.owner,
         "the displacement must name the holder actually displaced"
@@ -2134,7 +2143,7 @@ async fn session_execution_lease_displacement_contract(store: Arc<dyn RuntimePer
 
     // Same-incarnation reentry advances nothing, so it displaces nobody.
     let reentry = store
-        .try_claim_session_execution_lease(session, &second, 60_000)
+        .try_claim_session_execution_lease(session_id, &second, 60_000)
         .await
         .expect("reenter the live lane")
         .acquisition()
@@ -2148,23 +2157,43 @@ async fn session_execution_lease_displacement_contract(store: Arc<dyn RuntimePer
 
     // A holder that released its lane hands it over; the next claimant took
     // nothing from anyone and must not report a takeover.
-    release_session_execution_lease_for_test(&store, &reentry.lease).await;
+    store
+        .release_session_execution_lease(&reentry.lease.completion())
+        .await
+        .expect("release the lane");
     let after_release = store
-        .try_claim_session_execution_lease(session, &first, 60_000)
+        .try_claim_session_execution_lease(session_id, &first, 60_000)
         .await
         .expect("claim a released lane")
         .acquisition()
         .expect("a released lane is acquirable");
     assert!(
-        after_release.lease.fencing_token > reentry.lease.fencing_token,
-        "a reclaim must still advance the generation"
-    );
-    assert!(
         after_release.displaced.is_none(),
         "claiming a cleanly released lane displaces nobody: {:?}",
         after_release.displaced
     );
-    release_session_execution_lease_for_test(&store, &after_release.lease).await;
+    store
+        .release_session_execution_lease(&after_release.lease.completion())
+        .await
+        .expect("release the reclaimed lane");
+}
+
+/// The durable-backend wrapper: the shared displacement contract plus the
+/// generation monotonicity a persistent store additionally owes across a release.
+async fn session_execution_lease_displacement_contract(store: Arc<dyn RuntimePersistence>) {
+    let session = "lease-displacement";
+    session_execution_lease_displacement(store.as_ref(), session).await;
+
+    // A durable backend keeps the fence across a release, so a later reclaim
+    // still advances it. Doubles that drop the row on release are held only to
+    // the displacement contract above.
+    let reclaimed =
+        claim_session_execution_lease_for_test(&store, session, "displacement-third").await;
+    assert!(
+        reclaimed.fencing_token > 1,
+        "a durable reclaim must not restart the fencing generation: {reclaimed:?}"
+    );
+    release_session_execution_lease_for_test(&store, &reclaimed).await;
 }
 
 async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>) {

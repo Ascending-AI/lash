@@ -380,6 +380,18 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
                 holder: existing.clone(),
             });
         }
+        // The lapsed holder this claim takes the lane from, read before the
+        // overwrite. A double that reports no displacement would silently
+        // disable the takeover event for every facade test that runs on it.
+        let displaced = leases.get(session_id).and_then(|previous| {
+            (!previous.owner.same_incarnation(owner)).then(|| {
+                (
+                    previous.owner.clone(),
+                    previous.fencing_token,
+                    previous.expires_at_epoch_ms,
+                )
+            })
+        });
         let next_fencing_token = leases
             .get(session_id)
             .map(|lease| lease.fencing_token.saturating_add(1))
@@ -388,7 +400,17 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
             test_session_execution_lease(session_id, owner, lease_ttl_ms, next_fencing_token);
         leases.insert(session_id.to_string(), lease.clone());
         Ok(lash_core::SessionExecutionLeaseClaimOutcome::Acquired(
-            lash_core::SessionExecutionLeaseAcquisition::fresh(lease),
+            match displaced {
+                Some((previous, generation, expired_at_epoch_ms)) => {
+                    lash_core::SessionExecutionLeaseAcquisition::displacing_observed(
+                        lease,
+                        previous,
+                        generation,
+                        expired_at_epoch_ms,
+                    )
+                }
+                None => lash_core::SessionExecutionLeaseAcquisition::fresh(lease),
+            },
         ))
     }
 
@@ -1977,3 +1999,16 @@ mod processes_endstate;
 mod rebuild_conformance;
 mod stack_budget;
 mod turn_streaming;
+
+/// `SnapshotStore` backs the facade tests, so it owes the displacement contract
+/// too: a double that reports no displacement would let a facade-level regression
+/// in the takeover event pass unnoticed.
+#[tokio::test]
+async fn snapshot_store_reports_the_holder_a_claim_displaces() {
+    let store = SnapshotStore::default();
+    lash_core::testing::conformance::session_execution_lease_displacement(
+        &store,
+        "snapshot-lease-displacement",
+    )
+    .await;
+}
