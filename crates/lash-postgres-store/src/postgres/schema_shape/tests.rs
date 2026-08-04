@@ -1,6 +1,90 @@
+//! Contract tests over both committed artifacts: `schema.sql`, the DDL a host
+//! vendors, and `schema-shape.txt`, the structure every open verifies against.
+
 use super::*;
 use crate::postgres_test_support;
 use sqlx::Connection;
+
+/// The DDL artifact is only vendorable if what the crate compiles is what the
+/// repository publishes. Reading the file back at test time is what keeps a
+/// future refactor from reintroducing a Rust-literal DDL that silently diverges
+/// from the bytes a host copied.
+#[test]
+fn the_published_ddl_file_is_the_ddl_this_build_executes() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schema.sql");
+    let published = std::fs::read_to_string(&path).expect("read the committed DDL artifact");
+    assert_eq!(
+        crate::PostgresStorage::schema_ddl(),
+        published,
+        "{} must be the exact DDL open executes",
+        path.display()
+    );
+}
+
+/// A host applies this file into a schema it may not own outright, possibly more
+/// than once. Every statement must therefore be creation-only and idempotent, and
+/// nothing may be schema-qualified.
+#[test]
+fn the_published_ddl_is_creation_only_and_unqualified() {
+    let ddl = crate::PostgresStorage::schema_ddl();
+    let statements: Vec<&str> = ddl
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("--"))
+        .collect();
+    let body = statements.join("\n");
+    for forbidden in ["DROP ", "ALTER ", "TRUNCATE ", "GRANT ", "public."] {
+        assert!(
+            !body.contains(forbidden),
+            "the DDL artifact must not contain `{forbidden}`: a host applies it into its own \
+             schema, possibly without the privilege to do that"
+        );
+    }
+    let creations = body.matches("CREATE TABLE IF NOT EXISTS").count();
+    assert!(
+        creations > 20,
+        "every table must be created idempotently, found {creations}"
+    );
+    assert_eq!(
+        body.matches("CREATE TABLE ").count(),
+        creations,
+        "no table may be created non-idempotently"
+    );
+    assert_eq!(
+        body.matches("CREATE INDEX ").count(),
+        body.matches("CREATE INDEX IF NOT EXISTS").count(),
+        "no index may be created non-idempotently"
+    );
+    assert_eq!(
+        body.matches("CREATE UNIQUE INDEX ").count(),
+        body.matches("CREATE UNIQUE INDEX IF NOT EXISTS").count(),
+        "no unique index may be created non-idempotently"
+    );
+}
+
+/// A structural check cannot see a missing row, so the artifact has to carry the
+/// seeds itself — otherwise a host that copies it faithfully still ends up with a
+/// database lash refuses to open.
+#[test]
+fn the_published_ddl_seeds_every_required_row() {
+    let ddl = crate::PostgresStorage::schema_ddl();
+    for (table, _) in SEED_ROWS {
+        assert!(
+            ddl.contains(&format!("INSERT INTO {table} ")),
+            "the DDL artifact must seed {table}"
+        );
+    }
+    assert!(
+        ddl.contains(&format!("VALUES ('{SCHEMA_COMPONENT}', {SCHEMA_VERSION})")),
+        "the DDL artifact must stamp the component version this build implements"
+    );
+    // Every seed is re-applied on each lash-managed open, so each must be a
+    // no-op the second time.
+    assert_eq!(
+        ddl.matches("INSERT INTO ").count(),
+        ddl.matches("ON CONFLICT").count(),
+        "every seed insert must be idempotent"
+    );
+}
 
 /// Applies `schema.sql` into a throwaway PostgreSQL schema and returns the live
 /// shape the DDL actually produces, alongside the schema name it resolved in.
