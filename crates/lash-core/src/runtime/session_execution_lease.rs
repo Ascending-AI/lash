@@ -1,3 +1,43 @@
+//! Session-execution-lease acquisition, renewal, and the trace timeline an
+//! operator reconstructs a takeover from.
+//!
+//! The lease is advisory: it serializes the common case so two runners do not
+//! duplicate work, but the commit's head compare-and-set is the only authority
+//! on who publishes (ADR 0029). That makes a handful of transitions decisive when
+//! a turn looks stuck, and each emits a structured event carrying the session id,
+//! the lease `fencing_token` (ADR 0029 calls it the generation), and the holder
+//! identity:
+//!
+//! | event | level | emitted by | meaning |
+//! |---|---|---|---|
+//! | `session_execution_lease.acquired` | INFO | the claimant | this runner acquired the lane |
+//! | `session_execution_lease.taken_over` | INFO | the *winner* | this claim displaced a named lapsed holder |
+//! | `session_execution_lease.lost` | WARN | the loser | a renewal was fence-rejected; this runner no longer holds the lane |
+//! | `session_execution_lease.renewal_failed` | WARN | the holder | renewal stopped on a transient error; the lease is still ours to release |
+//! | `session_execution_lease.commit_cas_rejected` | WARN | the losing writer | the commit's head CAS lost to a concurrent writer |
+//!
+//! **`taken_over` is the winner's event, emitted atomically with the claim that
+//! displaced the previous holder.** That placement is not a detail: the displaced
+//! runner is usually *why* its lease lapsed, so it is frequently dead, frozen, or
+//! already replaced, and a takeover reported from its renewal path would be
+//! missing in exactly the case an operator most needs it, or would name whichever
+//! holder happens to be current by the time it wakes up. The substrate hands the
+//! winner the prior holder inside the claim
+//! ([`SessionExecutionLeaseAcquisition::displaced`](crate::store::SessionExecutionLeaseAcquisition::displaced)),
+//! so the event is true by construction and needs no liveness on the loser's side.
+//!
+//! The loser's `lost` remains a purely local observation: *this* runner no longer
+//! holds the lane. It deliberately does not name a successor.
+//!
+//! They are trace events, not durable session events, on purpose: lease churn is
+//! per-attempt telemetry about which runner tried what, not session history. A
+//! lost lease is not a turn failure: the turn may still commit, and the
+//! `commit_cas_rejected` event is what proves it did not.
+//!
+//! `acquired` and `taken_over` are INFO rather than DEBUG because reconstructing
+//! takeover order is an ordinary production question; requiring debug logging to
+//! answer it would make the timeline unavailable exactly when it is needed.
+
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
@@ -37,6 +77,51 @@ pub(super) struct SessionExecutionLeaseContinuity {
     fencing_token: u64,
 }
 
+/// What a commit-time trace event says about the authority the writer had.
+///
+/// Captured before the commit so a rejection reports the generation that lost,
+/// not whatever the row holds afterwards. Both paths that reach a commit are
+/// represented, because both can lose the head CAS:
+///
+/// * the runner holds the lane, and `fencing_token` is its own; or
+/// * the lane was busy and the runner proceeded anyway under the advisory
+///   (ADR 0029 makes the CAS the authority, so this is legal), in which case
+///   `fencing_token` is the holder it knowingly raced and `lane_held` is false.
+///
+/// Either way the event carries the writer's identity and a generation, so a
+/// rejection is never anonymous.
+#[derive(Clone, Debug)]
+pub(super) struct SessionExecutionLeaseCommitEvidence {
+    /// Identity of the runner attempting the commit, always present.
+    owner: crate::LeaseOwnerIdentity,
+    /// The lane generation in play for this attempt: this runner's when it holds
+    /// the lane, otherwise the generation it observed holding it.
+    fencing_token: u64,
+    /// Whether `fencing_token` belongs to this runner. False on the busy-advisory
+    /// path, where no lane was ever held and `lease_lost` is meaningless.
+    lane_held: bool,
+    /// Whether this runner had already observed its own lease loss before the
+    /// commit. Repeated rejections with `lane_held` true and this false are
+    /// livelock, not takeover.
+    lease_lost: bool,
+}
+
+impl SessionExecutionLeaseCommitEvidence {
+    /// Evidence for a writer that proceeded under the busy advisory without the
+    /// lane, naming itself and the generation it chose to race.
+    pub(super) fn without_lane(
+        claimant: &crate::LeaseOwnerIdentity,
+        observed_holder: &SessionExecutionLease,
+    ) -> Self {
+        Self {
+            owner: claimant.clone(),
+            fencing_token: observed_holder.fencing_token,
+            lane_held: false,
+            lease_lost: false,
+        }
+    }
+}
+
 pub(super) struct SessionExecutionLeaseGuard {
     store: Arc<dyn RuntimePersistence>,
     lease: Arc<StdMutex<SessionExecutionLease>>,
@@ -65,11 +150,12 @@ impl SessionExecutionLeaseGuard {
                 return Ok(None);
             }
         };
-        tracing::debug!(
+        tracing::info!(
             session_id = %lease.session_id,
             owner_id = %lease.owner.owner_id,
             incarnation_id = %lease.owner.incarnation_id,
             fencing_token = lease.fencing_token,
+            expires_at_epoch_ms = lease.expires_at_epoch_ms,
             event = "session_execution_lease.acquired",
             "acquired session execution lease"
         );
@@ -111,6 +197,20 @@ impl SessionExecutionLeaseGuard {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .completion()
+    }
+
+    /// Snapshot the holder facts a commit-rejection trace event reports.
+    pub(super) fn commit_evidence(&self) -> SessionExecutionLeaseCommitEvidence {
+        let lease = self
+            .lease
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        SessionExecutionLeaseCommitEvidence {
+            owner: lease.owner.clone(),
+            fencing_token: lease.fencing_token,
+            lane_held: true,
+            lease_lost: self.lost.load(Ordering::Acquire),
+        }
     }
 
     /// Record an already-acknowledged release: the commit that carried this
@@ -365,6 +465,7 @@ fn spawn_renewal_task(
                             event = "session_execution_lease.lost",
                             "lost session execution lease"
                         );
+                        trace_takeover(store.as_ref(), &fence).await;
                     } else {
                         tracing::warn!(
                             error = %err,
@@ -384,6 +485,77 @@ fn spawn_renewal_task(
             }
         }
     })
+}
+
+/// Name the successor after a fence-rejected renewal so a log timeline
+/// reconstructs takeover order. Diagnostics only: the read never fences anything,
+/// and a failure to read is not allowed to escalate a lost lease into an error.
+async fn trace_takeover(store: &dyn RuntimePersistence, fence: &SessionExecutionLeaseFence) {
+    let current = match store.get_session_execution_lease(&fence.session_id).await {
+        Ok(current) => current,
+        Err(err) => {
+            tracing::debug!(
+                error = %err,
+                session_id = %fence.session_id,
+                consulted = "session_execution_lease_row",
+                outcome = "successor_unknown",
+                event = "session_execution_lease.takeover_unknown",
+                "could not read the session execution lease row after renewal failure"
+            );
+            return;
+        }
+    };
+    let Some(current) = current else {
+        return;
+    };
+    if current.owner.same_incarnation(&fence.owner) && current.fencing_token == fence.fencing_token
+    {
+        return;
+    }
+    tracing::info!(
+        session_id = %fence.session_id,
+        owner_id = %fence.owner.owner_id,
+        incarnation_id = %fence.owner.incarnation_id,
+        fencing_token = fence.fencing_token,
+        superseding_owner_id = %current.owner.owner_id,
+        superseding_incarnation_id = %current.owner.incarnation_id,
+        superseding_fencing_token = current.fencing_token,
+        superseding_expires_at_epoch_ms = current.expires_at_epoch_ms,
+        consulted = "session_execution_lease_row",
+        outcome = "taken_over",
+        event = "session_execution_lease.taken_over",
+        "the session execution lane was taken over by a named successor"
+    );
+}
+
+/// Report a commit whose head compare-and-set lost to a concurrent writer.
+///
+/// This is the authority speaking, not the advisory lease: a repeated rejection
+/// while `lane_held` is true and `lease_lost` is false is livelock (two writers
+/// racing the same head), while a rejection after `lost` / `taken_over` is an
+/// ordinary handoff. Non-CAS store failures are left to their own error paths.
+pub(super) fn trace_commit_cas_rejected(
+    session_id: &str,
+    evidence: Option<&SessionExecutionLeaseCommitEvidence>,
+    err: &StoreError,
+) {
+    let StoreError::HeadRevisionConflict { expected, actual } = err else {
+        return;
+    };
+    tracing::warn!(
+        session_id,
+        fencing_token = evidence.map(|evidence| evidence.fencing_token),
+        owner_id = evidence.map(|evidence| evidence.owner.owner_id.as_str()),
+        incarnation_id = evidence.map(|evidence| evidence.owner.incarnation_id.as_str()),
+        lane_held = evidence.map(|evidence| evidence.lane_held),
+        lease_lost = evidence.map(|evidence| evidence.lease_lost),
+        expected_head_revision = expected,
+        actual_head_revision = actual,
+        consulted = "session_head_revision",
+        outcome = "commit_rejected",
+        event = "session_execution_lease.commit_cas_rejected",
+        "the commit's head compare-and-set was rejected; another writer published first"
+    );
 }
 
 fn trace_busy(

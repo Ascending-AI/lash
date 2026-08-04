@@ -566,6 +566,7 @@ impl LashRuntime {
                 release_session_execution_lease
                     .then(|| session_execution_lease.map(SessionExecutionLeaseGuard::completion))
                     .flatten(),
+                session_execution_lease.map(SessionExecutionLeaseGuard::commit_evidence),
             )
             .await
         {

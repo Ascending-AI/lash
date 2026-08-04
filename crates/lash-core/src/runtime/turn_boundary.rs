@@ -10,6 +10,7 @@ use crate::{
     ToolCallRecord, TurnOutcome,
 };
 
+use super::session_execution_lease::SessionExecutionLeaseCommitEvidence;
 use super::{RuntimeError, RuntimeSessionState, TurnCommitDraft, merge_ledger_entry};
 
 mod materialize;
@@ -276,6 +277,7 @@ impl TurnBoundary {
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<String>,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseCompletion>,
+        session_execution_lease_evidence: Option<SessionExecutionLeaseCommitEvidence>,
     ) -> Result<
         (
             Vec<crate::QueuedWorkBatch>,
@@ -283,6 +285,7 @@ impl TurnBoundary {
         ),
         RuntimeError,
     > {
+        let session_id = self.state().session_id.clone();
         let (store, plugins, execution_state_snapshot) = match session {
             Some(session) => {
                 let store = session.history_store();
@@ -310,6 +313,13 @@ impl TurnBoundary {
                 session_execution_lease_completion,
             })
             .await
+            .inspect_err(|err| {
+                super::trace_commit_cas_rejected(
+                    &session_id,
+                    session_execution_lease_evidence.as_ref(),
+                    err,
+                )
+            })
             .map_err(super::runtime_error_from_store_commit)?;
         returned_turn.state = self.final_state_mut().to_snapshot();
         Ok(enqueued_queue_batches)

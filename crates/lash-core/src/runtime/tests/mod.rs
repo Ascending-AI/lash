@@ -21,6 +21,7 @@ mod effect;
 mod persistence;
 mod projection;
 mod runtime_scenarios;
+mod session_lease_observability;
 mod stream_accumulator;
 mod tool_surface_lifecycle;
 mod tracing;
