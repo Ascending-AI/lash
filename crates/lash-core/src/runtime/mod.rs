@@ -1346,7 +1346,10 @@ pub struct LashRuntime {
     pub(in crate::runtime) state: RuntimeSessionState,
     pub(in crate::runtime) runtime_lease_owner: crate::LeaseOwnerIdentity,
     pub(in crate::runtime) managed_sessions: Arc<Mutex<HashMap<String, RuntimeHandle>>>,
-    pub(in crate::runtime) managed_turns: Arc<Mutex<HashMap<String, ManagedSessionTurn>>>,
+    /// Active managed child turns, keyed by turn id. Guarded by a synchronous
+    /// mutex so a `ManagedTurnLease` can release its registration from `Drop`:
+    /// a cancelled child turn must never leave a ghost "running turn" behind.
+    pub(in crate::runtime) managed_turns: Arc<StdMutex<HashMap<String, ManagedSessionTurn>>>,
     /// Protocol-owned turn options for this session.
     pub(in crate::runtime) protocol_turn_options: crate::ProtocolTurnOptions,
     /// Session-scoped token cost ledger. Shared by ALL

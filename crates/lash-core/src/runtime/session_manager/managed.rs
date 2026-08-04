@@ -97,7 +97,7 @@ impl ManagedSessionCapability {
         if self
             .turns
             .lock()
-            .await
+            .expect("managed turns lock")
             .values()
             .any(|turn| turn.session_id == session_id)
         {

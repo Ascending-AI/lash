@@ -42,23 +42,16 @@ impl ManagedSessionCapability {
         };
         let event_drain =
             crate::task::spawn(async move { while event_rx.recv().await.is_some() {} });
-        {
-            let mut turns = self.turns.lock().await;
-            if turns
-                .values()
-                .any(|turn| turn.session_id == session_id.as_str())
-            {
-                return Err(crate::PluginError::Session(format!(
-                    "session `{session_id}` already has a running turn"
-                )));
-            }
-            turns.insert(
-                turn_id.to_string(),
-                ManagedSessionTurn {
-                    session_id: session_id.to_string(),
-                },
-            );
-        }
+        // Registration is owned by this lease for the rest of the turn. Every
+        // exit — return, error, panic, or a dropped future when the owning
+        // process is cancelled — releases it, because release happens in `Drop`
+        // rather than at a statement after the child await.
+        let lease = ManagedTurnLease::register(
+            &self.turns,
+            &usage.child_turn_live_usage,
+            &session_id,
+            &turn_id,
+        )?;
         let turn = match scoped_effect_controller.into_static() {
             Ok(scoped_effect_controller) => {
                 // Canonical recursion-growth seam: every shareable child turn
@@ -102,10 +95,12 @@ impl ManagedSessionCapability {
                 .await
             }
         };
-        self.turns.lock().await.remove(&turn_id);
         drop(sink);
         let _ = event_drain.await;
-        let live_reported = self.turn_live_usage(usage, &turn_id);
+        // Take the live usage only once the sink is closed and its drain has
+        // finished: a live-usage forwarder still holding a sink clone could
+        // otherwise re-report into the entry after it was reclaimed.
+        let live_reported = lease.complete();
         if let Ok(turn) = &turn {
             let source = self.child_usage_source(usage, &session_id);
             if let Some(remainder) = subtract_usage(&live_reported, &turn.token_usage) {
@@ -127,14 +122,93 @@ impl ManagedSessionCapability {
             .cloned()
             .unwrap_or_else(|| "child".to_string())
     }
+}
 
-    fn turn_live_usage(&self, usage: &UsageCapability, turn_id: &str) -> TokenUsage {
-        usage
-            .child_turn_live_usage
+type ManagedTurnRegistry = Arc<StdMutex<HashMap<String, ManagedSessionTurn>>>;
+type ChildTurnLiveUsage = Arc<StdMutex<HashMap<String, TokenUsage>>>;
+
+/// Ownership of one managed child turn's registration.
+///
+/// A managed turn owns two shared entries: its active-turn registration (which
+/// gates `close_session` and any further turn on that session) and its
+/// live-usage accumulator. Both are released by `Drop`, so cancelling the
+/// process that drives the turn — which drops the `start_turn` future at
+/// whichever await it is parked on — cannot strand either one. Explicit
+/// completion consumes the lease and hands back the live usage it reclaimed.
+///
+/// Release is idempotent and identity-checked: it runs at most once per lease
+/// and only removes a registration this lease still owns, so the completion
+/// path and the drop path can never remove another turn's entry.
+struct ManagedTurnLease {
+    turns: ManagedTurnRegistry,
+    live_usage: ChildTurnLiveUsage,
+    session_id: String,
+    turn_id: String,
+    released: bool,
+}
+
+impl ManagedTurnLease {
+    fn register(
+        turns: &ManagedTurnRegistry,
+        live_usage: &ChildTurnLiveUsage,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<Self, crate::PluginError> {
+        {
+            let mut registered = turns.lock().expect("managed turns lock");
+            if registered
+                .values()
+                .any(|turn| turn.session_id == session_id)
+            {
+                return Err(crate::PluginError::Session(format!(
+                    "session `{session_id}` already has a running turn"
+                )));
+            }
+            registered.insert(
+                turn_id.to_string(),
+                ManagedSessionTurn {
+                    session_id: session_id.to_string(),
+                },
+            );
+        }
+        Ok(Self {
+            turns: Arc::clone(turns),
+            live_usage: Arc::clone(live_usage),
+            session_id: session_id.to_string(),
+            turn_id: turn_id.to_string(),
+            released: false,
+        })
+    }
+
+    /// Release the registration and take the live usage reported for this turn.
+    fn release(&mut self) -> TokenUsage {
+        if std::mem::replace(&mut self.released, true) {
+            return TokenUsage::default();
+        }
+        {
+            let mut registered = self.turns.lock().expect("managed turns lock");
+            if registered
+                .get(&self.turn_id)
+                .is_some_and(|turn| turn.session_id == self.session_id)
+            {
+                registered.remove(&self.turn_id);
+            }
+        }
+        self.live_usage
             .lock()
             .expect("child turn live usage lock")
-            .remove(turn_id)
+            .remove(&self.turn_id)
             .unwrap_or_default()
+    }
+
+    fn complete(mut self) -> TokenUsage {
+        self.release()
+    }
+}
+
+impl Drop for ManagedTurnLease {
+    fn drop(&mut self) {
+        self.release();
     }
 }
 
@@ -202,6 +276,96 @@ impl Drop for AbortTaskOnDrop {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn shared_maps() -> (ManagedTurnRegistry, ChildTurnLiveUsage) {
+        (
+            Arc::new(StdMutex::new(HashMap::new())),
+            Arc::new(StdMutex::new(HashMap::new())),
+        )
+    }
+
+    #[test]
+    fn dropped_managed_turn_lease_releases_both_registration_and_live_usage() {
+        let (turns, live_usage) = shared_maps();
+        let lease =
+            ManagedTurnLease::register(&turns, &live_usage, "session", "turn").expect("register");
+        live_usage.lock().expect("live usage").insert(
+            "turn".to_string(),
+            TokenUsage {
+                input_tokens: 3,
+                ..TokenUsage::default()
+            },
+        );
+
+        drop(lease);
+
+        assert!(turns.lock().expect("turns").is_empty());
+        assert!(live_usage.lock().expect("live usage").is_empty());
+    }
+
+    #[test]
+    fn completed_managed_turn_lease_takes_live_usage_exactly_once() {
+        let (turns, live_usage) = shared_maps();
+        let lease =
+            ManagedTurnLease::register(&turns, &live_usage, "session", "turn").expect("register");
+        live_usage.lock().expect("live usage").insert(
+            "turn".to_string(),
+            TokenUsage {
+                input_tokens: 3,
+                ..TokenUsage::default()
+            },
+        );
+
+        // `complete` consumes the lease, so its `Drop` runs immediately after
+        // the explicit release: the double removal must be a no-op.
+        let reported = lease.complete();
+
+        assert_eq!(reported.input_tokens, 3);
+        assert!(turns.lock().expect("turns").is_empty());
+        assert!(live_usage.lock().expect("live usage").is_empty());
+    }
+
+    #[test]
+    fn managed_turn_lease_release_never_removes_another_turns_registration() {
+        let (turns, live_usage) = shared_maps();
+        let lease =
+            ManagedTurnLease::register(&turns, &live_usage, "session", "turn").expect("register");
+        // A later turn took over this turn id for a different session.
+        turns.lock().expect("turns").insert(
+            "turn".to_string(),
+            ManagedSessionTurn {
+                session_id: "other-session".to_string(),
+            },
+        );
+
+        drop(lease);
+
+        assert_eq!(
+            turns
+                .lock()
+                .expect("turns")
+                .get("turn")
+                .map(|turn| turn.session_id.clone()),
+            Some("other-session".to_string()),
+            "a stale lease must not release a registration it no longer owns"
+        );
+    }
+
+    #[test]
+    fn managed_turn_lease_rejects_a_second_turn_on_the_same_session() {
+        let (turns, live_usage) = shared_maps();
+        let _lease =
+            ManagedTurnLease::register(&turns, &live_usage, "session", "turn").expect("register");
+
+        let err = match ManagedTurnLease::register(&turns, &live_usage, "session", "other-turn") {
+            Ok(_) => panic!("a session runs at most one managed turn"),
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("already has a running turn"));
+    }
+
     #[test]
     fn session_turn_request_requires_matching_scope_and_sets_trace_turn_id() {
         let controller = crate::InlineRuntimeEffectController::default();

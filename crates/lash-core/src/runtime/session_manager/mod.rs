@@ -59,7 +59,7 @@ pub(in crate::runtime) struct CurrentSessionCapability {
 #[derive(Clone)]
 struct ManagedSessionCapability {
     registry: Arc<Mutex<HashMap<String, RuntimeHandle>>>,
-    turns: Arc<Mutex<HashMap<String, ManagedSessionTurn>>>,
+    turns: Arc<StdMutex<HashMap<String, ManagedSessionTurn>>>,
 }
 
 #[derive(Clone)]
