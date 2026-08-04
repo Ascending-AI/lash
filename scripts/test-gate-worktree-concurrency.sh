@@ -98,7 +98,7 @@ if [ "$second_status" -ne 73 ]; then
   echo "Second same-worktree run exited $second_status; expected clean refusal 73." >&2
   exit 1
 fi
-grep -q "already running for worktree '${LASH_GATE_WORKTREE_SLUG}'" \
+grep -q "already holds the worktree gate for '${LASH_GATE_WORKTREE_SLUG}'" \
   "$proof_root/same-worktree-second.log"
 grep -Eq 'PID [0-9]+' "$proof_root/same-worktree-second.log"
 grep -Fq "$LASH_GATE_WORKTREE_LOCK_PATH" "$proof_root/same-worktree-second.log"
