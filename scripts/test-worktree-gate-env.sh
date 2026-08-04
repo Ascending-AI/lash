@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 helper="$repo/scripts/worktree-gate-env.sh"
+attachment_usage_gate="$repo/scripts/agent-workbench-attachment-usage-gate.sh"
 test_tmp="$(mktemp -d "${TMPDIR:-/tmp}/lash-gate-env-test.XXXXXX")"
 holder_pid=""
 leaked_child_pid=""
@@ -29,6 +30,29 @@ wait_for_unlocked() {
 
 # shellcheck source=scripts/worktree-gate-env.sh
 source "$helper"
+
+expected_state_root="/tmp/lash-gate-$(id -u)"
+[ "$LASH_GATE_STATE_ROOT" = "$expected_state_root" ] \
+  || fail "lock root is not stable: $LASH_GATE_STATE_ROOT"
+for ambient_root in "$test_tmp/xdg" "$test_tmp/tmpdir"; do
+  mkdir -p "$ambient_root"
+done
+alternate_state_root="$({
+  XDG_RUNTIME_DIR="$test_tmp/xdg" TMPDIR="$test_tmp/tmpdir" \
+    bash -c 'source "$1"; printf "%s" "$LASH_GATE_STATE_ROOT"' _ "$helper"
+})"
+[ "$alternate_state_root" = "$expected_state_root" ] \
+  || fail "ambient temp directories changed the lock root to $alternate_state_root"
+
+for workbench_port in 3030 3032 3042 65535; do
+  postgres_port="$({
+    AGENT_WORKBENCH_USAGE_GATE_PORT_PROBE=1 \
+      bash "$attachment_usage_gate" "$workbench_port"
+  })"
+  postgres_offset=$((postgres_port - LASH_E2E_PORT_BASE))
+  ((postgres_offset >= 0 && postgres_offset <= 9)) \
+    || fail "workbench port $workbench_port derived reserved/out-of-block Postgres offset $postgres_offset"
+done
 
 mkdir -p "$test_tmp/a/checkout" "$test_tmp/b/checkout"
 slug_a="$(lash_gate_slug_for_root "$test_tmp/a/checkout")"
@@ -76,9 +100,39 @@ grep -Fq "PID $holder_pid" "$refusal_log" || fail "refusal omitted owner PID"
 grep -Fq "$LASH_GATE_WORKTREE_LOCK_PATH" "$refusal_log" || fail "refusal omitted lock path"
 grep -Fq "kill $holder_pid" "$refusal_log" || fail "refusal omitted exact orphan remedy"
 
+peer_root="$test_tmp/peer-checkout"
+mkdir -p "$peer_root/scripts"
+cp "$helper" "$repo/scripts/worktree-gate-lock-holder.sh" "$peer_root/scripts/"
+slot_refusal_log="$test_tmp/slot-refusal.log"
+set +e
+LASH_GATE_SLOT_OVERRIDE="$override_slot" bash -c '
+  set -euo pipefail
+  source "$1/scripts/worktree-gate-env.sh"
+  lash_gate_acquire_locks regression-cross-worktree-contender
+' _ "$peer_root" >"$slot_refusal_log" 2>&1
+slot_refusal_status=$?
+set -e
+[ "$slot_refusal_status" -eq 73 ] \
+  || fail "cross-worktree slot contender exited $slot_refusal_status, expected 73"
+grep -Fq "holds port slot $override_slot" "$slot_refusal_log" \
+  || fail "slot refusal omitted occupied slot"
+grep -Fq "from '$repo'" "$slot_refusal_log" \
+  || fail "slot refusal omitted owner worktree"
+grep -Fq 'LASH_GATE_SLOT_OVERRIDE=<0..89> <gate-command>' "$slot_refusal_log" \
+  || fail "slot refusal omitted override remedy"
+
 kill "$holder_pid"
 wait "$holder_pid" 2>/dev/null || true
 holder_pid=""
+
+# Reacquisition must absorb the holder's /proc polling tail. The owner PID is
+# already dead here, so a refusal would also print an unusable kill remedy.
+LASH_GATE_SLOT_OVERRIDE="$override_slot" bash -c '
+  set -euo pipefail
+  source "$1"
+  lash_gate_acquire_locks regression-after-dead-owner
+' _ "$helper" >"$test_tmp/dead-owner-reacquire.log" 2>&1 \
+  || fail "dead owner did not trigger takeover: $(tr '\n' ' ' <"$test_tmp/dead-owner-reacquire.log")"
 wait_for_unlocked "$LASH_GATE_WORKTREE_LOCK_PATH"
 wait_for_unlocked "$LASH_GATE_STATE_ROOT/port-slot-${override_slot}.lock"
 

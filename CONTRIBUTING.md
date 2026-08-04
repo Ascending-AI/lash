@@ -43,13 +43,14 @@ Each absolute worktree path hashes with `cksum` into one of 90 disjoint 50-port
 blocks spanning 61000–65499, above Linux's default ephemeral range. The lane
 offsets are stable:
 
+- `+0..+9` attachment/usage workbench PostgreSQL, selected by the workbench
+  port's last decimal digit;
 - `+10` push/confidence PostgreSQL, `+11` push MinIO, `+12` mutation PostgreSQL;
 - `+20..+23` agent-service Restate and endpoint;
 - `+30..+34` agent-workbench Restate, endpoint, and PostgreSQL;
 - `+40` distributed-worker MinIO;
 - `+41..+46` process-operations MinIO, Restate, and PostgreSQL;
-- `+47` version-bump recreation PostgreSQL; and
-- `+48` the attachment/usage workbench gate's PostgreSQL.
+- `+47` version-bump recreation PostgreSQL.
 
 Explicit existing environment overrides such as `LASH_PUSH_GATE_PORT_BASE`,
 `LASH_PUSH_GATE_POSTGRES_PORT`, `LASH_CONFIDENCE_OUT_DIR`, and each recipe's
@@ -74,9 +75,12 @@ nonblocking worktree lock rejects a second same-worktree battery with exit 73.
 The refusal names the owner PID, lock path, and exact orphan remedy. Compose
 leftovers produce a project-qualified `docker compose ... down -v
 --remove-orphans` remedy; direct containers use `docker rm -fv`. Lock state is
-UID-scoped below `${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}`, and lock descriptors are
-not inherited by gate children. A slot lock turns a residual hash collision
-into a clean refusal rather than a host-port race.
+pinned to `/tmp/lash-gate-<uid>` so interactive, cron, and systemd-run gates
+coordinate through the same identity regardless of `XDG_RUNTIME_DIR` or
+`TMPDIR`; lock descriptors are not inherited by gate children. Lock acquisition
+allows a bounded two-second handover for a holder whose owner just exited,
+while a slot lock turns a residual hash collision into a clean refusal rather
+than a host-port race.
 
 After upgrading from the older global-name gate layout, remove pre-change
 unlabeled state once, after confirming no old gate is running. In particular,

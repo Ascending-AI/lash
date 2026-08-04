@@ -189,19 +189,40 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             computed["sim-search:2/9"], ci_root / "sim-search" / "2-of-9"
         )
 
-        # Check every workflow line that computes, copies, or uploads a
-        # target/confidence path. All must remain rooted at the same relative
-        # path the gate produced above under the workflow environment.
-        relative_ci_root = ci_root.relative_to(ROOT).as_posix()
-        confidence_path_lines = [
-            line.strip()
+        # Pair each workflow-consumed artifact path with the selector output it
+        # is meant to consume. This deliberately parses only `path:` values:
+        # command-local staging paths are not gate outputs.
+        upload_steps = [
+            step
             for source in (workflow, confidence_workflow)
-            for line in source.splitlines()
-            if "target/confidence" in line
+            for step in re.split(
+                r"(?=^      - (?:name|uses):)", source, flags=re.MULTILINE
+            )
+            if "uses: actions/upload-artifact@" in step
         ]
-        self.assertGreaterEqual(len(confidence_path_lines), 8)
-        for line in confidence_path_lines:
-            self.assertIn(relative_ci_root, line)
+        consumed_paths = [
+            match.group(1)
+            for step in upload_steps
+            for match in re.finditer(
+                r"^\s+path:\s+(target/confidence.+)$", step, re.MULTILINE
+            )
+        ]
+        computed_relative = {
+            selector: path.relative_to(ROOT).as_posix()
+            for selector, path in computed.items()
+        }
+        expected_consumed_paths = {
+            computed_relative["fast:summary"],
+            computed_relative["fast:scenario-harnesses"].replace(
+                "scenario-harnesses", "${{ matrix.shard }}"
+            ),
+            str(pathlib.PurePosixPath(computed_relative["full"]).parent / "**"),
+            str(
+                pathlib.PurePosixPath(computed_relative["sim-search:2/9"]).parent
+                / "**"
+            ),
+        }
+        self.assertCountEqual(consumed_paths, expected_consumed_paths)
 
         self.assertIn("path: target/confidence/fast/${{ matrix.shard }}", workflow)
         self.assertIn("path: target/confidence/fast", workflow)

@@ -17,11 +17,19 @@ if (( workbench_port_number < 1 || workbench_port_number > 65535 )); then
   exit 2
 fi
 
-port_offset=$((workbench_port_number - 3030))
-postgres_port="${AGENT_WORKBENCH_USAGE_GATE_POSTGRES_PORT:-$((LASH_E2E_PORT_BASE + 48 + port_offset))}"
+# Offsets +0..+9 are reserved for this gate and selected by the workbench
+# port's last decimal digit. This keeps every derived Postgres port inside the
+# worktree's 50-port block without colliding with the +10..+48 lane offsets.
+postgres_offset=$((workbench_port_number % 10))
+postgres_port="${AGENT_WORKBENCH_USAGE_GATE_POSTGRES_PORT:-$((LASH_E2E_PORT_BASE + postgres_offset))}"
 if (( postgres_port < 1 || postgres_port > 65535 )); then
   printf 'derived Postgres port is outside 1..65535: %s\n' "$postgres_port" >&2
   exit 2
+fi
+
+if [[ "${AGENT_WORKBENCH_USAGE_GATE_PORT_PROBE:-0}" == "1" ]]; then
+  printf '%s\n' "$postgres_port"
+  exit 0
 fi
 
 postgres_image="${AGENT_WORKBENCH_USAGE_GATE_POSTGRES_IMAGE:-postgres:16-alpine}"

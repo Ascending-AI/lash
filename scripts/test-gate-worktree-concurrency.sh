@@ -117,6 +117,17 @@ grep -Fq "$LASH_GATE_WORKTREE_LOCK_PATH" "$proof_root/same-worktree-second.log"
 wait "$first_job"
 first_job=""
 
+# A completed gate must hand its locks to the next same-worktree gate without
+# exposing the lock holder's crash-backstop polling interval to the caller.
+set +e
+run_smoke "$repo" "$proof_root/same-worktree-back-to-back.log" "$primary_slug" "$primary_slot"
+back_to_back_status=$?
+set -e
+if [ "$back_to_back_status" -ne 0 ]; then
+  echo "Back-to-back same-worktree run exited $back_to_back_status; expected success." >&2
+  exit 1
+fi
+
 leftover_container="lash-gate-proof-leftover-${LASH_GATE_WORKTREE_SLUG}"
 docker create --name "$leftover_container" --label "$LASH_GATE_LABEL" \
   postgres:16-alpine true >/dev/null
@@ -161,6 +172,8 @@ compose_leftover_container=""
   sed -n '/gate container smoke ready:/p' "$proof_root/worktree-b.log"
   printf 'same_worktree_second_exit=%s\n' "$second_status"
   sed -n '/Refusing to start/p' "$proof_root/same-worktree-second.log"
+  printf 'same_worktree_back_to_back_exit=%s\n' "$back_to_back_status"
+  sed -n '/gate container smoke ready:/p' "$proof_root/same-worktree-back-to-back.log"
   printf 'leftover_refusal_exit=%s\n' "$leftover_status"
   sed -n '/Refusing to start:/p;/docker rm -fv/p' "$proof_root/leftover-refusal.log"
   printf 'compose_leftover_refusal_exit=%s\n' "$compose_leftover_status"

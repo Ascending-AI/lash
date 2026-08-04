@@ -14,8 +14,8 @@ port_slot="$9"
 write_metadata() {
   local lock_path="$1" scope="$2"
   umask 077
-  printf 'battery=%s\npid=%s\nstarted_at=%s\nworktree_slug=%s\nworktree_root=%s\nscope=%s\nlock_path=%s\n' \
-    "$battery" "$owner_pid" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  printf 'battery=%s\npid=%s\npid_start=%s\nstarted_at=%s\nworktree_slug=%s\nworktree_root=%s\nscope=%s\nlock_path=%s\n' \
+    "$battery" "$owner_pid" "$owner_start" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     "$worktree_slug" "$worktree_root" "$scope" "$lock_path" \
     >"$lock_path"
 }
@@ -24,7 +24,7 @@ case "$mode" in
   worktree)
     write_metadata "$worktree_lock" worktree
     printf 'worktree-acquired\n'
-    exec flock -n -o "$slot_lock" "$0" slot \
+    exec flock -w 2 -o "$slot_lock" "$0" slot \
       "$worktree_lock" "$slot_lock" "$battery" "$owner_pid" "$owner_start" \
       "$worktree_slug" "$worktree_root" "$port_slot"
     ;;

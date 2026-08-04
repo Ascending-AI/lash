@@ -35,7 +35,9 @@ provider-reported counters, canonical arithmetic, and equality between surfaces.
 - First run `just agent-workbench-attachment-usage-gate <port>`. Its deterministic
   provider reports fixed non-zero usage, the gate reconciles one `llm_call_completed`
   record, reconstructs the core, and executes against both SQLite and Postgres
-  session-store backends on a port-derived managed database.
+  session-store backends on a managed database inside the worktree block. Its
+  Postgres offset is `+0..+9`, selected by the last decimal digit of `<port>`
+  (`3042` selects `+2`).
 - Boot with a fresh directory:
   `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
   Require `OPENROUTER_API_KEY`; missing credentials are a harness gap → Abort. Teardown is

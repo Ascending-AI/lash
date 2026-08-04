@@ -26,7 +26,7 @@ lash_gate_slug_for_root() {
 }
 
 lash_gate_configure() {
-  local helper_dir repo_root checksum derived_slot slot runtime_root
+  local helper_dir repo_root checksum derived_slot slot
 
   helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   repo_root="$(cd "$helper_dir/.." && pwd -P)"
@@ -50,8 +50,9 @@ lash_gate_configure() {
   LASH_E2E_PORT_BASE="$((61000 + slot * 50))"
   LASH_E2E_NETWORK="lash-e2e-${LASH_GATE_WORKTREE_SLUG}"
   LASH_GATE_LABEL="com.lash.e2e.worktree=${LASH_GATE_WORKTREE_SLUG}"
-  runtime_root="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
-  LASH_GATE_STATE_ROOT="${runtime_root%/}/lash-gate-$(id -u)"
+  # Lock identity must not change between interactive, cron, and systemd-run
+  # environments. /tmp is host-wide and the UID suffix keeps users disjoint.
+  LASH_GATE_STATE_ROOT="/tmp/lash-gate-$(id -u)"
   LASH_GATE_STATE_DIR="${LASH_GATE_STATE_ROOT}/${LASH_GATE_WORKTREE_SLUG}"
   LASH_GATE_WORKTREE_LOCK_PATH="${LASH_GATE_STATE_DIR}/worktree.lock"
   LASH_GATE_PORT_LOCK_PATH="${LASH_GATE_STATE_ROOT}/port-slot-${LASH_GATE_PORT_SLOT}.lock"
@@ -121,6 +122,17 @@ lash_gate_lock_value() {
   sed -n "s/^${key}=//p" "$path" 2>/dev/null | head -n 1
 }
 
+lash_gate_lock_owner_is_live() {
+  local lock_path="$1" owner_pid owner_start current_start
+
+  owner_pid="$(lash_gate_lock_value pid "$lock_path")"
+  owner_start="$(lash_gate_lock_value pid_start "$lock_path")"
+  [[ "$owner_pid" =~ ^[0-9]+$ && "$owner_start" =~ ^[0-9]+$ ]] || return 1
+  [ -r "/proc/${owner_pid}/stat" ] || return 1
+  current_start="$(awk '{print $22}' "/proc/${owner_pid}/stat" 2>/dev/null || true)"
+  [ "$current_start" = "$owner_start" ]
+}
+
 lash_gate_refuse_lock() {
   local battery="$1" lock_path="$2" scope="$3"
   local owner_battery owner_pid owner_root
@@ -138,7 +150,7 @@ lash_gate_refuse_lock() {
     echo "Refusing to start ${battery}: ${owner_battery} (PID ${owner_pid}) from '${owner_root}' holds port slot ${LASH_GATE_PORT_SLOT}." >&2
   fi
   echo "Lock: ${lock_path}" >&2
-  if [ "$owner_pid" = "unknown" ]; then
+  if [ "$owner_pid" = "unknown" ] || ! lash_gate_lock_owner_is_live "$lock_path"; then
     echo "Inspect the holder, stop it if orphaned, then retry:" >&2
     printf '  fuser -v %q\n' "$lock_path" >&2
   else
@@ -154,6 +166,7 @@ lash_gate_refuse_lock() {
 
 lash_gate_acquire_locks() {
   local battery="${1:-gate}" owner_start marker status_fd holder_pid
+  local attempt failed_lock failed_scope
   local holder_script="${LASH_GATE_WORKTREE_ROOT}/scripts/worktree-gate-lock-holder.sh"
 
   LASH_GATE_ACQUIRED_HERE=0
@@ -172,28 +185,40 @@ lash_gate_acquire_locks() {
 
   mkdir -p "$LASH_GATE_STATE_DIR"
   owner_start="$(awk '{print $22}' "/proc/$$/stat")"
-  coproc LASH_GATE_LOCK_HOLDER_PROCESS {
-    flock -n -o "$LASH_GATE_WORKTREE_LOCK_PATH" \
-      "$holder_script" worktree \
-      "$LASH_GATE_WORKTREE_LOCK_PATH" "$LASH_GATE_PORT_LOCK_PATH" \
-      "$battery" "$$" "$owner_start" "$LASH_GATE_WORKTREE_SLUG" \
-      "$LASH_GATE_WORKTREE_ROOT" "$LASH_GATE_PORT_SLOT"
-  }
-  status_fd="${LASH_GATE_LOCK_HOLDER_PROCESS[0]}"
-  holder_pid="$LASH_GATE_LOCK_HOLDER_PROCESS_PID"
+  for attempt in 1 2; do
+    marker=""
+    failed_lock="$LASH_GATE_WORKTREE_LOCK_PATH"
+    failed_scope=worktree
+    coproc LASH_GATE_LOCK_HOLDER_PROCESS {
+      flock -w 2 -o "$LASH_GATE_WORKTREE_LOCK_PATH" \
+        "$holder_script" worktree \
+        "$LASH_GATE_WORKTREE_LOCK_PATH" "$LASH_GATE_PORT_LOCK_PATH" \
+        "$battery" "$$" "$owner_start" "$LASH_GATE_WORKTREE_SLUG" \
+        "$LASH_GATE_WORKTREE_ROOT" "$LASH_GATE_PORT_SLOT"
+    }
+    status_fd="${LASH_GATE_LOCK_HOLDER_PROCESS[0]}"
+    holder_pid="$LASH_GATE_LOCK_HOLDER_PROCESS_PID"
 
-  if ! IFS= read -r marker <&"$status_fd" || [ "$marker" != "worktree-acquired" ]; then
+    if IFS= read -r marker <&"$status_fd" && [ "$marker" = "worktree-acquired" ]; then
+      failed_lock="$LASH_GATE_PORT_LOCK_PATH"
+      failed_scope=slot
+      if IFS= read -r marker <&"$status_fd" && [ "$marker" = "slot-acquired" ]; then
+        eval "exec ${status_fd}<&-"
+        break
+      fi
+      kill "$holder_pid" >/dev/null 2>&1 || true
+    fi
     wait "$holder_pid" 2>/dev/null || true
-    lash_gate_refuse_lock "$battery" "$LASH_GATE_WORKTREE_LOCK_PATH" worktree
+
+    # Metadata for a dead/reused PID describes a release in progress, not an
+    # actionable owner. Retry once so the caller takes over after the holder's
+    # crash-backstop poll instead of being told to kill a dead process.
+    if [ "$attempt" -eq 1 ] && ! lash_gate_lock_owner_is_live "$failed_lock"; then
+      continue
+    fi
+    lash_gate_refuse_lock "$battery" "$failed_lock" "$failed_scope"
     return
-  fi
-  if ! IFS= read -r marker <&"$status_fd" || [ "$marker" != "slot-acquired" ]; then
-    kill "$holder_pid" >/dev/null 2>&1 || true
-    wait "$holder_pid" 2>/dev/null || true
-    lash_gate_refuse_lock "$battery" "$LASH_GATE_PORT_LOCK_PATH" slot
-    return
-  fi
-  eval "exec ${status_fd}<&-"
+  done
 
   LASH_GATE_LOCK_HOLDER_PID="$holder_pid"
   LASH_GATE_ACQUIRED_HERE=1
