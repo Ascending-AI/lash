@@ -11,8 +11,12 @@ cd "$repo"
 
 postgres_port="${LASH_VERSION_BUMP_POSTGRES_PORT:-5463}"
 export LASH_VERSION_BUMP_POSTGRES_PORT="$postgres_port"
-compose_project="lash-version-bump-${USER:-runner}-$$"
+# Fixed project and external network: the fixed host port already serializes
+# runs, and a stable network name means repeated invocations never create or
+# destroy Docker networks (host-level watchers treat that as interface churn).
+compose_project="lash-version-bump"
 compose=(docker compose -p "$compose_project" -f "$repo/runbooks/version-bump-recreation/docker-compose.yml")
+docker network inspect lash-e2e >/dev/null 2>&1 || docker network create lash-e2e >/dev/null
 if [ -n "${LASH_VERSION_BUMP_ARTIFACT_DIR:-}" ]; then
   artifact_dir="$LASH_VERSION_BUMP_ARTIFACT_DIR"
 else

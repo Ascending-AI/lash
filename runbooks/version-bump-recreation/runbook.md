@@ -19,9 +19,10 @@ what the companion observed.
 LASH_VERSION_BUMP_ARTIFACT_DIR=<fresh-dir> just version-bump-recreation-e2e
 ```
 
-The companion owns one PostgreSQL service on host port **5463** under a per-invocation
-compose project, and removes that project and its volume on exit. It never touches another
-worktree's assigned PostgreSQL service. It seeds the pre-bump deployment with a real turn
+The companion owns one PostgreSQL service on host port **5463** under the fixed
+`lash-version-bump` compose project on the shared external `lash-e2e` network (created
+idempotently, never destroyed), and removes the project's services and volume on exit. It
+never touches another worktree's assigned PostgreSQL service. It seeds the pre-bump deployment with a real turn
 per session, a live background process holding a pending wake, and a fired trigger
 delivery, then rewinds the recorded component schema version by one. It emits
 `version-bump recreation e2e passed: scenarios=4` only after every phase assertion holds.

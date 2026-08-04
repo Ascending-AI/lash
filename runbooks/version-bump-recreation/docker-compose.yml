@@ -3,8 +3,11 @@
 #
 # The harness binary runs on the host (via `cargo run`), so PostgreSQL publishes
 # a loopback port. Bring the stack up through
-# `just version-bump-recreation-e2e`; the runner owns a per-invocation compose
-# project and removes it, including its volume, on exit.
+# `just version-bump-recreation-e2e`; the runner owns a fixed compose project
+# (serialized by the fixed host port) and removes its services and volume on
+# exit. The network is a fixed external one so repeated runs never create or
+# destroy Docker networks: host-level watchers treat network add/remove as
+# interface churn.
 services:
   postgres:
     image: postgres:16-alpine
@@ -19,3 +22,7 @@ services:
       interval: 2s
       timeout: 2s
       retries: 30
+networks:
+  default:
+    name: lash-e2e
+    external: true
