@@ -3,13 +3,28 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
+# shellcheck source=scripts/worktree-gate-env.sh
+source "$repo/scripts/worktree-gate-env.sh"
+lash_gate_acquire process-operations-e2e
 
-compose_project="lash-process-operations-${USER:-runner}-$$"
+compose_project="${LASH_PROCESS_OPERATIONS_COMPOSE_PROJECT:-lash-process-operations-${LASH_GATE_WORKTREE_SLUG}}"
 compose=(docker compose -p "$compose_project" -f "$repo/runbooks/process-operations/docker-compose.yml")
+postgres_port="${LASH_PROCESS_OPERATIONS_POSTGRES_PORT:-$((LASH_E2E_PORT_BASE + 46))}"
+minio_port="${LASH_PROCESS_OPERATIONS_MINIO_PORT:-$((LASH_E2E_PORT_BASE + 41))}"
+minio_console_port="${LASH_PROCESS_OPERATIONS_MINIO_CONSOLE_PORT:-$((LASH_E2E_PORT_BASE + 42))}"
+restate_admin_port="${LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT:-$((LASH_E2E_PORT_BASE + 43))}"
+restate_ingress_port="${LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT:-$((LASH_E2E_PORT_BASE + 44))}"
+restate_node_port="${LASH_PROCESS_OPERATIONS_RESTATE_NODE_PORT:-$((LASH_E2E_PORT_BASE + 45))}"
+export LASH_PROCESS_OPERATIONS_POSTGRES_PORT="$postgres_port"
+export LASH_PROCESS_OPERATIONS_MINIO_PORT="$minio_port"
+export LASH_PROCESS_OPERATIONS_MINIO_CONSOLE_PORT="$minio_console_port"
+export LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT="$restate_admin_port"
+export LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT="$restate_ingress_port"
+export LASH_PROCESS_OPERATIONS_RESTATE_NODE_PORT="$restate_node_port"
 if [ -n "${LASH_PROCESS_OPERATIONS_ARTIFACT_DIR:-}" ]; then
   artifact_dir="$LASH_PROCESS_OPERATIONS_ARTIFACT_DIR"
 else
-  artifact_dir="$(mktemp -d "${TMPDIR:-/tmp}/lash-process-operations.XXXXXX")"
+  artifact_dir="$(mktemp -d "${TMPDIR:-/tmp}/lash-process-operations-${LASH_GATE_WORKTREE_SLUG}.XXXXXX")"
 fi
 mkdir -p "$artifact_dir"
 crash_container="${compose_project}-crash-window"
@@ -30,20 +45,20 @@ cargo build --locked --release -p lash-restate-postgres-workers-e2e \
   --bin lash-e2e-process-operations-worker
 export LASH_PROCESS_OPERATIONS_BIN_DIR="${CARGO_TARGET_DIR:-$repo/target}/release"
 
-"${compose[@]}" --profile crash down -v --remove-orphans >/dev/null 2>&1 || true
 bash scripts/docker-pull-with-retry.sh ubuntu:24.04
-"${compose[@]}" up -d minio minio-init restate
+"${compose[@]}" up -d postgres minio minio-init restate
 
 deadline=$((SECONDS + 90))
-until docker run --rm --network host postgres:16-alpine \
-  pg_isready -h 127.0.0.1 -p 5446 -U lash -d lash >/dev/null 2>&1; do
+until docker run --rm --name "lash-process-postgres-probe-${LASH_GATE_WORKTREE_SLUG}-$$" \
+  --label "$LASH_GATE_LABEL" --network host postgres:16-alpine \
+  pg_isready -h 127.0.0.1 -p "$postgres_port" -U lash -d lash >/dev/null 2>&1; do
   if ((SECONDS >= deadline)); then
     echo "Postgres did not become ready" >&2
     exit 1
   fi
   sleep 1
 done
-until curl -fsS --max-time 2 "http://127.0.0.1:${LASH_PROCESS_OPERATIONS_MINIO_PORT:-19446}/minio/health/live" >/dev/null; do
+until curl -fsS --max-time 2 "http://127.0.0.1:${minio_port}/minio/health/live" >/dev/null; do
   if ((SECONDS >= deadline)); then
     echo "MinIO did not become ready" >&2
     exit 1
@@ -51,7 +66,7 @@ until curl -fsS --max-time 2 "http://127.0.0.1:${LASH_PROCESS_OPERATIONS_MINIO_P
   sleep 1
 done
 "${compose[@]}" wait minio-init >/dev/null
-until curl -fsS --max-time 2 "http://127.0.0.1:${LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT:-19076}/deployments" >"$artifact_dir/restate-deployments.json"; do
+until curl -fsS --max-time 2 "http://127.0.0.1:${restate_admin_port}/deployments" >"$artifact_dir/restate-deployments.json"; do
   if ((SECONDS >= deadline)); then
     echo "Restate did not become ready" >&2
     exit 1
@@ -60,28 +75,29 @@ until curl -fsS --max-time 2 "http://127.0.0.1:${LASH_PROCESS_OPERATIONS_RESTATE
 done
 
 "${compose[@]}" ps --format json >"$artifact_dir/00-live-services.json"
-docker ps --filter publish=5446 --format json >"$artifact_dir/00-postgres-service.json"
+docker ps --filter "publish=$postgres_port" --format json >"$artifact_dir/00-postgres-service.json"
 if [ ! -s "$artifact_dir/00-postgres-service.json" ]; then
-  echo "No running container publishes the assigned PostgreSQL port 5446" >&2
+  echo "No running container publishes the assigned PostgreSQL port $postgres_port" >&2
   exit 1
 fi
-docker run --rm --network host -e PGPASSWORD=lash postgres:16-alpine \
-  psql -h 127.0.0.1 -p 5446 -U lash -d lash -Atqc \
-  "SELECT json_build_object('postgres_version', current_setting('server_version'), 'port', 5446)" \
+docker run --rm --name "lash-process-postgres-query-${LASH_GATE_WORKTREE_SLUG}-$$" \
+  --label "$LASH_GATE_LABEL" --network host -e PGPASSWORD=lash postgres:16-alpine \
+  psql -h 127.0.0.1 -p "$postgres_port" -U lash -d lash -Atqc \
+  "SELECT json_build_object('postgres_version', current_setting('server_version'), 'port', ${postgres_port})" \
   >"$artifact_dir/00-postgres.json"
-echo "scenario 0 evidence: Restate, PostgreSQL:5446, and MinIO are live" | tee "$test_output"
+echo "scenario 0 evidence: Restate, PostgreSQL:${postgres_port}, and MinIO are live" | tee "$test_output"
 
-LASH_MINIO_ENDPOINT="http://127.0.0.1:${LASH_PROCESS_OPERATIONS_MINIO_PORT:-19446}" \
+LASH_MINIO_ENDPOINT="http://127.0.0.1:${minio_port}" \
 LASH_MINIO_BUCKET="lash-attachments" \
 LASH_MINIO_REGION="us-east-1" \
 LASH_MINIO_ACCESS_KEY="minioadmin" \
 LASH_MINIO_SECRET_KEY="minioadmin" \
-LASH_MINIO_PREFIX="runbooks/process-operations-$$" \
+LASH_MINIO_PREFIX="runbooks/process-operations-${LASH_GATE_WORKTREE_SLUG}-$$" \
 LASH_REQUIRE_MINIO=1 \
   cargo test --locked -p lash-s3-store -- --nocapture \
   2>&1 | tee "$artifact_dir/00-minio-conformance.log" | tee -a "$test_output"
 
-postgres_url="postgres://lash:lash@127.0.0.1:5446/lash"
+postgres_url="postgres://lash:lash@127.0.0.1:${postgres_port}/lash"
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
   cargo test --locked -p lash-postgres-store --test conformance \
   postgres_wake_delivery_crash_matrix_when_configured -- --nocapture --test-threads=1 \

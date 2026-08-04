@@ -7,8 +7,12 @@
 # runner's glibc, so host-built binaries run unmodified — which also means the
 # harness needs a Linux x86_64 host with glibc <= the image's (any current
 # Ubuntu works).
+x-gate-labels: &gate-labels
+  com.lash.e2e.worktree: "${LASH_GATE_WORKTREE_SLUG:?run via the e2e script}"
+
 services:
   postgres:
+    labels: *gate-labels
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: lash
@@ -21,14 +25,16 @@ services:
       retries: 30
 
   minio:
+    labels: *gate-labels
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "${LASH_E2E_MINIO_PORT:-19000}:9000"
+      - "127.0.0.1:${LASH_E2E_MINIO_PORT:?run via the e2e script}:9000"
   minio-init:
+    labels: *gate-labels
     image: minio/mc:RELEASE.2025-04-16T18-13-26Z
     depends_on:
       - minio
@@ -39,6 +45,7 @@ services:
       "
 
   restate:
+    labels: *gate-labels
     image: restatedev/restate:1.7.0
     environment:
       RESTATE_ADMIN__BIND_PORT: "9070"
@@ -46,6 +53,7 @@ services:
       RESTATE_BIND_PORT: "5122"
 
   mock-provider:
+    labels: *gate-labels
     image: ubuntu:24.04
     command: /usr/local/bin/lash-e2e-mock-provider
     depends_on:
@@ -59,6 +67,7 @@ services:
       - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
 
   worker-a:
+    labels: *gate-labels
     image: ubuntu:24.04
     command: /usr/local/bin/lash-e2e-worker
     restart: on-failure
@@ -90,6 +99,7 @@ services:
       - trace-output:/e2e-traces
 
   worker-b:
+    labels: *gate-labels
     image: ubuntu:24.04
     command: /usr/local/bin/lash-e2e-worker
     restart: on-failure
@@ -121,6 +131,7 @@ services:
       - trace-output:/e2e-traces
 
   worker-proxy:
+    labels: *gate-labels
     image: caddy:2-alpine
     depends_on:
       - worker-a
@@ -129,6 +140,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
 
   runner:
+    labels: *gate-labels
     image: ubuntu:24.04
     command: /usr/local/bin/lash-e2e-runner
     depends_on:
@@ -168,3 +180,8 @@ services:
 
 volumes:
   trace-output:
+
+networks:
+  default:
+    name: "${LASH_E2E_NETWORK:?run via the e2e script}"
+    external: true
