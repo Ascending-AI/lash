@@ -13,9 +13,10 @@ use lash::persistence::{
     PersistedSessionRead, PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft,
     QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkStore, RealizedNodeTimestamp, RuntimeCommit,
     RuntimeCommitResult, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
-    RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionCommitStore, SessionExecutionLease,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    SessionExecutionLeaseStore, SessionHeadMeta, SessionHeadPayload, SessionMeta,
+    RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionCommitStore,
+    SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseClaimOutcome,
+    SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
+    SessionHeadMeta, SessionHeadPayload, SessionMeta,
     SessionNodeRecord, StoreError,
     StoreMaintenance, TurnInputClaim, TurnInputCheckpointBoundary, TurnInputIngress,
     TurnInputState, TurnInputStore, VacuumReport, commit_runtime_state_verified,
@@ -110,14 +111,14 @@ impl SessionExecutionLeaseStore for FacadeStore {
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
         Ok(SessionExecutionLeaseClaimOutcome::Acquired(
-            SessionExecutionLease {
+            SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
                 session_id: session_id.to_string(),
                 owner: owner.clone(),
                 lease_token: "facade-token".to_string(),
                 fencing_token: 1,
                 claimed_at_epoch_ms: 0,
                 expires_at_epoch_ms: lease_ttl_ms,
-            },
+            }),
         ))
     }
 
@@ -141,6 +142,13 @@ impl SessionExecutionLeaseStore for FacadeStore {
         _completion: &SessionExecutionLeaseCompletion,
     ) -> Result<(), StoreError> {
         Ok(())
+    }
+
+    async fn get_session_execution_lease(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<SessionExecutionLease>, StoreError> {
+        Ok(None)
     }
 }
 

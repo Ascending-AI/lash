@@ -281,7 +281,7 @@ impl TurnBoundary {
             Vec<crate::QueuedWorkBatch>,
             Vec<crate::store::RuntimeUsageDeltaIdentity>,
         ),
-        RuntimeError,
+        StoreError,
     > {
         let (store, plugins, execution_state_snapshot) = match session {
             Some(session) => {
@@ -309,8 +309,7 @@ impl TurnBoundary {
                 interrupted_turn_input_turn_id,
                 session_execution_lease_completion,
             })
-            .await
-            .map_err(super::runtime_error_from_store_commit)?;
+            .await?;
         returned_turn.state = self.final_state_mut().to_snapshot();
         Ok(enqueued_queue_batches)
     }

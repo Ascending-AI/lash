@@ -55,12 +55,12 @@ use lash_core::{
     QueuedWorkStore, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
     RuntimePersistence, ScopedEffectController, SessionCommitStore, SessionExecutionLease,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
-    SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord, SessionStoreCreateRequest,
-    SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance, TokenLedgerEntry,
-    TurnInputStore, VacuumReport, facade_support::CanonicalRuntimeEffectEnvelope,
-    facade_support::MergeKey, facade_support::ProcessStartPlan,
-    facade_support::validate_replayed_effect_envelope,
+    SessionExecutionLeaseAcquisition, SessionExecutionLeaseClaimOutcome,
+    SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
+    SessionMeta, SessionNodeRecord, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy,
+    StoreError, StoreMaintenance, TokenLedgerEntry, TurnInputStore, VacuumReport,
+    facade_support::CanonicalRuntimeEffectEnvelope, facade_support::MergeKey,
+    facade_support::ProcessStartPlan, facade_support::validate_replayed_effect_envelope,
 };
 use lash_core::{
     PluginError, TriggerDeliveryReservation, TriggerOccurrenceRecord, TriggerOccurrenceRequest,

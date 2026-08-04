@@ -77,6 +77,14 @@ struct SnapshotStore {
     usage_delta_identities:
         std::sync::Mutex<std::collections::HashSet<lash_core::store::RuntimeUsageDeltaIdentity>>,
     session_execution_leases: std::sync::Mutex<HashMap<String, lash_core::SessionExecutionLease>>,
+    /// Highest generation ever minted per session, retained across release.
+    ///
+    /// `SessionExecutionLeaseStore` is a fencing trait: ADR 0029 requires every
+    /// fresh acquisition after release or expiry to mint `previous + 1`, and a
+    /// double is not exempt. This store drops the live lease row on release, so
+    /// generation authority has to live somewhere that survives it, or a stale
+    /// generation would be reissued and fencing would silently stop working.
+    session_execution_lease_generations: std::sync::Mutex<HashMap<String, u64>>,
 }
 
 impl SnapshotStore {
@@ -113,6 +121,7 @@ impl SnapshotStore {
             runtime_turn_commits: std::sync::Mutex::new(std::collections::HashMap::new()),
             usage_delta_identities: std::sync::Mutex::new(std::collections::HashSet::new()),
             session_execution_leases: std::sync::Mutex::new(HashMap::new()),
+            session_execution_lease_generations: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -373,22 +382,54 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
                 lease.expires_at_epoch_ms = now_epoch_ms().saturating_add(lease_ttl_ms);
                 leases.insert(session_id.to_string(), lease.clone());
                 return Ok(lash_core::SessionExecutionLeaseClaimOutcome::Acquired(
-                    lease,
+                    lash_core::SessionExecutionLeaseAcquisition::fresh(lease),
                 ));
             }
             return Ok(lash_core::SessionExecutionLeaseClaimOutcome::Busy {
                 holder: existing.clone(),
             });
         }
-        let next_fencing_token = leases
+        // The lapsed holder this claim takes the lane from, read before the
+        // overwrite. A double that reports no displacement would silently
+        // disable the takeover event for every facade test that runs on it.
+        let displaced = leases.get(session_id).and_then(|previous| {
+            (!previous.owner.same_incarnation(owner)).then(|| {
+                (
+                    previous.owner.clone(),
+                    previous.fencing_token,
+                    previous.expires_at_epoch_ms,
+                )
+            })
+        });
+        // Mint from the retained counter, not from the live row: the row is gone
+        // after a release, and restarting the fence there would reissue a
+        // generation a stale claim still pins.
+        let mut generations = self
+            .session_execution_lease_generations
+            .lock()
+            .expect("session execution lease generations lock");
+        let next_fencing_token = generations
             .get(session_id)
-            .map(|lease| lease.fencing_token.saturating_add(1))
-            .unwrap_or(1);
+            .copied()
+            .unwrap_or(0)
+            .saturating_add(1);
+        generations.insert(session_id.to_string(), next_fencing_token);
+        drop(generations);
         let lease =
             test_session_execution_lease(session_id, owner, lease_ttl_ms, next_fencing_token);
         leases.insert(session_id.to_string(), lease.clone());
         Ok(lash_core::SessionExecutionLeaseClaimOutcome::Acquired(
-            lease,
+            match displaced {
+                Some((previous, generation, expired_at_epoch_ms)) => {
+                    lash_core::SessionExecutionLeaseAcquisition::displacing_observed(
+                        lease,
+                        previous,
+                        generation,
+                        expired_at_epoch_ms,
+                    )
+                }
+                None => lash_core::SessionExecutionLeaseAcquisition::fresh(lease),
+            },
         ))
     }
 
@@ -428,9 +469,24 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
             .get(&completion.session_id)
             .is_some_and(|lease| session_completion_matches(lease, completion))
         {
+            // The live row goes; the generation counter deliberately stays, so
+            // the next claim mints `previous + 1` (ADR 0029).
             leases.remove(&completion.session_id);
         }
         Ok(())
+    }
+
+    async fn get_session_execution_lease(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<Option<lash_core::SessionExecutionLease>, lash_core::store::StoreError>
+    {
+        Ok(self
+            .session_execution_leases
+            .lock()
+            .expect("session execution leases lock")
+            .get(session_id)
+            .cloned())
     }
 }
 
@@ -743,7 +799,12 @@ impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
         lash_core::store::StoreError,
     > {
         Ok(lash_core::SessionExecutionLeaseClaimOutcome::Acquired(
-            test_session_execution_lease(session_id, owner, lease_ttl_ms, 1),
+            lash_core::SessionExecutionLeaseAcquisition::fresh(test_session_execution_lease(
+                session_id,
+                owner,
+                lease_ttl_ms,
+                1,
+            )),
         ))
     }
 
@@ -765,6 +826,14 @@ impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
         _completion: &lash_core::SessionExecutionLeaseCompletion,
     ) -> std::result::Result<(), lash_core::store::StoreError> {
         Ok(())
+    }
+
+    async fn get_session_execution_lease(
+        &self,
+        _session_id: &str,
+    ) -> std::result::Result<Option<lash_core::SessionExecutionLease>, lash_core::store::StoreError>
+    {
+        Ok(None)
     }
 }
 
@@ -1951,3 +2020,16 @@ mod processes_endstate;
 mod rebuild_conformance;
 mod stack_budget;
 mod turn_streaming;
+
+/// `SnapshotStore` backs the facade tests, so it owes the displacement contract
+/// too: a double that reports no displacement would let a facade-level regression
+/// in the takeover event pass unnoticed.
+#[tokio::test]
+async fn snapshot_store_reports_the_holder_a_claim_displaces() {
+    let store = SnapshotStore::default();
+    lash_core::testing::conformance::session_execution_lease_displacement(
+        &store,
+        "snapshot-lease-displacement",
+    )
+    .await;
+}

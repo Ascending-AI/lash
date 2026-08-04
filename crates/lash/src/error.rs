@@ -40,7 +40,7 @@ pub enum EmbedError {
     ProcessExecutionConcurrency(
         #[from] lash_core::facade_support::ProcessExecutionConcurrencyError,
     ),
-    #[error("session deletion requires a LashCore store factory")]
+    #[error("this operation requires a LashCore store factory")]
     MissingSessionStoreFactory,
     #[error("failed to delete process state for session `{session_id}`: {message}")]
     SessionDeleteProcess { session_id: String, message: String },

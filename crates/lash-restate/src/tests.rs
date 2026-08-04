@@ -3251,6 +3251,13 @@ impl lash_core::SessionExecutionLeaseStore for CommitRetryStore {
     ) -> Result<(), lash_core::StoreError> {
         self.inner.release_session_execution_lease(completion).await
     }
+
+    async fn get_session_execution_lease(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<lash_core::SessionExecutionLease>, lash_core::StoreError> {
+        self.inner.get_session_execution_lease(session_id).await
+    }
 }
 
 #[async_trait::async_trait]

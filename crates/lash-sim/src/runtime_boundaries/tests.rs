@@ -28,7 +28,7 @@ async fn worker_failover_continuation_oracle_catches_a_store_that_fails_to_fence
         .await
         .expect("blocker claim")
     {
-        SessionExecutionLeaseClaimOutcome::Acquired(lease) => lease,
+        SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => acquisition.lease,
         other => panic!("expected to acquire the blocking lease: {other:?}"),
     };
 

@@ -13,10 +13,11 @@ use lash_core::store::{
 };
 use lash_core::{
     BlobRef, GcReport, LeaseOwnerIdentity, QueuedWorkStore, RuntimeCommit, RuntimePersistence,
-    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
-    SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
-    SessionGraph, SessionNodeRecord, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
-    StoreMaintenance, TurnInputStore, VacuumReport, facade_support::current_epoch_ms,
+    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
+    SessionExecutionLeaseStore, SessionGraph, SessionNodeRecord, SessionStoreCreateRequest,
+    SessionStoreFactory, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
+    facade_support::current_epoch_ms,
 };
 
 #[derive(Clone)]
@@ -864,14 +865,14 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
             {
                 current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
                 return Ok(SessionExecutionLeaseClaimOutcome::Acquired(
-                    SessionExecutionLease {
+                    SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
                         session_id: session_id.to_string(),
                         owner: owner.clone(),
                         lease_token: current.lease_token.clone().expect("live lease token set"),
                         fencing_token: current.fencing_token,
                         claimed_at_epoch_ms: current.claimed_at_epoch_ms,
                         expires_at_epoch_ms: current.expires_at_epoch_ms,
-                    },
+                    }),
                 ));
             }
             return Ok(SessionExecutionLeaseClaimOutcome::Busy {
@@ -885,6 +886,16 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
                 },
             });
         }
+        // Read the lapsed holder before overwriting it. The claim is the only
+        // atomic moment a takeover is observable, and the displaced runner is
+        // usually why the lease lapsed, so it cannot be relied on to report it.
+        // A double that skips this silently disables the takeover event for
+        // whatever it stands in for.
+        let displaced = current
+            .owner
+            .clone()
+            .filter(|previous| !previous.same_incarnation(owner))
+            .map(|previous| (previous, current.fencing_token, current.expires_at_epoch_ms));
         current.fencing_token = current.fencing_token.saturating_add(1);
         current.owner = Some(owner.clone());
         current.lease_token = Some(format!(
@@ -893,14 +904,25 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
         ));
         current.claimed_at_epoch_ms = now;
         current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
+        let lease = SessionExecutionLease {
+            session_id: session_id.to_string(),
+            owner: owner.clone(),
+            lease_token: current.lease_token.clone().expect("lease token set"),
+            fencing_token: current.fencing_token,
+            claimed_at_epoch_ms: current.claimed_at_epoch_ms,
+            expires_at_epoch_ms: current.expires_at_epoch_ms,
+        };
         Ok(SessionExecutionLeaseClaimOutcome::Acquired(
-            SessionExecutionLease {
-                session_id: session_id.to_string(),
-                owner: owner.clone(),
-                lease_token: current.lease_token.clone().expect("lease token set"),
-                fencing_token: current.fencing_token,
-                claimed_at_epoch_ms: current.claimed_at_epoch_ms,
-                expires_at_epoch_ms: current.expires_at_epoch_ms,
+            match displaced {
+                Some((previous, generation, expired_at_epoch_ms)) => {
+                    SessionExecutionLeaseAcquisition::displacing_observed(
+                        lease,
+                        previous,
+                        generation,
+                        expired_at_epoch_ms,
+                    )
+                }
+                None => SessionExecutionLeaseAcquisition::fresh(lease),
             },
         ))
     }
@@ -946,6 +968,28 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
     ) -> Result<(), StoreError> {
         self.release_session_execution_lease_in_memory(completion);
         Ok(())
+    }
+
+    async fn get_session_execution_lease(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionExecutionLease>, StoreError> {
+        let leases = self
+            .session_execution_leases
+            .lock()
+            .expect("lock perf session execution leases");
+        Ok(leases.get(session_id).and_then(|current| {
+            let owner = current.owner.clone()?;
+            let lease_token = current.lease_token.clone()?;
+            Some(SessionExecutionLease {
+                session_id: session_id.to_string(),
+                owner,
+                lease_token,
+                fencing_token: current.fencing_token,
+                claimed_at_epoch_ms: current.claimed_at_epoch_ms,
+                expires_at_epoch_ms: current.expires_at_epoch_ms,
+            })
+        }))
     }
 }
 

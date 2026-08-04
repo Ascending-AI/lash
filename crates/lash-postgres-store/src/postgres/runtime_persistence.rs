@@ -1205,15 +1205,16 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
                 .await
                 .map_err(store_sqlx_error)?;
                 tx.commit().await.map_err(store_sqlx_error)?;
+                // Reentry advances no generation: nobody is displaced.
                 return Ok(SessionExecutionLeaseClaimOutcome::Acquired(
-                    SessionExecutionLease {
+                    SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
                         session_id: session_id.to_string(),
                         owner: owner.clone(),
                         lease_token: current.lease_token.expect("live lease token set"),
                         fencing_token: current.fencing_token,
                         claimed_at_epoch_ms: current.claimed_at_ms,
                         expires_at_epoch_ms: expires_at,
-                    },
+                    }),
                 ));
             }
             let holder = row_to_session_execution_lease(session_id, current)?;
@@ -1221,6 +1222,15 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
             return Ok(SessionExecutionLeaseClaimOutcome::Busy { holder });
         }
         let previous_fencing_token = current.as_ref().map_or(0, |lease| lease.fencing_token);
+        // The lapsed holder, read under the same row lock as the claim. The
+        // winner is the only party guaranteed alive to report the takeover.
+        let displaced = current.as_ref().and_then(|lease| {
+            lease
+                .owner
+                .clone()
+                .filter(|previous| !previous.same_incarnation(owner))
+                .map(|previous| (previous, lease.fencing_token, lease.expires_at_ms))
+        });
         let lease = acquire_session_execution_lease_tx(
             &mut tx,
             session_id,
@@ -1231,7 +1241,19 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         )
         .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(SessionExecutionLeaseClaimOutcome::Acquired(lease))
+        Ok(SessionExecutionLeaseClaimOutcome::Acquired(
+            match displaced {
+                Some((previous, generation, expired_at_epoch_ms)) => {
+                    SessionExecutionLeaseAcquisition::displacing_observed(
+                        lease,
+                        previous,
+                        generation,
+                        expired_at_epoch_ms,
+                    )
+                }
+                None => SessionExecutionLeaseAcquisition::fresh(lease),
+            },
+        ))
     }
 
     async fn renew_session_execution_lease(
@@ -1297,6 +1319,23 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         release_session_execution_lease_tx(&mut tx, completion).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(())
+    }
+
+    async fn get_session_execution_lease(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionExecutionLease>, StoreError> {
+        // Non-locking on purpose: observation must never be able to delay the
+        // lane it observes. See `read_session_execution_lease_unlocked`.
+        let current = read_session_execution_lease_unlocked(&self.pool, session_id).await?;
+        // A released row keeps its generation but clears owner and token; only a
+        // held row is reported. Expiry stays a raw fact for the caller.
+        let Some(current) =
+            current.filter(|lease| lease.owner.is_some() && lease.lease_token.is_some())
+        else {
+            return Ok(None);
+        };
+        Ok(Some(row_to_session_execution_lease(session_id, current)?))
     }
 }
 
@@ -2843,6 +2882,33 @@ pub(crate) struct SessionExecutionLeaseRow {
     pub(crate) expires_at_ms: u64,
 }
 
+/// Read the lease row without locking it, for diagnostics.
+///
+/// The mutation paths deliberately take a `FOR UPDATE` row lock (see
+/// [`load_session_execution_lease_tx`]) because check-then-act on this row is not
+/// atomic under READ COMMITTED. A diagnostic read must never take that lock: an
+/// operator polling a stuck session would otherwise make the holder's renewal or
+/// a peer's claim wait behind the observer's transaction, so watching the lease
+/// could itself delay the lane it is watching. This runs as a single autocommit
+/// statement on the pool with no `FOR UPDATE` and no surrounding transaction.
+pub(crate) async fn read_session_execution_lease_unlocked(
+    pool: &PgPool,
+    session_id: &str,
+) -> Result<Option<SessionExecutionLeaseRow>, StoreError> {
+    let row = sqlx::query(
+        "SELECT lease_owner_id, lease_token, lease_fencing_token,
+                lease_claimed_at_ms, lease_expires_at_ms,
+                lease_owner_incarnation_id, lease_owner_liveness_json
+         FROM lash_session_execution_leases
+         WHERE session_id = $1",
+    )
+    .bind(session_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(store_sqlx_error)?;
+    Ok(row.map(session_execution_lease_row_from_columns))
+}
+
 pub(crate) async fn load_session_execution_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
@@ -2859,13 +2925,19 @@ pub(crate) async fn load_session_execution_lease_tx(
     .fetch_optional(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    Ok(row.map(|row| SessionExecutionLeaseRow {
+    Ok(row.map(session_execution_lease_row_from_columns))
+}
+
+fn session_execution_lease_row_from_columns(
+    row: sqlx::postgres::PgRow,
+) -> SessionExecutionLeaseRow {
+    SessionExecutionLeaseRow {
         owner: lease_owner_from_columns(row.get(0), row.get(5), row.get(6)),
         lease_token: row.get(1),
         fencing_token: row.get::<i64, _>(2) as u64,
         claimed_at_ms: row.get::<i64, _>(3) as u64,
         expires_at_ms: row.get::<i64, _>(4) as u64,
-    }))
+    }
 }
 
 pub(crate) fn lease_owner_from_columns(

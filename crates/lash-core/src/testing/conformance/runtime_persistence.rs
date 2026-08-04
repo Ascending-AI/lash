@@ -197,6 +197,8 @@ where
     // [`SessionExecutionLeaseStore`]: single-writer lane fencing.
     session_execution_lease_contract(make()).await;
     session_execution_lease_expires_by_ttl_contract(make()).await;
+    session_execution_lease_diagnostic_read_contract(make()).await;
+    session_execution_lease_displacement_contract(make()).await;
     // [`QueuedWorkStore`]: durable queued-work ingress, ordering, and claim
     // leases, plus the commit-side completion atomicity it shares with
     // [`SessionCommitStore`].
@@ -1997,6 +1999,213 @@ async fn session_execution_lease_expires_by_ttl_contract(store: Arc<dyn RuntimeP
         "TTL takeover must advance the fencing token"
     );
     release_session_execution_lease_for_test(&store, &acquired).await;
+}
+
+/// The diagnostic read reports the durable lease row as a raw fact and never
+/// mutates it: unknown sessions and released rows read as absent, a held row
+/// reports the exact holder facts, a lapsed row is still reported (expiry is not
+/// filtered), and a takeover is visible as a strictly higher generation under a
+/// different holder.
+async fn session_execution_lease_diagnostic_read_contract(store: Arc<dyn RuntimePersistence>) {
+    assert!(
+        store
+            .get_session_execution_lease("lease-diagnostics-unknown")
+            .await
+            .expect("diagnostic read of an unknown session succeeds")
+            .is_none(),
+        "an unknown session id must read as no lease rather than erroring"
+    );
+
+    let held = claim_session_execution_lease_for_test(&store, "lease-diagnostics", "diag-a").await;
+    let observed = store
+        .get_session_execution_lease("lease-diagnostics")
+        .await
+        .expect("diagnostic read of a held lease")
+        .expect("a held lease must be reported");
+    assert_eq!(observed.session_id, held.session_id);
+    assert_eq!(observed.owner, held.owner);
+    assert_eq!(observed.fencing_token, held.fencing_token);
+    assert_eq!(observed.lease_token, held.lease_token);
+    assert_eq!(observed.claimed_at_epoch_ms, held.claimed_at_epoch_ms);
+    assert_eq!(observed.expires_at_epoch_ms, held.expires_at_epoch_ms);
+
+    // Reading must not renew, expire, or re-fence anything: the holder's own
+    // renewal still succeeds against the fence it presented before the read.
+    store
+        .renew_session_execution_lease(&held.fence(), 120_000)
+        .await
+        .expect("a diagnostic read must not invalidate the holder's fence");
+
+    release_session_execution_lease_for_test(&store, &held).await;
+    assert!(
+        store
+            .get_session_execution_lease("lease-diagnostics")
+            .await
+            .expect("diagnostic read after release")
+            .is_none(),
+        "a released row must read as no holder even though its generation persists"
+    );
+
+    // A lapsed holder is the ambiguous case triage must see, so expiry is
+    // reported rather than filtered out.
+    let lapsing = store
+        .try_claim_session_execution_lease("lease-diagnostics", &lease_owner("diag-lapsed"), 0)
+        .await
+        .expect("claim an immediately expiring lease")
+        .acquired()
+        .expect("expiring lease acquired");
+    let lapsed = store
+        .get_session_execution_lease("lease-diagnostics")
+        .await
+        .expect("diagnostic read of a lapsed lease")
+        .expect("a lapsed holder must still be reported");
+    assert_eq!(lapsed.owner, lapsing.owner);
+    assert_eq!(lapsed.fencing_token, lapsing.fencing_token);
+
+    let successor =
+        claim_session_execution_lease_for_test(&store, "lease-diagnostics", "diag-b").await;
+    let after_takeover = store
+        .get_session_execution_lease("lease-diagnostics")
+        .await
+        .expect("diagnostic read after takeover")
+        .expect("the successor holds the row");
+    assert_eq!(after_takeover.owner, successor.owner);
+    assert!(
+        after_takeover.fencing_token > lapsing.fencing_token,
+        "takeover must be visible read-side as a strictly higher generation"
+    );
+    release_session_execution_lease_for_test(&store, &successor).await;
+}
+
+/// A granted claim must name the lapsed holder it displaced, read inside the same
+/// atomic operation.
+///
+/// This is the only truthful report of a takeover. The displaced runner is
+/// usually *why* the lease lapsed, so it is frequently dead, frozen, or already
+/// replaced; a takeover inferred from its own renewal-failure path is missing in
+/// exactly that case, and can name whichever holder happens to be current by the
+/// time it wakes rather than the one that displaced it.
+///
+/// The same vector carries the generation law the displacement is measured
+/// against: [`crate::store::SessionExecutionLeaseStore`] is a fencing trait, and
+/// ADR 0029 requires every fresh acquisition after release or TTL expiry to mint
+/// `previous + 1`. Both halves are checked against the generations this run
+/// actually observed, never against a constant, so a store frozen at one
+/// generation cannot pass.
+///
+/// Every implementation answers this, in-process doubles included. A double that
+/// reports no displacement silently disables the takeover event for whatever it
+/// stands in for, and one that restarts the fence after release reissues a
+/// generation that stale claims still pin, which stops fencing working at all.
+/// Callers pass a session id they own, because a claim mutates the lane.
+pub async fn session_execution_lease_displacement(
+    store: &(dyn crate::store::SessionExecutionLeaseStore + '_),
+    session_id: &str,
+) {
+    let first = lease_owner("displacement-first");
+    let second = lease_owner("displacement-second");
+
+    // A first claim on a row nobody ever held displaces nobody.
+    let opening = store
+        .try_claim_session_execution_lease(session_id, &first, 0)
+        .await
+        .expect("first claim")
+        .acquisition()
+        .expect("an unheld lane is acquirable");
+    assert!(
+        opening.displaced.is_none(),
+        "a first claim must not report displacing anyone: {:?}",
+        opening.displaced
+    );
+
+    // Taking over a lapsed holder must name that exact holder and generation.
+    let takeover = store
+        .try_claim_session_execution_lease(session_id, &second, 60_000)
+        .await
+        .expect("claim the lapsed lane")
+        .acquisition()
+        .expect("a lapsed lane is claimable");
+    let displaced = takeover.displaced.as_ref().unwrap_or_else(|| {
+        panic!(
+            "displacing a lapsed holder must be reported on the claim; \
+             this store reported nothing, which disables the takeover event"
+        )
+    });
+    assert_eq!(
+        displaced.owner, opening.lease.owner,
+        "the displacement must name the holder actually displaced"
+    );
+    assert_eq!(
+        displaced.fencing_token, opening.lease.fencing_token,
+        "the displacement must name the generation actually displaced"
+    );
+    assert_eq!(
+        takeover.lease.fencing_token,
+        opening.lease.fencing_token + 1,
+        "a claim over an expired lease must mint exactly the previous generation plus one \
+         (ADR 0029): displaced {}, acquired {}",
+        opening.lease.fencing_token,
+        takeover.lease.fencing_token
+    );
+    assert_eq!(
+        displaced.expired_at_epoch_ms, opening.lease.expires_at_epoch_ms,
+        "the displacement must report the lapsed holder's own expiry"
+    );
+
+    // Same-incarnation reentry advances nothing, so it displaces nobody.
+    let reentry = store
+        .try_claim_session_execution_lease(session_id, &second, 60_000)
+        .await
+        .expect("reenter the live lane")
+        .acquisition()
+        .expect("the same incarnation reenters its own lease");
+    assert_eq!(reentry.lease.fencing_token, takeover.lease.fencing_token);
+    assert!(
+        reentry.displaced.is_none(),
+        "reentry must not report a displacement: {:?}",
+        reentry.displaced
+    );
+
+    // A holder that released its lane hands it over; the next claimant took
+    // nothing from anyone and must not report a takeover.
+    store
+        .release_session_execution_lease(&reentry.lease.completion())
+        .await
+        .expect("release the lane");
+    let after_release = store
+        .try_claim_session_execution_lease(session_id, &first, 60_000)
+        .await
+        .expect("claim a released lane")
+        .acquisition()
+        .expect("a released lane is acquirable");
+    assert!(
+        after_release.displaced.is_none(),
+        "claiming a cleanly released lane displaces nobody: {:?}",
+        after_release.displaced
+    );
+    assert_eq!(
+        after_release.lease.fencing_token,
+        reentry.lease.fencing_token + 1,
+        "a claim after a release must mint exactly the released generation plus one \
+         (ADR 0029): released {}, acquired {}. Restarting or repeating the generation here \
+         reissues one that stale claims still pin, so fencing stops working",
+        reentry.lease.fencing_token,
+        after_release.lease.fencing_token
+    );
+    store
+        .release_session_execution_lease(&after_release.lease.completion())
+        .await
+        .expect("release the reclaimed lane");
+}
+
+/// The durable-backend entry point for the shared lease-acquisition contract.
+///
+/// The contract itself lives in [`session_execution_lease_displacement`] because
+/// it binds every implementation of the fencing trait, doubles included. There is
+/// nothing extra a durable backend owes here: the displacement report and the
+/// `previous + 1` generation law are both trait-level obligations.
+async fn session_execution_lease_displacement_contract(store: Arc<dyn RuntimePersistence>) {
+    session_execution_lease_displacement(store.as_ref(), "lease-displacement").await;
 }
 
 async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>) {

@@ -4,622 +4,6 @@
 schema_version = 1
 
 [[api]]
-symbol = "lash::testing::conformance::append_usage_cancellation_publishes_exactly_once"
-kind = "function"
-availability = "all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: queued-commit backend conformance embedders provide a deterministic post-send cancellation seam."
-
-[[api]]
-symbol = "lash::persistence::RuntimeCommitResult::committed_usage_delta_identities"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: durable store implementors return the exact usage identities carried by the stored receipt result."
-
-[[api]]
-symbol = "lash::persistence::RuntimeUsageDelta"
-kind = "struct"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: durable store implementors persist identity-bearing usage rows from RuntimeCommit."
-
-[[api]]
-symbol = "lash::persistence::RuntimeUsageDelta::entry"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: durable store implementors encode the usage counters carried by an idempotent row."
-
-[[api]]
-symbol = "lash::persistence::RuntimeUsageDelta::identity"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: durable store implementors enforce uniqueness on this usage identity."
-
-[[api]]
-symbol = "lash::persistence::RuntimeUsageDeltaIdentity"
-kind = "struct"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: durable store implementors use this compound identity for exactly-once usage publication."
-
-[[api]]
-symbol = "lash::persistence::RuntimeUsageDeltaIdentity::entry_ordinal"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: durable store implementors persist the row ordinal within its originating operation."
-
-[[api]]
-symbol = "lash::persistence::RuntimeUsageDeltaIdentity::operation_storage_key"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: durable store implementors persist the canonical operation key that originated the usage row."
-
-[[api]]
-symbol = "lash::persistence::RuntimeUsageDeltaIdentity::for_entry"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: conformance embedders construct content-bound usage identities with the canonical payload encoding."
-
-[[api]]
-symbol = "lash::persistence::RuntimeUsageDeltaIdentity::payload_hash"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: durable store implementors persist the canonical content hash in the full uniqueness key."
-
-[[api]]
-symbol = "lash::persistence::RuntimeUsageDeltaIdentity::payload_encoding_version"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: durable store implementors persist the payload projection version in the full uniqueness key."
-
-[[api]]
-symbol = "lash_core::RuntimeUsageDelta"
-kind = "struct"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable substrates consume identity-bearing usage rows from RuntimeCommit."
-
-[[api]]
-symbol = "lash_core::RuntimeUsageDelta::entry"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable substrates encode the usage counters carried by an idempotent row."
-
-[[api]]
-symbol = "lash_core::RuntimeUsageDelta::identity"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable substrates enforce uniqueness on this usage identity."
-
-[[api]]
-symbol = "lash_core::RuntimeUsageDeltaIdentity"
-kind = "struct"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable substrates use this compound identity for exactly-once usage publication."
-
-[[api]]
-symbol = "lash_core::RuntimeUsageDeltaIdentity::entry_ordinal"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable substrates persist the row ordinal within its originating operation."
-
-[[api]]
-symbol = "lash_core::RuntimeUsageDeltaIdentity::operation_storage_key"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable substrates persist the canonical operation key that originated the usage row."
-
-[[api]]
-symbol = "lash_core::RuntimeUsageDeltaIdentity::for_entry"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: conformance embedders construct content-bound usage identities with the canonical payload encoding."
-
-[[api]]
-symbol = "lash_core::RuntimeUsageDeltaIdentity::payload_hash"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable substrates persist the canonical content hash in the full uniqueness key."
-
-[[api]]
-symbol = "lash_core::RuntimeUsageDeltaIdentity::payload_encoding_version"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable substrates persist the payload projection version in the full uniqueness key."
-
-[[api]]
-symbol = "lash::persistence::StoreError::TokenUsageAccountingOverflow"
-kind = "variant"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: hosts diagnose a retained usage batch that cannot be represented without counter overflow."
-
-[[api]]
-symbol = "lash::persistence::StoreError::TokenUsageAccountingOverflow::counter"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: hosts identify the overflowing usage counter."
-
-[[api]]
-symbol = "lash::persistence::StoreError::TokenUsageAccountingOverflow::model"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: hosts identify the model owning an overflowing retained usage row."
-
-[[api]]
-symbol = "lash::persistence::StoreError::TokenUsageAccountingOverflow::usage_source"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: hosts identify the source owning an overflowing retained usage row."
-
-[[api]]
-symbol = "lash_core::StoreError::TokenUsageAccountingOverflow"
-kind = "variant"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: runtime and store hosts diagnose a retained usage batch that cannot be represented without overflow."
-
-[[api]]
-symbol = "lash_core::StoreError::TokenUsageAccountingOverflow::counter"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: runtime and store hosts identify the overflowing usage counter."
-
-[[api]]
-symbol = "lash_core::StoreError::TokenUsageAccountingOverflow::model"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: runtime and store hosts identify the model owning an overflowing retained usage row."
-
-[[api]]
-symbol = "lash_core::StoreError::TokenUsageAccountingOverflow::usage_source"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: runtime and store hosts identify the source owning an overflowing retained usage row."
-
-[[api]]
-symbol = "lash::plugins::PluginError::AppendReceiptRequestedNodeCountCorrupt"
-kind = "variant"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: plugin hosts distinguish durable append receipt corruption without string matching."
-
-[[api]]
-symbol = "lash::plugins::PluginError::AppendReceiptRequestedNodeCountCorrupt::attempted"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: plugin hosts report the attempted append node count for corrupt receipts."
-
-[[api]]
-symbol = "lash::plugins::PluginError::AppendReceiptRequestedNodeCountCorrupt::operation_key"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: plugin hosts report the durable operation key for corrupt receipts."
-
-[[api]]
-symbol = "lash::plugins::PluginError::AppendReceiptRequestedNodeCountCorrupt::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: plugin hosts report the session owning a corrupt append receipt."
-
-[[api]]
-symbol = "lash::plugins::PluginError::AppendReceiptRequestedNodeCountCorrupt::stored"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: plugin hosts report the stored append node count for corrupt receipts."
-
-[[api]]
-symbol = "lash_core::PluginError::AppendReceiptRequestedNodeCountCorrupt"
-kind = "variant"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: core plugin hosts distinguish durable append receipt corruption without string matching."
-
-[[api]]
-symbol = "lash_core::PluginError::AppendReceiptRequestedNodeCountCorrupt::attempted"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: core plugin hosts report the attempted append node count for corrupt receipts."
-
-[[api]]
-symbol = "lash_core::PluginError::AppendReceiptRequestedNodeCountCorrupt::operation_key"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: core plugin hosts report the durable operation key for corrupt receipts."
-
-[[api]]
-symbol = "lash_core::PluginError::AppendReceiptRequestedNodeCountCorrupt::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: core plugin hosts report the session owning a corrupt append receipt."
-
-[[api]]
-symbol = "lash_core::PluginError::AppendReceiptRequestedNodeCountCorrupt::stored"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: core plugin hosts report the stored append node count for corrupt receipts."
-
-[[api]]
-symbol = "lash::testing::conformance::append_receipt_mixed_usage_envelope"
-kind = "function"
-availability = "all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: durable store conformance embedders verify replay-safe mixed append and usage envelopes."
-
-[[api]]
-symbol = "lash::testing::conformance::old_format_append_receipt_returns_public_leaf"
-kind = "function"
-availability = "all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: SQL store conformance embedders provide raw legacy receipt row surgery."
-
-[[api]]
-symbol = "lash::testing::conformance::append_request_receipt_replays_after_ancestor_superseded"
-kind = "function"
-availability = "all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable store conformance embedders provide the backend-specific branch-switch test hook."
-
-[[api]]
-symbol = "lash::persistence::RuntimeCommitResult::committed_leaf_node_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add the durable append receipt replay to the agent-service persistence example and assert that it returns the first committed leaf."
-
-[[api]]
-symbol = "lash::persistence::RuntimeCommitResult::receipt_replayed"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add the durable append receipt replay to the agent-service persistence example and assert that the runtime refreshes resident state."
-
-[[api]]
-symbol = "lash::persistence::RuntimeTurnCommitStamp::identity_encoding_version"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add an append request receipt construction example once hosts can construct this runtime-owned stamp through the facade."
-
-[[api]]
-symbol = "lash::persistence::RuntimeTurnCommitStamp::request_identity_hash"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add an append request receipt construction example once hosts can construct this runtime-owned stamp through the facade."
-
-[[api]]
-symbol = "lash::persistence::RuntimeTurnCommitStamp::requested_ancestor_node_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add an append request receipt construction example once hosts can construct this runtime-owned stamp through the facade."
-
-[[api]]
-symbol = "lash::persistence::RuntimeTurnCommitStamp::requested_node_count"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add an append request receipt construction example once hosts can construct this runtime-owned stamp through the facade."
-
-[[api]]
-symbol = "lash::persistence::StoreError::AppendAncestorNotActive"
-kind = "variant"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add the fresh append ancestor-fence rejection to the agent-service persistence example and assert its StaleBranch translation."
-
-[[api]]
-symbol = "lash::persistence::StoreError::AppendAncestorNotActive::required_node_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add the fresh append ancestor-fence rejection to the agent-service persistence example and assert the refused ancestor id."
-
-[[api]]
-symbol = "lash::persistence::StoreError::AppendOperationIdentityConflict"
-kind = "variant"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add operation-id reuse with changed append content to the agent-service persistence example and assert the typed conflict."
-
-[[api]]
-symbol = "lash::persistence::StoreError::AppendOperationIdentityConflict::operation_key"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add operation-id reuse with changed append content to the agent-service persistence example and assert the conflicting storage key."
-
-[[api]]
-symbol = "lash::persistence::StoreError::AppendOperationIdentityConflict::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add operation-id reuse with changed append content to the agent-service persistence example and assert the conflicting session id."
-
-[[api]]
-symbol = "lash::persistence::StoreError::AppendReceiptRequestedNodeCountCorrupt"
-kind = "variant"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add a corrupt append receipt to the agent-service persistence example and assert that replay is refused."
-
-[[api]]
-symbol = "lash::persistence::StoreError::AppendReceiptRequestedNodeCountCorrupt::attempted"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add a corrupt append receipt example and assert the attempted requested-node count."
-
-[[api]]
-symbol = "lash::persistence::StoreError::AppendReceiptRequestedNodeCountCorrupt::operation_key"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add a corrupt append receipt example and assert the affected durable operation key."
-
-[[api]]
-symbol = "lash::persistence::StoreError::AppendReceiptRequestedNodeCountCorrupt::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add a corrupt append receipt example and assert the affected session id."
-
-[[api]]
-symbol = "lash::persistence::StoreError::AppendReceiptRequestedNodeCountCorrupt::stored"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add a corrupt append receipt example and assert the stored requested-node count."
-
-[[api]]
-symbol = "lash::plugins::PluginError::AppendOperationIdentityConflict"
-kind = "variant"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add a changed-content append retry to the agent-workbench plugin example and assert the typed caller conflict."
-
-[[api]]
-symbol = "lash::plugins::PluginError::AppendOperationIdentityConflict::operation_key"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add a changed-content append retry example and assert its durable operation key."
-
-[[api]]
-symbol = "lash::plugins::PluginError::AppendOperationIdentityConflict::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add a changed-content append retry example and assert its session id."
-
-[[api]]
-symbol = "lash_core::RuntimeTurnCommitStamp::identity_encoding_version"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable store implementors consume versioned append request receipt metadata."
-
-[[api]]
-symbol = "lash_core::RuntimeTurnCommitStamp::request_identity_hash"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable store implementors consume append request identity hashes."
-
-[[api]]
-symbol = "lash_core::RuntimeTurnCommitStamp::requested_ancestor_node_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable store implementors enforce fresh append ancestor fences after receipt lookup."
-
-[[api]]
-symbol = "lash_core::RuntimeTurnCommitStamp::requested_node_count"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable store implementors persist append receipt observability metadata."
-
-[[api]]
-symbol = "lash_core::StoreError::AppendAncestorNotActive"
-kind = "variant"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable store implementors reject a fresh append whose requested ancestor is inactive."
-
-[[api]]
-symbol = "lash_core::StoreError::AppendAncestorNotActive::required_node_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable store implementors identify the inactive append ancestor."
-
-[[api]]
-symbol = "lash_core::StoreError::AppendOperationIdentityConflict"
-kind = "variant"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable store implementors distinguish append operation-id reuse from generic commit conflicts."
-
-[[api]]
-symbol = "lash_core::StoreError::AppendOperationIdentityConflict::operation_key"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable store implementors report the conflicting append operation storage key."
-
-[[api]]
-symbol = "lash_core::StoreError::AppendOperationIdentityConflict::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable store implementors report the session owning the conflicting append receipt."
-
-[[api]]
-symbol = "lash_core::PluginError::AppendOperationIdentityConflict"
-kind = "variant"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: plugin hosts distinguish changed-content append retries without string matching."
-
-[[api]]
-symbol = "lash_core::PluginError::AppendOperationIdentityConflict::operation_key"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: plugin hosts report the conflicting durable operation key."
-
-[[api]]
-symbol = "lash_core::PluginError::AppendOperationIdentityConflict::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: plugin hosts report the session whose append identity conflicted."
-
-[[api]]
-symbol = "lash_core::StoreError::AppendReceiptRequestedNodeCountCorrupt"
-kind = "variant"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable stores reject contradictory append receipt counts as corruption."
-
-[[api]]
-symbol = "lash_core::StoreError::AppendReceiptRequestedNodeCountCorrupt::attempted"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable stores report the attempted requested-node count."
-
-[[api]]
-symbol = "lash_core::StoreError::AppendReceiptRequestedNodeCountCorrupt::operation_key"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable stores report the corrupt receipt operation key."
-
-[[api]]
-symbol = "lash_core::StoreError::AppendReceiptRequestedNodeCountCorrupt::session_id"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable stores report the corrupt receipt session id."
-
-[[api]]
-symbol = "lash_core::StoreError::AppendReceiptRequestedNodeCountCorrupt::stored"
-kind = "field"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable stores report the stored requested-node count."
-
-[[api]]
 symbol = "lash::AdvancedToolAdmin"
 kind = "struct"
 availability = "default+all-features"
@@ -1644,15 +1028,6 @@ usage = "examples/agent-workbench/src/restate_tests.rs:324#let effect_host = sta
 assertion = "examples/agent-workbench/src/restate_tests.rs:156#assert_eq!("
 
 [[api]]
-symbol = "lash::LashCore::tool_catalog"
-kind = "function"
-availability = "default+all-features"
-area = "plugins"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:26#let core_catalog: lash::ToolCatalogView = core.tool_catalog();"
-assertion = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:28#assert!("
-
-[[api]]
 symbol = "lash::LashCore::enqueue_turn_input"
 kind = "function"
 availability = "default+all-features"
@@ -1752,12 +1127,30 @@ disposition = "unused-add"
 reason = "The current example use of lash::LashCore::session_delete_scope is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::LashCore::session_lease_diagnostics"
+kind = "function"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:289#.session_lease_diagnostics(SESSION_ID)"
+assertion = "examples/agent-service/src/lease_triage.rs:306#assert_eq!(diagnostics.session_id, SESSION_ID);"
+
+[[api]]
 symbol = "lash::LashCore::standard_builder"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "The current example use of lash::LashCore::standard_builder is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
+
+[[api]]
+symbol = "lash::LashCore::tool_catalog"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:26#let core_catalog: lash::ToolCatalogView = core.tool_catalog();"
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:28#assert!("
 
 [[api]]
 symbol = "lash::LashCore::triggers"
@@ -2985,6 +2378,14 @@ disposition = "unused-add"
 reason = "The current example use of lash::PendingTurnInputCancelTarget::input_id is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::PendingTurnInputCancelTarget::source_key"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add an outcome-driven host example for the public pending-input source-key constructor."
+
+[[api]]
 symbol = "lash::PendingTurnInputSuffixCancelOutcome"
 kind = "enum"
 availability = "default+all-features"
@@ -3857,6 +3258,14 @@ disposition = "unused-add"
 reason = "Add lash::SessionCreateRequest::with_initial_nodes to the docs-snippets embedding/turns example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::SessionCreateRequest::with_observed_processes"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add this builder to the agent-workbench durable process flow and assert the observer results."
+
+[[api]]
 symbol = "lash::SessionCreateRequest::with_plugin_source"
 kind = "function"
 availability = "default+all-features"
@@ -4345,6 +3754,15 @@ usage = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:188#.r
 assertion = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:206#assert_eq!(removed.name, \"inbox__live__send\");"
 
 [[api]]
+symbol = "lash::ToolAdmin::resolve_contract"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:40#.resolve_contract(\"inbox__test__send\")"
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:42#assert_eq!("
+
+[[api]]
 symbol = "lash::ToolAdmin::set_membership"
 kind = "function"
 availability = "default+all-features"
@@ -4368,15 +3786,6 @@ area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests.rs:1121#let tool_state = reopened.tools().state().await.expect(\"tool state\");"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:184#assert!("
-
-[[api]]
-symbol = "lash::ToolAdmin::resolve_contract"
-kind = "function"
-availability = "default+all-features"
-area = "plugins"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:40#.resolve_contract(\"inbox__test__send\")"
-assertion = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:42#assert_eq!("
 
 [[api]]
 symbol = "lash::ToolCatalogMiss"
@@ -5951,7 +5360,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:158#let elapsed = output.result.duration(); // claim -> commit + post-persist hooks"
+usage = "examples/docs-snippets/src/operations.rs:197#let elapsed = output.result.duration(); // claim -> commit + post-persist hooks"
 
 [[api]]
 symbol = "lash::TurnResult::errors"
@@ -6007,7 +5416,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:157#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
+usage = "examples/docs-snippets/src/operations.rs:196#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
 
 [[api]]
 symbol = "lash::TurnResult::state"
@@ -6963,6 +6372,15 @@ disposition = "unused-add"
 reason = "Add lash::admin::ToolAdmin::remove_source to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::admin::ToolAdmin::resolve_contract"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:40#.resolve_contract(\"inbox__test__send\")"
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:78#assert_eq!(gated.name, \"inbox__test__send\");"
+
+[[api]]
 symbol = "lash::admin::ToolAdmin::set_membership"
 kind = "function"
 availability = "default+all-features"
@@ -6986,15 +6404,6 @@ area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests.rs:1121#let tool_state = reopened.tools().state().await.expect(\"tool state\");"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:184#assert!("
-
-[[api]]
-symbol = "lash::admin::ToolAdmin::resolve_contract"
-kind = "function"
-availability = "default+all-features"
-area = "plugins"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:40#.resolve_contract(\"inbox__test__send\")"
-assertion = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:78#assert_eq!(gated.name, \"inbox__test__send\");"
 
 [[api]]
 symbol = "lash::attachments::AttachmentCreateMeta"
@@ -12726,6 +12135,22 @@ disposition = "unused-add"
 reason = "Add lash::persistence::RuntimeCommitResult::checkpoint_ref to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::persistence::RuntimeCommitResult::committed_leaf_node_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add the durable append receipt replay to the agent-service persistence example and assert that it returns the first committed leaf."
+
+[[api]]
+symbol = "lash::persistence::RuntimeCommitResult::committed_usage_delta_identities"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors return the exact usage identities carried by the stored receipt result."
+
+[[api]]
 symbol = "lash::persistence::RuntimeCommitResult::enqueued_queue_batches"
 kind = "field"
 availability = "default+all-features"
@@ -12756,6 +12181,14 @@ availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::RuntimeCommitResult::realized_node_timestamps to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::RuntimeCommitResult::receipt_replayed"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add the durable append receipt replay to the agent-service persistence example and assert that the runtime refreshes resident state."
 
 [[api]]
 symbol = "lash::persistence::RuntimeCommitResult::turn_input_applications"
@@ -13118,6 +12551,14 @@ disposition = "unused-add"
 reason = "Add lash::persistence::RuntimeTurnCommitStamp to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::persistence::RuntimeTurnCommitStamp::identity_encoding_version"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add an append request receipt construction example once hosts can construct this runtime-owned stamp through the facade."
+
+[[api]]
 symbol = "lash::persistence::RuntimeTurnCommitStamp::new"
 kind = "function"
 availability = "default+all-features"
@@ -13132,6 +12573,102 @@ availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::RuntimeTurnCommitStamp::operation to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::RuntimeTurnCommitStamp::request_identity_hash"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add an append request receipt construction example once hosts can construct this runtime-owned stamp through the facade."
+
+[[api]]
+symbol = "lash::persistence::RuntimeTurnCommitStamp::requested_ancestor_node_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add an append request receipt construction example once hosts can construct this runtime-owned stamp through the facade."
+
+[[api]]
+symbol = "lash::persistence::RuntimeTurnCommitStamp::requested_node_count"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add an append request receipt construction example once hosts can construct this runtime-owned stamp through the facade."
+
+[[api]]
+symbol = "lash::persistence::RuntimeUsageDelta"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors persist identity-bearing usage rows from RuntimeCommit."
+
+[[api]]
+symbol = "lash::persistence::RuntimeUsageDelta::entry"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors encode the usage counters carried by an idempotent row."
+
+[[api]]
+symbol = "lash::persistence::RuntimeUsageDelta::identity"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors enforce uniqueness on this usage identity."
+
+[[api]]
+symbol = "lash::persistence::RuntimeUsageDeltaIdentity"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors use this compound identity for exactly-once usage publication."
+
+[[api]]
+symbol = "lash::persistence::RuntimeUsageDeltaIdentity::entry_ordinal"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors persist the row ordinal within its originating operation."
+
+[[api]]
+symbol = "lash::persistence::RuntimeUsageDeltaIdentity::for_entry"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: conformance embedders construct content-bound usage identities with the canonical payload encoding."
+
+[[api]]
+symbol = "lash::persistence::RuntimeUsageDeltaIdentity::operation_storage_key"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors persist the canonical operation key that originated the usage row."
+
+[[api]]
+symbol = "lash::persistence::RuntimeUsageDeltaIdentity::payload_encoding_version"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors persist the payload projection version in the full uniqueness key."
+
+[[api]]
+symbol = "lash::persistence::RuntimeUsageDeltaIdentity::payload_hash"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors persist the canonical content hash in the full uniqueness key."
 
 [[api]]
 symbol = "lash::persistence::SessionAdmission"
@@ -13260,6 +12797,14 @@ availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionBinding::cwd to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::SessionBinding::from_create_request"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add the canonical session-binding constructor to an example persistence setup."
 
 [[api]]
 symbol = "lash::persistence::SessionBinding::model_id"
@@ -13494,6 +13039,46 @@ disposition = "unused-add"
 reason = "Add lash::persistence::SessionExecutionLease::session_id to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::persistence::SessionExecutionLeaseAcquisition"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseAcquisition::displaced"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseAcquisition::displacing_observed"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseAcquisition::fresh"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseAcquisition::lease"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
 symbol = "lash::persistence::SessionExecutionLeaseClaimOutcome"
 kind = "enum"
 availability = "default+all-features"
@@ -13542,6 +13127,14 @@ disposition = "unused-add"
 reason = "Add lash::persistence::SessionExecutionLeaseClaimOutcome::acquired to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::persistence::SessionExecutionLeaseClaimOutcome::acquisition"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
 symbol = "lash::persistence::SessionExecutionLeaseCompletion"
 kind = "struct"
 availability = "default+all-features"
@@ -13580,6 +13173,38 @@ availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionExecutionLeaseCompletion::session_id to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseDisplacement"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseDisplacement::expired_at_epoch_ms"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseDisplacement::fencing_token"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseDisplacement::owner"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
 
 [[api]]
 symbol = "lash::persistence::SessionExecutionLeaseFence"
@@ -13628,6 +13253,15 @@ availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionExecutionLeaseStore to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseStore::get_session_execution_lease"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:298#.get_session_execution_lease(SESSION_ID)"
+assertion = "examples/agent-service/src/lease_triage.rs:302#assert_eq!(holder.owner, row.owner);"
 
 [[api]]
 symbol = "lash::persistence::SessionExecutionLeaseStore::release_session_execution_lease"
@@ -13972,6 +13606,150 @@ availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionHistoryRecord to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::SessionLeaseDiagnostics"
+kind = "struct"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:288#let diagnostics: SessionLeaseDiagnostics = core"
+assertion = "examples/agent-service/src/lease_triage.rs:306#assert_eq!(diagnostics.session_id, SESSION_ID);"
+
+[[api]]
+symbol = "lash::persistence::SessionLeaseDiagnostics::holder"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:294#            .holder"
+assertion = "examples/agent-service/src/lease_triage.rs:302#assert_eq!(holder.owner, row.owner);"
+
+[[api]]
+symbol = "lash::persistence::SessionLeaseDiagnostics::observed_at_epoch_ms"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:129#observed_at_epoch_ms: Some(diagnostics.observed_at_epoch_ms),"
+assertion = "examples/agent-service/src/lease_triage.rs:307#assert!(diagnostics.observed_at_epoch_ms > 0);"
+
+[[api]]
+symbol = "lash::persistence::SessionLeaseDiagnostics::renewal"
+kind = "function"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:118#let renewal = diagnostics.renewal();"
+assertion = "examples/agent-service/src/lease_triage.rs:308#assert!(matches!("
+
+[[api]]
+symbol = "lash::persistence::SessionLeaseDiagnostics::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:126#session_id: diagnostics.session_id.clone(),"
+assertion = "examples/agent-service/src/lease_triage.rs:306#assert_eq!(diagnostics.session_id, SESSION_ID);"
+
+[[api]]
+symbol = "lash::persistence::SessionLeaseHolder"
+kind = "struct"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:293#let holder: &SessionLeaseHolder = diagnostics"
+assertion = "examples/agent-service/src/lease_triage.rs:302#assert_eq!(holder.owner, row.owner);"
+
+[[api]]
+symbol = "lash::persistence::SessionLeaseHolder::claimed_at_epoch_ms"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:133#claimed_at_epoch_ms: holder.map(|holder| holder.claimed_at_epoch_ms),"
+assertion = "examples/agent-service/src/lease_triage.rs:304#assert_eq!(holder.claimed_at_epoch_ms, row.claimed_at_epoch_ms);"
+
+[[api]]
+symbol = "lash::persistence::SessionLeaseHolder::expires_at_epoch_ms"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:134#expires_at_epoch_ms: holder.map(|holder| holder.expires_at_epoch_ms),"
+assertion = "examples/agent-service/src/lease_triage.rs:305#assert_eq!(holder.expires_at_epoch_ms, row.expires_at_epoch_ms);"
+
+[[api]]
+symbol = "lash::persistence::SessionLeaseHolder::generation"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:132#generation: holder.map(|holder| holder.generation),"
+assertion = "examples/agent-service/src/lease_triage.rs:303#assert_eq!(holder.generation, row.fencing_token);"
+
+[[api]]
+symbol = "lash::persistence::SessionLeaseHolder::owner"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:130#holder_owner_id: holder.map(|holder| holder.owner.owner_id.clone()),"
+assertion = "examples/agent-service/src/lease_triage.rs:302#assert_eq!(holder.owner, row.owner);"
+
+[[api]]
+symbol = "lash::persistence::SessionLeaseRenewal"
+kind = "enum"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:120#SessionLeaseRenewal::Unheld => LeaseTriage::Unheld,"
+assertion = "examples/agent-service/src/lease_triage.rs:409#assert_eq!(report.triage, LeaseTriage::Unheld);"
+
+[[api]]
+symbol = "lash::persistence::SessionLeaseRenewal::Current"
+kind = "variant"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:121#SessionLeaseRenewal::Current { .. } => LeaseTriage::ProviderHangShape,"
+assertion = "examples/agent-service/src/lease_triage.rs:272#assert_eq!(report.triage, LeaseTriage::ProviderHangShape);"
+
+[[api]]
+symbol = "lash::persistence::SessionLeaseRenewal::Current::expires_in_ms"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:136#SessionLeaseRenewal::Current { expires_in_ms } => Some(expires_in_ms),"
+assertion = "examples/agent-service/src/lease_triage.rs:280#report.expires_in_ms.is_some_and(|remaining| remaining > 0),"
+
+[[api]]
+symbol = "lash::persistence::SessionLeaseRenewal::Lapsed"
+kind = "variant"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:122#SessionLeaseRenewal::Lapsed { .. } => LeaseTriage::LeaseLost,"
+assertion = "examples/agent-service/src/lease_triage.rs:332#assert_eq!(report.triage, LeaseTriage::LeaseLost);"
+
+[[api]]
+symbol = "lash::persistence::SessionLeaseRenewal::Lapsed::expired_for_ms"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:140#SessionLeaseRenewal::Lapsed { expired_for_ms } => Some(expired_for_ms),"
+assertion = "examples/agent-service/src/lease_triage.rs:335#assert!(report.expired_for_ms.is_some());"
+
+[[api]]
+symbol = "lash::persistence::SessionLeaseRenewal::Unheld"
+kind = "variant"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:120#SessionLeaseRenewal::Unheld => LeaseTriage::Unheld,"
+assertion = "examples/agent-service/src/lease_triage.rs:409#assert_eq!(report.triage, LeaseTriage::Unheld);"
 
 [[api]]
 symbol = "lash::persistence::SessionMeta"
@@ -14537,6 +14315,86 @@ usage = "examples/agent-workbench/src/restate_tests.rs:180#lash::persistence::St
 assertion = "examples/agent-workbench/src/restate_tests.rs:174#assert!("
 
 [[api]]
+symbol = "lash::persistence::StoreError::AppendAncestorNotActive"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add the fresh append ancestor-fence rejection to the agent-service persistence example and assert its StaleBranch translation."
+
+[[api]]
+symbol = "lash::persistence::StoreError::AppendAncestorNotActive::required_node_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add the fresh append ancestor-fence rejection to the agent-service persistence example and assert the refused ancestor id."
+
+[[api]]
+symbol = "lash::persistence::StoreError::AppendOperationIdentityConflict"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add operation-id reuse with changed append content to the agent-service persistence example and assert the typed conflict."
+
+[[api]]
+symbol = "lash::persistence::StoreError::AppendOperationIdentityConflict::operation_key"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add operation-id reuse with changed append content to the agent-service persistence example and assert the conflicting storage key."
+
+[[api]]
+symbol = "lash::persistence::StoreError::AppendOperationIdentityConflict::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add operation-id reuse with changed append content to the agent-service persistence example and assert the conflicting session id."
+
+[[api]]
+symbol = "lash::persistence::StoreError::AppendReceiptRequestedNodeCountCorrupt"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add a corrupt append receipt to the agent-service persistence example and assert that replay is refused."
+
+[[api]]
+symbol = "lash::persistence::StoreError::AppendReceiptRequestedNodeCountCorrupt::attempted"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add a corrupt append receipt example and assert the attempted requested-node count."
+
+[[api]]
+symbol = "lash::persistence::StoreError::AppendReceiptRequestedNodeCountCorrupt::operation_key"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add a corrupt append receipt example and assert the affected durable operation key."
+
+[[api]]
+symbol = "lash::persistence::StoreError::AppendReceiptRequestedNodeCountCorrupt::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add a corrupt append receipt example and assert the affected session id."
+
+[[api]]
+symbol = "lash::persistence::StoreError::AppendReceiptRequestedNodeCountCorrupt::stored"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add a corrupt append receipt example and assert the stored requested-node count."
+
+[[api]]
 symbol = "lash::persistence::StoreError::Backend"
 kind = "variant"
 availability = "default+all-features"
@@ -15082,6 +14940,38 @@ availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::StoreError::SessionExecutionLeaseExpired::session_id to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::StoreError::TokenUsageAccountingOverflow"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: hosts diagnose a retained usage batch that cannot be represented without counter overflow."
+
+[[api]]
+symbol = "lash::persistence::StoreError::TokenUsageAccountingOverflow::counter"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: hosts identify the overflowing usage counter."
+
+[[api]]
+symbol = "lash::persistence::StoreError::TokenUsageAccountingOverflow::model"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: hosts identify the model owning an overflowing retained usage row."
+
+[[api]]
+symbol = "lash::persistence::StoreError::TokenUsageAccountingOverflow::usage_source"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: hosts identify the source owning an overflowing retained usage row."
 
 [[api]]
 symbol = "lash::persistence::StoreError::TurnInputClaimSuperseded"
@@ -16571,6 +16461,70 @@ disposition = "unused-add"
 reason = "The current example use of lash::plugins::PluginError is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::plugins::PluginError::AppendOperationIdentityConflict"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add a changed-content append retry to the agent-workbench plugin example and assert the typed caller conflict."
+
+[[api]]
+symbol = "lash::plugins::PluginError::AppendOperationIdentityConflict::operation_key"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add a changed-content append retry example and assert its durable operation key."
+
+[[api]]
+symbol = "lash::plugins::PluginError::AppendOperationIdentityConflict::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add a changed-content append retry example and assert its session id."
+
+[[api]]
+symbol = "lash::plugins::PluginError::AppendReceiptRequestedNodeCountCorrupt"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: plugin hosts distinguish durable append receipt corruption without string matching."
+
+[[api]]
+symbol = "lash::plugins::PluginError::AppendReceiptRequestedNodeCountCorrupt::attempted"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: plugin hosts report the attempted append node count for corrupt receipts."
+
+[[api]]
+symbol = "lash::plugins::PluginError::AppendReceiptRequestedNodeCountCorrupt::operation_key"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: plugin hosts report the durable operation key for corrupt receipts."
+
+[[api]]
+symbol = "lash::plugins::PluginError::AppendReceiptRequestedNodeCountCorrupt::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: plugin hosts report the session owning a corrupt append receipt."
+
+[[api]]
+symbol = "lash::plugins::PluginError::AppendReceiptRequestedNodeCountCorrupt::stored"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: plugin hosts report the stored append node count for corrupt receipts."
+
+[[api]]
 symbol = "lash::plugins::PluginError::Invoke"
 kind = "variant"
 availability = "default+all-features"
@@ -17211,6 +17165,14 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "unused-add"
 reason = "Add lash::plugins::PluginOptions::empty to the agent-workbench plugin/tool setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::PluginOptions::insert_typed"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add typed plugin-option insertion to the agent-workbench plugin setup and assert decoding."
 
 [[api]]
 symbol = "lash::plugins::PluginOptions::plugins"
@@ -19928,6 +19890,15 @@ disposition = "unused-add"
 reason = "The current example use of lash::prelude::LashCore::session_delete_scope is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::prelude::LashCore::session_lease_diagnostics"
+kind = "function"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/agent-service/src/lease_triage.rs:289#.session_lease_diagnostics(SESSION_ID)"
+assertion = "examples/agent-service/src/lease_triage.rs:306#assert_eq!(diagnostics.session_id, SESSION_ID);"
+
+[[api]]
 symbol = "lash::prelude::LashCore::standard_builder"
 kind = "function"
 availability = "default+all-features"
@@ -21706,6 +21677,14 @@ disposition = "unused-add"
 reason = "Add lash::prelude::SessionCreateRequest::with_initial_nodes to the docs-snippets embedding/turns example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::prelude::SessionCreateRequest::with_observed_processes"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add the prelude spelling to a durable process-flow example and assert the observer results."
+
+[[api]]
 symbol = "lash::prelude::SessionCreateRequest::with_plugin_source"
 kind = "function"
 availability = "default+all-features"
@@ -22022,6 +22001,15 @@ usage = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:188#.r
 assertion = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:206#assert_eq!(removed.name, \"inbox__live__send\");"
 
 [[api]]
+symbol = "lash::prelude::ToolAdmin::resolve_contract"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:40#.resolve_contract(\"inbox__test__send\")"
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:78#assert_eq!(gated.name, \"inbox__test__send\");"
+
+[[api]]
 symbol = "lash::prelude::ToolAdmin::set_membership"
 kind = "function"
 availability = "default+all-features"
@@ -22045,15 +22033,6 @@ area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests.rs:1121#let tool_state = reopened.tools().state().await.expect(\"tool state\");"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:184#assert!("
-
-[[api]]
-symbol = "lash::prelude::ToolAdmin::resolve_contract"
-kind = "function"
-availability = "default+all-features"
-area = "plugins"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:40#.resolve_contract(\"inbox__test__send\")"
-assertion = "examples/agent-workbench/src/main_sections/tests/tool_catalog.rs:78#assert_eq!(gated.name, \"inbox__test__send\");"
 
 [[api]]
 symbol = "lash::prelude::TurnActivity"
@@ -23315,7 +23294,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:158#let elapsed = output.result.duration(); // claim -> commit + post-persist hooks"
+usage = "examples/docs-snippets/src/operations.rs:197#let elapsed = output.result.duration(); // claim -> commit + post-persist hooks"
 
 [[api]]
 symbol = "lash::prelude::TurnResult::errors"
@@ -23371,7 +23350,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:157#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
+usage = "examples/docs-snippets/src/operations.rs:196#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
 
 [[api]]
 symbol = "lash::prelude::TurnResult::state"
@@ -24539,6 +24518,16 @@ assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:73
 reason = "Add lash::process::ProcessCancelSummary to the agent-workbench durable process flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::process::ProcessCancelSummary::from_record"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:733#let cancel_summary = lash::process::ProcessCancelSummary::from_record(completed.clone());"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:734#assert_eq!(cancel_summary.process_id, process_id);"
+reason = "Add the public-record projection to a durable process administration example."
+
+[[api]]
 symbol = "lash::process::ProcessCancelSummary::process_id"
 kind = "field"
 availability = "default+all-features"
@@ -25174,6 +25163,14 @@ disposition = "unused-add"
 reason = "Add lash::process::ProcessExecutionEnvSpec::stable_ref to the agent-workbench durable process flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::process::ProcessExecutionEnvSpec::to_store_bytes"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add a process-environment persistence round-trip to a host example."
+
+[[api]]
 symbol = "lash::process::ProcessExternalRef"
 kind = "struct"
 availability = "default+all-features"
@@ -25232,6 +25229,16 @@ disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:418#assert_eq!(identity.definition.as_ref().unwrap()[\"revision\"], 7);"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:418#assert_eq!(identity.definition.as_ref().unwrap()[\"revision\"], 7);"
 reason = "Add lash::process::ProcessHandleSummary::definition to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::process::ProcessHandleSummary::from_record"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:724#let handle = ProcessHandleSummary::from_record(completed.clone())"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:726#assert_eq!(handle.handle_type, \"process\");"
+reason = "Add the public-record projection to a durable process administration example."
 
 [[api]]
 symbol = "lash::process::ProcessHandleSummary::handle_type"
@@ -25651,6 +25658,14 @@ disposition = "unused-add"
 reason = "Add lash::process::ProcessLeaseCompletion to the agent-workbench durable process flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::process::ProcessLeaseCompletion::from_lease"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add process-lease completion construction to a durable process example."
+
+[[api]]
 symbol = "lash::process::ProcessLeaseCompletion::lease_token"
 kind = "field"
 availability = "default+all-features"
@@ -26020,6 +26035,16 @@ availability = "default+all-features"
 area = "processes"
 disposition = "unused-add"
 reason = "New facade home added by FIG-863 wave B. Give lash::process::ProcessOriginator::host example usage in the agent-workbench host example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::process::ProcessOriginator::host_scoped"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:762#ProcessProvenance::new(ProcessOriginator::host_scoped(\"batch-service\")),"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:780#assert_eq!(external_completion.status, ProcessStatus::Failed);"
+reason = "Add scoped host process provenance to an agent-workbench process example."
 
 [[api]]
 symbol = "lash::process::ProcessOriginator::session"
@@ -28478,6 +28503,16 @@ disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:380#assert_eq!(scope.agent_frame_id.as_deref(), Some(\"frame-review\"));"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:380#assert_eq!(scope.agent_frame_id.as_deref(), Some(\"frame-review\"));"
 reason = "Add lash::process::SessionScope::agent_frame_id to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::process::SessionScope::for_agent_frame"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:376#let scope = SessionScope::for_agent_frame(\"session-finance\", \"frame-review\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:377#assert_eq!(scope.id().as_str(), \"session:session-finance/frame:frame-review\");"
+reason = "Add frame-scoped session provenance to a durable process example."
 
 [[api]]
 symbol = "lash::process::SessionScope::id"
@@ -45776,6 +45811,15 @@ disposition = "unused-add"
 reason = "Add lash::runtime::RuntimeError::code to the docs-snippets embedding/turns example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::runtime::RuntimeError::deleted_session_id"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:716#return error.deleted_session_id().map(|session_id| (session_id, None));"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:781#assert_eq!(error.status, StatusCode::CONFLICT);"
+
+[[api]]
 symbol = "lash::runtime::RuntimeError::is_code"
 kind = "function"
 availability = "default+all-features"
@@ -45806,6 +45850,15 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/restate_tests.rs:194#lash::runtime::RuntimeError::new(\"runtime_store\", \"retired controller-owned session\")"
+assertion = "examples/agent-workbench/src/restate_tests.rs:200#assert!(error.terminal);"
+
+[[api]]
+symbol = "lash::runtime::RuntimeError::with_cause"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/restate_tests.rs:195#.with_cause(lash::runtime::RuntimeErrorCause::SessionDeleted {"
 assertion = "examples/agent-workbench/src/restate_tests.rs:200#assert!(error.terminal);"
 
 [[api]]
@@ -49537,6 +49590,30 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::WakeDeliveryConformanceClock::set to the agent-workbench durable process flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::append_receipt_mixed_usage_envelope"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store conformance embedders verify replay-safe mixed append and usage envelopes."
+
+[[api]]
+symbol = "lash::testing::conformance::append_request_receipt_replays_after_ancestor_superseded"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store conformance embedders provide the backend-specific branch-switch test hook."
+
+[[api]]
+symbol = "lash::testing::conformance::append_usage_cancellation_publishes_exactly_once"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: queued-commit backend conformance embedders provide a deterministic post-send cancellation seam."
+
+[[api]]
 symbol = "lash::testing::conformance::attachment_owner_cold_replay"
 kind = "function"
 availability = "all-features"
@@ -49599,6 +49676,30 @@ availability = "all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::testing::conformance::checkpoint_rejects_unknown_component_ref to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::cold_process_real_turn_driver"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Conformance-only class 4 helper for durable backend test binaries that prove full-turn recovery across a real process kill."
+
+[[api]]
+symbol = "lash::testing::conformance::cold_process_turn_expectations"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Conformance-only class 4 oracle consumed by bundled backend tests so level-2 helper assertions share the committed real-turn outcome table."
+
+[[api]]
+symbol = "lash::testing::conformance::cold_process_turn_scope"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Conformance-only class 4 helper that gives durable backend test binaries the stable scope required by the cold-process turn driver."
 
 [[api]]
 symbol = "lash::testing::conformance::effect_controller_concurrent_replay_deterministic"
@@ -49729,6 +49830,14 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::live_replay_store_ttl_trim to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::old_format_append_receipt_returns_public_leaf"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: SQL store conformance embedders provide raw legacy receipt row surgery."
+
+[[api]]
 symbol = "lash::testing::conformance::process_continuation_store"
 kind = "function"
 availability = "all-features"
@@ -49817,6 +49926,14 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::runtime_persistence_clock_expiry to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::runtime_persistence_recovery_laws"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::runtime_persistence_recovery_laws to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::testing::conformance::runtime_persistence_reopenable"
 kind = "function"
 availability = "all-features"
@@ -49855,6 +49972,14 @@ availability = "all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::testing::conformance::sample_store_contract_operations to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::session_execution_lease_displacement"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: conformance-suite embedders (ADR 0051). This is the executable contract that a session-execution-lease implementation, including an in-process double, reports the lapsed holder a claim displaced; without it a store silently disables session_execution_lease.taken_over. It is exercised by the durable backends' conformance runs plus the lash-perf and facade double tests, which is the integrator-class home for it rather than a host example."
 
 [[api]]
 symbol = "lash::testing::conformance::session_graph_append_branch_liveness"
@@ -49913,12 +50038,12 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::trigger_store_reopenable to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::testing::conformance::runtime_persistence_recovery_laws"
+symbol = "lash::testing::conformance::turn_crash_matrix_level_1"
 kind = "function"
 availability = "all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::testing::conformance::runtime_persistence_recovery_laws to the agent-service persistence setup example and assert its externally observable result."
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Conformance-only class 4 suite invoked directly by each bundled runtime persistence backend's tests."
 
 [[api]]
 symbol = "lash::testing::conformance::turn_input_claims_supersede_across_session_lease_generations"
@@ -49943,38 +50068,6 @@ availability = "all-features"
 area = "processes"
 disposition = "unused-add"
 reason = "Add lash::testing::conformance::wake_delivery_crash_matrix to the agent-workbench durable process flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::testing::conformance::cold_process_real_turn_driver"
-kind = "function"
-availability = "all-features"
-area = "sessions-turns"
-disposition = "unused-justify"
-reason = "Conformance-only class 4 helper for durable backend test binaries that prove full-turn recovery across a real process kill."
-
-[[api]]
-symbol = "lash::testing::conformance::cold_process_turn_expectations"
-kind = "function"
-availability = "all-features"
-area = "sessions-turns"
-disposition = "unused-justify"
-reason = "Conformance-only class 4 oracle consumed by bundled backend tests so level-2 helper assertions share the committed real-turn outcome table."
-
-[[api]]
-symbol = "lash::testing::conformance::cold_process_turn_scope"
-kind = "function"
-availability = "all-features"
-area = "sessions-turns"
-disposition = "unused-justify"
-reason = "Conformance-only class 4 helper that gives durable backend test binaries the stable scope required by the cold-process turn driver."
-
-[[api]]
-symbol = "lash::testing::conformance::turn_crash_matrix_level_1"
-kind = "function"
-availability = "all-features"
-area = "sessions-turns"
-disposition = "unused-justify"
-reason = "Conformance-only class 4 suite invoked directly by each bundled runtime persistence backend's tests."
 
 [[api]]
 symbol = "lash::tools::CancelHint"
@@ -51038,83 +51131,6 @@ disposition = "unused-add"
 reason = "Add a facade tool-implementor example that projects ToolCancellation directly and asserts the structured JSON value."
 
 [[api]]
-symbol = "lash::tools::ToolControl"
-kind = "enum"
-availability = "default+all-features"
-area = "plugins"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:15#lash::tools::ToolControl::Finish {"
-assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:186#lash::TurnOutcome::Finished(lash::TurnFinish::ToolValue { tool_name, value })"
-
-[[api]]
-symbol = "lash::tools::ToolControl::Fail"
-kind = "variant"
-availability = "default+all-features"
-area = "plugins"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:23#.with_control(lash::tools::ToolControl::Fail {"
-assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:199#lash::TurnOutcome::Stopped(lash::TurnStop::ToolError { tool_name, value })"
-
-[[api]]
-symbol = "lash::tools::ToolControl::Fail::failure"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:24#failure: lash::tools::ToolFailure::tool("
-assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:199#lash::TurnOutcome::Stopped(lash::TurnStop::ToolError { tool_name, value })"
-
-[[api]]
-symbol = "lash::tools::ToolControl::Finish"
-kind = "variant"
-availability = "default+all-features"
-area = "plugins"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:15#lash::tools::ToolControl::Finish {"
-assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:186#lash::TurnOutcome::Finished(lash::TurnFinish::ToolValue { tool_name, value })"
-
-[[api]]
-symbol = "lash::tools::ToolControl::Finish::value"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:16#value: lash::tools::ToolValue::from(json!({"
-assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:186#lash::TurnOutcome::Finished(lash::TurnFinish::ToolValue { tool_name, value })"
-
-[[api]]
-symbol = "lash::tools::ToolControl::SwitchAgentFrame"
-kind = "variant"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add a facade tool-implementor example that requests an agent-frame switch and asserts the switched turn outcome."
-
-[[api]]
-symbol = "lash::tools::ToolControl::SwitchAgentFrame::frame_id"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add a facade tool-implementor agent-frame switch example that asserts the host-visible frame id."
-
-[[api]]
-symbol = "lash::tools::ToolControl::SwitchAgentFrame::initial_nodes"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add a facade tool-implementor agent-frame switch example that asserts the seeded frame nodes."
-
-[[api]]
-symbol = "lash::tools::ToolControl::SwitchAgentFrame::task"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add a facade tool-implementor agent-frame switch example that asserts the host-visible task."
-
-[[api]]
 symbol = "lash::tools::ToolContext"
 kind = "struct"
 availability = "default+all-features"
@@ -51447,6 +51463,83 @@ disposition = "used-asserted"
 usage = "examples/docs-snippets/src/plugins_tools.rs:262#assert_eq!(ToolContract::parameter_metadata(&contract).len(), 2);"
 assertion = "examples/docs-snippets/src/plugins_tools.rs:226#assert_eq!(contract.examples.len(), 3);"
 reason = "Add lash::tools::ToolContract::parameter_metadata to the agent-workbench plugin/tool setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::tools::ToolControl"
+kind = "enum"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:15#lash::tools::ToolControl::Finish {"
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:186#lash::TurnOutcome::Finished(lash::TurnFinish::ToolValue { tool_name, value })"
+
+[[api]]
+symbol = "lash::tools::ToolControl::Fail"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:23#.with_control(lash::tools::ToolControl::Fail {"
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:199#lash::TurnOutcome::Stopped(lash::TurnStop::ToolError { tool_name, value })"
+
+[[api]]
+symbol = "lash::tools::ToolControl::Fail::failure"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:24#failure: lash::tools::ToolFailure::tool("
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:199#lash::TurnOutcome::Stopped(lash::TurnStop::ToolError { tool_name, value })"
+
+[[api]]
+symbol = "lash::tools::ToolControl::Finish"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:15#lash::tools::ToolControl::Finish {"
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:186#lash::TurnOutcome::Finished(lash::TurnFinish::ToolValue { tool_name, value })"
+
+[[api]]
+symbol = "lash::tools::ToolControl::Finish::value"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:16#value: lash::tools::ToolValue::from(json!({"
+assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:186#lash::TurnOutcome::Finished(lash::TurnFinish::ToolValue { tool_name, value })"
+
+[[api]]
+symbol = "lash::tools::ToolControl::SwitchAgentFrame"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add a facade tool-implementor example that requests an agent-frame switch and asserts the switched turn outcome."
+
+[[api]]
+symbol = "lash::tools::ToolControl::SwitchAgentFrame::frame_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add a facade tool-implementor agent-frame switch example that asserts the host-visible frame id."
+
+[[api]]
+symbol = "lash::tools::ToolControl::SwitchAgentFrame::initial_nodes"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add a facade tool-implementor agent-frame switch example that asserts the seeded frame nodes."
+
+[[api]]
+symbol = "lash::tools::ToolControl::SwitchAgentFrame::task"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add a facade tool-implementor agent-frame switch example that asserts the host-visible task."
 
 [[api]]
 symbol = "lash::tools::ToolDefinition"
@@ -59220,7 +59313,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:158#let elapsed = output.result.duration(); // claim -> commit + post-persist hooks"
+usage = "examples/docs-snippets/src/operations.rs:197#let elapsed = output.result.duration(); // claim -> commit + post-persist hooks"
 
 [[api]]
 symbol = "lash::turn::TurnResult::errors"
@@ -59276,7 +59369,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:157#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
+usage = "examples/docs-snippets/src/operations.rs:196#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
 
 [[api]]
 symbol = "lash::turn::TurnResult::state"
@@ -59749,216 +59842,6 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
-
-[[api]]
-symbol = "lash::PendingTurnInputCancelTarget::source_key"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add an outcome-driven host example for the public pending-input source-key constructor."
-
-[[api]]
-symbol = "lash::SessionCreateRequest::with_observed_processes"
-kind = "function"
-availability = "default+all-features"
-area = "processes"
-disposition = "unused-add"
-reason = "Add this builder to the agent-workbench durable process flow and assert the observer results."
-
-[[api]]
-symbol = "lash::persistence::SessionBinding::from_create_request"
-kind = "function"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add the canonical session-binding constructor to an example persistence setup."
-
-[[api]]
-symbol = "lash::plugins::PluginOptions::insert_typed"
-kind = "function"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add typed plugin-option insertion to the agent-workbench plugin setup and assert decoding."
-
-[[api]]
-symbol = "lash::prelude::SessionCreateRequest::with_observed_processes"
-kind = "function"
-availability = "default+all-features"
-area = "processes"
-disposition = "unused-add"
-reason = "Add the prelude spelling to a durable process-flow example and assert the observer results."
-
-[[api]]
-symbol = "lash::process::ProcessCancelSummary::from_record"
-kind = "function"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:733#let cancel_summary = lash::process::ProcessCancelSummary::from_record(completed.clone());"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:734#assert_eq!(cancel_summary.process_id, process_id);"
-reason = "Add the public-record projection to a durable process administration example."
-
-[[api]]
-symbol = "lash::process::ProcessExecutionEnvSpec::to_store_bytes"
-kind = "function"
-availability = "default+all-features"
-area = "processes"
-disposition = "unused-add"
-reason = "Add a process-environment persistence round-trip to a host example."
-
-[[api]]
-symbol = "lash::process::ProcessHandleSummary::from_record"
-kind = "function"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:724#let handle = ProcessHandleSummary::from_record(completed.clone())"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:726#assert_eq!(handle.handle_type, \"process\");"
-reason = "Add the public-record projection to a durable process administration example."
-
-[[api]]
-symbol = "lash::process::ProcessLeaseCompletion::from_lease"
-kind = "function"
-availability = "default+all-features"
-area = "processes"
-disposition = "unused-add"
-reason = "Add process-lease completion construction to a durable process example."
-
-[[api]]
-symbol = "lash::process::ProcessOriginator::host_scoped"
-kind = "function"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:762#ProcessProvenance::new(ProcessOriginator::host_scoped(\"batch-service\")),"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:780#assert_eq!(external_completion.status, ProcessStatus::Failed);"
-reason = "Add scoped host process provenance to an agent-workbench process example."
-
-[[api]]
-symbol = "lash::process::SessionScope::for_agent_frame"
-kind = "function"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:376#let scope = SessionScope::for_agent_frame(\"session-finance\", \"frame-review\");"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:377#assert_eq!(scope.id().as_str(), \"session:session-finance/frame:frame-review\");"
-reason = "Add frame-scoped session provenance to a durable process example."
-
-[[api]]
-symbol = "lash::runtime::RuntimeError::deleted_session_id"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:716#return error.deleted_session_id().map(|session_id| (session_id, None));"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:781#assert_eq!(error.status, StatusCode::CONFLICT);"
-
-[[api]]
-symbol = "lash::runtime::RuntimeError::with_cause"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:195#.with_cause(lash::runtime::RuntimeErrorCause::SessionDeleted {"
-assertion = "examples/agent-workbench/src/restate_tests.rs:200#assert!(error.terminal);"
-
-[[api]]
-symbol = "lash_core::PendingTurnInputCancelTarget::source_key"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding.rs:274#.map(PendingTurnInputCancelTarget::source_key)"
-
-[[api]]
-symbol = "lash_core::PluginOptions::insert_typed"
-kind = "function"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Public plugin data already permits map insertion; retaining the typed helper narrows no promise and serves plugin implementors."
-
-[[api]]
-symbol = "lash_core::ProcessCancelSummary::from_record"
-kind = "function"
-availability = "default+all-features"
-area = "processes"
-disposition = "unused-justify"
-reason = "Public summary fields already permit construction; the canonical projection serves alternative process substrates."
-
-[[api]]
-symbol = "lash_core::ProcessExecutionEnvSpec::to_store_bytes"
-kind = "function"
-availability = "default+all-features"
-area = "processes"
-disposition = "unused-justify"
-reason = "The public serializable data shape already promises this capability; the helper serves alternative process substrates."
-
-[[api]]
-symbol = "lash_core::ProcessHandleSummary::from_record"
-kind = "function"
-availability = "default+all-features"
-area = "processes"
-disposition = "unused-justify"
-reason = "Public summary fields already permit construction; the canonical projection serves alternative process substrates."
-
-[[api]]
-symbol = "lash_core::ProcessLeaseCompletion::from_lease"
-kind = "function"
-availability = "default+all-features"
-area = "processes"
-disposition = "unused-justify"
-reason = "Public completion fields already permit construction; the canonical helper serves alternative process substrates."
-
-[[api]]
-symbol = "lash_core::ProcessOriginator::host_scoped"
-kind = "function"
-availability = "default+all-features"
-area = "processes"
-disposition = "unused-justify"
-reason = "The public Host variant already permits construction; retaining the helper narrows no promise."
-
-[[api]]
-symbol = "lash_core::RuntimeError::deleted_session_id"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:716#return error.deleted_session_id().map(|session_id| (session_id, None));"
-
-[[api]]
-symbol = "lash_core::RuntimeError::with_cause"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-justify"
-reason = "The public cause field already permits attachment; retaining the helper narrows no promise and preserves integrator ergonomics."
-
-[[api]]
-symbol = "lash_core::SessionBinding::from_create_request"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-justify"
-reason = "Public binding fields already permit construction; bundled and alternative persistence backends use the canonical operation."
-
-[[api]]
-symbol = "lash_core::SessionCreateRequest::with_observed_processes"
-kind = "function"
-availability = "default+all-features"
-area = "processes"
-disposition = "unused-justify"
-reason = "The public observed-processes field already permits assignment; retaining the builder narrows no promise."
-
-[[api]]
-symbol = "lash_core::SessionScope::for_agent_frame"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-justify"
-reason = "Public session and frame fields already permit construction; retaining the helper narrows no promise."
 
 [[api]]
 symbol = "lash_core::AgentFrameAssignment::policy"
@@ -61299,7 +61182,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:38#cache_control: Some(lash::provider::CacheControlDialect::Anthropic),"
+usage = "examples/agent-service/src/main.rs:39#cache_control: Some(lash::provider::CacheControlDialect::Anthropic),"
 
 [[api]]
 symbol = "lash_core::CacheControlDialect::Anthropic"
@@ -61307,7 +61190,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:38#cache_control: Some(lash::provider::CacheControlDialect::Anthropic),"
+usage = "examples/agent-service/src/main.rs:39#cache_control: Some(lash::provider::CacheControlDialect::Anthropic),"
 
 [[api]]
 symbol = "lash_core::CacheControlDialect::Gemini"
@@ -64013,7 +63896,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:38#cache_control: Some(lash::provider::CacheControlDialect::Anthropic),"
+usage = "examples/agent-service/src/main.rs:39#cache_control: Some(lash::provider::CacheControlDialect::Anthropic),"
 
 [[api]]
 symbol = "lash_core::ModelCapability::allows_caller_temperature"
@@ -64029,7 +63912,7 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:38#cache_control: Some(lash::provider::CacheControlDialect::Anthropic),"
+usage = "examples/agent-service/src/main.rs:39#cache_control: Some(lash::provider::CacheControlDialect::Anthropic),"
 
 [[api]]
 symbol = "lash_core::ModelCapability::is_empty"
@@ -64045,7 +63928,7 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:29#reasoning: Some(lash::provider::ReasoningCapability {"
+usage = "examples/agent-service/src/main.rs:30#reasoning: Some(lash::provider::ReasoningCapability {"
 
 [[api]]
 symbol = "lash_core::ModelCapability::resolve_effort"
@@ -64061,7 +63944,7 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:40#sampling: lash::provider::SamplingCapability::Configurable,"
+usage = "examples/agent-service/src/main.rs:41#sampling: lash::provider::SamplingCapability::Configurable,"
 
 [[api]]
 symbol = "lash_core::ModelCapability::stream_termination"
@@ -64069,7 +63952,7 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:39#stream_termination: None,"
+usage = "examples/agent-service/src/main.rs:40#stream_termination: None,"
 
 [[api]]
 symbol = "lash_core::ModelCapability::validate_selection"
@@ -64934,7 +64817,15 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:1104#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
+usage = "examples/agent-workbench/src/restate.rs:1110#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
+
+[[api]]
+symbol = "lash_core::PendingTurnInputCancelTarget::source_key"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/embedding.rs:274#.map(PendingTurnInputCancelTarget::source_key)"
 
 [[api]]
 symbol = "lash_core::PendingTurnInputClaimDiagnostics"
@@ -65215,6 +65106,70 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
 usage = "examples/agent-service/src/demo_plugin.rs:6#plugins::{PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin},"
+
+[[api]]
+symbol = "lash_core::PluginError::AppendOperationIdentityConflict"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: plugin hosts distinguish changed-content append retries without string matching."
+
+[[api]]
+symbol = "lash_core::PluginError::AppendOperationIdentityConflict::operation_key"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: plugin hosts report the conflicting durable operation key."
+
+[[api]]
+symbol = "lash_core::PluginError::AppendOperationIdentityConflict::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: plugin hosts report the session whose append identity conflicted."
+
+[[api]]
+symbol = "lash_core::PluginError::AppendReceiptRequestedNodeCountCorrupt"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: core plugin hosts distinguish durable append receipt corruption without string matching."
+
+[[api]]
+symbol = "lash_core::PluginError::AppendReceiptRequestedNodeCountCorrupt::attempted"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: core plugin hosts report the attempted append node count for corrupt receipts."
+
+[[api]]
+symbol = "lash_core::PluginError::AppendReceiptRequestedNodeCountCorrupt::operation_key"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: core plugin hosts report the durable operation key for corrupt receipts."
+
+[[api]]
+symbol = "lash_core::PluginError::AppendReceiptRequestedNodeCountCorrupt::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: core plugin hosts report the session owning a corrupt append receipt."
+
+[[api]]
+symbol = "lash_core::PluginError::AppendReceiptRequestedNodeCountCorrupt::stored"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: core plugin hosts report the stored append node count for corrupt receipts."
 
 [[api]]
 symbol = "lash_core::PluginError::Invoke"
@@ -65620,6 +65575,14 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+
+[[api]]
+symbol = "lash_core::PluginOptions::insert_typed"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Public plugin data already permits map insertion; retaining the typed helper narrows no promise and serves plugin implementors."
 
 [[api]]
 symbol = "lash_core::PluginOptions::plugins"
@@ -66140,6 +66103,14 @@ availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::ProcessCancelSummary::from_record"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Public summary fields already permit construction; the canonical projection serves alternative process substrates."
 
 [[api]]
 symbol = "lash_core::ProcessCancelSummary::process_id"
@@ -67350,6 +67321,14 @@ disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
 
 [[api]]
+symbol = "lash_core::ProcessExecutionEnvSpec::to_store_bytes"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "The public serializable data shape already promises this capability; the helper serves alternative process substrates."
+
+[[api]]
 symbol = "lash_core::ProcessExecutionEnvStore"
 kind = "trait"
 availability = "default+all-features"
@@ -67548,6 +67527,14 @@ availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::ProcessHandleSummary::from_record"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Public summary fields already permit construction; the canonical projection serves alternative process substrates."
 
 [[api]]
 symbol = "lash_core::ProcessHandleSummary::handle_type"
@@ -67936,6 +67923,14 @@ disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
 
 [[api]]
+symbol = "lash_core::ProcessLeaseCompletion::from_lease"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Public completion fields already permit construction; the canonical helper serves alternative process substrates."
+
+[[api]]
 symbol = "lash_core::ProcessLeaseCompletion::lease_token"
 kind = "field"
 availability = "default+all-features"
@@ -68272,6 +68267,14 @@ availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::ProcessOriginator::host_scoped"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "The public Host variant already permits construction; retaining the helper narrows no promise."
 
 [[api]]
 symbol = "lash_core::ProcessOriginator::session"
@@ -70143,7 +70146,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:427#.prune(cutoff, lash::process::ProjectionWatermark::NoProjector)"
+usage = "examples/agent-service/src/main.rs:437#.prune(cutoff, lash::process::ProjectionWatermark::NoProjector)"
 
 [[api]]
 symbol = "lash_core::ProjectionWatermark::NoProjector"
@@ -70151,7 +70154,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:427#.prune(cutoff, lash::process::ProjectionWatermark::NoProjector)"
+usage = "examples/agent-service/src/main.rs:437#.prune(cutoff, lash::process::ProjectionWatermark::NoProjector)"
 
 [[api]]
 symbol = "lash_core::ProjectionWatermark::UpTo"
@@ -71551,7 +71554,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:34#default_effort: Some(\"medium\".to_string()),"
+usage = "examples/agent-service/src/main.rs:35#default_effort: Some(\"medium\".to_string()),"
 
 [[api]]
 symbol = "lash_core::ReasoningCapability::disable"
@@ -71567,7 +71570,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:30#efforts: [\"low\", \"medium\", \"high\"]"
+usage = "examples/agent-service/src/main.rs:31#efforts: [\"low\", \"medium\", \"high\"]"
 
 [[api]]
 symbol = "lash_core::ReasoningCapability::encoding"
@@ -71575,7 +71578,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:35#encoding: lash::provider::ReasoningEncoding::Effort,"
+usage = "examples/agent-service/src/main.rs:36#encoding: lash::provider::ReasoningEncoding::Effort,"
 
 [[api]]
 symbol = "lash_core::ReasoningCapability::mandatory"
@@ -71655,7 +71658,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:35#encoding: lash::provider::ReasoningEncoding::Effort,"
+usage = "examples/agent-service/src/main.rs:36#encoding: lash::provider::ReasoningEncoding::Effort,"
 
 [[api]]
 symbol = "lash_core::ReasoningEncoding::Budget"
@@ -71679,7 +71682,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:35#encoding: lash::provider::ReasoningEncoding::Effort,"
+usage = "examples/agent-service/src/main.rs:36#encoding: lash::provider::ReasoningEncoding::Effort,"
 
 [[api]]
 symbol = "lash_core::ReasoningSelection"
@@ -71687,7 +71690,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:178#lash::provider::ReasoningSelection::Effort(model_variant.clone()),"
+usage = "examples/agent-service/src/main.rs:179#lash::provider::ReasoningSelection::Effort(model_variant.clone()),"
 
 [[api]]
 symbol = "lash_core::ReasoningSelection::Disabled"
@@ -71703,7 +71706,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:178#lash::provider::ReasoningSelection::Effort(model_variant.clone()),"
+usage = "examples/agent-service/src/main.rs:179#lash::provider::ReasoningSelection::Effort(model_variant.clone()),"
 
 [[api]]
 symbol = "lash_core::ReasoningSelection::Effort::0"
@@ -73090,6 +73093,14 @@ disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeError::code. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
+symbol = "lash_core::RuntimeError::deleted_session_id"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:716#return error.deleted_session_id().map(|session_id| (session_id, None));"
+
+[[api]]
 symbol = "lash_core::RuntimeError::is_code"
 kind = "function"
 availability = "default+all-features"
@@ -73120,6 +73131,14 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Retained as integrator surface under ADR 0051; the in-repo example consumer moved to its facade home in FIG-863 wave B, so the core spelling is now reached only by store/effect-host/protocol-engine implementors and the conformance suite."
+
+[[api]]
+symbol = "lash_core::RuntimeError::with_cause"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "The public cause field already permits attachment; retaining the helper narrows no promise and preserves integrator ergonomics."
 
 [[api]]
 symbol = "lash_core::RuntimeErrorCause"
@@ -74075,6 +74094,14 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
+symbol = "lash_core::RuntimeTurnCommitStamp::identity_encoding_version"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors consume versioned append request receipt metadata."
+
+[[api]]
 symbol = "lash_core::RuntimeTurnCommitStamp::new"
 kind = "function"
 availability = "default+all-features"
@@ -74091,12 +74118,108 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
+symbol = "lash_core::RuntimeTurnCommitStamp::request_identity_hash"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors consume append request identity hashes."
+
+[[api]]
+symbol = "lash_core::RuntimeTurnCommitStamp::requested_ancestor_node_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors enforce fresh append ancestor fences after receipt lookup."
+
+[[api]]
+symbol = "lash_core::RuntimeTurnCommitStamp::requested_node_count"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors persist append receipt observability metadata."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDelta"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable substrates consume identity-bearing usage rows from RuntimeCommit."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDelta::entry"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable substrates encode the usage counters carried by an idempotent row."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDelta::identity"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable substrates enforce uniqueness on this usage identity."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDeltaIdentity"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable substrates use this compound identity for exactly-once usage publication."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDeltaIdentity::entry_ordinal"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable substrates persist the row ordinal within its originating operation."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDeltaIdentity::for_entry"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: conformance embedders construct content-bound usage identities with the canonical payload encoding."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDeltaIdentity::operation_storage_key"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable substrates persist the canonical operation key that originated the usage row."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDeltaIdentity::payload_encoding_version"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable substrates persist the payload projection version in the full uniqueness key."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDeltaIdentity::payload_hash"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable substrates persist the canonical content hash in the full uniqueness key."
+
+[[api]]
 symbol = "lash_core::SamplingCapability"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:40#sampling: lash::provider::SamplingCapability::Configurable,"
+usage = "examples/agent-service/src/main.rs:41#sampling: lash::provider::SamplingCapability::Configurable,"
 
 [[api]]
 symbol = "lash_core::SamplingCapability::Configurable"
@@ -74104,7 +74227,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:40#sampling: lash::provider::SamplingCapability::Configurable,"
+usage = "examples/agent-service/src/main.rs:41#sampling: lash::provider::SamplingCapability::Configurable,"
 
 [[api]]
 symbol = "lash_core::SamplingCapability::Pinned"
@@ -74483,6 +74606,14 @@ disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionBinding::cwd. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
+symbol = "lash_core::SessionBinding::from_create_request"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Public binding fields already permit construction; bundled and alternative persistence backends use the canonical operation."
+
+[[api]]
 symbol = "lash_core::SessionBinding::model_id"
 kind = "field"
 availability = "default+all-features"
@@ -74761,6 +74892,14 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete consumer: session materialization and subagent hosts uses lash_core::SessionCreateRequest::with_initial_nodes; retain the canonical host operation."
+
+[[api]]
+symbol = "lash_core::SessionCreateRequest::with_observed_processes"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "The public observed-processes field already permits assignment; retaining the builder narrows no promise."
 
 [[api]]
 symbol = "lash_core::SessionCreateRequest::with_plugin_source"
@@ -75109,6 +75248,46 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
+symbol = "lash_core::SessionExecutionLeaseAcquisition"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseAcquisition::displaced"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseAcquisition::displacing_observed"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseAcquisition::fresh"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseAcquisition::lease"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
 symbol = "lash_core::SessionExecutionLeaseClaimOutcome"
 kind = "enum"
 availability = "default+all-features"
@@ -75157,6 +75336,14 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
+symbol = "lash_core::SessionExecutionLeaseClaimOutcome::acquisition"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
 symbol = "lash_core::SessionExecutionLeaseCompletion"
 kind = "struct"
 availability = "default+all-features"
@@ -75195,6 +75382,38 @@ availability = "default+all-features"
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseDisplacement"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseDisplacement::expired_at_epoch_ms"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseDisplacement::fencing_token"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseDisplacement::owner"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
 
 [[api]]
 symbol = "lash_core::SessionExecutionLeaseFence"
@@ -75239,6 +75458,14 @@ reason = "Concrete host class: custom durable store or attachment backend implem
 [[api]]
 symbol = "lash_core::SessionExecutionLeaseStore"
 kind = "trait"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseStore::get_session_execution_lease"
+kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "unused-justify"
@@ -76283,6 +76510,14 @@ disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionScope::agent_frame_id. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
+symbol = "lash_core::SessionScope::for_agent_frame"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Public session and frame fields already permit construction; retaining the helper narrows no promise."
+
+[[api]]
 symbol = "lash_core::SessionScope::id"
 kind = "function"
 availability = "default+all-features"
@@ -76814,6 +77049,86 @@ area = "stores"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/restate_tests.rs:180#lash::persistence::StoreError::Backend(\"temporary outage\".to_string()),"
 assertion = "examples/agent-workbench/src/restate_tests.rs:174#assert!("
+
+[[api]]
+symbol = "lash_core::StoreError::AppendAncestorNotActive"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors reject a fresh append whose requested ancestor is inactive."
+
+[[api]]
+symbol = "lash_core::StoreError::AppendAncestorNotActive::required_node_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors identify the inactive append ancestor."
+
+[[api]]
+symbol = "lash_core::StoreError::AppendOperationIdentityConflict"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors distinguish append operation-id reuse from generic commit conflicts."
+
+[[api]]
+symbol = "lash_core::StoreError::AppendOperationIdentityConflict::operation_key"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors report the conflicting append operation storage key."
+
+[[api]]
+symbol = "lash_core::StoreError::AppendOperationIdentityConflict::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors report the session owning the conflicting append receipt."
+
+[[api]]
+symbol = "lash_core::StoreError::AppendReceiptRequestedNodeCountCorrupt"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable stores reject contradictory append receipt counts as corruption."
+
+[[api]]
+symbol = "lash_core::StoreError::AppendReceiptRequestedNodeCountCorrupt::attempted"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable stores report the attempted requested-node count."
+
+[[api]]
+symbol = "lash_core::StoreError::AppendReceiptRequestedNodeCountCorrupt::operation_key"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable stores report the corrupt receipt operation key."
+
+[[api]]
+symbol = "lash_core::StoreError::AppendReceiptRequestedNodeCountCorrupt::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable stores report the corrupt receipt session id."
+
+[[api]]
+symbol = "lash_core::StoreError::AppendReceiptRequestedNodeCountCorrupt::stored"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable stores report the stored requested-node count."
 
 [[api]]
 symbol = "lash_core::StoreError::Backend"
@@ -77361,6 +77676,38 @@ availability = "default+all-features"
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash_core::StoreError::TokenUsageAccountingOverflow"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: runtime and store hosts diagnose a retained usage batch that cannot be represented without overflow."
+
+[[api]]
+symbol = "lash_core::StoreError::TokenUsageAccountingOverflow::counter"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: runtime and store hosts identify the overflowing usage counter."
+
+[[api]]
+symbol = "lash_core::StoreError::TokenUsageAccountingOverflow::model"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: runtime and store hosts identify the model owning an overflowing retained usage row."
+
+[[api]]
+symbol = "lash_core::StoreError::TokenUsageAccountingOverflow::usage_source"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: runtime and store hosts identify the source owning an overflowing retained usage row."
 
 [[api]]
 symbol = "lash_core::StoreError::TurnInputClaimSuperseded"

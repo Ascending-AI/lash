@@ -603,6 +603,17 @@ impl SessionExecutionLeaseStore for SeamStore {
             )
             .await
     }
+
+    /// Passed straight through, deliberately without a seam operation: the
+    /// diagnostic read is non-mutating and must never be a crash point, or the
+    /// matrix would be injecting faults into observation rather than into the
+    /// turn.
+    async fn get_session_execution_lease(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionExecutionLease>, StoreError> {
+        self.inner.get_session_execution_lease(session_id).await
+    }
 }
 
 #[async_trait::async_trait]

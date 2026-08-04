@@ -17,7 +17,7 @@
 <script src="./docs.js?v=7" defer></script>
 <script src="./syntax.js" defer></script>
 </head>
-<body class="docs-page" data-cover-source="<code>crates/lash-core/src/store/lease_timings.rs</code>, <code>crates/lash/src/session.rs</code>, <code>crates/lash/src/core.rs</code>, <code>crates/lash/src/process_admin.rs</code>, <code>crates/lash-core/src/runtime/process_worker/mod.rs</code>, <code>docs/adr/0014-operational-policy-stays-with-the-host.md</code>, <code>docs/adr/0019-process-recovery-obeys-declared-disposition.md</code>, <code>examples/agent-service</code>.">
+<body class="docs-page" data-cover-source="<code>crates/lash-core/src/store/lease_timings.rs</code>, <code>crates/lash-core/src/runtime/session_execution_lease.rs</code>, <code>crates/lash/src/session.rs</code>, <code>crates/lash/src/session_lease.rs</code>, <code>crates/lash/src/core.rs</code>, <code>crates/lash/src/process_admin.rs</code>, <code>crates/lash-core/src/runtime/process_worker/mod.rs</code>, <code>docs/adr/0014-operational-policy-stays-with-the-host.md</code>, <code>docs/adr/0019-process-recovery-obeys-declared-disposition.md</code>, <code>docs/adr/0029-claims-are-generation-fenced-under-the-session-lease.md</code>, <code>examples/agent-service</code>.">
   <a class="skip-link" href="#content">skip to content</a>
 <section class="opener">
     <h1 class="opener__title">operations<span class="slash">/</span>production</h1>
@@ -288,7 +288,7 @@ Ok(())</code></pre>
     <div class="section" id="stuck-process">
       <div class="section-header">
         <h2>Detecting A Stuck Process</h2>
-        <p>lash ships no stuck-process daemon and writes no "stuck" verdict. Staleness is a host-built read-side classification over raw facts (ADR 0019): the runtime exposes the lease and start facts, and the host decides what its own timeouts mean. The <code>silent, not dead</code> case above is exactly the ambiguity this read-side check surfaces.</p>
+        <p>lash ships no stuck-process daemon and writes no "stuck" verdict. (For a stuck <em>turn</em> rather than a background process, start at <a href="#stuck-turn">triaging a stuck turn</a>.) Staleness is a host-built read-side classification over raw facts (ADR 0019): the runtime exposes the lease and start facts, and the host decides what its own timeouts mean. The <code>silent, not dead</code> case above is exactly the ambiguity this read-side check surfaces.</p>
       </div>
       <p>The recipe: list the non-terminal rows, then read four raw fields off each <code>ObservedProcess</code> and classify.</p>
       <pre data-lang="rust"><code>// List the live rows (host-wide, or `list_observed_by`/`list_originated_by`
@@ -334,6 +334,79 @@ for p in live {
           <div class="listing__body"><p><code>core.processes().request_abandon(process_id, requested_by, reason)</code> writes a durable <strong>Abandon Request</strong>: the operator's recorded authorization to accept uncertainty (who, when, why). It authorizes <em>exactly one</em> thing: the sweep reconciling the row into <code>Abandoned{ReconciledRequest}</code>, and only once the owner's lease has lapsed. It never terminalizes anything itself, never touches the owner's OS resources, and never fences the owner off; a still-live owner keeps its lease until it expires. The marker is visible to observers while pending and is returned on the <code>ObservedProcess</code> the call yields.</p></div>
         </div>
       </div>
+    </div>
+
+    <div class="section" id="stuck-turn">
+      <div class="section-header">
+        <h2>Triaging A Stuck Turn</h2>
+        <p>A turn that stops producing output has three very different causes that look identical from outside: the provider is hanging, the session-execution lease moved to another worker, or two writers are livelocked on the same session head. lash exposes one surface per question, and they are meant to be consulted in order.</p>
+      </div>
+      <p><strong>1. Read the lane.</strong> <code>core.session_lease_diagnostics(session_id)</code> returns a snapshot of the session's execution-lease row (holder identity, generation, claim time, expiry) plus a derived <code>SessionLeaseRenewal</code>. It never claims, renews, or releases, so it is free to run against a live session.</p>
+      <pre data-lang="rust" data-snippet="operations#stuck-turn"><code>// Step 1: read the lane. Diagnostics only: this never claims, renews, or
+// releases anything, so it is free to run against a live session. `None`
+// means no durable session under this id at all.
+let Some(lease) = core.session_lease_diagnostics(session_id).await? else {
+    // The host's own record of an in-flight turn is what is wrong here.
+    return Ok(());
+};
+let holder = lease.holder.as_ref().map(|holder| &amp;holder.owner);
+let generation = lease.holder.as_ref().map(|holder| holder.generation);
+let _ = (holder, generation, lease.observed_at_epoch_ms);
+
+match lease.renewal() {
+    // Nobody holds the lane. A turn the host still shows as running either
+    // already committed and released, or never claimed. Reconcile against
+    // the session's committed head.
+    SessionLeaseRenewal::Unheld =&gt; {}
+
+    // Renewals were current: the lane is healthy, so the turn is blocked
+    // inside itself. Look at the provider call, not the lease, and cancel
+    // the exact turn if it has to stop.
+    SessionLeaseRenewal::Current { expires_in_ms } =&gt; {
+        let _ = expires_in_ms;
+    }
+
+    // Renewals stopped. The worker that swept the lane logs
+    // `session_execution_lease.taken_over` naming this holder as
+    // `displaced_owner_id`, so the handoff is in the log even if this holder
+    // died without noticing. Do NOT kill it: it may still win the commit CAS.
+    // Only `session_execution_lease.commit_cas_rejected` proves it lost.
+    SessionLeaseRenewal::Lapsed { expired_for_ms } =&gt; {
+        let _ = expired_for_ms;
+    }
+}
+Ok(())</code></pre>
+      <p><strong>2. Read the lease timeline.</strong> Four <code>tracing</code> events cover the decisive transitions. Every one of them carries <code>session_id</code>, <code>generation</code> (the lane's fencing token, which ADR 0029 calls the generation), <code>owner_id</code>, and <code>incarnation_id</code>, and in every case those describe the worker that emitted the line. A takeover is reported by the worker that <em>won</em> the lane, atomically with its claim, so it is present even when the displaced worker is dead: that is the usual reason a lease lapsed, and a report from the loser would be missing exactly when it matters.</p>
+      <div class="table">
+        <table>
+          <thead><tr><th>Event</th><th>Level</th><th>Extra fields</th><th>What it establishes</th></tr></thead>
+          <tbody>
+            <tr><td><code>session_execution_lease.acquired</code></td><td>info</td><td><code>expires_at_epoch_ms</code></td><td>this worker acquired the lane at this generation.</td></tr>
+            <tr><td><code>session_execution_lease.taken_over</code></td><td>info</td><td><code>displaced_fencing_token</code>, <code>displaced_owner_id</code>, <code>displaced_incarnation_id</code>, <code>displaced_expired_at_epoch_ms</code></td><td>emitted by the <em>winner</em>: this worker took the lane from that named lapsed holder. Always present on a real takeover, including when the displaced worker is dead.</td></tr>
+            <tr><td><code>session_execution_lease.lost</code></td><td>warn</td><td><code>error</code></td><td>a renewal was rejected; this worker no longer holds the lane. A purely local notice that names no successor, and absent entirely when the worker is gone. Not a turn failure.</td></tr>
+            <tr><td><code>session_execution_lease.commit_cas_rejected</code></td><td>warn</td><td><code>lane_held</code>, <code>lease_lost</code>, <code>expected_head_revision</code>, <code>actual_head_revision</code></td><td>this worker's commit lost the head compare-and-set. This, and only this, proves a turn did not publish. <code>lane_held</code> says whether <code>generation</code> is this worker's own lane or the one it knowingly raced under the busy advisory, which is what the livelock row below keys on.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><strong>3. Read the committed outcome.</strong> The lease says who was working; the session head says what landed. Only the two together answer "did anything happen".</p>
+      <p>What each combination means:</p>
+      <div class="table">
+        <table>
+          <thead><tr><th>Reading</th><th>Situation</th><th>Do this</th></tr></thead>
+          <tbody>
+            <tr><td><code>Current</code>, no <code>session_execution_lease.lost</code> in the log</td><td><strong>provider hang.</strong> The lane is healthy and renewals are landing, so the worker is alive and blocked inside its own turn. Most often that is a provider call with no timeout, sometimes a tool or a durable wait.</td><td>Inspect the provider call and the turn's own activity. If it must stop, cancel the exact turn through <code>core.turn_work_driver()</code>. Do not touch the lease.</td></tr>
+            <tr><td><code>Lapsed</code>, or a different holder than you expected, with a <code>taken_over</code> naming your worker as <code>displaced_owner_id</code></td><td><strong>lease loss / takeover.</strong> The original worker stopped renewing and a peer swept the lane with a higher generation. A matching <code>session_execution_lease.lost</code> from the displaced worker appears only if it is still alive to notice; its absence means the worker is gone, not that no takeover happened.</td><td>Nothing, yet. The displaced worker may still be running and may still win the commit CAS: a lost lease is not a failed turn. Wait for the turn's committed outcome, or for <code>commit_cas_rejected</code> to prove it lost. Killing the worker here is how a successful turn gets destroyed.</td></tr>
+            <tr><td>A single <code>commit_cas_rejected</code> with <code>lease_lost = false</code></td><td><strong>concurrent-writer CAS contention.</strong> Two writers overlapped once on this session head and the CAS did its job. One rejection is not a pattern.</td><td>Note it and move on. Investigate only if it recurs, which is the next row.</td></tr>
+            <tr><td><em>Repeated</em> <code>commit_cas_rejected</code> with <code>lease_lost = false</code> and <code>lane_held = true</code>, across attempts on the same session</td><td><strong>livelock.</strong> The same contention keeps recurring because nothing serializes the writers: usually a host that routes two concurrent writers to one session under one explicit <code>session_execution_owner</code> identity, so each reenters the other's lease instead of seeing <code>session_execution_busy</code>, and retries keep colliding.</td><td>Fix the identity or the routing, not the lease timings. See <a href="#worker-identity">worker identity</a>: the default per-open identity is what makes a second concurrent writer resolve at the lease boundary.</td></tr>
+            <tr><td><code>Unheld</code> while the host still shows a turn running</td><td><strong>stale host record.</strong> The lane is free, so nothing is executing under it.</td><td>Reconcile the host's in-flight record against the session's committed head; the turn either landed or never started.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <aside class="contract">
+        <strong>Contract</strong>
+        <p>The diagnostic read is a snapshot, stale by design, and can be superseded the moment it is read. It is not a fencing primitive and hosts must never gate behavior on it. The commit compare-and-set is the only authority on who publishes (<code>docs/adr/0029-claims-are-generation-fenced-under-the-session-lease.md</code>). Lease churn is deliberately <em>not</em> durable session history either: these are trace events, because which worker attempted what is per-attempt telemetry, not part of the conversation.</p>
+      </aside>
+      <p>The <a href="./example-agent-service.html">agent service</a> example wires this exactly: <code>GET /api/chats/{chat_id}/lease</code> returns the reading plus the host-owned classification, and its tests induce each situation.</p>
     </div>
 
     <div class="section" id="process-retention">
@@ -391,7 +464,7 @@ for p in live {
         </div>
         <div class="listing__row">
           <div class="listing__label">busy vs lease-lost</div>
-          <div class="listing__body"><p><code>Busy</code> means a live owner holds the lane; back off and retry the same session. <code>LeaseLost</code> means ownership moved; reopen the session before retrying. <code>store_commit_failed</code> is deliberately neither retryable nor terminal: the code cannot distinguish transient store I/O from a real conflict. Reload and apply your own bounded policy. The full conflict-retry shape is on <a href="./persistence.html#cas-conflicts">persistence</a>.</p></div>
+          <div class="listing__body"><p><code>Busy</code> means a live owner holds the lane; back off and retry the same session. <code>LeaseLost</code> means ownership moved; reopen the session before retrying. <code>store_commit_failed</code> is deliberately neither retryable nor terminal: the code cannot distinguish transient store I/O from a real conflict. Reload and apply your own bounded policy. The full conflict-retry shape is on <a href="./persistence.html#cas-conflicts">persistence</a>, and <a href="#stuck-turn">triaging a stuck turn</a> covers telling these apart from the outside.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">provider failures</div>

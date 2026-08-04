@@ -2293,6 +2293,7 @@ dependencies = [
  "lash-restate",
  "lash-runtime",
  "lash-s3-store",
+ "lash-sqlite-store",
  "reqwest 0.13.4",
  "restate-sdk",
  "serde",

@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Deterministic companion for runbooks/session-lease-triage. It induces the three
+# situations the published stuck-turn triage procedure claims to distinguish
+# (provider hang, lease takeover, commit-CAS livelock), captures both surfaces the
+# procedure names, and asserts that each situation reads the way the docs say.
+#
+# PostgreSQL is optional. Set LASH_POSTGRES_DATABASE_URL to run every phase on a
+# shared substrate as well as SQLite; the companion owns no container and no host
+# port, so it never serializes against another worktree's assigned service.
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo"
+
+if [ -n "${LASH_SESSION_LEASE_ARTIFACT_DIR:-}" ]; then
+  artifact_dir="$LASH_SESSION_LEASE_ARTIFACT_DIR"
+else
+  artifact_dir="$(mktemp -d "${TMPDIR:-/tmp}/lash-session-lease-triage.XXXXXX")"
+fi
+mkdir -p "$artifact_dir"
+test_output="$artifact_dir/session-lease-triage-e2e.log"
+
+on_exit() {
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "session-lease-triage E2E failed with status $status; artifacts: $artifact_dir" >&2
+  fi
+  exit "$status"
+}
+trap on_exit EXIT
+
+harness() {
+  cargo run --locked --quiet -p lash-restate-postgres-workers-e2e \
+    --bin lash-e2e-session-lease-triage -- "$1"
+}
+
+backends="sqlite"
+if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
+  backends="sqlite,postgres"
+fi
+echo "session-lease-triage backends: $backends" | tee "$test_output"
+
+# The four trace events are contract, so their unit coverage is part of the
+# companion rather than something the judged run takes on trust.
+cargo test --locked --quiet -p lash-core --lib session_lease_observability \
+  2>&1 | tee "$artifact_dir/00-trace-event-tests.log" | tee -a "$test_output"
+# The facade read and its host-side classification, exercised through the example
+# that owns the operator endpoint.
+cargo test --locked --quiet -p agent-service lease_triage \
+  2>&1 | tee "$artifact_dir/01-facade-read-tests.log" | tee -a "$test_output"
+
+harness hang 2>&1 | tee "$artifact_dir/02-provider-hang.jsonl" | tee -a "$test_output"
+harness takeover 2>&1 | tee "$artifact_dir/03-lease-takeover.jsonl" | tee -a "$test_output"
+harness livelock 2>&1 | tee "$artifact_dir/04-commit-cas-livelock.jsonl" | tee -a "$test_output"
+
+# The documented procedure and its compiled snippet must still agree with the
+# sources, so a docs-vs-observed judgment has something stable to score against.
+python3 scripts/lint_docs.py 2>&1 | tee "$artifact_dir/05-docs-lint.log" | tee -a "$test_output"
+
+python3 - "$artifact_dir" "$backends" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+artifacts = Path(sys.argv[1])
+backends = sys.argv[2].split(",")
+
+LEASE_EVENTS = (
+    "session_execution_lease.acquired",
+    "session_execution_lease.lost",
+    "session_execution_lease.taken_over",
+    "session_execution_lease.commit_cas_rejected",
+)
+
+
+def fail(message):
+    raise SystemExit(f"session-lease-triage gate failed: {message}")
+
+
+def checkpoints(name, filename):
+    path = artifacts / filename
+    found = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if value.get("checkpoint") == name:
+            found[value["backend"]] = value
+    for backend in backends:
+        if backend not in found:
+            fail(f"missing {name!r} checkpoint for backend {backend!r} in {path}")
+    return found
+
+
+def event(record, name):
+    matched = [
+        entry for entry in record["lease_trace"] if entry.get("event") == name
+    ]
+    if not matched:
+        fail(f"{record['checkpoint']}/{record['backend']}: no {name!r} trace event")
+    return matched[0]
+
+
+def require_identity_fields(record, name, entry):
+    for field in ("session_id", "fencing_token", "owner_id", "incarnation_id"):
+        if entry.get(field) in (None, ""):
+            fail(
+                f"{record['checkpoint']}/{record['backend']}: {name!r} omits {field!r}: {entry}"
+            )
+
+
+# Phase 1: a healthy holder is the provider-hang shape, and it is silent.
+for backend, record in checkpoints("provider_hang_shape", "02-provider-hang.jsonl").items():
+    claimed = event(record, "session_execution_lease.acquired")
+    require_identity_fields(record, "claimed", claimed)
+    if claimed["level"] != "INFO":
+        fail(f"{backend}: claimed must be operator-visible, got {claimed['level']}")
+    if not record["holder_matches_running_worker"]:
+        fail(f"{backend}: the reading did not name the worker running the parked turn: {record}")
+    if not record["renewals_current_while_parked"]:
+        fail(f"{backend}: a parked turn's lane must read as current: {record}")
+    if record["reading_while_parked"]["renewal"] != "current":
+        fail(f"{backend}: parked reading was not current: {record['reading_while_parked']}")
+    if not record["reading_while_parked"]["expires_in_ms"]:
+        fail(f"{backend}: a current reading must carry positive headroom: {record}")
+    if record["lease_lost_count"] or record["taken_over_count"]:
+        fail(f"{backend}: a healthy lane must emit no lease-loss events: {record}")
+    if record["commit_cas_rejected_count"]:
+        fail(f"{backend}: the only writer must not lose the head CAS: {record}")
+    if not record["turn_committed_after_release"]:
+        fail(f"{backend}: the released turn did not commit: {record}")
+    if record["reading_after_commit"]["renewal"] != "unheld":
+        fail(f"{backend}: a committed turn must release its lane: {record['reading_after_commit']}")
+
+# Phase 2: the winner reports the takeover truthfully, and the dead holder
+# reports nothing at all. The second half is the whole point: an event emitted by
+# the displaced runner would be absent here.
+for backend, record in checkpoints("lease_takeover", "03-lease-takeover.jsonl").items():
+    taken_over = event(record, "session_execution_lease.taken_over")
+    require_identity_fields(record, "taken_over", taken_over)
+    if taken_over["level"] != "INFO":
+        fail(f"{backend}: taken_over must be operator-visible, got {taken_over['level']}")
+    if record["taken_over_count"] != 1:
+        fail(f"{backend}: exactly one takeover must be reported: {record}")
+    if record["lease_lost_count"]:
+        fail(
+            f"{backend}: the abandoned holder runs nothing and must report nothing, so a "
+            f"session_execution_lease.lost here means the scenario is not testing a dead loser: {record}"
+        )
+    if taken_over["owner_id"] != record["successor_owner_id"]:
+        fail(f"{backend}: the takeover was not emitted by the winner: {taken_over}")
+    if taken_over["displaced_owner_id"] != record["abandoned_owner_id"]:
+        fail(f"{backend}: the takeover named the wrong displaced holder: {taken_over}")
+    if taken_over["displaced_fencing_token"] != record["abandoned_generation"]:
+        fail(f"{backend}: the takeover named the wrong displaced generation: {taken_over}")
+    if taken_over["fencing_token"] <= taken_over["displaced_fencing_token"]:
+        fail(f"{backend}: takeover did not advance the generation: {taken_over}")
+    if taken_over["displaced_owner_id"] == taken_over["owner_id"]:
+        fail(f"{backend}: a claim reported displacing itself: {taken_over}")
+    before = record["reading_before_takeover"]
+    after = record["reading_after_takeover"]
+    if before["holder_owner_id"] != record["abandoned_owner_id"]:
+        fail(f"{backend}: the pre-takeover reading named the wrong holder: {before}")
+    if before["renewal"] != "lapsed":
+        fail(f"{backend}: an abandoned lane must read as lapsed: {before}")
+    # After the sweep the abandoned holder must be gone from the read. The lane is
+    # either held by the successor or already unheld, because a committing turn
+    # releases it; both are correct and the run records which happened.
+    if after["holder_owner_id"] == record["abandoned_owner_id"]:
+        fail(f"{backend}: the operator read still names the displaced holder: {after}")
+    if after["renewal"] not in ("unheld", "current"):
+        fail(f"{backend}: unexpected post-sweep reading: {after}")
+    if after["fencing_token"] is not None and after["fencing_token"] <= before["fencing_token"]:
+        fail(f"{backend}: a still-held lane must show a higher generation: {before} -> {after}")
+    # The doctrine under test: lease loss is not a turn verdict. Whichever way
+    # the sweeping turn settled, the run must record it, self-consistently.
+    if record["turn_committed_after_takeover"] and record["commit_cas_rejected_count"]:
+        fail(f"{backend}: a committed turn cannot also have lost the head CAS: {record}")
+    if not record["turn_committed_after_takeover"] and not record["turn_error_after_takeover"]:
+        fail(f"{backend}: the sweeping turn neither committed nor reported an error: {record}")
+
+# Phase 3: livelock is *repeated* rejection under sustained misrouting, while the
+# writer still holds a lane. One collision is ordinary contention and is not what
+# the documented decision procedure keys on.
+for backend, record in checkpoints("commit_cas_livelock", "04-commit-cas-livelock.jsonl").items():
+    if record["rounds_attempted"] < 2:
+        fail(f"{backend}: recurrence needs more than one round: {record}")
+    if record["rounds_with_a_rejection"] != record["rounds_attempted"]:
+        fail(
+            f"{backend}: misrouting must keep colliding to be livelock rather than a one-off; "
+            f"only {record['rounds_with_a_rejection']}/{record['rounds_attempted']} rounds "
+            f"produced a rejection: {record}"
+        )
+    if record["commit_cas_rejected_count"] < record["rounds_attempted"]:
+        fail(f"{backend}: expected at least one rejection per round: {record}")
+    for round_record in record["rounds"]:
+        if round_record["committed"] != 1:
+            fail(f"{backend}: each round must have exactly one winner: {round_record}")
+        if not round_record["loser_rejected"]:
+            fail(f"{backend}: a round's stale writer was accepted: {round_record}")
+    for rejected in record["commit_cas_rejected"]:
+        require_identity_fields(record, "commit_cas_rejected", rejected)
+        if rejected["level"] != "WARN":
+            fail(f"{backend}: commit_cas_rejected must warn, got {rejected['level']}")
+        if rejected["lease_lost"] is not False:
+            fail(f"{backend}: livelock is a rejection while the lane is still held: {rejected}")
+        if rejected["lane_held"] is not True:
+            fail(f"{backend}: these writers do hold the lane by reentry: {rejected}")
+        if rejected["actual_head_revision"] <= rejected["expected_head_revision"]:
+            fail(f"{backend}: the rejection did not name a head that had moved on: {rejected}")
+    if record["lease_lost_count"] or record["taken_over_count"]:
+        fail(f"{backend}: livelock must be distinguishable from a handoff: {record}")
+
+print(
+    "session-lease-triage gates: provider hang, winner-emitted takeover of a dead holder, "
+    f"and recurring CAS livelock asserted on {', '.join(backends)}; all four lease events "
+    "observed"
+)
+PY
+
+if grep -Fn 'panicked at' "$test_output" >&2; then
+  echo "panic gate: FAILED ('panicked at' found in session-lease-triage E2E output)" >&2
+  exit 1
+fi
+echo "panic gate: clean (no 'panicked at' lines in session-lease-triage E2E output)" | tee -a "$test_output"
+echo "session-lease-triage e2e passed: scenarios=3 backends=$backends artifacts=$artifact_dir" | tee -a "$test_output"

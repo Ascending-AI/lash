@@ -248,8 +248,15 @@ impl LashRuntime {
         self.state.effective_policy().context_window_tokens()
     }
 
+    /// Claim the lane for this turn, or record why the turn proceeds without it.
+    ///
+    /// A busy lane does not stop the turn: the commit CAS is the authority
+    /// (ADR 0029), so the turn continues and may well win. It must not continue
+    /// *anonymously* though, or a later `commit_cas_rejected` cannot say who was
+    /// writing under whose generation, so the observed holder is retained as
+    /// lane-less commit evidence for this turn.
     async fn claim_session_execution_lease(
-        &self,
+        &mut self,
     ) -> Result<Option<SessionExecutionLeaseGuard>, RuntimeError> {
         let Some(store) = self
             .session
@@ -268,10 +275,16 @@ impl LashRuntime {
         .await
         .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?
         {
-            Some(lease) => Ok(Some(lease)),
+            Some(guard) => Ok(Some(guard)),
             None => {
+                // The claim itself already logged the holder it lost to
+                // (`session_execution_lease.busy`). The turn proceeds without the
+                // lane because the commit CAS is the authority (ADR 0029), and a
+                // rejection still names this writer from its claimant identity.
                 tracing::debug!(
                     session_id = %self.state.session_id,
+                    consulted = "session_execution_lease",
+                    outcome = "proceeding_under_commit_cas",
                     event = "session_execution_lease.busy_advisory",
                     "session execution lease is busy; proceeding under the commit CAS fence"
                 );
@@ -571,9 +584,21 @@ impl LashRuntime {
         {
             Ok(batches) => batches,
             Err(err) => {
+                // Reported here, not inside the commit: the guard reference and the
+                // claimant are already live in this future, so naming the writer
+                // costs nothing, while carrying evidence through the commit await
+                // would grow every turn future.
+                trace_commit_cas_rejected(
+                    &self.state.session_id,
+                    session_execution_lease
+                        .map(SessionExecutionLeaseGuard::commit_evidence)
+                        .as_deref(),
+                    &self.runtime_lease_owner,
+                    &err,
+                );
                 self.mark_phase_end(RuntimeTurnPhase::FinalCommit);
                 self.mark_phase_end(RuntimeTurnPhase::PersistTurn);
-                return Err(err);
+                return Err(runtime_error_from_store_commit(err));
             }
         };
         staged_usage.confirm_identities(&confirmed_usage);

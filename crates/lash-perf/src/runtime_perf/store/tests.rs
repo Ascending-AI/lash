@@ -50,3 +50,21 @@ async fn runtime_commit_rejects_cross_session_queue_batches_atomically() {
         "rejected commit must not enqueue cross-session work"
     );
 }
+
+/// The perf harness's store is a real [`SessionExecutionLeaseStore`], so it owes
+/// the same displacement contract as the durable backends.
+///
+/// A double that reports no displacement silently disables
+/// `session_execution_lease.taken_over` for everything running on it, and that
+/// absence is invisible until an operator needs the event. This runs the shared
+/// conformance vector rather than a local copy, so the perf store cannot drift
+/// away from the contract the durable backends are held to.
+#[tokio::test]
+async fn perf_store_reports_the_holder_a_claim_displaces() {
+    let store = RuntimePerfStore::default();
+    lash_core::testing::conformance::session_execution_lease_displacement(
+        &store,
+        "perf-lease-displacement",
+    )
+    .await;
+}
