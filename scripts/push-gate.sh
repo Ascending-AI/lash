@@ -3,9 +3,12 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
+# shellcheck source=scripts/worktree-gate-env.sh
+source "$repo/scripts/worktree-gate-env.sh"
+lash_gate_acquire push-gate
 
 ci_features="${LASH_CI_FEATURES:-}"
-port_base="${LASH_PUSH_GATE_PORT_BASE:-$((20000 + ($$ % 20000)))}"
+port_base="${LASH_PUSH_GATE_PORT_BASE:-$LASH_E2E_PORT_BASE}"
 postgres_container=""
 minio_container=""
 
@@ -117,11 +120,12 @@ run_workspace_tests() {
 
 run_postgres_conformance() {
   step "Postgres conformance"
-  postgres_container="lash-postgres-push-gate-$$"
+  postgres_container="lash-postgres-push-gate-${LASH_GATE_WORKTREE_SLUG}"
   local port="${LASH_PUSH_GATE_POSTGRES_PORT:-$((port_base + 10))}"
-  docker rm -f "$postgres_container" >/dev/null 2>&1 || true
   bash scripts/docker-pull-with-retry.sh postgres:16-alpine
   docker run -d --name "$postgres_container" \
+    --label "$LASH_GATE_LABEL" \
+    --network "$LASH_E2E_NETWORK" \
     -e POSTGRES_USER=lash \
     -e POSTGRES_PASSWORD=lash \
     -e POSTGRES_DB=lash \
@@ -163,12 +167,13 @@ run_postgres_conformance() {
 
 run_minio_conformance() {
   step "MinIO/S3 conformance"
-  minio_container="lash-minio-push-gate-$$"
+  minio_container="lash-minio-push-gate-${LASH_GATE_WORKTREE_SLUG}"
   local port="${LASH_PUSH_GATE_MINIO_PORT:-$((port_base + 11))}"
-  docker rm -f "$minio_container" >/dev/null 2>&1 || true
   bash scripts/docker-pull-with-retry.sh minio/minio:RELEASE.2025-04-22T22-12-26Z
   bash scripts/docker-pull-with-retry.sh minio/mc:RELEASE.2025-04-16T18-13-26Z
   docker run -d --name "$minio_container" \
+    --label "$LASH_GATE_LABEL" \
+    --network "$LASH_E2E_NETWORK" \
     -e MINIO_ROOT_USER=minioadmin \
     -e MINIO_ROOT_PASSWORD=minioadmin \
     -p "127.0.0.1:${port}:9000" \
@@ -176,7 +181,8 @@ run_minio_conformance() {
 
   local endpoint="http://127.0.0.1:${port}"
   local deadline=$((SECONDS + 60))
-  until docker run --rm --network host minio/mc:RELEASE.2025-04-16T18-13-26Z \
+  until docker run --rm --name "lash-minio-probe-${LASH_GATE_WORKTREE_SLUG}-$$" \
+    --label "$LASH_GATE_LABEL" --network host minio/mc:RELEASE.2025-04-16T18-13-26Z \
     alias set fig831 "$endpoint" minioadmin minioadmin >/dev/null 2>&1; do
     if (( SECONDS >= deadline )); then
       docker logs "$minio_container" >&2 || true
@@ -185,7 +191,9 @@ run_minio_conformance() {
     fi
     sleep 1
   done
-  docker run --rm --network host --entrypoint /bin/sh minio/mc:RELEASE.2025-04-16T18-13-26Z -c \
+  docker run --rm --name "lash-minio-setup-${LASH_GATE_WORKTREE_SLUG}-$$" \
+    --label "$LASH_GATE_LABEL" --network host --entrypoint /bin/sh \
+    minio/mc:RELEASE.2025-04-16T18-13-26Z -c \
     "mc alias set fig831 '$endpoint' minioadmin minioadmin >/dev/null && mc mb --ignore-existing fig831/lash-attachments >/dev/null"
 
   LASH_MINIO_ENDPOINT="$endpoint" \
@@ -245,31 +253,32 @@ step "Workflow graph example integration"
 just workflow-graph-integration-verify
 
 step "Restate e2e: agent-service"
-RESTATE_ADMIN_PORT="$((port_base + 20))" \
-RESTATE_INGRESS_PORT="$((port_base + 21))" \
-RESTATE_NODE_PORT="$((port_base + 22))" \
-AGENT_SERVICE_E2E_ENDPOINT_BIND="127.0.0.1:$((port_base + 23))" \
-AGENT_SERVICE_E2E_ENDPOINT_URL="http://127.0.0.1:$((port_base + 23))" \
+RESTATE_ADMIN_PORT="${RESTATE_ADMIN_PORT:-$((port_base + 20))}" \
+RESTATE_INGRESS_PORT="${RESTATE_INGRESS_PORT:-$((port_base + 21))}" \
+RESTATE_NODE_PORT="${RESTATE_NODE_PORT:-$((port_base + 22))}" \
+AGENT_SERVICE_E2E_ENDPOINT_BIND="${AGENT_SERVICE_E2E_ENDPOINT_BIND:-127.0.0.1:$((port_base + 23))}" \
+AGENT_SERVICE_E2E_ENDPOINT_URL="${AGENT_SERVICE_E2E_ENDPOINT_URL:-http://127.0.0.1:$((port_base + 23))}" \
   just agent-service-restate-e2e
 
 step "Restate e2e: agent-workbench"
-AGENT_WORKBENCH_RESTATE_ADMIN_PORT="$((port_base + 30))" \
-AGENT_WORKBENCH_RESTATE_INGRESS_PORT="$((port_base + 31))" \
-AGENT_WORKBENCH_RESTATE_NODE_PORT="$((port_base + 32))" \
-AGENT_WORKBENCH_E2E_ENDPOINT_BIND="127.0.0.1:$((port_base + 33))" \
-AGENT_WORKBENCH_E2E_ENDPOINT_URL="http://127.0.0.1:$((port_base + 33))" \
+AGENT_WORKBENCH_RESTATE_ADMIN_PORT="${AGENT_WORKBENCH_RESTATE_ADMIN_PORT:-$((port_base + 30))}" \
+AGENT_WORKBENCH_RESTATE_INGRESS_PORT="${AGENT_WORKBENCH_RESTATE_INGRESS_PORT:-$((port_base + 31))}" \
+AGENT_WORKBENCH_RESTATE_NODE_PORT="${AGENT_WORKBENCH_RESTATE_NODE_PORT:-$((port_base + 32))}" \
+AGENT_WORKBENCH_E2E_ENDPOINT_BIND="${AGENT_WORKBENCH_E2E_ENDPOINT_BIND:-127.0.0.1:$((port_base + 33))}" \
+AGENT_WORKBENCH_E2E_ENDPOINT_URL="${AGENT_WORKBENCH_E2E_ENDPOINT_URL:-http://127.0.0.1:$((port_base + 33))}" \
   just agent-workbench-restate-e2e
 
 step "Restate/Postgres/MinIO workers e2e"
-LASH_E2E_MINIO_PORT="$((port_base + 40))" \
+LASH_E2E_MINIO_PORT="${LASH_E2E_MINIO_PORT:-$((port_base + 40))}" \
   bash scripts/restate-postgres-workers-e2e.sh
 
 step "Process operations e2e"
-LASH_PROCESS_OPERATIONS_MINIO_PORT="$((port_base + 41))" \
-LASH_PROCESS_OPERATIONS_MINIO_CONSOLE_PORT="$((port_base + 42))" \
-LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT="$((port_base + 43))" \
-LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT="$((port_base + 44))" \
-LASH_PROCESS_OPERATIONS_RESTATE_NODE_PORT="$((port_base + 45))" \
+LASH_PROCESS_OPERATIONS_MINIO_PORT="${LASH_PROCESS_OPERATIONS_MINIO_PORT:-$((port_base + 41))}" \
+LASH_PROCESS_OPERATIONS_MINIO_CONSOLE_PORT="${LASH_PROCESS_OPERATIONS_MINIO_CONSOLE_PORT:-$((port_base + 42))}" \
+LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT="${LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT:-$((port_base + 43))}" \
+LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT="${LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT:-$((port_base + 44))}" \
+LASH_PROCESS_OPERATIONS_RESTATE_NODE_PORT="${LASH_PROCESS_OPERATIONS_RESTATE_NODE_PORT:-$((port_base + 45))}" \
+LASH_PROCESS_OPERATIONS_POSTGRES_PORT="${LASH_PROCESS_OPERATIONS_POSTGRES_PORT:-$((port_base + 46))}" \
   bash scripts/process-operations-e2e.sh
 
 step "Push gate passed"

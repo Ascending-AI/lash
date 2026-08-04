@@ -47,13 +47,15 @@ workflow-graph-integration-verify:
 agent-service-restate-e2e:
   #!/usr/bin/env bash
   set -euo pipefail
+  source "{{repo}}/scripts/worktree-gate-env.sh"
+  lash_gate_acquire agent-service-restate-e2e
   image="${AGENT_SERVICE_RESTATE_IMAGE:-restatedev/restate:1.7.0}"
-  container="${AGENT_SERVICE_RESTATE_CONTAINER:-lash-agent-service-restate-e2e}"
-  admin_port="${RESTATE_ADMIN_PORT:-19070}"
-  ingress_port="${RESTATE_INGRESS_PORT:-18080}"
-  node_port="${RESTATE_NODE_PORT:-15122}"
-  endpoint_bind="${AGENT_SERVICE_E2E_ENDPOINT_BIND:-127.0.0.1:19080}"
-  endpoint_url="${AGENT_SERVICE_E2E_ENDPOINT_URL:-http://127.0.0.1:19080}"
+  container="${AGENT_SERVICE_RESTATE_CONTAINER:-lash-agent-service-restate-${LASH_GATE_WORKTREE_SLUG}}"
+  admin_port="${RESTATE_ADMIN_PORT:-$((LASH_E2E_PORT_BASE + 20))}"
+  ingress_port="${RESTATE_INGRESS_PORT:-$((LASH_E2E_PORT_BASE + 21))}"
+  node_port="${RESTATE_NODE_PORT:-$((LASH_E2E_PORT_BASE + 22))}"
+  endpoint_bind="${AGENT_SERVICE_E2E_ENDPOINT_BIND:-127.0.0.1:$((LASH_E2E_PORT_BASE + 23))}"
+  endpoint_url="${AGENT_SERVICE_E2E_ENDPOINT_URL:-http://127.0.0.1:$((LASH_E2E_PORT_BASE + 23))}"
   admin_url="${RESTATE_ADMIN_URL:-http://127.0.0.1:$admin_port}"
   ingress_url="${RESTATE_INGRESS_URL:-http://127.0.0.1:$ingress_port}"
 
@@ -61,11 +63,10 @@ agent-service-restate-e2e:
     docker rm -f "$container" >/dev/null 2>&1 || true
   }
   trap cleanup EXIT
-  cleanup
 
   bash "{{repo}}/scripts/docker-pull-with-retry.sh" "$image"
 
-  docker run -d --name "$container" --network host \
+  docker run -d --name "$container" --label "$LASH_GATE_LABEL" --network host \
     -e RESTATE_ADMIN__BIND_PORT="$admin_port" \
     -e RESTATE_INGRESS__BIND_PORT="$ingress_port" \
     -e RESTATE_BIND_PORT="$node_port" \
@@ -99,19 +100,21 @@ agent-service-restate-e2e:
 agent-workbench-restate-e2e:
   #!/usr/bin/env bash
   set -euo pipefail
+  source "{{repo}}/scripts/worktree-gate-env.sh"
+  lash_gate_acquire agent-workbench-restate-e2e
   image="${AGENT_WORKBENCH_RESTATE_IMAGE:-restatedev/restate:1.7.0}"
-  container="${AGENT_WORKBENCH_RESTATE_CONTAINER:-lash-agent-workbench-restate-e2e}"
-  admin_port="${AGENT_WORKBENCH_RESTATE_ADMIN_PORT:-19071}"
-  ingress_port="${AGENT_WORKBENCH_RESTATE_INGRESS_PORT:-18081}"
-  node_port="${AGENT_WORKBENCH_RESTATE_NODE_PORT:-15123}"
-  endpoint_bind="${AGENT_WORKBENCH_E2E_ENDPOINT_BIND:-127.0.0.1:19081}"
-  endpoint_url="${AGENT_WORKBENCH_E2E_ENDPOINT_URL:-http://127.0.0.1:19081}"
-  postgres_container="${AGENT_WORKBENCH_E2E_POSTGRES_CONTAINER:-lash-agent-workbench-postgres-e2e}"
-  postgres_port="${AGENT_WORKBENCH_E2E_POSTGRES_PORT:-15433}"
+  container="${AGENT_WORKBENCH_RESTATE_CONTAINER:-lash-agent-workbench-restate-${LASH_GATE_WORKTREE_SLUG}}"
+  admin_port="${AGENT_WORKBENCH_RESTATE_ADMIN_PORT:-$((LASH_E2E_PORT_BASE + 30))}"
+  ingress_port="${AGENT_WORKBENCH_RESTATE_INGRESS_PORT:-$((LASH_E2E_PORT_BASE + 31))}"
+  node_port="${AGENT_WORKBENCH_RESTATE_NODE_PORT:-$((LASH_E2E_PORT_BASE + 32))}"
+  endpoint_bind="${AGENT_WORKBENCH_E2E_ENDPOINT_BIND:-127.0.0.1:$((LASH_E2E_PORT_BASE + 33))}"
+  endpoint_url="${AGENT_WORKBENCH_E2E_ENDPOINT_URL:-http://127.0.0.1:$((LASH_E2E_PORT_BASE + 33))}"
+  postgres_container="${AGENT_WORKBENCH_E2E_POSTGRES_CONTAINER:-lash-agent-workbench-postgres-${LASH_GATE_WORKTREE_SLUG}}"
+  postgres_port="${AGENT_WORKBENCH_E2E_POSTGRES_PORT:-$((LASH_E2E_PORT_BASE + 34))}"
   database_url="${AGENT_WORKBENCH_E2E_DATABASE_URL:-postgres://lash:lash@127.0.0.1:$postgres_port/lash}"
   admin_url="${RESTATE_ADMIN_URL:-http://127.0.0.1:$admin_port}"
   ingress_url="${RESTATE_INGRESS_URL:-http://127.0.0.1:$ingress_port}"
-  test_output="$(mktemp "${TMPDIR:-/tmp}/lash-agent-workbench-restate-e2e.XXXXXX")"
+  test_output="$(mktemp "${TMPDIR:-/tmp}/lash-agent-workbench-restate-e2e-${LASH_GATE_WORKTREE_SLUG}.XXXXXX")"
 
   cleanup() {
     docker rm -f "$container" >/dev/null 2>&1 || true
@@ -119,17 +122,16 @@ agent-workbench-restate-e2e:
     rm -f "$test_output"
   }
   trap cleanup EXIT
-  cleanup
 
   bash "{{repo}}/scripts/docker-pull-with-retry.sh" "$image"
   bash "{{repo}}/scripts/docker-pull-with-retry.sh" postgres:16-alpine
 
-  docker run -d --name "$container" --network host \
+  docker run -d --name "$container" --label "$LASH_GATE_LABEL" --network host \
     -e RESTATE_ADMIN__BIND_PORT="$admin_port" \
     -e RESTATE_INGRESS__BIND_PORT="$ingress_port" \
     -e RESTATE_BIND_PORT="$node_port" \
     "$image" >/dev/null
-  docker run -d --name "$postgres_container" --network host \
+  docker run -d --name "$postgres_container" --label "$LASH_GATE_LABEL" --network host \
     -e POSTGRES_USER=lash \
     -e POSTGRES_PASSWORD=lash \
     -e POSTGRES_DB=lash \
@@ -189,6 +191,16 @@ process-operations-e2e:
 
 version-bump-recreation-e2e:
   bash "{{repo}}/scripts/version-bump-recreation-e2e.sh"
+
+# Fast live proof of the shared Postgres/MinIO/Restate gate isolation contract.
+gate-container-smoke:
+  bash "{{repo}}/scripts/gate-container-smoke.sh"
+
+gate-worktree-concurrency-check peer:
+  bash "{{repo}}/scripts/test-gate-worktree-concurrency.sh" "{{peer}}"
+
+gate-stale-trace-regression:
+  bash "{{repo}}/scripts/test-restate-workers-trace-scrub.sh"
 
 stack-budget:
   bash "{{repo}}/scripts/ci-stack-budget.sh"

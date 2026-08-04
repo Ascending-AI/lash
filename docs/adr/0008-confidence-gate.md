@@ -78,7 +78,12 @@ CI and local development the same language for confidence.
 - PR CI runs the `fast:<shard>` commands in parallel with workspace tests and
   then validates a small aggregate `fast:summary` artifact. Local
   `scripts/confidence-gate.sh fast` runs the same shards sequentially for a
-  single-machine check.
+  single-machine check. Local evidence defaults to
+  `target/confidence/<worktree-slug>/`, where the slug includes an absolute-path
+  checksum, so concurrent and same-basename worktrees cannot overwrite one
+  another. CI explicitly sets `LASH_CONFIDENCE_OUT_DIR` to
+  `target/confidence`, preserving its artifact contract; the variable remains
+  an explicit override elsewhere.
 - The `Confidence` workflow runs `full` on a weekly schedule and supports
   manual `default`/`broad`/`full` dispatch.
 - `just confidence`, `just confidence-fast`, `just confidence-broad`, and

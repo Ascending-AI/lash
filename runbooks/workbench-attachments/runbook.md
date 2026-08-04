@@ -39,8 +39,9 @@ cross-surface identity, not the quality of the model's image description.
 
 - First run `just agent-workbench-attachment-usage-gate <port>`. It is model-free and
   asserts upload → reference → persist → retrieve, non-zero internally consistent usage,
-  JSONL `llm_call_completed` agreement, and exact usage after reconstruction. It derives
-  its managed Postgres port and container name from `<port>`.
+  JSONL `llm_call_completed` agreement, and exact usage after reconstruction. Its managed
+  Postgres stays inside the worktree block at offset `+0..+9`, selected by the last decimal
+  digit of `<port>` (`3042` selects `+2`); its container name also derives from `<port>`.
 - Boot the browser scenario with a fresh directory:
   `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
   Require `OPENROUTER_API_KEY`; missing credentials are a harness gap → Abort. Teardown is

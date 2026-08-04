@@ -3,6 +3,8 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
+# shellcheck source=scripts/worktree-gate-env.sh
+source "$repo/scripts/worktree-gate-env.sh"
 
 export PATH="$HOME/.cargo/bin:$PATH"
 
@@ -64,7 +66,7 @@ if [ -n "$sim_search_shard" ] && [ "$area" != "all" ] && [ "$area" != "sim" ]; t
   exit 2
 fi
 
-out_root="${LASH_CONFIDENCE_OUT_DIR:-$repo/target/confidence}"
+out_root="${LASH_CONFIDENCE_OUT_DIR:-$repo/target/confidence/$LASH_GATE_WORKTREE_SLUG}"
 if [ -n "$sim_search_shard" ]; then
   out_dir="${out_root}/sim-search/${sim_search_shard//\//-of-}"
 elif [ "$lane" = "fast" ] && [ "$fast_shard" != "all" ]; then
@@ -290,7 +292,8 @@ Fast shards:
 Sim search shards:
   sim-search:<i>/<n> runs only the deterministic simulation search lane at
   full-lane budgets for one seed-index shard, writing artifacts under
-  target/confidence/sim-search/<i>-of-<n>/. The weekly Confidence workflow
+  target/confidence/<worktree-slug>/sim-search/<i>-of-<n>/ locally. CI pins
+  LASH_CONFIDENCE_OUT_DIR to target/confidence so the weekly Confidence workflow
   partitions the full search seed space as shard 1/<n> on the main full job
   plus matrix jobs for the remaining shards, so the union covers every seed
   exactly once.
@@ -408,6 +411,9 @@ if [ "$lane" = "fast" ] && [ "$area" != "all" ]; then
   esac
 fi
 
+if [ "$dry_run" -eq 0 ] && [ "$lane" != "fast" ]; then
+  lash_gate_acquire "confidence-${requested_selector}"
+fi
 if [ "$dry_run" -eq 0 ]; then
   mkdir -p "$out_dir"
 fi
@@ -549,14 +555,15 @@ start_mutation_postgres() {
   fi
 
   cleanup_mutation_postgres
-  mutation_postgres_container="lash-confidence-mutation-postgres-$(basename "$artifact")-$$"
-  docker rm -f "$mutation_postgres_container" >/dev/null 2>&1 || true
+  mutation_postgres_container="lash-confidence-mutation-postgres-${LASH_GATE_WORKTREE_SLUG}-$(basename "$artifact")-$$"
   bash scripts/docker-pull-with-retry.sh postgres:16-alpine
   docker run -d --name "$mutation_postgres_container" \
+    --label "$LASH_GATE_LABEL" \
+    --network "$LASH_E2E_NETWORK" \
     -e POSTGRES_USER=lash \
     -e POSTGRES_PASSWORD=lash \
     -e POSTGRES_DB=lash \
-    -p "127.0.0.1::5432" \
+    -p "127.0.0.1:${LASH_CONFIDENCE_MUTATION_POSTGRES_PORT:-$((LASH_E2E_PORT_BASE + 12))}:5432" \
     postgres:16-alpine >/dev/null
 
   port="$(
@@ -1416,9 +1423,8 @@ EOF
   fi
 
   local container port
-  container="lash-confidence-postgres-$$"
-  port="${LASH_CONFIDENCE_POSTGRES_PORT:-$((21000 + ($$ % 20000)))}"
-  docker rm -f "$container" >/dev/null 2>&1 || true
+  container="lash-confidence-postgres-${LASH_GATE_WORKTREE_SLUG}"
+  port="${LASH_CONFIDENCE_POSTGRES_PORT:-$((LASH_E2E_PORT_BASE + 10))}"
   cleanup_postgres() {
     docker rm -f "$container" >/dev/null 2>&1 || true
   }
@@ -1426,6 +1432,8 @@ EOF
 
   bash scripts/docker-pull-with-retry.sh postgres:16-alpine
   docker run -d --name "$container" \
+    --label "$LASH_GATE_LABEL" \
+    --network "$LASH_E2E_NETWORK" \
     -e POSTGRES_USER=lash \
     -e POSTGRES_PASSWORD=lash \
     -e POSTGRES_DB=lash \
@@ -1489,7 +1497,7 @@ run_restate_postgres_workers_e2e() {
   local artifact log_dir minio_port exit_code
   artifact="${out_dir}/sim/restate-postgres-workers-e2e.json"
   log_dir="${out_dir}/sim/restate-postgres-workers-e2e"
-  minio_port="${LASH_CONFIDENCE_RESTATE_WORKERS_MINIO_PORT:-$((51000 + ($$ % 10000)))}"
+  minio_port="${LASH_CONFIDENCE_RESTATE_WORKERS_MINIO_PORT:-$((LASH_E2E_PORT_BASE + 40))}"
   mkdir -p "$log_dir"
   set +e
   LASH_E2E_MINIO_PORT="$minio_port" \
@@ -1571,9 +1579,8 @@ EOF
   fi
 
   local container port
-  container="lash-confidence-broad-postgres-$$"
-  port="${LASH_CONFIDENCE_POSTGRES_PORT:-$((51000 + ($$ % 10000)))}"
-  docker rm -f "$container" >/dev/null 2>&1 || true
+  container="lash-confidence-broad-postgres-${LASH_GATE_WORKTREE_SLUG}"
+  port="${LASH_CONFIDENCE_POSTGRES_PORT:-$((LASH_E2E_PORT_BASE + 10))}"
   cleanup_postgres_broad() {
     docker rm -f "$container" >/dev/null 2>&1 || true
   }
@@ -1581,6 +1588,8 @@ EOF
 
   bash scripts/docker-pull-with-retry.sh postgres:16-alpine
   docker run -d --name "$container" \
+    --label "$LASH_GATE_LABEL" \
+    --network "$LASH_E2E_NETWORK" \
     -e POSTGRES_USER=lash \
     -e POSTGRES_PASSWORD=lash \
     -e POSTGRES_DB=lash \
@@ -1652,9 +1661,8 @@ EOF
   fi
 
   local container port
-  container="lash-confidence-current-postgres-$$"
-  port="${LASH_CONFIDENCE_POSTGRES_PORT:-$((41000 + ($$ % 20000)))}"
-  docker rm -f "$container" >/dev/null 2>&1 || true
+  container="lash-confidence-current-postgres-${LASH_GATE_WORKTREE_SLUG}"
+  port="${LASH_CONFIDENCE_POSTGRES_PORT:-$((LASH_E2E_PORT_BASE + 10))}"
   cleanup_postgres_current() {
     docker rm -f "$container" >/dev/null 2>&1 || true
   }
@@ -1662,6 +1670,8 @@ EOF
 
   bash scripts/docker-pull-with-retry.sh postgres:16-alpine
   docker run -d --name "$container" \
+    --label "$LASH_GATE_LABEL" \
+    --network "$LASH_E2E_NETWORK" \
     -e POSTGRES_USER=lash \
     -e POSTGRES_PASSWORD=lash \
     -e POSTGRES_DB=lash \
@@ -2526,6 +2536,7 @@ print_plan() {
   printf 'Area: %s\n' "$area"
   printf 'Mutation scope: %s\n' "$mutation_scope"
   printf 'Coverage scope: %s\n' "$coverage_scope"
+  printf 'Artifacts: %s\n' "$out_dir"
   printf 'Would run:\n'
 
   if [ -n "$sim_search_shard" ]; then

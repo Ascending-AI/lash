@@ -3,16 +3,47 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
+# shellcheck source=scripts/worktree-gate-env.sh
+source "$repo/scripts/worktree-gate-env.sh"
 
-compose=(docker compose -f "$repo/runbooks/restate-postgres-workers/docker-compose.yml")
-minio_port="${LASH_E2E_MINIO_PORT:-19000}"
-test_output="$(mktemp "${TMPDIR:-/tmp}/lash-restate-postgres-workers-e2e.XXXXXX")"
+compose_project="${LASH_RESTATE_WORKERS_COMPOSE_PROJECT:-lash-restate-workers-${LASH_GATE_WORKTREE_SLUG}}"
+compose=(docker compose -p "$compose_project" -f "$repo/runbooks/restate-postgres-workers/docker-compose.yml")
+minio_port="${LASH_E2E_MINIO_PORT:-$((LASH_E2E_PORT_BASE + 40))}"
+export LASH_E2E_MINIO_PORT="$minio_port"
+export LASH_E2E_BIN_DIR="${CARGO_TARGET_DIR:-$repo/target}/release"
+trace_volume="${compose_project}_trace-output"
+
+# Acquire ownership before touching this fixed project, then scrub the entire
+# previous project including its append-only trace volume. The generic
+# leftover check runs after this lane-owned cleanup, so unrelated leftovers in
+# the same worktree still produce a refusal rather than being removed.
+lash_gate_acquire_locks restate-postgres-workers-e2e
+"${compose[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+if docker volume inspect "$trace_volume" >/dev/null 2>&1; then
+  echo "Pre-run cleanup left stale trace volume '$trace_volume'." >&2
+  exit 1
+fi
+lash_gate_prepare_docker
+
+if [ "${LASH_E2E_TRACE_SCRUB_PROBE:-0}" = "1" ]; then
+  docker volume create "$trace_volume" >/dev/null
+  trace_probe_contents="$(docker run --rm -v "$trace_volume:/e2e-traces" postgres:16-alpine \
+    sh -c 'find /e2e-traces -mindepth 1 -print -quit')"
+  docker volume rm "$trace_volume" >/dev/null
+  if [ -n "$trace_probe_contents" ]; then
+    echo "Fresh trace volume '$trace_volume' was not empty." >&2
+    exit 1
+  fi
+  echo "trace scrub regression probe passed: stale evidence removed; fresh assertion input empty"
+  exit 0
+fi
+
+test_output="$(mktemp "${TMPDIR:-/tmp}/lash-restate-postgres-workers-e2e-${LASH_GATE_WORKTREE_SLUG}.XXXXXX")"
 
 # Binaries are built on the host (sharing the normal cargo cache) and
 # bind-mounted into the compose services; see docker-compose.yml for the
 # glibc compatibility note.
 cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
-export LASH_E2E_BIN_DIR="${CARGO_TARGET_DIR:-$repo/target}/release"
 
 cleanup() {
   status=$?
@@ -36,7 +67,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"${compose[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
 # Several services share the host-binary runtime image. Pull it once with
 # retries so a transient Docker Hub HEAD error doesn't fail compose startup.
 bash scripts/docker-pull-with-retry.sh ubuntu:24.04
@@ -67,7 +97,7 @@ LASH_MINIO_BUCKET="lash-attachments" \
 LASH_MINIO_REGION="us-east-1" \
 LASH_MINIO_ACCESS_KEY="minioadmin" \
 LASH_MINIO_SECRET_KEY="minioadmin" \
-LASH_MINIO_PREFIX="conformance/restate-postgres-workers-$$" \
+LASH_MINIO_PREFIX="conformance/restate-postgres-workers-${LASH_GATE_WORKTREE_SLUG}-$$" \
   cargo test --locked -p lash-s3-store -- --nocapture \
   2>&1 | tee "$test_output"
 

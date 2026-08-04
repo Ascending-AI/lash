@@ -136,6 +136,101 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertGreaterEqual(min_seeds, 4)
         self.assertGreaterEqual(min_boundaries, 256)
 
+    def test_ci_confidence_out_root_matches_every_workflow_artifact_path(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
+        expected_env = (
+            "LASH_CONFIDENCE_OUT_DIR: "
+            "${{ github.workspace }}/target/confidence"
+        )
+        self.assertIn(expected_env, workflow)
+        self.assertIn(expected_env, confidence_workflow)
+
+        ci_root = ROOT / "target" / "confidence"
+        ci_env = {
+            **os.environ,
+            "CI": "true",
+            "GITHUB_ACTIONS": "true",
+            "GITHUB_WORKSPACE": str(ROOT),
+            "LASH_CONFIDENCE_OUT_DIR": str(ci_root),
+            "LASH_CONFIDENCE_MUTATION_SCOPE": "full",
+            "LASH_CONFIDENCE_COVERAGE_SCOPE": "run",
+        }
+
+        def computed_artifact_dir(selector: str) -> pathlib.Path:
+            result = subprocess.run(
+                ["bash", str(GATE), "--dry-run", selector],
+                cwd=ROOT,
+                env=ci_env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            match = re.search(r"^Artifacts: (.+)$", result.stdout, re.MULTILINE)
+            self.assertIsNotNone(match, result.stdout)
+            return pathlib.Path(match.group(1))
+
+        computed = {
+            f"fast:{shard}": computed_artifact_dir(f"fast:{shard}")
+            for shard in FAST_SHARDS
+        }
+        computed["fast:summary"] = computed_artifact_dir("fast:summary")
+        computed["full"] = computed_artifact_dir("full")
+        computed["sim-search:2/9"] = computed_artifact_dir("sim-search:2/9")
+
+        for shard in FAST_SHARDS:
+            self.assertEqual(
+                computed[f"fast:{shard}"], ci_root / "fast" / shard
+            )
+        self.assertEqual(computed["fast:summary"], ci_root / "fast")
+        self.assertEqual(computed["full"], ci_root / "full")
+        self.assertEqual(
+            computed["sim-search:2/9"], ci_root / "sim-search" / "2-of-9"
+        )
+
+        # Pair each workflow-consumed artifact path with the selector output it
+        # is meant to consume. This deliberately parses only `path:` values:
+        # command-local staging paths are not gate outputs.
+        upload_steps = [
+            step
+            for source in (workflow, confidence_workflow)
+            for step in re.split(
+                r"(?=^      - (?:name|uses):)", source, flags=re.MULTILINE
+            )
+            if "uses: actions/upload-artifact@" in step
+        ]
+        consumed_paths = [
+            match.group(1)
+            for step in upload_steps
+            for match in re.finditer(
+                r"^\s+path:\s+(target/confidence.+)$", step, re.MULTILINE
+            )
+        ]
+        computed_relative = {
+            selector: path.relative_to(ROOT).as_posix()
+            for selector, path in computed.items()
+        }
+        expected_consumed_paths = {
+            computed_relative["fast:summary"],
+            computed_relative["fast:scenario-harnesses"].replace(
+                "scenario-harnesses", "${{ matrix.shard }}"
+            ),
+            str(pathlib.PurePosixPath(computed_relative["full"]).parent / "**"),
+            str(
+                pathlib.PurePosixPath(computed_relative["sim-search:2/9"]).parent
+                / "**"
+            ),
+        }
+        self.assertCountEqual(consumed_paths, expected_consumed_paths)
+
+        self.assertIn("path: target/confidence/fast/${{ matrix.shard }}", workflow)
+        self.assertIn("path: target/confidence/fast", workflow)
+        self.assertIn("path: target/confidence/**", confidence_workflow)
+        self.assertIn(
+            "path: target/confidence/sim-search/**", confidence_workflow
+        )
+
     def test_store_properties_have_reproducible_pr_and_soak_budgets(self) -> None:
         gate = GATE.read_text(encoding="utf-8")
         justfile = JUSTFILE.read_text(encoding="utf-8")

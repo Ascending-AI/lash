@@ -97,11 +97,13 @@ cargo run -p lash-sim -- run --out target/lash-sim/search \
   when the input is a failure. Failing negative fixtures live under
   `crates/lash-sim/failure-fixtures/`.
 - The confidence gate declares sim lane artifacts under flat
-  `target/confidence/<lane>/sim/` roots for default/broad/full, sharded
-  `target/confidence/fast/<shard>/sim/` roots for the fast lane, and
-  `target/confidence/sim-search/<i>-of-<n>/` roots for sharded search-fleet
-  runs, including env-gated Postgres conformance evidence when the lane is
-  enabled.
+  `target/confidence/<worktree-slug>/<lane>/sim/` roots for default/broad/full,
+  sharded `target/confidence/<worktree-slug>/fast/<shard>/sim/` roots for the
+  fast lane, and
+  `target/confidence/<worktree-slug>/sim-search/<i>-of-<n>/` roots for sharded
+  search-fleet runs, including env-gated Postgres conformance evidence when the
+  lane is enabled. CI overrides the root to the established unqualified
+  `target/confidence/` artifact tree.
 
 ## Implemented DST substance
 
