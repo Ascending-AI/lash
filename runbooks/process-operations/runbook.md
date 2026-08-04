@@ -15,9 +15,10 @@ truthful in durable state.
 LASH_PROCESS_OPERATIONS_ARTIFACT_DIR=<fresh-dir> just process-operations-e2e
 ```
 
-The companion owns isolated Restate and MinIO ports, uses the worktree's assigned PostgreSQL at
-host port **5446 only**, kills a real worker container at the named crash checkpoint, and removes
-every container and volume it owns on exit. It does not remove the assigned PostgreSQL service.
+The companion owns isolated Restate, PostgreSQL, and MinIO ports derived from the worktree slug,
+kills a real worker container at the named crash checkpoint, and removes every container and
+volume it owns on exit. PostgreSQL uses the worktree block's `+46` offset unless
+`LASH_PROCESS_OPERATIONS_POSTGRES_PORT` overrides it.
 It emits `process-operations e2e passed: scenarios=7` only after all exact assertions pass. The
 artifacts are the backend truth for this judged runbook.
 
@@ -41,8 +42,8 @@ artifacts are the backend truth for this judged runbook.
 Run the deterministic companion. Require all of these before judging later phases:
 
 - `00-live-services.json` contains running Restate and MinIO services;
-- `00-postgres-service.json` identifies the assigned service publishing port `5446`;
-- `00-postgres.json` reports port `5446`;
+- `00-postgres-service.json` identifies the service publishing the assigned port;
+- `00-postgres.json` reports that same assigned port;
 - `restate-deployments.json` is a successful Restate Admin response; and
 - `00-minio-conformance.log` reports a passing S3-store conformance run.
 
@@ -170,7 +171,7 @@ container no longer exist.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
-| Durable geometry | Restate/PostgreSQL:5446/MinIO live; S3 conformance green | | `00-*`, `restate-deployments.json`, `00-minio-conformance.log` |
+| Durable geometry | Restate/PostgreSQL/MinIO live on assigned ports; S3 conformance green | | `00-*`, `restate-deployments.json`, `00-minio-conformance.log` |
 | Typed discard + redrive | exact `TargetGone`/`Expired`; named block clears | | `01-wake-delivery.log` |
 | Retarget | old pending `Retargeted`; audit; next wake reaches new target | | `02-retarget.jsonl` |
 | Visibility lens | model narrowed; host list/signal/cancel complete | | `03-tool-visibility.log` |
