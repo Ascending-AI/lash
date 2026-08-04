@@ -29,6 +29,10 @@ path = "src/bin/await_event_helper.rs"
 name = "lash-e2e-process-operations-worker"
 path = "src/bin/process_operations_worker.rs"
 
+[[bin]]
+name = "lash-e2e-version-bump"
+path = "src/bin/version_bump.rs"
+
 [lints]
 workspace = true
 
@@ -50,6 +54,7 @@ restate-sdk = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sqlx = { workspace = true, features = ["runtime-tokio-rustls", "postgres"] }
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

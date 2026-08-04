@@ -28,7 +28,7 @@
     <div class="section" id="what-this-is">
       <div class="section-header">
         <h2>What This Is</h2>
-        <p>The runtime state that operational policy acts on — session-execution leases, queued-work and turn-input claims, durable waits, cached provider transports, and trace buffers — lives inside lash. lash's obligation is that every reasonable host policy is implementable through explicit, lash-owned levers over that state.</p>
+        <p>The runtime state that operational policy acts on (session-execution leases, queued-work and turn-input claims, durable waits, cached provider transports, and trace buffers) lives inside lash. lash's obligation is that every reasonable host policy is implementable through explicit, lash-owned levers over that state.</p>
       </div>
       <aside class="contract">
         <strong>Contract</strong>
@@ -84,12 +84,58 @@ let session = core
     <div class="section" id="schema-compatibility">
       <div class="section-header">
         <h2>Schema Compatibility</h2>
-        <p>lash accepts a persistent database only when its schema version matches exactly. SQLite checks <code>PRAGMA user_version</code>; Postgres checks each component version.</p>
+        <p>lash opens a persistent store only when its schema version matches exactly. SQLite checks <code>PRAGMA user_version</code>; Postgres checks each recorded component version. A mismatch in either direction, older store or newer store, refuses the open and names both the version found and the version expected.</p>
       </div>
       <aside class="contract">
-        <strong>Clean break</strong>
-        <p>This release moves SQLite from version 10 to 11 and the Postgres component from version 11 to 12. Persistent deployments must start with a fresh database. lash does not maintain a migration chain by policy.</p>
+        <strong>Forward only</strong>
+        <p>lash maintains no migration chain, by policy. A version whose schema changed is adopted by recreating the store from empty, and that step is one-way: the previous binary refuses the recreated store on the same exact-match gate. There is no downgrade path, no rollback, and no restore procedure. Recovery from a failed bump is fix-forward.</p>
       </aside>
+      <p>Mid-incident that reads smaller than it is. Once the stores are recreated, redeploying the previous image does not bring the service back. It fails at store open with a schema-version mismatch and never serves a request. <strong>That is the policy working, not a second outage.</strong> The old binary cannot read the new schema, and lash refuses the open rather than writing into rows it does not understand. So plan the bump such that forward is the only direction you need: know before the deploy whether the new version requires recreation, keep its image and configuration ready to redeploy, and treat "roll back the deployment" as unavailable from the moment the first store is recreated.</p>
+      <p>The version integers themselves live with the stores (<code>crates/lash-sqlite-store</code>, <code>crates/lash-postgres-store</code>) and move without ceremony, so do not pin a procedure to a number. Two operator-facing facts carry instead: the refusal reports the found and expected versions, and a release that changed either one says so in its notes, marked breaking (<code>docs/PUBLISHING.md</code>).</p>
+    </div>
+
+    <div class="section" id="version-bumps">
+      <div class="section-header">
+        <h2>Bumping lash</h2>
+        <p>A bump across a schema change recreates durable state, so it is a short ordered procedure rather than a rolling restart. Instantiate the five steps below as your own deployment checklist. Each one is host policy that lash has no lever to perform for you.</p>
+      </div>
+      <ol class="principle-list">
+        <li>
+          <div>
+            <h3>Quiesce ingress</h3>
+            <p>Stop admitting turns, trigger sources, and queued work at the host edge, and stop the drivers that claim them. lash cannot see your ingress (ADR-0014), so this is a readiness flag or a load-balancer change you own. Steps 1 and 2 of <a href="#graceful-drain">graceful drain</a> are the same levers, applied here to reach a quiet fleet rather than a single exiting process.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h3>Drain in-flight effect work</h3>
+            <p>Let running turns and background processes finish or cancel them, then confirm the effect journal is empty before you touch a store. An invocation still mid-replay when its rows disappear is the failure mode the next step's gotcha describes. Hosts running a durable process worker also call <code>drain_owner_bound_work()</code>, which terminalizes the <code>OwnerBound</code> rows that worker started instead of leaving them for a sweep that will refuse to guess.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h3>Snapshot, if that is your policy</h3>
+            <p>Optional, and entirely yours: lash ships no backup or restore, and nothing below depends on one. If you take a snapshot, take it of the whole consistency unit at once (see <strong>Backups</strong> below).</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h3>Bump and recreate</h3>
+            <p>Start the new binary against empty durable state: a fresh database (or one with the <code>lash_*</code> tables dropped), a fresh effect journal, and an attachment prefix consistent with the store you just recreated. The first open creates the schema at exactly the version the new binary expects; a leftover store at any other version is refused, which is the gate telling you a recreation step was missed.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h3>Verify before reopening ingress</h3>
+            <p>Prove the three durable surfaces work on the recreated state, in this order: a session opens and a turn commits; a background process registers, wakes, and runs to a terminal; a trigger fires. Only then reopen ingress. Verifying after traffic returns turns a failed bump into an incident with users in it.</p>
+          </div>
+        </li>
+      </ol>
+      <aside class="gotcha">
+        <strong>Gotcha</strong>
+        <p>Store lifetime and journal lifetime are coupled. A workflow-engine journal that survives the recreation replays handler steps whose sessions, processes, and turn commits no longer exist. That replay either fails on a missing row or lands a later step's result in a store that never saw the earlier ones. Step 2 is what prevents it: an empty journal at bump time has nothing to replay. If a deployment cannot prove the journal is empty, recreate the journal along with the stores so no invocation outlives the rows it references.</p>
+      </aside>
+      <p><strong>Backups.</strong> lash ships no backup or restore tooling, and the procedure above never needs one. If your own prudence says snapshot before a destructive step, snapshot the consistency unit as a unit: the Postgres store, the effect journal, and the S3-compatible blob store holding attachment bytes are one unit, not three. Restoring any one of them alone yields mixed-vintage state: a journal referencing sessions that no longer exist, or effects replaying against recreated rows. Restoring is host territory and untested by lash, so treat a snapshot as forensic material and a fix-forward aid, never as a rollback plan.</p>
     </div>
 
     <div class="section" id="lease-timings">
@@ -108,7 +154,7 @@ let session = core
         </table>
       </div>
       <p>Queued-work and turn-input claims are not timed lanes. Each claim pins the session-execution-lease generation under which it was taken. Renewing the session lease preserves the generation; release or takeover makes the claim eligible for successor re-claim and hides it from lease-less live-claim views. Its completion remains valid until successor re-claim or explicit abandon, while the session-head CAS separately governs publication.</p>
-      <p>The default is a 30 second TTL with a 10 second renew interval. The constructor enforces <code>ttl &gt;= 3 * renew_interval</code>, so a healthy owner can miss two consecutive renewals — a scheduler stall, a transient store error — before a peer may treat the lease as expired. A shorter TTL reclaims a crashed owner's work sooner but widens the window in which a slow-but-alive owner is falsely taken over; a longer TTL does the reverse. Choosing that number is the trade, and it is now a host decision instead of a constant baked into lash.</p>
+      <p>The default is a 30 second TTL with a 10 second renew interval. The constructor enforces <code>ttl &gt;= 3 * renew_interval</code>, so a healthy owner can miss two consecutive renewals (a scheduler stall, a transient store error) before a peer may treat the lease as expired. A shorter TTL reclaims a crashed owner's work sooner but widens the window in which a slow-but-alive owner is falsely taken over; a longer TTL does the reverse. Choosing that number is the trade, and it is now a host decision instead of a constant baked into lash.</p>
       <pre data-lang="rust" data-snippet="operations#lease-timings"><code>// One timing decision governs the three durable lease lanes:
 // session execution, effect replay, and process execution. `new` enforces
 // `ttl &gt;= 3 * renew_interval`, so a live owner can miss two renewals before
@@ -184,15 +230,15 @@ core.flush_trace_sink()?;
 
 // 7. Exit. Any lease this process still holds now expires on its TTL.
 Ok(())</code></pre>
-      <p>Steps 1 and 2 are pure policy: lash cannot see your ingress or your grace budget, so stopping admission and deciding whether to await or cancel in-flight turns stays with the host. Steps 3 through 6 are the levers — <code>park</code>/<code>close</code>, the claim and wait handbacks, provider <code>close</code>, trace <code>flush</code> — each an explicit call with no hidden ordering. Anything lash cannot expose as a lever without becoming an orchestrator (signal handling, drain deadlines, readiness endpoints) is host territory by design.</p>
+      <p>Steps 1 and 2 are pure policy: lash cannot see your ingress or your grace budget, so stopping admission and deciding whether to await or cancel in-flight turns stays with the host. Steps 3 through 6 are the levers: <code>park</code>/<code>close</code>, the claim and wait handbacks, provider <code>close</code>, and trace <code>flush</code>. Each is an explicit call with no hidden ordering. Anything lash cannot expose as a lever without becoming an orchestrator (signal handling, drain deadlines, readiness endpoints) is host territory by design.</p>
       <p>The <a href="./example-agent-service.html">agent service</a> example wires the subset a stateless request/response host owns: an axum graceful-shutdown signal stops admission, then the process closes its retained provider handle and flushes its trace sink before exit.</p>
-      <p>A host that runs its own durable process worker has one more terminal-writing step, orthogonal to the session drain above: <code>DurableProcessWorker::drain_owner_bound_work()</code>. lash does not fold it into a facade drain, because only a host that constructs the worker — directly through <code>lash::durability::DurableProcessWorker::new</code>, or reached through <code>RestateProcessDeployment::worker()</code> — owns its lifecycle. Run it inside the worker's own shutdown, after stopping admission and releasing in-flight run leases. It terminalizes every non-terminal <code>OwnerBound</code> row <em>this</em> worker started (the row's <code>first_started.owner</code> equals the worker's lease owner) as <code>Abandoned{OwnerDrain}</code> under a fresh drain lease — the owner completing its own work is the ordinary graceful path, and <code>shell.start</code> processes carry <code>OwnerBound</code>. <code>Rerunnable</code> in-flight work (lashlang engine and subagent turns) takes the opposite contract: the worker just stops the local run task and writes <em>no</em> terminal, leaving the row non-terminal so the next worker re-runs it. Rows another owner started, not-yet-started <code>OwnerBound</code> rows (still claimable by any peer), and <code>ExternallyOwned</code> rows are left untouched. What happens to a host's OwnerBound work when it <em>crashes</em> instead of draining is the subject of <a href="#process-recovery">background process recovery</a>.</p>
+      <p>A host that runs its own durable process worker has one more terminal-writing step, orthogonal to the session drain above: <code>DurableProcessWorker::drain_owner_bound_work()</code>. lash does not fold it into a facade drain, because only a host that constructs the worker (directly through <code>lash::durability::DurableProcessWorker::new</code>, or reached through <code>RestateProcessDeployment::worker()</code>) owns its lifecycle. Run it inside the worker's own shutdown, after stopping admission and releasing in-flight run leases. It terminalizes every non-terminal <code>OwnerBound</code> row <em>this</em> worker started (the row's <code>first_started.owner</code> equals the worker's lease owner) as <code>Abandoned{OwnerDrain}</code> under a fresh drain lease. The owner completing its own work is the ordinary graceful path, and <code>shell.start</code> processes carry <code>OwnerBound</code>. <code>Rerunnable</code> in-flight work (lashlang engine and subagent turns) takes the opposite contract: the worker just stops the local run task and writes <em>no</em> terminal, leaving the row non-terminal so the next worker re-runs it. Rows another owner started, not-yet-started <code>OwnerBound</code> rows (still claimable by any peer), and <code>ExternallyOwned</code> rows are left untouched. What happens to a host's OwnerBound work when it <em>crashes</em> instead of draining is the subject of <a href="#process-recovery">background process recovery</a>.</p>
     </div>
 
     <div class="section" id="process-recovery">
       <div class="section-header">
         <h2>Background Process Recovery</h2>
-        <p>When a host crashes instead of draining, its non-terminal background processes are recovered by the next durable-process-worker sweep any peer drives — on session open, after a start, or on lease expiry. The sweep is not a re-run-everything loop. It obeys each row's declared <strong>Recovery Disposition</strong> (<code>docs/adr/0019-process-recovery-obeys-declared-disposition.md</code>): the required contract, with no default, that a producer stamps at registration — <code>shell.start</code> declares <code>OwnerBound</code>, the lashlang engine and subagent turns declare <code>Rerunnable</code>, and external placeholders declare <code>ExternallyOwned</code>.</p>
+        <p>When a host crashes instead of draining, its non-terminal background processes are recovered by the next durable-process-worker sweep any peer drives, whether on session open, after a start, or on lease expiry. The sweep is not a re-run-everything loop. It obeys each row's declared <strong>Recovery Disposition</strong> (<code>docs/adr/0019-process-recovery-obeys-declared-disposition.md</code>): the required contract, with no default, that a producer stamps at registration. <code>shell.start</code> declares <code>OwnerBound</code>, the lashlang engine and subagent turns declare <code>Rerunnable</code>, and external placeholders declare <code>ExternallyOwned</code>.</p>
       </div>
       <p>The sweep may acquire a free or TTL-expired process lease. Elapsed time alone never terminalizes anything: a started <code>OwnerBound</code> row remains non-terminal even after its holder's lease expires, because lease expiry does not prove whether its external side effects completed. Only the original owner's graceful drain or an operator's explicit authorization converts that uncertainty into a terminal fact.</p>
       <p>The verdict each disposition yields after owner loss:</p>
@@ -202,7 +248,7 @@ Ok(())</code></pre>
           <tbody>
             <tr><td><code>Rerunnable</code></td><td>Claimed and re-executed under a fresh lease, exactly as before this contract existed. The right policy for journaled, idempotent inputs (engine rows, session-turn rows).</td></tr>
             <tr><td><code>OwnerBound</code>, never started</td><td>Any peer may claim and run it: first execution is not re-execution. The runner records the durable <code>first_started</code> fact under its lease immediately before executing.</td></tr>
-            <tr><td><code>OwnerBound</code>, started</td><td>Left non-terminal. Lease expiry is not proof of completion or failure. The row waits until the original owner drains it or an Abandon Request is reconciled — see <a href="#stuck-process">detecting a stuck process</a>.</td></tr>
+            <tr><td><code>OwnerBound</code>, started</td><td>Left non-terminal. Lease expiry is not proof of completion or failure. The row waits until the original owner drains it or an Abandon Request is reconciled (see <a href="#stuck-process">detecting a stuck process</a>).</td></tr>
             <tr><td><code>ExternallyOwned</code></td><td>Never claimed, never executed. Closes only through an external <code>complete_process</code> call or a reconciled Abandon Request. Detached commands (<code>shell.start</code> with <code>detach: true</code>) are born here, already terminal.</td></tr>
           </tbody>
         </table>
@@ -256,7 +302,7 @@ for p in live {
         </div>
         <div class="listing__row">
           <div class="listing__label">the escape hatch</div>
-          <div class="listing__body"><p><code>core.processes().request_abandon(process_id, requested_by, reason)</code> writes a durable <strong>Abandon Request</strong> — the operator's recorded authorization to accept uncertainty (who, when, why). It authorizes <em>exactly one</em> thing: the sweep reconciling the row into <code>Abandoned{ReconciledRequest}</code>, and only once the owner's lease has lapsed. It never terminalizes anything itself, never touches the owner's OS resources, and never fences the owner off — a still-live owner keeps its lease until it expires. The marker is visible to observers while pending and is returned on the <code>ObservedProcess</code> the call yields.</p></div>
+          <div class="listing__body"><p><code>core.processes().request_abandon(process_id, requested_by, reason)</code> writes a durable <strong>Abandon Request</strong>: the operator's recorded authorization to accept uncertainty (who, when, why). It authorizes <em>exactly one</em> thing: the sweep reconciling the row into <code>Abandoned{ReconciledRequest}</code>, and only once the owner's lease has lapsed. It never terminalizes anything itself, never touches the owner's OS resources, and never fences the owner off; a still-live owner keeps its lease until it expires. The marker is visible to observers while pending and is returned on the <code>ObservedProcess</code> the call yields.</p></div>
         </div>
       </div>
     </div>
@@ -264,7 +310,7 @@ for p in live {
     <div class="section" id="process-retention">
       <div class="section-header">
         <h2>Process Retention</h2>
-        <p>Terminal process rows accumulate. The registry never garbage-collects itself — only the host knows how long its consumers still need to await or reconcile a finished process — so retention is one more explicit lever.</p>
+        <p>Terminal process rows accumulate. The registry never garbage-collects itself: only the host knows how long its consumers still need to await or reconcile a finished process. Retention is one more explicit lever.</p>
       </div>
       <p><code>core.processes().prune(cutoff_epoch_ms, ProjectionWatermark::UpTo(cursor))</code> replaces eligible terminal rows with payload-free tombstones after the host projector has acknowledged them. A deployment without a projector must pass <code>ProjectionWatermark::NoProjector</code> explicitly. Their events, wakes, observer edges, leases, and exact tombstone-authorized trigger deliveries are removed, and <code>ProcessPruneReport</code> reports what was reclaimed. Non-terminal rows are never touched. Run <code>core.processes().compact_tombstones(cutoff_epoch_ms, watermark)</code> on the same maintenance cadence as the session store's <code>vacuum</code> / <code>gc_unreachable</code> reclamation (see <a href="./persistence.html#garbage-collection">persistence</a>). Compaction refuses tombstones still guarding trigger deliveries and remains blocked while a configured trigger store is unhealthy.</p>
       <aside class="gotcha">
@@ -316,11 +362,11 @@ for p in live {
         </div>
         <div class="listing__row">
           <div class="listing__label">busy vs lease-lost</div>
-          <div class="listing__body"><p><code>Busy</code> means a live owner holds the lane; back off and retry the same session. <code>LeaseLost</code> means ownership moved; reopen the session before retrying. <code>store_commit_failed</code> is deliberately neither retryable nor terminal — the code cannot distinguish transient store I/O from a real conflict — so reload and apply your own bounded policy. The full conflict-retry shape is on <a href="./persistence.html#cas-conflicts">persistence</a>.</p></div>
+          <div class="listing__body"><p><code>Busy</code> means a live owner holds the lane; back off and retry the same session. <code>LeaseLost</code> means ownership moved; reopen the session before retrying. <code>store_commit_failed</code> is deliberately neither retryable nor terminal: the code cannot distinguish transient store I/O from a real conflict. Reload and apply your own bounded policy. The full conflict-retry shape is on <a href="./persistence.html#cas-conflicts">persistence</a>.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">provider failures</div>
-          <div class="listing__body"><p>A failed LLM call finishes the turn rather than erroring, so its typed retryability rides on <code>TurnIssue.retryable</code> and <code>TurnIssue.provider_failure_kind</code> (<code>Transport</code>, <code>Timeout</code>, <code>Http</code>, <code>Stream</code>, <code>Auth</code>, <code>Validation</code>, <code>Quota</code>, <code>Unsupported</code>, <code>Unknown</code>) — read them off the finished turn's issues, not off an <code>EmbedError</code>.</p></div>
+          <div class="listing__body"><p>A failed LLM call finishes the turn rather than erroring, so its typed retryability rides on <code>TurnIssue.retryable</code> and <code>TurnIssue.provider_failure_kind</code> (<code>Transport</code>, <code>Timeout</code>, <code>Http</code>, <code>Stream</code>, <code>Auth</code>, <code>Validation</code>, <code>Quota</code>, <code>Unsupported</code>, <code>Unknown</code>); read them off the finished turn's issues, not off an <code>EmbedError</code>.</p></div>
         </div>
       </div>
     </div>
@@ -349,7 +395,7 @@ for p in live {
     <div class="section" id="monitoring">
       <div class="section-header">
         <h2>Monitoring</h2>
-        <p>Per-turn timing, cumulative token usage, and traces come off the runtime directly — wire them into whatever metrics and tracing stack the host already runs.</p>
+        <p>Per-turn timing, cumulative token usage, and traces come off the runtime directly; wire them into whatever metrics and tracing stack the host already runs.</p>
       </div>
       <pre data-lang="rust" data-snippet="operations#monitoring"><code>// Per-turn timing, straight off the runtime clock.
 let started_at = output.result.started_at(); // SystemTime the turn was claimed
@@ -362,7 +408,7 @@ let _ = (usage.entry_count, usage.usage);</code></pre>
       <div class="listing">
         <div class="listing__row">
           <div class="listing__label">timing</div>
-          <div class="listing__body"><p><code>TurnResult::started_at</code> is the wall-clock instant the runtime claimed the turn; <code>TurnResult::duration</code> is the whole-turn window — claim through final commit and post-persist hooks — on the runtime clock's monotonic source. Export both as request latency.</p></div>
+          <div class="listing__body"><p><code>TurnResult::started_at</code> is the wall-clock instant the runtime claimed the turn; <code>TurnResult::duration</code> is the whole-turn window (claim through final commit and post-persist hooks) on the runtime clock's monotonic source. Export both as request latency.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">usage</div>
@@ -370,7 +416,7 @@ let _ = (usage.entry_count, usage.usage);</code></pre>
         </div>
         <div class="listing__row">
           <div class="listing__label">traces</div>
-          <div class="listing__body"><p>Attach a trace sink and flush it before exit. JSONL flush fsyncs the file; for OTel, span-export durability stays the host's duty — flush your own <code>TracerProvider</code>. See <a href="./tracing.html">tracing</a>.</p></div>
+          <div class="listing__body"><p>Attach a trace sink and flush it before exit. JSONL flush fsyncs the file; for OTel, span-export durability stays the host's duty: flush your own <code>TracerProvider</code>. See <a href="./tracing.html">tracing</a>.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">admission</div>

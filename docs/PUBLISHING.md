@@ -129,6 +129,33 @@ commit appears in the next range and carries its required categorized trailer,
 but the collector excludes that mechanical note so it cannot satisfy the next
 release gate by itself. Every other commit remains eligible to contribute.
 
+### Releases that require store recreation
+
+A change to any store schema version (`lash-sqlite-store`'s `PRAGMA
+user_version`, or a `lash-postgres-store` component version) is breaking for
+every persistent deployment: the new binary refuses the existing store, and the
+only way to adopt the release is to recreate durable state from empty. That
+release's notes must say so, and must say it is one-way. Lead the section with
+`Breaking:` and carry three facts:
+
+```text
+Release-Notes:
+- Breaking: the Postgres store schema version changed. Persistent deployments
+  must recreate their stores (and the effect journal alongside them); lash
+  maintains no migration chain.
+- Adopting this release is forward-only. Once stores are recreated, the previous
+  version refuses to open them and will not boot. There is no rollback and no
+  restore procedure; recovery from a failed bump is fix-forward.
+- Pre-flight checklist and the store/journal coupling: docs `operations.html`,
+  "Bumping lash".
+```
+
+Write those three (recreation required, forward-only with no rollback, where the
+checklist lives) even when the schema move looks minor. An operator who reads
+only the release notes must not discover mid-incident that redeploying the
+previous image cannot work. Do not add a rollback or restore procedure to the
+notes; none exists, and describing one would be a lie an operator acts on.
+
 ## Docs code snippets
 
 Every Rust code block on a published docs page is compiled. The sources live in

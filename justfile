@@ -187,6 +187,9 @@ restate-postgres-workers-e2e:
 process-operations-e2e:
   bash "{{repo}}/scripts/process-operations-e2e.sh"
 
+version-bump-recreation-e2e:
+  bash "{{repo}}/scripts/version-bump-recreation-e2e.sh"
+
 stack-budget:
   bash "{{repo}}/scripts/ci-stack-budget.sh"
 

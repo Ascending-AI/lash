@@ -59,8 +59,8 @@
         <p>lash rejects a persistent database unless its schema version matches exactly: SQLite uses <code>PRAGMA user_version</code>, and Postgres records component versions.</p>
       </div>
       <aside class="contract">
-        <strong>Start fresh for this release</strong>
-        <p>The SQLite schema is version 23, and the Postgres schema component is version 34. Each continuation anchor binds its node, checkpoint, and source session as one immutable snapshot. Persistent deployments must use a fresh database when either exact version changes; there is no migration chain by policy.</p>
+        <strong>Start fresh when the version moves</strong>
+        <p>Each exact version is pinned in its store crate, and a refused open names the version found alongside the version expected. Each continuation anchor binds its node, checkpoint, and source session as one immutable snapshot. Persistent deployments must use a fresh database when either exact version changes; there is no migration chain by policy, and adopting a new version is forward-only (see <a href="./operations.html#version-bumps">bumping lash</a>).</p>
       </aside>
     </div>
 
