@@ -65,7 +65,25 @@ until curl -fsS --max-time 2 "http://127.0.0.1:${minio_port}/minio/health/live" 
   fi
   sleep 1
 done
-"${compose[@]}" wait minio-init >/dev/null
+while true; do
+  minio_init_id="$("${compose[@]}" ps -a -q minio-init)"
+  if [ -n "$minio_init_id" ]; then
+    minio_init_status="$(docker inspect -f '{{.State.Status}}' "$minio_init_id")"
+    if [ "$minio_init_status" = "exited" ]; then
+      minio_init_exit="$(docker inspect -f '{{.State.ExitCode}}' "$minio_init_id")"
+      if [ "$minio_init_exit" != "0" ]; then
+        echo "minio-init exited with status $minio_init_exit" >&2
+        exit 1
+      fi
+      break
+    fi
+  fi
+  if ((SECONDS >= deadline)); then
+    echo "minio-init did not complete before timeout" >&2
+    exit 1
+  fi
+  sleep 1
+done
 until curl -fsS --max-time 2 "http://127.0.0.1:${restate_admin_port}/deployments" >"$artifact_dir/restate-deployments.json"; do
   if ((SECONDS >= deadline)); then
     echo "Restate did not become ready" >&2
