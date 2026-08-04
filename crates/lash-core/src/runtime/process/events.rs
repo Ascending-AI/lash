@@ -293,6 +293,8 @@ pub enum ProcessAwaitOutput {
 }
 
 impl ProcessAwaitOutput {
+    /// Projects only terminal process outcomes to their durable status for store implementors,
+    /// returning `None` for non-terminal or deferred output.
     pub fn terminal_status(&self) -> Option<ProcessStatus> {
         match self {
             Self::Success { .. } => Some(ProcessStatus::Completed),
@@ -303,6 +305,8 @@ impl ProcessAwaitOutput {
         }
     }
 
+    /// Builds a `ProcessAwaitOutput` from tool output data for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn from_tool_output(output: crate::ToolCallOutput) -> Self {
         let control = output.control;
         match output.outcome {
@@ -325,6 +329,8 @@ impl ProcessAwaitOutput {
         }
     }
 
+    /// Extracts the tool output outcome for store and durable-substrate implementors while
+    /// persisting and coordinating durable process execution.
     pub fn into_tool_output(self) -> crate::ToolCallOutput {
         match self {
             Self::Success { value, control } => {
@@ -464,6 +470,8 @@ pub struct ProcessEventAppendRequest {
 }
 
 impl ProcessEventAppendRequest {
+    /// Constructs a `ProcessEventAppendRequest` for store and durable-substrate implementors while
+    /// persisting and coordinating durable process execution.
     pub fn new(event_type: impl Into<String>, payload: serde_json::Value) -> Self {
         Self {
             event_type: event_type.into(),
@@ -472,6 +480,8 @@ impl ProcessEventAppendRequest {
         }
     }
 
+    /// Attaches a replay key for process-store implementors so an equivalent event append is
+    /// idempotent within that key.
     pub fn with_replay_key(mut self, replay_key: impl Into<String>) -> Self {
         self.replay = Some(crate::RuntimeReplay {
             key: replay_key.into(),
@@ -479,11 +489,15 @@ impl ProcessEventAppendRequest {
         self
     }
 
+    /// Sets the optional replay carried by a `ProcessEventAppendRequest` for store and
+    /// durable-substrate implementors while persisting and coordinating durable process execution.
     pub fn with_optional_replay(mut self, replay: Option<crate::RuntimeReplay>) -> Self {
         self.replay = replay;
         self
     }
 
+    /// Builds a cancellation-request event for process-store implementors with a payload-derived
+    /// replay key, making repeated requests with the same reason idempotent.
     pub fn cancel_requested(process_id: &str, reason: Option<String>) -> Self {
         let payload = serde_json::json!({
             "reason": reason,
@@ -495,6 +509,8 @@ impl ProcessEventAppendRequest {
         ))
     }
 
+    /// Builds a first-start event for process-store implementors keyed by attempt number so a retry
+    /// cannot alias the preceding execution attempt.
     pub fn first_started(
         process_id: &str,
         started: &super::model::ProcessStarted,
@@ -513,6 +529,8 @@ impl ProcessEventAppendRequest {
         ))
     }
 
+    /// Builds a wait-entry event for process-store implementors keyed by wait identity and start
+    /// time so replay cannot duplicate the transition.
     pub fn wait_entered(process_id: &str, wait: &super::model::WaitState) -> Self {
         Self::new("process.waiting", serde_json::json!({ "wait": wait })).with_replay_key(format!(
             "process:{process_id}:wait:{}:since:{}:entered",
@@ -521,6 +539,8 @@ impl ProcessEventAppendRequest {
         ))
     }
 
+    /// Builds a wait-clear event for process-store implementors keyed to the exact wait identity
+    /// and start time being resumed.
     pub fn wait_cleared(process_id: &str, wait: &super::model::WaitState) -> Self {
         Self::new("process.resumed", serde_json::json!({ "wait": wait })).with_replay_key(format!(
             "process:{process_id}:wait:{}:since:{}:cleared",
@@ -529,6 +549,8 @@ impl ProcessEventAppendRequest {
         ))
     }
 
+    /// Builds the single replay-stable external-reference event for process-store implementors
+    /// binding durable backend work.
     pub fn external_ref_set(
         process_id: &str,
         external_ref: &super::model::ProcessExternalRef,
@@ -540,6 +562,8 @@ impl ProcessEventAppendRequest {
         .with_replay_key(format!("process:{process_id}:external-ref"))
     }
 
+    /// Builds the replay-stable abandon-request event for process-store implementors; repeated
+    /// requests for the process converge on the same append identity.
     pub fn abandon_requested(process_id: &str, request: &super::model::AbandonRequest) -> Self {
         Self::new(
             "process.abandon_requested",
@@ -548,6 +572,8 @@ impl ProcessEventAppendRequest {
         .with_replay_key(format!("process:{process_id}:abandon-requested"))
     }
 
+    /// Builds an observer-add event for process-store implementors whose replay key includes
+    /// process, session, and observer authority.
     pub fn observer_added(process_id: &str, session: &str, by: &ProcessObserverBy) -> Self {
         Self::new(
             "process.observer_added",
@@ -559,6 +585,8 @@ impl ProcessEventAppendRequest {
         ))
     }
 
+    /// Builds an observer-remove event for process-store implementors whose replay key includes
+    /// process, session, and observer authority.
     pub fn observer_removed(process_id: &str, session: &str, by: &ProcessObserverBy) -> Self {
         Self::new(
             "process.observer_removed",
@@ -570,6 +598,8 @@ impl ProcessEventAppendRequest {
         ))
     }
 
+    /// Builds a replay-stable subscription-retarget event for process-store implementors, encoding
+    /// an absent target with the reserved `none` replay component.
     pub fn subscription_retargeted(process_id: &str, target: Option<&str>) -> Self {
         Self::new(
             "process.subscription_retargeted",

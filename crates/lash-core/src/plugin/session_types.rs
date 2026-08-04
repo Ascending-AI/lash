@@ -82,10 +82,14 @@ impl SessionSnapshot {
         )
     }
 
+    /// Exposes read view to store and durable-substrate implementors while snapshotting or
+    /// restoring durable session state.
     pub fn read_view(&self) -> crate::SessionReadView {
         crate::SessionReadView::from_snapshot(self)
     }
 
+    /// Replaces the active frame's readable message tail for store implementors restoring a
+    /// snapshot; transient messages are not inserted into the graph.
     pub fn replace_active_read_state(&mut self, messages: &[crate::Message]) {
         if let Some(frame_node_id) = self.current_frame_node_id.as_deref() {
             self.session_graph
@@ -100,6 +104,8 @@ impl SessionSnapshot {
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 
+    /// Appends non-transient messages after the active leaf for store implementors applying a
+    /// snapshot delta in source order.
     pub fn append_active_read_delta(&mut self, messages: &[crate::Message]) {
         self.session_graph.append_active_read_delta(messages);
         self.current_frame_node_id = self
@@ -147,6 +153,8 @@ impl AgentFrameReason {
         Self(label.into())
     }
 
+    /// Constructs the canonical initial-frame reason for store and protocol implementors restoring
+    /// a session that has not yet opened another frame.
     pub fn initial() -> Self {
         Self::new(Self::INITIAL)
     }
@@ -155,6 +163,8 @@ impl AgentFrameReason {
         Self::new(Self::COMPACTION)
     }
 
+    /// Exposes the stable reason label to store and protocol implementors for persistence and
+    /// diagnostics.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -241,6 +251,8 @@ impl AgentFrameAssignment {
         }
     }
 
+    /// Builds a `AgentFrameAssignment` from policy data for store, effect-host, and protocol
+    /// implementors while materializing, executing, or persisting a session turn.
     pub fn from_policy(policy: SessionPolicy) -> Self {
         Self {
             policy,
@@ -376,6 +388,8 @@ pub enum SessionRelation {
 }
 
 impl SessionRelation {
+    /// Exposes the parent session ID to store implementors for child and fork relations, returning
+    /// `None` for a root session.
     pub fn parent_session_id(&self) -> Option<&str> {
         match self {
             Self::Root => None,
@@ -457,6 +471,8 @@ pub struct SessionCreateRequest {
 }
 
 impl SessionCreateRequest {
+    /// Builds a root-session request with a fresh UUID for protocol implementors materializing a
+    /// new independent session.
     pub fn root(start: SessionStartPoint, plugin_options: PluginOptions) -> Self {
         Self {
             session_id: Some(uuid::Uuid::new_v4().to_string()),
@@ -474,6 +490,8 @@ impl SessionCreateRequest {
         }
     }
 
+    /// Builds a child-session request with a fresh UUID and inherited policy selection for protocol
+    /// implementors materializing nested work.
     pub fn child_session(
         parent_session_id: impl Into<String>,
         start: SessionStartPoint,
@@ -498,6 +516,8 @@ impl SessionCreateRequest {
         }
     }
 
+    /// Builds a child-session request with an explicit policy and usage-ledger source for protocol
+    /// and process-engine implementors materializing nested work.
     pub fn child(
         parent_session_id: impl Into<String>,
         start: SessionStartPoint,
@@ -540,21 +560,29 @@ impl SessionCreateRequest {
         }
     }
 
+    /// Sets the plugin source carried by a `SessionCreateRequest` for protocol and process-engine
+    /// implementors while preparing or executing plugin and tool work.
     pub fn with_plugin_source(mut self, plugin_source: SessionPluginSource) -> Self {
         self.plugin_source = plugin_source;
         self
     }
 
+    /// Sets the session id carried by a `SessionCreateRequest` for store, effect-host, and protocol
+    /// implementors while materializing, executing, or persisting a session turn.
     pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
         self.session_id = Some(session_id.into());
         self
     }
 
+    /// Sets the initial nodes carried by a `SessionCreateRequest` for store, effect-host, and
+    /// protocol implementors while materializing, executing, or persisting a session turn.
     pub fn with_initial_nodes(mut self, initial_nodes: Vec<SessionAppendNode>) -> Self {
         self.initial_nodes = initial_nodes;
         self
     }
 
+    /// Sets the observed processes carried by a `SessionCreateRequest` for store and process-engine
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_observed_processes(
         mut self,
         process_ids: impl IntoIterator<Item = impl Into<crate::ProcessId>>,
@@ -563,16 +591,22 @@ impl SessionCreateRequest {
         self
     }
 
+    /// Sets the tool access carried by a `SessionCreateRequest` for protocol and process-engine
+    /// implementors while preparing or executing plugin and tool work.
     pub fn with_tool_access(mut self, tool_access: SessionToolAccess) -> Self {
         self.tool_access = tool_access;
         self
     }
 
+    /// Sets the subagent context carried by a `SessionCreateRequest` for store, effect-host, and
+    /// protocol implementors while materializing, executing, or persisting a session turn.
     pub fn with_subagent_context(mut self, subagent: SubagentSessionContext) -> Self {
         self.subagent = Some(subagent);
         self
     }
 
+    /// Records causal provenance for protocol and process-engine implementors when the request is a
+    /// child; root requests remain unchanged.
     pub fn with_caused_by(mut self, caused_by: crate::CausalRef) -> Self {
         if let SessionRelation::Child {
             caused_by: cause, ..
@@ -583,11 +617,15 @@ impl SessionCreateRequest {
         self
     }
 
+    /// Sets the context overlay carried by a `SessionCreateRequest` for store, effect-host, and
+    /// protocol implementors while materializing, executing, or persisting a session turn.
     pub fn with_context_overlay(mut self, context_overlay: SessionContextOverlay) -> Self {
         self.context_overlay = context_overlay;
         self
     }
 
+    /// Labels child-session token cost for protocol and administration embedders so committed usage
+    /// is attributed to the correct parent-ledger source.
     pub fn with_usage_source(mut self, usage_source: impl Into<String>) -> Self {
         self.usage_source = Some(usage_source.into());
         self
@@ -603,6 +641,7 @@ pub struct SessionToolAccess {
 }
 
 impl SessionToolAccess {
+    /// Lets protocol implementors apply the session's persisted tool-hiding policy by exact name.
     pub fn hides(&self, name: &str) -> bool {
         self.hidden_tools.contains(name)
     }

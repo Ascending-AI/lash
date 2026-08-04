@@ -74,6 +74,8 @@ pub struct RuntimeSessionState {
 }
 
 impl RuntimeSessionState {
+    /// Builds a `RuntimeSessionState` from snapshot data for protocol and process-engine
+    /// implementors while materializing or restoring protocol session state.
     pub fn from_snapshot(snapshot: SessionSnapshot) -> Self {
         let agent_frames = snapshot
             .session_graph
@@ -105,6 +107,8 @@ impl RuntimeSessionState {
         state
     }
 
+    /// Projects this `RuntimeSessionState` into snapshot form for protocol and process-engine
+    /// implementors while materializing or restoring protocol session state.
     pub fn to_snapshot(&self) -> SessionSnapshot {
         SessionSnapshot {
             session_id: self.session_id.clone(),
@@ -126,6 +130,8 @@ impl RuntimeSessionState {
         }
     }
 
+    /// Updates snapshot state for protocol and process-engine implementors while materializing or
+    /// restoring protocol session state.
     pub fn apply_snapshot(&mut self, snapshot: &SessionSnapshot) {
         self.session_id = snapshot.session_id.clone();
         self.policy = snapshot.policy.clone();
@@ -146,6 +152,8 @@ impl RuntimeSessionState {
         self.checkpoint_ref = snapshot.checkpoint_ref.clone();
     }
 
+    /// Folds durable token-ledger entries into a per-source report for protocol and administration
+    /// embedders without mutating the ledger.
     pub fn usage_report(&self) -> super::usage::SessionUsageReport {
         super::usage::SessionUsageReport::from_entries(&self.token_ledger)
     }
@@ -157,6 +165,8 @@ impl RuntimeSessionState {
         )
     }
 
+    /// Replaces the current frame's readable message tail for protocol implementors restoring
+    /// state; transient messages are excluded and the frame projection is refreshed.
     pub fn replace_active_read_state(&mut self, messages: &[Message]) {
         self.ensure_agent_frame_initialized();
         if let Some(frame_node_id) = self.current_frame_node_id.as_deref() {
@@ -168,12 +178,16 @@ impl RuntimeSessionState {
         self.refresh_current_frame_projection();
     }
 
+    /// Appends non-transient messages in source order for protocol implementors restoring an
+    /// incremental session delta, then refreshes the current frame projection.
     pub fn append_active_read_delta(&mut self, messages: &[Message]) {
         self.ensure_agent_frame_initialized();
         self.session_graph.append_active_read_delta(messages);
         self.refresh_current_frame_projection();
     }
 
+    /// Appends non-transient conversation messages in source order for protocol implementors and
+    /// refreshes the current frame projection.
     pub fn append_active_conversation_messages(&mut self, messages: &[Message]) {
         self.ensure_agent_frame_initialized();
         self.session_graph.append_active_read_delta(messages);
@@ -191,18 +205,27 @@ impl RuntimeSessionState {
         self.refresh_current_frame_projection();
     }
 
+    /// Exposes read view to protocol and process-engine implementors while materializing or
+    /// restoring protocol session state.
     pub fn read_view(&self) -> crate::SessionReadView {
         crate::SessionReadView::from_persisted_state(self)
     }
 
+    /// Exposes session graph to protocol and process-engine implementors while materializing or
+    /// restoring protocol session state.
     pub fn session_graph(&self) -> &crate::SessionGraph {
         &self.session_graph
     }
 
+    /// Exposes policy to protocol and process-engine implementors while materializing or restoring
+    /// protocol session state.
     pub fn policy(&self) -> &SessionPolicy {
         self.effective_policy()
     }
 
+    /// Advances resident state to a store's committed head revision and realized timestamps, adopts
+    /// durable artifact references, and clears transient snapshots so protocol and store
+    /// implementors cannot reuse stale bytes.
     pub fn apply_persisted_commit_result(&mut self, result: crate::store::RuntimeCommitResult) {
         self.head_revision = result.head_revision;
         self.checkpoint_ref = Some(result.checkpoint_ref);
@@ -251,12 +274,16 @@ impl RuntimeSessionState {
         self.persisted_node_ids.extend(node_ids);
     }
 
+    /// Clears in-memory tool, plugin, and execution-state snapshots for protocol implementors after
+    /// their durable references have become authoritative.
     pub fn discard_runtime_snapshots(&mut self) {
         self.tool_state_snapshot = None;
         self.plugin_snapshot = None;
         self.execution_state_snapshot = None;
     }
 
+    /// Updates execution state snapshot state for protocol and process-engine implementors while
+    /// materializing or restoring protocol session state.
     pub fn set_execution_state_snapshot(&mut self, execution_state_snapshot: Option<Vec<u8>>) {
         if execution_state_snapshot.is_none() {
             self.execution_state_ref = None;
@@ -264,10 +291,15 @@ impl RuntimeSessionState {
         self.execution_state_snapshot = execution_state_snapshot;
     }
 
+    /// Exposes execution state snapshot to protocol and process-engine implementors while
+    /// materializing or restoring protocol session state. Returns `None` when no execution state
+    /// snapshot is present.
     pub fn execution_state_snapshot(&self) -> Option<&[u8]> {
         self.execution_state_snapshot.as_deref()
     }
 
+    /// Updates plugin snapshots state for protocol and process-engine implementors while
+    /// materializing or restoring protocol session state.
     pub fn refresh_plugin_snapshots(&mut self, plugins: &crate::PluginSession) {
         let tool_registry = plugins.tool_registry();
         let generation = tool_registry.generation();
@@ -314,24 +346,34 @@ impl RuntimeSessionState {
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 
+    /// Exposes current agent frame to protocol and process-engine implementors while materializing
+    /// or restoring protocol session state. Returns `None` when no current agent frame is present.
     pub fn current_agent_frame(&self) -> Option<&crate::AgentFrameRecord> {
         self.agent_frames.iter().find(|frame| {
             Some(frame.frame_node_id.as_str()) == self.current_frame_node_id.as_deref()
         })
     }
 
+    /// Exposes effective policy to protocol and process-engine implementors while materializing or
+    /// restoring protocol session state.
     pub fn effective_policy(&self) -> &SessionPolicy {
         &self.policy
     }
 
+    /// Exposes the protocol options captured for the current agent frame so protocol implementors
+    /// restore the frame's durable turn configuration.
     pub fn effective_protocol_turn_options(&self) -> &crate::ProtocolTurnOptions {
         &self.protocol_turn_options
     }
 
+    /// Ensures protocol implementors restoring legacy state have a canonical initial agent frame
+    /// before reading or mutating frame-scoped history.
     pub fn ensure_agent_frame_initialized(&mut self) {
         self.ensure_agent_frame_initialized_with_clock(&crate::SystemClock);
     }
 
+    /// Ensures agent frame initialized with clock exists for protocol and process-engine
+    /// implementors while materializing or restoring protocol session state.
     pub fn ensure_agent_frame_initialized_with_clock(&mut self, clock: &dyn crate::Clock) {
         if let Some(frame_node_id) = self
             .session_graph
@@ -361,6 +403,8 @@ impl RuntimeSessionState {
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 
+    /// Resets initial agent frame with clock for protocol and process-engine implementors while
+    /// materializing or restoring protocol session state.
     pub fn reset_initial_agent_frame_with_clock(
         &mut self,
         assignment: crate::AgentFrameAssignment,

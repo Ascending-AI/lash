@@ -17,6 +17,8 @@ pub struct ModelSpec {
 }
 
 impl ModelSpec {
+    /// Constructs provider-default model policy for protocol implementors with a non-zero prompt
+    /// budget, no known output ceiling, and no extra capabilities.
     pub fn new(id: impl Into<String>, context_window_tokens: NonZeroUsize) -> Self {
         Self {
             id: id.into(),
@@ -29,6 +31,8 @@ impl ModelSpec {
         }
     }
 
+    /// Sets the limits carried by a `ModelSpec` for protocol and process-engine implementors while
+    /// materializing protocol-specific session and turn state.
     pub fn with_limits(
         id: impl Into<String>,
         variant: ReasoningSelection,
@@ -42,11 +46,15 @@ impl ModelSpec {
         }
     }
 
+    /// Sets the variant carried by a `ModelSpec` for protocol and process-engine implementors while
+    /// materializing protocol-specific session and turn state.
     pub fn with_variant(mut self, variant: ReasoningSelection) -> Self {
         self.variant = variant;
         self
     }
 
+    /// Sets the capability carried by a `ModelSpec` for protocol and process-engine implementors
+    /// while materializing protocol-specific session and turn state.
     pub fn with_capability(mut self, capability: ModelCapability) -> Self {
         self.capability = capability;
         self
@@ -69,6 +77,8 @@ impl ModelSpec {
         ))
     }
 
+    /// Exposes the non-zero prompt budget protocol implementors use for history pruning rather than
+    /// the optional output-token ceiling.
     pub fn context_window_tokens(&self) -> usize {
         self.limits.context_window_tokens.get()
     }
@@ -144,6 +154,8 @@ pub struct ModelLimits {
 }
 
 impl ModelLimits {
+    /// Validates model limits for protocol implementors, rejecting zero prompt budgets and present
+    /// zero output capacities while preserving an unknown output ceiling as `None`.
     pub fn from_token_limits(
         context_window_tokens: usize,
         output_token_capacity: Option<usize>,

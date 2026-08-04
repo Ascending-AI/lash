@@ -29,14 +29,17 @@ pub type ProcessOutcome = ProcessAwaitOutput;
 pub struct ProcessChangeCursor(u64);
 
 impl ProcessChangeCursor {
+    /// Constructs the backend-defined initial change-feed position for process-store implementors; callers must not treat it as a timestamp.
     pub fn initial() -> Self {
         Self(0)
     }
 
+    /// Wraps an opaque backend change-feed sequence for process-store implementors without promising cross-backend comparability.
     pub fn from_store_sequence(sequence: u64) -> Self {
         Self(sequence)
     }
 
+    /// Exposes the opaque sequence to the process-store implementor that issued it; consumers must not compare cursors from different backends.
     pub fn store_sequence(self) -> u64 {
         self.0
     }
@@ -135,6 +138,7 @@ impl PartialEq for ProcessInput {
 }
 
 impl ProcessInput {
+    /// Exposes engine kind to store and process-engine implementors while persisting and coordinating durable process execution.
     pub fn engine_kind(&self) -> &'static str {
         match self {
             Self::ToolCall { .. } => "tool",
@@ -144,6 +148,7 @@ impl ProcessInput {
         }
     }
 
+    /// Exposes engine-specific kind to store and process-engine implementors, returning `None` for runtime-owned process primitives.
     pub fn engine_specific_kind(&self) -> Option<&str> {
         match self {
             Self::Engine { kind, .. } => Some(kind.as_str()),
@@ -192,10 +197,12 @@ pub struct AbandonRequest {
 pub struct ProcessExecutionEnvRef(String);
 
 impl ProcessExecutionEnvRef {
+    /// Constructs a `ProcessExecutionEnvRef` for store and durable-substrate implementors suspending or resuming durable process execution.
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
 
+    /// Exposes the opaque stable reference for continuation-store implementors; its contents carry no ordering or backend-independent structure.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -217,6 +224,7 @@ pub struct ProcessExecutionEnvSpec {
 }
 
 impl ProcessExecutionEnvSpec {
+    /// Constructs a `ProcessExecutionEnvSpec` for protocol and process-engine implementors running a durable process.
     pub fn new(plugin_options: crate::PluginOptions, policy: crate::SessionPolicy) -> Self {
         Self {
             plugin_options,
@@ -224,15 +232,18 @@ impl ProcessExecutionEnvSpec {
         }
     }
 
+    /// Exposes the stable environment reference to protocol and process-engine implementors running a durable process.
     pub fn stable_ref(&self) -> Result<ProcessExecutionEnvRef, serde_json::Error> {
         crate::stable_hash::stable_json_sha256_hex(self)
             .map(|hash| ProcessExecutionEnvRef::new(format!("process-env:sha256:{hash}")))
     }
 
+    /// Serializes a process execution environment for continuation-store implementors, preserving the stable reference alongside plugin and protocol state.
     pub fn to_store_bytes(&self) -> Result<Vec<u8>, serde_json::Error> {
         serde_json::to_vec(self)
     }
 
+    /// Deserializes a stored execution environment for process-engine implementors and returns malformed payloads as plugin errors.
     pub fn from_store_bytes(bytes: &[u8]) -> Result<Self, serde_json::Error> {
         serde_json::from_slice(bytes)
     }
@@ -351,15 +362,20 @@ pub struct ProcessSpawnProvenance {
 }
 
 impl ProcessStartOptions {
+    /// Constructs default start options for store and durable-substrate implementors coordinating durable process execution.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets the initial observer carried by a `ProcessStartOptions` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_initial_observer(mut self, session_id: impl Into<SessionId>) -> Self {
         self.initial_observers.push(session_id.into());
         self
     }
 
+    /// Sets the initial observers carried by a `ProcessStartOptions` for store and
+    /// durable-substrate implementors while persisting and coordinating durable process execution.
     pub fn with_initial_observers(
         mut self,
         observers: impl IntoIterator<Item = impl Into<SessionId>>,
@@ -368,11 +384,15 @@ impl ProcessStartOptions {
         self
     }
 
+    /// Sets the spawn provenance carried by a `ProcessStartOptions` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_spawn_provenance(mut self, spawn_provenance: ProcessSpawnProvenance) -> Self {
         self.spawn_provenance = Some(spawn_provenance);
         self
     }
 
+    /// Exposes execution context to store and durable-substrate implementors while persisting and
+    /// coordinating durable process execution.
     pub fn execution_context(&self, scope: &ProcessOpScope<'_>) -> ProcessExecutionContext {
         ProcessExecutionContext {
             causal_invocation: scope.parent_invocation.clone(),
@@ -406,6 +426,8 @@ pub struct ProcessStartRequest {
 }
 
 impl ProcessStartRequest {
+    /// Constructs a `ProcessStartRequest` for store and durable-substrate implementors while
+    /// persisting and coordinating durable process execution.
     pub fn new(
         id: impl Into<ProcessId>,
         input: ProcessInput,
@@ -441,26 +463,36 @@ impl ProcessStartRequest {
         )
     }
 
+    /// Sets the env spec carried by a `ProcessStartRequest` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_env_spec(mut self, env_spec: ProcessExecutionEnvSpec) -> Self {
         self.env_spec = Some(env_spec);
         self
     }
 
+    /// Sets the max attempts carried by a `ProcessStartRequest` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_max_attempts(mut self, max_attempts: Option<u32>) -> Self {
         self.max_attempts = max_attempts;
         self
     }
 
+    /// Sets the identity carried by a `ProcessStartRequest` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_identity(mut self, identity: ProcessIdentity) -> Self {
         self.identity = Some(identity);
         self
     }
 
+    /// Sets the wake session id carried by a `ProcessStartRequest` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_wake_session_id(mut self, wake_session_id: Option<SessionId>) -> Self {
         self.wake_session_id = wake_session_id;
         self
     }
 
+    /// Sets the observers carried by a `ProcessStartRequest` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_observers(
         mut self,
         observers: impl IntoIterator<Item = impl Into<SessionId>>,
@@ -469,6 +501,8 @@ impl ProcessStartRequest {
         self
     }
 
+    /// Sets the event types carried by a `ProcessStartRequest` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_event_types(
         mut self,
         event_types: impl IntoIterator<Item = ProcessEventType>,
@@ -477,6 +511,8 @@ impl ProcessStartRequest {
         self
     }
 
+    /// Sets the extra event types carried by a `ProcessStartRequest` for store and
+    /// durable-substrate implementors while persisting and coordinating durable process execution.
     pub fn with_extra_event_types(
         mut self,
         event_types: impl IntoIterator<Item = ProcessEventType>,
@@ -485,6 +521,8 @@ impl ProcessStartRequest {
         self
     }
 
+    /// Extracts the registration outcome for store and durable-substrate implementors while
+    /// persisting and coordinating durable process execution.
     pub fn into_registration(self, env_ref: Option<ProcessExecutionEnvRef>) -> ProcessRegistration {
         let mut registration = ProcessRegistration::new(
             self.id,
@@ -518,6 +556,8 @@ pub struct ProcessProvenance {
 }
 
 impl ProcessProvenance {
+    /// Constructs a `ProcessProvenance` for store and process-engine implementors while persisting
+    /// and coordinating durable process execution.
     pub fn new(originator: ProcessOriginator) -> Self {
         Self {
             originator,
@@ -525,14 +565,20 @@ impl ProcessProvenance {
         }
     }
 
+    /// Constructs a `ProcessProvenance` using host semantics for store and process-engine
+    /// implementors while persisting and coordinating durable process execution.
     pub fn host() -> Self {
         Self::new(ProcessOriginator::host())
     }
 
+    /// Constructs a `ProcessProvenance` using session semantics for store and process-engine
+    /// implementors while persisting and coordinating durable process execution.
     pub fn session(scope: SessionScope) -> Self {
         Self::new(ProcessOriginator::session(scope))
     }
 
+    /// Sets the caused by carried by a `ProcessProvenance` for store and process-engine
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_caused_by(mut self, caused_by: Option<crate::CausalRef>) -> Self {
         self.caused_by = caused_by;
         self
@@ -552,16 +598,22 @@ pub enum ProcessOriginator {
 }
 
 impl ProcessOriginator {
+    /// Constructs a `ProcessOriginator` using host semantics for store and process-engine
+    /// implementors while persisting and coordinating durable process execution.
     pub fn host() -> Self {
         Self::Host { scope: None }
     }
 
+    /// Constructs a `ProcessOriginator` using host scoped semantics for store and process-engine
+    /// implementors while persisting and coordinating durable process execution.
     pub fn host_scoped(scope: impl Into<String>) -> Self {
         Self::Host {
             scope: Some(scope.into()),
         }
     }
 
+    /// Constructs a `ProcessOriginator` using session semantics for store and process-engine
+    /// implementors while persisting and coordinating durable process execution.
     pub fn session(scope: SessionScope) -> Self {
         Self::Session {
             session_id: scope.session_id,
@@ -580,6 +632,8 @@ impl ProcessOriginator {
 }
 
 impl SessionScope {
+    /// Constructs a `SessionScope` for store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
     pub fn new(session_id: impl Into<String>) -> Self {
         Self {
             session_id: session_id.into(),
@@ -587,6 +641,8 @@ impl SessionScope {
         }
     }
 
+    /// Constructs a frame-scoped session identity for process-engine implementors binding work to
+    /// one durable agent frame.
     pub fn for_agent_frame(
         session_id: impl Into<String>,
         agent_frame_id: impl Into<crate::AgentFrameId>,
@@ -597,6 +653,8 @@ impl SessionScope {
         }
     }
 
+    /// Exposes id to store, effect-host, and protocol implementors while materializing, executing,
+    /// or persisting a session turn.
     pub fn id(&self) -> SessionScopeId {
         match self.agent_frame_id.as_deref() {
             Some(frame_id) if !frame_id.is_empty() => {
@@ -606,6 +664,8 @@ impl SessionScope {
         }
     }
 
+    /// Lets store, effect-host, and protocol implementors test whether this `SessionScope` is empty
+    /// while materializing, executing, or persisting a session turn.
     pub fn is_empty(&self) -> bool {
         self.session_id.is_empty()
     }
@@ -650,6 +710,8 @@ impl Clone for ProcessRegistration {
 }
 
 impl ProcessRegistration {
+    /// Constructs a `ProcessRegistration` for store and durable-substrate implementors while
+    /// persisting and coordinating durable process execution.
     pub fn new(
         id: impl Into<ProcessId>,
         input: ProcessInput,
@@ -679,31 +741,43 @@ impl ProcessRegistration {
         Self::new(id, input, disposition, ProcessProvenance::host())
     }
 
+    /// Sets the process provenance carried by a `ProcessRegistration` for store and
+    /// durable-substrate implementors while persisting and coordinating durable process execution.
     pub fn with_process_provenance(mut self, provenance: ProcessProvenance) -> Self {
         self.provenance = provenance;
         self
     }
 
+    /// Sets the max attempts carried by a `ProcessRegistration` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_max_attempts(mut self, max_attempts: Option<u32>) -> Self {
         self.max_attempts = max_attempts;
         self
     }
 
+    /// Sets the execution env ref carried by a `ProcessRegistration` for store and
+    /// durable-substrate implementors while persisting and coordinating durable process execution.
     pub fn with_execution_env_ref(mut self, env_ref: Option<ProcessExecutionEnvRef>) -> Self {
         self.env_ref = env_ref;
         self
     }
 
+    /// Sets the wake session id carried by a `ProcessRegistration` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_wake_session_id(mut self, wake_session_id: Option<SessionId>) -> Self {
         self.wake_session_id = wake_session_id;
         self
     }
 
+    /// Sets the identity carried by a `ProcessRegistration` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_identity(mut self, identity: ProcessIdentity) -> Self {
         self.identity = identity;
         self
     }
 
+    /// Sets the event types carried by a `ProcessRegistration` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_event_types(
         mut self,
         event_types: impl IntoIterator<Item = ProcessEventType>,
@@ -712,6 +786,8 @@ impl ProcessRegistration {
         self
     }
 
+    /// Sets the extra event types carried by a `ProcessRegistration` for store and
+    /// durable-substrate implementors while persisting and coordinating durable process execution.
     pub fn with_extra_event_types(
         mut self,
         event_types: impl IntoIterator<Item = ProcessEventType>,
@@ -734,10 +810,14 @@ pub enum ProcessStatus {
 }
 
 impl ProcessStatus {
+    /// Maps a terminal process outcome to its durable status for process-store implementors;
+    /// non-terminal variants remain running.
     pub fn from_terminal(terminal: ProcessTerminalSemantics) -> Self {
         terminal.status
     }
 
+    /// Lets process-store implementors apply retention only to completed, failed, cancelled, or
+    /// abandoned rows; running and waiting rows are never terminal.
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
@@ -745,6 +825,8 @@ impl ProcessStatus {
         )
     }
 
+    /// Exposes label to store and process-engine implementors while persisting and coordinating
+    /// durable process execution.
     pub fn label(&self) -> &'static str {
         match self {
             Self::Running => "running",
@@ -820,6 +902,8 @@ pub enum WaitKind {
 }
 
 impl WaitState {
+    /// Exposes key to store and durable-substrate implementors while persisting and coordinating
+    /// durable process execution.
     pub fn key(&self) -> &str {
         let WaitKind::Signal { key, .. } = &self.kind;
         key
@@ -827,10 +911,14 @@ impl WaitState {
 }
 
 impl ProcessRecord {
+    /// Builds a `ProcessRecord` from registration data for store and durable-substrate implementors
+    /// while persisting and coordinating durable process execution.
     pub fn from_registration(registration: ProcessRegistration) -> Self {
         Self::from_registration_with_clock(registration, &crate::SystemClock)
     }
 
+    /// Builds a `ProcessRecord` from registration with clock data for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn from_registration_with_clock(
         registration: ProcessRegistration,
         clock: &dyn crate::Clock,
@@ -840,6 +928,8 @@ impl ProcessRecord {
         Self::from_prepared_registration(registration, registration_hash, clock.timestamp_ms())
     }
 
+    /// Builds a `ProcessRecord` from prepared registration data for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn from_prepared_registration(
         registration: ProcessRegistration,
         registration_hash: String,
@@ -866,10 +956,14 @@ impl ProcessRecord {
         }
     }
 
+    /// Lets process-store implementors gate retention on the folded durable status rather than the
+    /// presence of an incidental event.
     pub fn is_terminal(&self) -> bool {
         self.status.is_terminal()
     }
 
+    /// Exposes originator id to store and durable-substrate implementors while persisting and
+    /// coordinating durable process execution.
     pub fn originator_id(&self) -> String {
         self.provenance.originator.id()
     }
@@ -904,6 +998,8 @@ where
 }
 
 impl ProcessIdentity {
+    /// Constructs a `ProcessIdentity` for protocol and process-engine implementors while running a
+    /// durable process.
     pub fn new(kind: impl Into<String>) -> Self {
         Self {
             kind: kind.into(),
@@ -912,16 +1008,22 @@ impl ProcessIdentity {
         }
     }
 
+    /// Sets the label carried by a `ProcessIdentity` for protocol and process-engine implementors
+    /// while running a durable process.
     pub fn with_label(mut self, label: Option<impl Into<String>>) -> Self {
         self.label = label.map(Into::into);
         self
     }
 
+    /// Sets the definition carried by a `ProcessIdentity` for protocol and process-engine
+    /// implementors while running a durable process.
     pub fn with_definition(mut self, definition: Option<serde_json::Value>) -> Self {
         self.definition = definition;
         self
     }
 
+    /// Derives stable kind and definition identity for process-engine implementors from the
+    /// executable input without executing it.
     pub fn from_process_input(input: &ProcessInput) -> Self {
         match input {
             ProcessInput::ToolCall { call } => {
@@ -1008,6 +1110,8 @@ pub enum ProcessLeaseClaimOutcome {
 }
 
 impl ProcessLeaseClaimOutcome {
+    /// Returns the newly acquired lease to process-store implementors and `None` when another
+    /// holder remains busy; the busy holder is not discarded before this projection.
     pub fn acquired(self) -> Option<ProcessLease> {
         match self {
             Self::Acquired(lease) => Some(lease),
@@ -1023,6 +1127,8 @@ pub struct ProcessLeaseCompletion {
 }
 
 impl ProcessLeaseCompletion {
+    /// Captures the process ID and exact lease token that process-store implementors must present
+    /// to complete or release the claimed execution.
     pub fn from_lease(lease: &ProcessLease) -> Self {
         Self {
             process_id: lease.process_id.clone(),
@@ -1055,6 +1161,8 @@ pub struct ProcessHandleSummary {
 }
 
 impl ProcessHandleSummary {
+    /// Constructs a `ProcessHandleSummary` for store and durable-substrate implementors while
+    /// persisting and coordinating durable process execution.
     pub fn new(
         process_id: impl Into<ProcessId>,
         identity: ProcessIdentity,
@@ -1072,11 +1180,15 @@ impl ProcessHandleSummary {
         }
     }
 
+    /// Sets the definition carried by a `ProcessHandleSummary` for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_definition(mut self, definition: Option<serde_json::Value>) -> Self {
         self.definition = definition;
         self
     }
 
+    /// Builds a `ProcessHandleSummary` from record data for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn from_record(record: ProcessRecord) -> Self {
         Self::new(record.id, record.identity, record.status)
     }
@@ -1089,6 +1201,8 @@ pub struct ProcessCancelSummary {
 }
 
 impl ProcessCancelSummary {
+    /// Builds a `ProcessCancelSummary` from record data for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn from_record(record: ProcessRecord) -> Self {
         Self {
             process_id: record.id,
@@ -1110,6 +1224,8 @@ pub enum ProcessStatusFilter {
 }
 
 impl ProcessStatusFilter {
+    /// Exposes label to store and process-engine implementors while persisting and coordinating
+    /// durable process execution. Returns `None` when no label is present.
     pub fn label(self) -> Option<&'static str> {
         match self {
             Self::Running => Some("running"),
@@ -1122,6 +1238,8 @@ impl ProcessStatusFilter {
         }
     }
 
+    /// Parses the process-status filter for store and protocol implementors, defaults absence to
+    /// `running`, and rejects unknown labels.
     pub fn decode(value: Option<&str>) -> Result<Self, String> {
         match value.unwrap_or("running") {
             "running" => Ok(Self::Running),
@@ -1137,6 +1255,8 @@ impl ProcessStatusFilter {
         }
     }
 
+    /// Requests the live-only store scan for running or waiting filters and the all-row scan for
+    /// terminal or `any` filters.
     pub fn list_mode(self) -> ProcessListMode {
         match self {
             Self::Running | Self::Waiting => ProcessListMode::Live,
@@ -1146,6 +1266,8 @@ impl ProcessStatusFilter {
         }
     }
 
+    /// Applies exact status matching for process-store implementors, with `any` as the sole
+    /// wildcard.
     pub fn matches(self, status: ProcessStatus) -> bool {
         match self {
             Self::Running => status == ProcessStatus::Running,
@@ -1178,6 +1300,8 @@ pub struct ProcessListFilter {
 }
 
 impl ProcessListFilter {
+    /// Parses the complete process-list filter for store implementors, rejecting unknown fields and
+    /// ill-typed values rather than silently ignoring them.
     pub fn decode(args: &serde_json::Value) -> Result<Self, String> {
         let map = args
             .as_object()
@@ -1229,10 +1353,14 @@ impl ProcessListFilter {
         })
     }
 
+    /// Exposes list mode to store and durable-substrate implementors while persisting and
+    /// coordinating durable process execution.
     pub fn list_mode(&self) -> ProcessListMode {
         self.status.list_mode()
     }
 
+    /// Applies every populated process filter conjunctively for store and conformance implementors;
+    /// the creation-time bounds form a half-open `[start, end)` range.
     pub fn matches_record(&self, record: &ProcessRecord) -> bool {
         self.status.matches(record.status)
             && self
@@ -1320,6 +1448,7 @@ pub enum ProcessListMode {
 }
 
 impl ProcessListMode {
+    /// Exposes the stable snake-case list mode for process-store implementors.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Live => "live",
@@ -1344,12 +1473,16 @@ pub enum ProcessObserverBy {
 }
 
 impl ProcessObserverBy {
+    /// Constructs a `ProcessObserverBy` using host semantics for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
     pub fn host(operation_id: impl Into<String>) -> Self {
         Self::Host {
             operation_id: operation_id.into(),
         }
     }
 
+    /// Returns the stable observer-authority component process-store implementors include in
+    /// add/remove replay keys; fork inheritance uses one reserved literal.
     pub fn replay_component(&self) -> &str {
         match self {
             Self::Host { operation_id } => operation_id,

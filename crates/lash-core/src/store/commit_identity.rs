@@ -12,6 +12,8 @@ pub struct OperationId {
 }
 
 impl OperationId {
+    /// Constructs a `OperationId` for store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
     pub fn new(scope: crate::ExecutionScope, key: impl Into<String>) -> Self {
         Self {
             scope,
@@ -19,6 +21,8 @@ impl OperationId {
         }
     }
 
+    /// Constructs a turn-scoped idempotency identity for store implementors, binding the operation
+    /// key to both session and turn IDs.
     pub fn turn(
         session_id: impl Into<String>,
         turn_id: impl Into<String>,
@@ -27,6 +31,8 @@ impl OperationId {
         Self::new(crate::ExecutionScope::turn(session_id, turn_id), key)
     }
 
+    /// Derives the canonical durable idempotency key for store implementors and rejects operation
+    /// components that cannot be encoded safely.
     pub fn storage_key(&self) -> Result<String, StoreError> {
         let value = serde_json::to_value(self).map_err(|err| {
             StoreError::Backend(format!(
@@ -38,6 +44,8 @@ impl OperationId {
         })
     }
 
+    /// Exposes turn id to store, effect-host, and protocol implementors while materializing,
+    /// executing, or persisting a session turn. Returns `None` when no turn id is present.
     pub fn turn_id(&self) -> Option<&str> {
         self.scope.turn_id()
     }

@@ -17,6 +17,8 @@ impl RuntimeExecutionContext<'_> {
         Self::process_handle_json(id)
     }
 
+    /// Encodes the minimal stable process handle for code-executor implementors returning a process
+    /// reference through JSON.
     pub fn process_handle_json(id: &str) -> serde_json::Value {
         json!({
             "__handle__": "process",

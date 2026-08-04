@@ -127,6 +127,8 @@ impl SessionReadView {
         }))
     }
 
+    /// Builds a `SessionReadView` from snapshot data for store, effect-host, and protocol
+    /// implementors while materializing, executing, or persisting a session turn.
     pub fn from_snapshot(snapshot: &SessionSnapshot) -> Self {
         let read_model = snapshot.read_model();
         Self(Arc::new(SessionReadState {
@@ -137,6 +139,8 @@ impl SessionReadView {
         }))
     }
 
+    /// Builds a `SessionReadView` from persisted state data for store and durable-substrate
+    /// implementors while validating and applying durable session transitions.
     pub fn from_persisted_state(state: &RuntimeSessionState) -> Self {
         let graph = state.session_graph.clone();
         let read_model = state.read_model();
@@ -192,6 +196,8 @@ impl SessionReadView {
         )
     }
 
+    /// Exposes session graph to store and durable-substrate implementors while validating and
+    /// applying durable session transitions.
     pub fn session_graph(&self) -> &crate::SessionGraph {
         match &self.0.graph {
             SessionReadGraph::Owned(graph) => graph,
@@ -212,22 +218,32 @@ impl SessionReadView {
         }
     }
 
+    /// Exposes session id to store, effect-host, and protocol implementors while materializing,
+    /// executing, or persisting a session turn.
     pub fn session_id(&self) -> &str {
         &self.0.meta.session_id
     }
 
+    /// Exposes policy to store, effect-host, and protocol implementors while materializing,
+    /// executing, or persisting a session turn.
     pub fn policy(&self) -> &SessionPolicy {
         &self.0.meta.policy
     }
 
+    /// Exposes messages to store, effect-host, and protocol implementors while materializing,
+    /// executing, or persisting a session turn.
     pub fn messages(&self) -> &[crate::Message] {
         self.0.read_model.messages.as_slice()
     }
 
+    /// Borrows active-path protocol events in graph order for protocol implementors materializing
+    /// the next turn; events on inactive branches are excluded.
     pub fn active_events(&self) -> &[crate::SessionHistoryRecord] {
         self.0.read_model.active_events.as_slice()
     }
 
+    /// Interleaves active messages and protocol events by graph position for protocol implementors
+    /// building a chronological turn view.
     pub fn chronological_projection(&self) -> crate::ChronologicalProjection {
         crate::ChronologicalProjection::from_read_model(&self.0.read_model)
     }
@@ -240,26 +256,38 @@ impl SessionReadView {
         }))
     }
 
+    /// Projects all message nodes, including inactive branches, for protocol and conformance
+    /// embedders that need the session's branch structure.
     pub fn message_tree(&self) -> Vec<crate::SessionMessageTreeNode> {
         self.session_graph().message_tree()
     }
 
+    /// Exposes turn index to store, effect-host, and protocol implementors while materializing,
+    /// executing, or persisting a session turn.
     pub fn turn_index(&self) -> usize {
         self.0.meta.turn_index
     }
 
+    /// Borrows the session's accumulated prompt and completion usage for protocol and observation
+    /// embedders without recomputing it from message history.
     pub fn token_usage(&self) -> &crate::TokenUsage {
         &self.0.meta.token_usage
     }
 
+    /// Exposes last prompt usage to protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work. Returns `None` when no last prompt usage is present.
     pub fn last_prompt_usage(&self) -> Option<&crate::runtime::PromptUsage> {
         self.0.meta.last_prompt_usage.as_ref()
     }
 
+    /// Exposes protocol turn options to protocol and process-engine implementors while
+    /// materializing protocol-specific session and turn state.
     pub fn protocol_turn_options(&self) -> &crate::ProtocolTurnOptions {
         &self.0.meta.protocol_turn_options
     }
 
+    /// Projects this `SessionReadView` into snapshot form for store, effect-host, and protocol
+    /// implementors while materializing, executing, or persisting a session turn.
     pub fn to_snapshot(&self) -> SessionSnapshot {
         self.0.meta.to_snapshot(self.session_graph().clone())
     }

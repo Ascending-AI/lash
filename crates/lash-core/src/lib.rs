@@ -541,6 +541,8 @@ impl Default for ProtocolTurnOptions {
 }
 
 impl ProtocolTurnOptions {
+    /// Constructs schema-current empty object options for protocol implementors materializing a
+    /// turn with no protocol-specific overrides.
     pub fn empty() -> Self {
         Self {
             schema_version: PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION,
@@ -548,6 +550,8 @@ impl ProtocolTurnOptions {
         }
     }
 
+    /// Wraps an arbitrary JSON payload at the current schema version for protocol implementors
+    /// materializing turn-specific state.
     pub fn from_payload(payload: serde_json::Value) -> Self {
         Self {
             schema_version: PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION,
@@ -555,6 +559,8 @@ impl ProtocolTurnOptions {
         }
     }
 
+    /// Reports empty only for an empty JSON object so protocol implementors do not confuse scalar,
+    /// list, or null payloads with absent options.
     pub fn is_empty(&self) -> bool {
         match &self.payload {
             serde_json::Value::Object(map) => map.is_empty(),
@@ -562,6 +568,8 @@ impl ProtocolTurnOptions {
         }
     }
 
+    /// Serializes typed protocol options at the current schema version for protocol implementors
+    /// materializing a turn.
     pub fn typed<T>(value: T) -> Result<Self, serde_json::Error>
     where
         T: serde::Serialize,
@@ -574,6 +582,8 @@ impl ProtocolTurnOptions {
 }
 
 impl ProtocolTurnOptions {
+    /// Checks the schema version before deserializing typed options for protocol implementors,
+    /// preserving version and payload errors separately.
     pub fn decode<T>(&self) -> Result<T, ProtocolTurnOptionsError>
     where
         T: serde::de::DeserializeOwned,
@@ -624,6 +634,8 @@ pub struct ProtocolDriverState {
 }
 
 impl ProtocolDriverState {
+    /// Wraps one plugin's durable driver payload for protocol-engine implementors persisting
+    /// turn-machine state across suspension.
     pub fn new(plugin_id: impl Into<String>, payload: serde_json::Value) -> Self {
         Self {
             plugin_id: plugin_id.into(),

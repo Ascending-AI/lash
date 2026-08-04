@@ -38,6 +38,7 @@ pub enum DeliveryPolicy {
 }
 
 impl DeliveryPolicy {
+    /// Exposes the stable snake-case delivery value for queued-work store implementors.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::EarliestSafeBoundary => "earliest_safe_boundary",
@@ -45,6 +46,8 @@ impl DeliveryPolicy {
         }
     }
 
+    /// Parses the stable delivery value for queued-work store implementors, returning `None` for an
+    /// unknown value.
     pub fn from_wire_str(value: &str) -> Option<Self> {
         match value {
             "earliest_safe_boundary" => Some(Self::EarliestSafeBoundary),
@@ -62,6 +65,7 @@ pub enum SlotPolicy {
 }
 
 impl SlotPolicy {
+    /// Exposes the stable snake-case slot value for queued-work store implementors.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Join => "join",
@@ -69,6 +73,8 @@ impl SlotPolicy {
         }
     }
 
+    /// Parses the stable slot value for queued-work store implementors, returning `None` for an
+    /// unknown value.
     pub fn from_wire_str(value: &str) -> Option<Self> {
         match value {
             "join" => Some(Self::Join),

@@ -380,10 +380,14 @@ pub enum InputItem {
 }
 
 impl InputItem {
+    /// Constructs a text turn item for protocol implementors while preserving its position among
+    /// mixed text and attachment input.
     pub fn text(text: impl Into<String>) -> Self {
         Self::Text { text: text.into() }
     }
 
+    /// Constructs an attachment item for protocol implementors while preserving the source variant
+    /// until runtime attachment resolution.
     pub fn attachment(source: crate::AttachmentSource) -> Self {
         Self::Attachment { source }
     }
@@ -407,14 +411,19 @@ pub struct TurnInput {
 }
 
 impl TurnInput {
+    /// Constructs an input with no items for protocol and process-engine implementors that will add
+    /// content or extensions before execution.
     pub fn empty() -> Self {
         Self::items(std::iter::empty())
     }
 
+    /// Constructs a one-item text input for protocol and process-engine implementors without adding
+    /// protocol extensions or metadata.
     pub fn text(text: impl Into<String>) -> Self {
         Self::items([InputItem::text(text)])
     }
 
+    /// Collects mixed input items in caller order for protocol implementors materializing a turn.
     pub fn items(items: impl IntoIterator<Item = InputItem>) -> Self {
         Self {
             items: items.into_iter().collect(),
@@ -425,16 +434,22 @@ impl TurnInput {
         }
     }
 
+    /// Appends an attachment after existing turn items for protocol implementors, preserving
+    /// mixed-input source order.
     pub fn with_attachment(mut self, source: crate::AttachmentSource) -> Self {
         self.items.push(InputItem::attachment(source));
         self
     }
 
+    /// Sets the protocol turn options carried by a `TurnInput` for protocol and process-engine
+    /// implementors while materializing protocol-specific session and turn state.
     pub fn with_protocol_turn_options(mut self, options: crate::ProtocolTurnOptions) -> Self {
         self.protocol_turn_options = Some(options);
         self
     }
 
+    /// Attaches host trace correlation to a turn for protocol and observation embedders without
+    /// changing durable turn identity.
     pub fn with_trace_turn_id(mut self, trace_turn_id: impl Into<String>) -> Self {
         self.trace_turn_id = Some(trace_turn_id.into());
         self
@@ -515,10 +530,14 @@ impl Default for TurnContext {
 }
 
 impl TurnContext {
+    /// Constructs a `TurnContext` for store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Updates plugin input state for protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work.
     pub fn insert_plugin_input<T>(&mut self, plugin_id: &'static str, input: T)
     where
         T: Send + Sync + 'static,
@@ -526,10 +545,14 @@ impl TurnContext {
         self.plugin_inputs.insert(plugin_id, input);
     }
 
+    /// Updates provider state for protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work.
     pub fn set_provider(&mut self, provider: crate::ProviderHandle) {
         self.provider = Some(provider);
     }
 
+    /// Exposes provider to protocol and process-engine implementors while preparing or executing
+    /// plugin and tool work. Returns `None` when no provider is present.
     pub fn provider(&self) -> Option<&crate::ProviderHandle> {
         self.provider.as_ref()
     }
@@ -555,6 +578,8 @@ impl TurnContext {
         }
     }
 
+    /// Exposes plugin input to protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work. Returns `None` when no plugin input is present.
     pub fn plugin_input<T>(&self, plugin_id: &'static str) -> Option<&T>
     where
         T: 'static,
@@ -562,10 +587,14 @@ impl TurnContext {
         self.plugin_inputs.get(plugin_id)
     }
 
+    /// Lets protocol implementors detect type-erased live plugin inputs that cannot cross a durable
+    /// serialization boundary.
     pub fn has_live_plugin_inputs(&self) -> bool {
         !self.plugin_inputs.inputs.is_empty()
     }
 
+    /// Lists only type-erased live plugin inputs for protocol implementors that must reject
+    /// non-persistable turn extensions before a durable boundary.
     pub fn live_plugin_input_ids(&self) -> Vec<&'static str> {
         self.plugin_inputs.plugin_ids()
     }
@@ -576,10 +605,14 @@ impl TurnContext {
         &self.plugin_inputs
     }
 
+    /// Updates prompt layer state for protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work.
     pub fn set_prompt_layer(&mut self, prompt: crate::PromptLayer) {
         self.prompt = prompt;
     }
 
+    /// Exposes prompt layer to protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work.
     pub fn prompt_layer(&self) -> &crate::PromptLayer {
         &self.prompt
     }
@@ -650,14 +683,20 @@ impl fmt::Debug for TurnContext {
 pub struct ProtocolTurnExtensionHandle(Arc<dyn ProtocolTurnExtension>);
 
 impl ProtocolTurnExtensionHandle {
+    /// Type-erases and shares a turn extension for protocol implementors while retaining its
+    /// downcast and prompt-contribution behavior.
     pub fn new(extension: impl ProtocolTurnExtension + 'static) -> Self {
         Self(Arc::new(extension))
     }
 
+    /// Exposes the erased extension for protocol implementors that must downcast back to their
+    /// concrete turn-extension type.
     pub fn as_any(&self) -> &dyn Any {
         self.0.as_any()
     }
 
+    /// Exposes prompt contributions to protocol and process-engine implementors while materializing
+    /// or restoring protocol session state.
     pub fn prompt_contributions(&self) -> Vec<crate::PromptContribution> {
         self.0.prompt_contributions()
     }
@@ -681,10 +720,14 @@ pub trait ProtocolTurnExtension: Send + Sync {
 pub struct ProtocolSessionExtensionHandle(Arc<dyn ProtocolSessionExtension>);
 
 impl ProtocolSessionExtensionHandle {
+    /// Type-erases and shares a session extension for protocol implementors restoring plugin-owned
+    /// session state.
     pub fn new(extension: impl ProtocolSessionExtension + 'static) -> Self {
         Self(Arc::new(extension))
     }
 
+    /// Exposes the erased extension for protocol implementors that must downcast back to their
+    /// concrete session-extension type.
     pub fn as_any(&self) -> &dyn Any {
         self.0.as_any()
     }
@@ -878,6 +921,8 @@ impl EventSink for NoopEventSink {
 pub struct TurnActivityId(pub Arc<str>);
 
 impl TurnActivityId {
+    /// Constructs a `TurnActivityId` for store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
     pub fn new(id: impl Into<Arc<str>>) -> Self {
         Self(id.into())
     }
@@ -897,6 +942,8 @@ pub struct TurnActivity {
 }
 
 impl TurnActivity {
+    /// Constructs a `TurnActivity` for store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
     pub fn new(correlation_id: TurnActivityId, event: TurnEvent) -> Self {
         Self {
             id: TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
@@ -905,6 +952,8 @@ impl TurnActivity {
         }
     }
 
+    /// Constructs an activity with a fresh stable ID for protocol implementors representing work
+    /// that has no parent activity.
     pub fn independent(event: TurnEvent) -> Self {
         let correlation_id = TurnActivityId::new(uuid::Uuid::new_v4().to_string());
         Self::new(correlation_id, event)
@@ -1146,6 +1195,8 @@ pub struct SessionStoreCreateRequest {
 }
 
 impl SessionStoreCreateRequest {
+    /// Exposes the parent session ID to session-store factories for child and fork relations,
+    /// returning `None` for a root session.
     pub fn parent_session_id(&self) -> Option<&str> {
         self.relation.parent_session_id()
     }

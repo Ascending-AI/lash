@@ -53,6 +53,8 @@ pub struct PluginExtensions {
 }
 
 impl PluginExtensions {
+    /// Builds a `PluginExtensions` from contributions data for protocol and process-engine
+    /// implementors while preparing or executing plugin and tool work.
     pub fn from_contributions(
         contributions: impl IntoIterator<Item = PluginExtensionContribution>,
     ) -> Self {
@@ -63,6 +65,7 @@ impl PluginExtensions {
         extensions
     }
 
+    /// Adds one extension payload for protocol implementors composing a shared extension set.
     pub fn insert(&mut self, contribution: PluginExtensionContribution) {
         self.contributions
             .entry(contribution.extension_id)
@@ -70,6 +73,8 @@ impl PluginExtensions {
             .push(contribution.payload);
     }
 
+    /// Borrows every payload registered under an extension ID for protocol implementors applying
+    /// that extension; an unknown ID yields an empty slice.
     pub fn payloads(&self, extension_id: &str) -> &[serde_json::Value] {
         self.contributions
             .get(extension_id)
@@ -540,6 +545,9 @@ pub struct ProcessEngineContributionContext<'a> {
 }
 
 impl<'a> ProcessEngineContributionContext<'a> {
+    /// Constructs a `ProcessEngineContributionContext` for protocol and process-engine implementors
+    /// while implementing `PluginFactory::process_engine_contributions` (process engine
+    /// contributions).
     pub fn new(
         extensions: &'a PluginExtensions,
         trace_context: &'a crate::TraceContext,
@@ -552,14 +560,20 @@ impl<'a> ProcessEngineContributionContext<'a> {
         }
     }
 
+    /// Exposes extensions to protocol and process-engine implementors while implementing
+    /// `PluginFactory::process_engine_contributions` (process engine contributions).
     pub fn extensions(&self) -> &PluginExtensions {
         self.extensions
     }
 
+    /// Exposes trace context to protocol and process-engine implementors while implementing
+    /// `PluginFactory::process_engine_contributions` (process engine contributions).
     pub fn trace_context(&self) -> &crate::TraceContext {
         self.trace_context
     }
 
+    /// Tells plugin factories whether the host supplied the lifecycle services required to
+    /// contribute a runnable process engine.
     pub fn process_lifecycle_available(&self) -> bool {
         self.process_lifecycle_available
     }

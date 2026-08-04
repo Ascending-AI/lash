@@ -17,6 +17,8 @@ pub struct RuntimeEffectControllerError {
 }
 
 impl RuntimeEffectControllerError {
+    /// Constructs a `RuntimeEffectControllerError` for effect-host implementors while executing or
+    /// replaying a runtime effect.
     pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             code: code.into(),
@@ -26,6 +28,8 @@ impl RuntimeEffectControllerError {
         }
     }
 
+    /// Sets the summary carried by a `RuntimeEffectControllerError` for effect-host implementors
+    /// while executing or replaying a runtime effect.
     pub fn with_summary(
         mut self,
         summary: crate::runtime::effect::RuntimeEffectReplayMismatchSummary,

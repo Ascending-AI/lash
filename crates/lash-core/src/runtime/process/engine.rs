@@ -49,6 +49,8 @@ pub struct ProcessInfraError {
 }
 
 impl ProcessInfraError {
+    /// Constructs a `ProcessInfraError` for protocol and process-engine implementors while running
+    /// a durable process.
     pub fn new(source: crate::PluginError) -> Self {
         Self { source }
     }
@@ -326,54 +328,79 @@ impl<'run> ProcessEngineRunContext<'run> {
         }
     }
 
+    /// Exposes registration to protocol and process-engine implementors while running a durable
+    /// process.
     pub fn registration(&self) -> &ProcessRegistration {
         &self.registration
     }
 
+    /// Exposes execution context to protocol and process-engine implementors while running a
+    /// durable process.
     pub fn execution_context(&self) -> &ProcessExecutionContext {
         &self.execution_context
     }
 
+    /// Exposes processes to protocol and process-engine implementors while running a durable
+    /// process.
     pub fn processes(&self) -> ProcessEngineProcessContext {
         self.processes.clone()
     }
 
+    /// Exposes session id to protocol and process-engine implementors while running a durable
+    /// process.
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
 
+    /// Exposes plugins to protocol and process-engine implementors while running a durable process.
     pub fn plugins(&self) -> Arc<crate::PluginSession> {
         Arc::clone(&self.plugins)
     }
 
+    /// Exposes store to protocol and process-engine implementors while running a durable process.
+    /// Returns `None` when no store is present.
     pub fn store(&self) -> Option<Arc<dyn crate::RuntimePersistence>> {
         self.store.clone()
     }
 
+    /// Exposes session store factory to protocol and process-engine implementors while running a
+    /// durable process. Returns `None` when no session store factory is present.
     pub fn session_store_factory(&self) -> Option<Arc<dyn crate::SessionStoreFactory>> {
         self.session_store_factory.clone()
     }
 
+    /// Exposes queued work driver to protocol and process-engine implementors while running a
+    /// durable process. Returns `None` when no queued work driver is present.
     pub fn queued_work_driver(&self) -> Option<crate::QueuedWorkDriver> {
         self.queued_work_driver.clone()
     }
 
+    /// Exposes process registry available to protocol and process-engine implementors while running
+    /// a durable process.
     pub fn process_registry_available(&self) -> bool {
         self.process_registry_available
     }
 
+    /// Exposes cancellation token to protocol and process-engine implementors while running a
+    /// durable process.
     pub fn cancellation_token(&self) -> CancellationToken {
         self.cancellation.clone()
     }
 
+    /// Exposes effect controller to protocol and process-engine implementors while running a
+    /// durable process.
     pub fn effect_controller(&self) -> &dyn crate::RuntimeEffectController {
         self.scoped_effect_controller.controller()
     }
 
+    /// Exposes scoped effect controller to protocol and process-engine implementors while running a
+    /// durable process.
     pub fn scoped_effect_controller(&self) -> crate::ScopedEffectController<'run> {
         self.scoped_effect_controller.clone()
     }
 
+    /// Transfers the persisted segment handover to a process-engine implementor exactly once,
+    /// returning `None` after it has been taken or when no predecessor exists.
     pub fn take_handover(&mut self) -> Option<SegmentHandover> {
         self.handover.take()
     }
@@ -388,10 +415,14 @@ impl<'run> ProcessEngineRunContext<'run> {
         self.turn_phase_probe.clone()
     }
 
+    /// Exposes resolved tool catalog to protocol and process-engine implementors while running a
+    /// durable process.
     pub fn resolved_tool_catalog(&self) -> Result<Arc<crate::ToolCatalog>, crate::PluginError> {
         self.plugins.resolved_tool_catalog(&self.session_id)
     }
 
+    /// Extracts the runtime context outcome for protocol and process-engine implementors while
+    /// running a durable process.
     pub fn into_runtime_context(
         mut self,
         tool_catalog: Arc<crate::ToolCatalog>,
@@ -422,14 +453,20 @@ impl<'a> ProcessEngineValidationContext<'a> {
         }
     }
 
+    /// Exposes plugin host to protocol and process-engine implementors while running a durable
+    /// process.
     pub fn plugin_host(&self) -> &crate::PluginHost {
         self.plugin_host
     }
 
+    /// Exposes tool catalog to protocol and process-engine implementors while running a durable
+    /// process.
     pub fn tool_catalog(&self) -> &crate::ToolCatalog {
         self.tool_catalog.as_ref()
     }
 
+    /// Exposes process registry available to protocol and process-engine implementors while running
+    /// a durable process.
     pub fn process_registry_available(&self) -> bool {
         self.process_registry_available
     }

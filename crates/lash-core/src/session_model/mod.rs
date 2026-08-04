@@ -138,18 +138,26 @@ pub struct SessionPolicy {
 }
 
 impl SessionPolicy {
+    /// Exposes the provider ID captured in policy for protocol implementors restoring the same
+    /// provider/model assignment on replay.
     pub fn recorded_provider_id(&self) -> &str {
         self.provider_id.trim()
     }
 
+    /// Exposes model id to protocol and process-engine implementors while materializing
+    /// protocol-specific session and turn state.
     pub fn model_id(&self) -> &str {
         &self.model.id
     }
 
+    /// Exposes model variant to protocol and process-engine implementors while materializing
+    /// protocol-specific session and turn state.
     pub fn model_variant(&self) -> &crate::ReasoningSelection {
         &self.model.variant
     }
 
+    /// Exposes context window tokens to store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
     pub fn context_window_tokens(&self) -> usize {
         self.model.context_window_tokens()
     }

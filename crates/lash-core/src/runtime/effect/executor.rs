@@ -348,6 +348,8 @@ impl Drop for AbortEffectTaskOnDrop {
 }
 
 impl<'run> RuntimeEffectLocalExecutor<'run> {
+    /// Constructs a local path that rejects execution for effect-host implementors whose durable
+    /// controller must not fall back to inline nondeterministic work.
     pub fn unavailable() -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Unavailable,
@@ -355,10 +357,14 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Builds the inline sleep path for effect-host implementors; cancellation is observed through
+    /// the supplied token and the system clock sets the deadline behavior.
     pub fn sleep(cancellation: CancellationToken) -> Self {
         Self::sleep_with_clock(cancellation, Arc::new(crate::SystemClock))
     }
 
+    /// Builds the inline sleep path with an injected clock for effect-host and conformance
+    /// implementors testing deterministic deadline behavior.
     pub fn sleep_with_clock(cancellation: CancellationToken, clock: Arc<dyn crate::Clock>) -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::SleepOnly {
@@ -371,10 +377,14 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Builds the inline durable-wait path for effect-host implementors using the system clock and
+    /// the supplied optional deadline.
     pub fn await_event(cancellation: CancellationToken, deadline: Option<Instant>) -> Self {
         Self::await_event_with_clock(cancellation, deadline, Arc::new(crate::SystemClock))
     }
 
+    /// Builds the inline durable-wait path with an injected clock for effect-host and conformance
+    /// implementors testing deterministic deadline behavior.
     pub fn await_event_with_clock(
         cancellation: CancellationToken,
         deadline: Option<Instant>,
@@ -408,6 +418,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
+    /// Adds the turn execution scope that effect-host implementors use to distinguish turn
+    /// cancellation from an ordinary wait cancellation.
     pub fn with_turn_cancel_scope(mut self, scope: crate::ExecutionScope) -> Self {
         match &mut self.state {
             RuntimeEffectLocalExecutorState::SleepOnly {
@@ -436,6 +448,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
+    /// Binds process registry and optional work-driver services for effect-host implementors
+    /// executing process effects inline.
     pub fn processes(
         registry: Arc<dyn ProcessRegistry>,
         process_work_driver: Option<crate::ProcessWorkDriver>,
@@ -450,6 +464,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Binds a trigger store for effect-host implementors executing trigger effects inline without
+    /// bypassing the runtime-effect envelope.
     pub fn triggers(store: Arc<dyn crate::TriggerStore>) -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Trigger(TriggerLocalExecution { store }),
@@ -458,6 +474,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     }
 
     #[cfg(any(test, feature = "testing"))]
+    /// Injects a one-shot local effect runner for conformance-suite embedders testing controller
+    /// behavior without a production effect backend.
     pub fn testing<F, Fut>(run: F) -> Self
     where
         F: FnOnce(RuntimeEffectEnvelope) -> Fut + Send + 'run,
@@ -612,10 +630,14 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Exposes structured replay-comparison evidence to effect-host and conformance implementors,
+    /// returning `None` when validation tracing was not requested.
     pub fn replay_validation_trace(&self) -> Option<&super::RuntimeEffectReplayTrace> {
         self.replay_trace.as_ref()
     }
 
+    /// Executes execute work for effect-host implementors while executing or replaying a runtime
+    /// effect.
     pub async fn execute(
         self,
         envelope: RuntimeEffectEnvelope,
@@ -679,6 +701,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Extracts the process outcome for effect-host implementors while executing or replaying a
+    /// runtime effect.
     pub fn into_process(self) -> Result<ProcessLocalExecution, RuntimeEffectControllerError> {
         match self.state {
             RuntimeEffectLocalExecutorState::Process(execution) => Ok(execution),
@@ -809,6 +833,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Extracts the trigger outcome for effect-host implementors while executing or replaying a
+    /// runtime effect.
     pub fn into_trigger(self) -> Result<TriggerLocalExecution, RuntimeEffectControllerError> {
         match self.state {
             RuntimeEffectLocalExecutorState::Trigger(execution) => Ok(execution),
@@ -819,6 +845,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Executes trigger work for effect-host implementors while executing or replaying a runtime
+    /// effect.
     pub async fn execute_trigger(
         self,
         invocation: crate::RuntimeInvocation,
@@ -858,6 +886,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Extracts the await event options outcome for effect-host implementors while executing or
+    /// replaying a runtime effect.
     pub fn into_await_event_options(
         self,
     ) -> Result<RuntimeAwaitEventOptions, RuntimeEffectControllerError> {
@@ -885,6 +915,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Consumes a local executor for effect-host implementors, returning sleep options only when
+    /// the effect was configured for sleep.
     pub fn into_sleep_options(self) -> RuntimeSleepOptions {
         match self.state {
             RuntimeEffectLocalExecutorState::SleepOnly {

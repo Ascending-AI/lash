@@ -19,6 +19,8 @@ const fn first_process_attempt() -> u32 {
 }
 
 impl ProcessStarted {
+    /// Compares owner incarnation, fencing token, and attempt for process-store implementors
+    /// deciding whether two facts belong to the same execution generation.
     pub fn same_execution(&self, other: &Self) -> bool {
         self.owner.same_incarnation(&other.owner)
             && self.fencing_token == other.fencing_token
@@ -43,6 +45,8 @@ pub enum ProcessExecutionWriteAuthority {
 }
 
 impl ProcessExecutionWriteAuthority {
+    /// Constructs owner-bound resume authority for durable-substrate implementors, pinning the
+    /// exact retained execution that may hand over.
     pub fn invocation_resume(
         process_id: impl Into<String>,
         execution_id: impl Into<String>,
@@ -56,10 +60,14 @@ impl ProcessExecutionWriteAuthority {
         }
     }
 
+    /// Constructs a `ProcessExecutionWriteAuthority` using lease semantics for store and
+    /// durable-substrate implementors while persisting and coordinating durable process execution.
     pub fn lease(lease: ProcessLease) -> Self {
         Self::Lease(lease)
     }
 
+    /// Constructs a `ProcessExecutionWriteAuthority` using invocation semantics for store and
+    /// durable-substrate implementors while persisting and coordinating durable process execution.
     pub fn invocation(process_id: impl Into<String>, execution_id: impl Into<String>) -> Self {
         Self::Invocation {
             process_id: process_id.into(),
@@ -69,6 +77,8 @@ impl ProcessExecutionWriteAuthority {
         }
     }
 
+    /// Binds invocation authority to one attempt for durable-substrate implementors; lease
+    /// authority already carries its generation and is unchanged.
     pub fn bind_attempt(&self, attempt: u32) -> Self {
         match self {
             Self::Lease(lease) => Self::Lease(lease.clone()),
@@ -86,6 +96,8 @@ impl ProcessExecutionWriteAuthority {
         }
     }
 
+    /// Projects a replay-stable started fact only after invocation authority is attempt-bound,
+    /// returning `None` for leases and unbound invocations.
     pub fn invocation_started(&self) -> Option<ProcessStarted> {
         match self {
             Self::Lease(_) => None,
@@ -107,6 +119,8 @@ impl ProcessExecutionWriteAuthority {
         }
     }
 
+    /// Permits durable handover only when the retained owner incarnation, fencing token, and
+    /// attempt exactly match the predecessor captured by invocation authority.
     pub fn permits_owner_bound_resume(&self, retained: &ProcessStarted) -> bool {
         matches!(
             self,
@@ -186,6 +200,8 @@ impl ProcessExecutionWriteAuthority {
         );
     }
 
+    /// Rejects a durable invocation start as superseded unless its process ID and complete
+    /// execution identity match the presented authority.
     pub fn validate_invocation_for_start(
         &self,
         process_id: &str,
@@ -217,6 +233,8 @@ impl ProcessExecutionWriteAuthority {
         Ok(())
     }
 
+    /// Rejects a durable invocation write as superseded unless its process ID and complete
+    /// execution identity match the record's retained current execution.
     pub fn validate_invocation_for_write(
         &self,
         process_id: &str,
@@ -273,6 +291,8 @@ pub enum ProcessCompletionOutcome {
 }
 
 impl ProcessCompletionOutcome {
+    /// Classifies a repeated completion as already applied only when the stored terminal outcome
+    /// exactly equals the proposal; a different retained outcome is superseding evidence.
     pub fn from_stored(record: ProcessRecord, proposed: &super::ProcessAwaitOutput) -> Self {
         if record.outcome.as_ref() == Some(proposed) {
             Self::AlreadyApplied { stored: record }
@@ -344,11 +364,15 @@ pub struct ProcessExecutionContext {
 }
 
 impl ProcessExecutionContext {
+    /// Sets the causal invocation carried by a `ProcessExecutionContext` for store and
+    /// process-engine implementors while persisting and coordinating durable process execution.
     pub fn with_causal_invocation(mut self, invocation: Option<crate::RuntimeInvocation>) -> Self {
         self.causal_invocation = invocation;
         self
     }
 
+    /// Sets the execution write authority carried by a `ProcessExecutionContext` for store and
+    /// process-engine implementors while persisting and coordinating durable process execution.
     pub fn with_execution_write_authority(
         mut self,
         authority: ProcessExecutionWriteAuthority,
@@ -357,6 +381,8 @@ impl ProcessExecutionContext {
         self
     }
 
+    /// Lets store and process-engine implementors test whether this `ProcessExecutionContext` is
+    /// empty while persisting and coordinating durable process execution.
     pub fn is_empty(&self) -> bool {
         self.causal_invocation.is_none()
     }

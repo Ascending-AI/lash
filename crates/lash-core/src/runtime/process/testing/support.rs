@@ -38,11 +38,15 @@ impl Default for TestLocalProcessRegistry {
 }
 
 impl TestLocalProcessRegistry {
+    /// Sets the wake delivery config carried by a `TestLocalProcessRegistry` for store and
+    /// process-engine implementors while persisting and coordinating durable process execution.
     pub fn with_wake_delivery_config(mut self, config: super::super::WakeDeliveryConfig) -> Self {
         self.wake_delivery_config = config;
         self
     }
 
+    /// Sets the clock carried by a `TestLocalProcessRegistry` for store and process-engine
+    /// implementors while persisting and coordinating durable process execution.
     pub fn with_clock(mut self, clock: Arc<dyn crate::Clock>) -> Self {
         self.clock = clock;
         self
