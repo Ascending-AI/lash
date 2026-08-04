@@ -219,6 +219,40 @@ async fn a_dropped_append_receipt_unique_guard_is_rejected() {
     .await;
 }
 
+/// The five-part usage identity guard is what makes usage publication
+/// exactly-once across receipt replay: without it, a re-staged delta at a
+/// reused ordinal inserts as a duplicate row and accounting silently double
+/// counts, with no query ever failing.
+#[tokio::test]
+async fn a_dropped_usage_identity_unique_guard_is_rejected() {
+    assert_mutation_is_rejected(
+        "ALTER TABLE lash_usage_deltas
+             DROP CONSTRAINT lash_usage_deltas_session_id_operation_storage_key_entry_or_key",
+        &[
+            "UNIQUE GUARD DRIFT",
+            "lash_usage_deltas: missing unique (session_id, operation_storage_key, \
+             entry_ordinal, payload_encoding_version, payload_hash)",
+        ],
+        |finding| {
+            matches!(
+                finding,
+                SchemaFinding::MissingUniqueGuard { table, expected }
+                    if table == "lash_usage_deltas"
+                        && !expected.primary_key
+                        && expected.columns
+                            == [
+                                "session_id",
+                                "operation_storage_key",
+                                "entry_ordinal",
+                                "payload_encoding_version",
+                                "payload_hash",
+                            ]
+            )
+        },
+    )
+    .await;
+}
+
 /// The motivating case. `idx_lash_process_events_key` is a partial unique
 /// *index*, so it has no `pg_constraint` row: a constraints-only check would
 /// never see it go missing, and exactly-once process-event dedup would degrade
