@@ -1372,6 +1372,23 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
         &self,
         completion: &SessionExecutionLeaseCompletion,
     ) -> Result<(), StoreError>;
+
+    /// Read the current session-execution-lease row without claiming it.
+    ///
+    /// Returns the persisted lease when an owner holds the row, or `None` when
+    /// the row is absent, unleased, or released. The returned lease may already
+    /// be expired: expiry is a raw fact exposed read-side, mirroring
+    /// [`ProcessRegistry::get_process_lease`](crate::ProcessRegistry::get_process_lease),
+    /// so callers classify staleness themselves. This never mutates the lease
+    /// and never advances a generation. Unknown session ids return `None`.
+    ///
+    /// This read is diagnostics only. The commit CAS is the single authority on
+    /// who may publish (ADR 0029); a backend must never let a caller substitute
+    /// this snapshot for the fence it presents on claim, renew, or release.
+    async fn get_session_execution_lease(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionExecutionLease>, StoreError>;
 }
 
 /// Durable queued-work capability: ingress, ordered claiming, and claim leases

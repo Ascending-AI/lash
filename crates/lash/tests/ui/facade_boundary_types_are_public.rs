@@ -142,6 +142,13 @@ impl SessionExecutionLeaseStore for FacadeStore {
     ) -> Result<(), StoreError> {
         Ok(())
     }
+
+    async fn get_session_execution_lease(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<SessionExecutionLease>, StoreError> {
+        Ok(None)
+    }
 }
 
 // Compile-only store: these segments exist to prove every capability trait

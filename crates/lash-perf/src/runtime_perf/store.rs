@@ -947,6 +947,28 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
         self.release_session_execution_lease_in_memory(completion);
         Ok(())
     }
+
+    async fn get_session_execution_lease(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionExecutionLease>, StoreError> {
+        let leases = self
+            .session_execution_leases
+            .lock()
+            .expect("lock perf session execution leases");
+        Ok(leases.get(session_id).and_then(|current| {
+            let owner = current.owner.clone()?;
+            let lease_token = current.lease_token.clone()?;
+            Some(SessionExecutionLease {
+                session_id: session_id.to_string(),
+                owner,
+                lease_token,
+                fencing_token: current.fencing_token,
+                claimed_at_epoch_ms: current.claimed_at_epoch_ms,
+                expires_at_epoch_ms: current.expires_at_epoch_ms,
+            })
+        }))
+    }
 }
 
 #[async_trait::async_trait]

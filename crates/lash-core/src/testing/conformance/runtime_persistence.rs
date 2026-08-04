@@ -197,6 +197,7 @@ where
     // [`SessionExecutionLeaseStore`]: single-writer lane fencing.
     session_execution_lease_contract(make()).await;
     session_execution_lease_expires_by_ttl_contract(make()).await;
+    session_execution_lease_diagnostic_read_contract(make()).await;
     // [`QueuedWorkStore`]: durable queued-work ingress, ordering, and claim
     // leases, plus the commit-side completion atomicity it shares with
     // [`SessionCommitStore`].
@@ -1997,6 +1998,82 @@ async fn session_execution_lease_expires_by_ttl_contract(store: Arc<dyn RuntimeP
         "TTL takeover must advance the fencing token"
     );
     release_session_execution_lease_for_test(&store, &acquired).await;
+}
+
+/// The diagnostic read reports the durable lease row as a raw fact and never
+/// mutates it: unknown sessions and released rows read as absent, a held row
+/// reports the exact holder facts, a lapsed row is still reported (expiry is not
+/// filtered), and a takeover is visible as a strictly higher generation under a
+/// different holder.
+async fn session_execution_lease_diagnostic_read_contract(store: Arc<dyn RuntimePersistence>) {
+    assert!(
+        store
+            .get_session_execution_lease("lease-diagnostics-unknown")
+            .await
+            .expect("diagnostic read of an unknown session succeeds")
+            .is_none(),
+        "an unknown session id must read as no lease rather than erroring"
+    );
+
+    let held = claim_session_execution_lease_for_test(&store, "lease-diagnostics", "diag-a").await;
+    let observed = store
+        .get_session_execution_lease("lease-diagnostics")
+        .await
+        .expect("diagnostic read of a held lease")
+        .expect("a held lease must be reported");
+    assert_eq!(observed.session_id, held.session_id);
+    assert_eq!(observed.owner, held.owner);
+    assert_eq!(observed.fencing_token, held.fencing_token);
+    assert_eq!(observed.lease_token, held.lease_token);
+    assert_eq!(observed.claimed_at_epoch_ms, held.claimed_at_epoch_ms);
+    assert_eq!(observed.expires_at_epoch_ms, held.expires_at_epoch_ms);
+
+    // Reading must not renew, expire, or re-fence anything: the holder's own
+    // renewal still succeeds against the fence it presented before the read.
+    store
+        .renew_session_execution_lease(&held.fence(), 120_000)
+        .await
+        .expect("a diagnostic read must not invalidate the holder's fence");
+
+    release_session_execution_lease_for_test(&store, &held).await;
+    assert!(
+        store
+            .get_session_execution_lease("lease-diagnostics")
+            .await
+            .expect("diagnostic read after release")
+            .is_none(),
+        "a released row must read as no holder even though its generation persists"
+    );
+
+    // A lapsed holder is the ambiguous case triage must see, so expiry is
+    // reported rather than filtered out.
+    let lapsing = store
+        .try_claim_session_execution_lease("lease-diagnostics", &lease_owner("diag-lapsed"), 0)
+        .await
+        .expect("claim an immediately expiring lease")
+        .acquired()
+        .expect("expiring lease acquired");
+    let lapsed = store
+        .get_session_execution_lease("lease-diagnostics")
+        .await
+        .expect("diagnostic read of a lapsed lease")
+        .expect("a lapsed holder must still be reported");
+    assert_eq!(lapsed.owner, lapsing.owner);
+    assert_eq!(lapsed.fencing_token, lapsing.fencing_token);
+
+    let successor =
+        claim_session_execution_lease_for_test(&store, "lease-diagnostics", "diag-b").await;
+    let after_takeover = store
+        .get_session_execution_lease("lease-diagnostics")
+        .await
+        .expect("diagnostic read after takeover")
+        .expect("the successor holds the row");
+    assert_eq!(after_takeover.owner, successor.owner);
+    assert!(
+        after_takeover.fencing_token > lapsing.fencing_token,
+        "takeover must be visible read-side as a strictly higher generation"
+    );
+    release_session_execution_lease_for_test(&store, &successor).await;
 }
 
 async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>) {

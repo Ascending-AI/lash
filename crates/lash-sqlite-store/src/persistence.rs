@@ -1088,6 +1088,32 @@ impl SessionExecutionLeaseStore for Store {
             .await
             .map_err(sqlite_error)?
     }
+
+    async fn get_session_execution_lease(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionExecutionLease>, StoreError> {
+        let session_id = session_id.to_string();
+        self.conn
+            .call(move |conn| {
+                let outcome: Result<Option<SessionExecutionLease>, StoreError> = (|| {
+                    let Some(row) = load_session_execution_lease_row_conn(conn, &session_id)?
+                    else {
+                        return Ok(None);
+                    };
+                    // A released row keeps its generation but clears owner and
+                    // token. Expiry is reported as a raw fact, not filtered.
+                    if row.owner.is_none() || row.lease_token.is_none() {
+                        return Ok(None);
+                    }
+                    Ok(Some(row_to_session_execution_lease(&session_id, row)?))
+                })(
+                );
+                Ok(outcome)
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
 }
 
 #[async_trait::async_trait]

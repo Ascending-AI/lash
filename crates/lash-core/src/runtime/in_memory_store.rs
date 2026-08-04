@@ -1579,4 +1579,21 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
+
+    async fn get_session_execution_lease(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<crate::SessionExecutionLease>, crate::store::StoreError> {
+        let leases = self
+            .session_execution_leases
+            .lock()
+            .expect("lock session execution leases");
+        Ok(leases.get(session_id).and_then(|current| {
+            // An unleased or released row keeps its generation but drops owner
+            // and token; only a held row is reported. Expiry is not filtered:
+            // a lapsed holder is the fact a triage read needs.
+            (current.owner.is_some() && current.lease_token.is_some())
+                .then(|| Self::in_memory_session_execution_lease(session_id, current))
+        }))
+    }
 }

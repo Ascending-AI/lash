@@ -604,6 +604,13 @@ impl SessionExecutionLeaseStore for ObservedSessionStore {
     ) -> Result<(), StoreError> {
         self.inner.release_session_execution_lease(completion).await
     }
+
+    async fn get_session_execution_lease(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionExecutionLease>, StoreError> {
+        self.inner.get_session_execution_lease(session_id).await
+    }
 }
 
 #[async_trait::async_trait]

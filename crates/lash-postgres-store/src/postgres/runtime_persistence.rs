@@ -1298,6 +1298,23 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(())
     }
+
+    async fn get_session_execution_lease(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionExecutionLease>, StoreError> {
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let current = load_session_execution_lease_tx(&mut tx, session_id).await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        // A released row keeps its generation but clears owner and token; only a
+        // held row is reported. Expiry stays a raw fact for the caller.
+        let Some(current) =
+            current.filter(|lease| lease.owner.is_some() && lease.lease_token.is_some())
+        else {
+            return Ok(None);
+        };
+        Ok(Some(row_to_session_execution_lease(session_id, current)?))
+    }
 }
 
 #[async_trait::async_trait]
