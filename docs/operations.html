@@ -84,12 +84,58 @@ let session = core
     <div class="section" id="schema-compatibility">
       <div class="section-header">
         <h2>Schema Compatibility</h2>
-        <p>lash accepts a persistent database only when its schema version matches exactly. SQLite checks <code>PRAGMA user_version</code>; Postgres checks each component version.</p>
+        <p>lash opens a persistent store only when its schema version matches exactly. SQLite checks <code>PRAGMA user_version</code>; Postgres checks each recorded component version. A mismatch in either direction — older store or newer store — refuses the open and names both the version found and the version expected.</p>
       </div>
       <aside class="contract">
-        <strong>Clean break</strong>
-        <p>This release moves SQLite from version 10 to 11 and the Postgres component from version 11 to 12. Persistent deployments must start with a fresh database. lash does not maintain a migration chain by policy.</p>
+        <strong>Forward only</strong>
+        <p>lash maintains no migration chain, by policy. A version whose schema changed is adopted by <strong>recreating</strong> the store from empty, and that step is one-way: the previous binary refuses the recreated store on the same exact-match gate. There is no downgrade path, no rollback, and no restore procedure. Recovery from a failed bump is fix-forward.</p>
       </aside>
+      <p>Mid-incident that reads smaller than it is. Once the stores are recreated, redeploying the previous image does not bring the service back — it fails at store open with a schema-version mismatch and never serves a request. <strong>That is the policy working, not a second outage.</strong> The old binary cannot read the new schema, and lash refuses the open rather than writing into rows it does not understand. So plan the bump such that forward is the only direction you need: know before the deploy whether the new version requires recreation, keep its image and configuration ready to redeploy, and treat "roll back the deployment" as unavailable from the moment the first store is recreated.</p>
+      <p>The version integers themselves live with the stores (<code>crates/lash-sqlite-store</code>, <code>crates/lash-postgres-store</code>) and move without ceremony, so do not pin a procedure to a number. Two operator-facing facts carry instead: the refusal reports the found and expected versions, and a release that changed either one says so in its notes, marked breaking (<code>docs/PUBLISHING.md</code>).</p>
+    </div>
+
+    <div class="section" id="version-bumps">
+      <div class="section-header">
+        <h2>Bumping lash</h2>
+        <p>A bump across a schema change recreates durable state, so it is a short ordered procedure rather than a rolling restart. Instantiate the five steps below as your own deployment checklist — each is host policy that lash has no lever to perform for you.</p>
+      </div>
+      <ol class="principle-list">
+        <li>
+          <div>
+            <h3>Quiesce ingress</h3>
+            <p>Stop admitting turns, trigger sources, and queued work at the host edge, and stop the drivers that claim them. lash cannot see your ingress (ADR-0014), so this is a readiness flag or a load-balancer change you own. Steps 1 and 2 of <a href="#graceful-drain">graceful drain</a> are the same levers, applied here to reach a quiet fleet rather than a single exiting process.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h3>Drain in-flight effect work</h3>
+            <p>Let running turns and background processes finish or cancel them, then confirm the effect journal is empty before you touch a store. An invocation still mid-replay when its rows disappear is the failure mode the next step's gotcha describes. Hosts running a durable process worker also call <code>drain_owner_bound_work()</code>, which terminalizes the <code>OwnerBound</code> rows that worker started instead of leaving them for a sweep that will refuse to guess.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h3>Snapshot, if that is your policy</h3>
+            <p>Optional, and entirely yours: lash ships no backup or restore, and nothing below depends on one. If you take a snapshot, take it of the whole consistency unit at once — see <strong>Backups</strong> below.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h3>Bump and recreate</h3>
+            <p>Start the new binary against empty durable state: a fresh database (or one with the <code>lash_*</code> tables dropped), a fresh effect journal, and an attachment prefix consistent with the store you just recreated. The first open creates the schema at exactly the version the new binary expects; a leftover store at any other version is refused, which is the gate telling you a recreation step was missed.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h3>Verify before reopening ingress</h3>
+            <p>Prove the three durable surfaces work on the recreated state, in this order: a session opens and a turn commits; a background process registers, wakes, and runs to a terminal; a trigger fires. Only then reopen ingress. Verifying after traffic returns turns a failed bump into an incident with users in it.</p>
+          </div>
+        </li>
+      </ol>
+      <aside class="gotcha">
+        <strong>Gotcha</strong>
+        <p>Store lifetime and journal lifetime are coupled. A workflow-engine journal that survives the recreation replays handler steps whose sessions, processes, and turn commits no longer exist — the replay either fails on a missing row or lands a later step's result in a store that never saw the earlier ones. Step 2 is what prevents it: an empty journal at bump time has nothing to replay. If a deployment cannot prove the journal is empty, recreate the journal along with the stores so no invocation outlives the rows it references.</p>
+      </aside>
+      <p><strong>Backups.</strong> lash ships no backup or restore tooling, and the procedure above never needs one. If your own prudence says snapshot before a destructive step, snapshot the consistency unit as a unit: the Postgres store, the effect journal, and the S3-compatible blob store holding attachment bytes are one unit, not three. Restoring any one of them alone yields mixed-vintage state — a journal referencing sessions that no longer exist, or effects replaying against recreated rows. Restoring is host territory and untested by lash, so treat a snapshot as forensic material and a fix-forward aid, never as a rollback plan.</p>
     </div>
 
     <div class="section" id="lease-timings">
