@@ -32,6 +32,35 @@ DOC_VERSION_FILES = [
     DOCS / "quickstart.html",
     DOCS / "tracing.html",
 ]
+SCHEMA_VERSION_CLAIMS = [
+    (
+        "SQLite",
+        ROOT / "crates" / "lash-sqlite-store" / "src" / "schema.rs",
+        "SCHEMA_VERSION",
+        [
+            (DOCS / "persistence.html", r"SQLite durable-core version (\d+)"),
+            (
+                DOCS / "architecture" / "durable-background-processes.md",
+                r"SQLite durable-core schema (\d+)",
+            ),
+        ],
+    ),
+    (
+        "Postgres",
+        ROOT / "crates" / "lash-postgres-store" / "src" / "lib.rs",
+        "SCHEMA_VERSION",
+        [
+            (
+                DOCS / "persistence.html",
+                r"Postgres component version (\d+)",
+            ),
+            (
+                DOCS / "architecture" / "durable-background-processes.md",
+                r"PostgreSQL schema (\d+) includes",
+            ),
+        ],
+    ),
+]
 ALPHA_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+-alpha\.\d+$")
 EXACT_ALPHA_PIN_RE = re.compile(r'=([0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+)')
 ALPHA_TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)-alpha\.(\d+)$")
@@ -407,6 +436,39 @@ def check_release_version_pins(errors: list[str]) -> None:
         )
 
 
+def check_schema_version_claims(errors: list[str]) -> None:
+    """Keep current-schema docs pinned to the Rust constants hosts enforce."""
+    for label, source, constant, claims in SCHEMA_VERSION_CLAIMS:
+        source_text = source.read_text(encoding="utf-8")
+        constant_matches = re.findall(
+            rf"(?m)^(?:pub(?:\(crate\))?\s+)?const\s+{re.escape(constant)}:\s*i32\s*=\s*(\d+);$",
+            source_text,
+        )
+        source_rel = source.relative_to(ROOT).as_posix()
+        if len(constant_matches) != 1:
+            errors.append(
+                f"{source_rel}: expected exactly one i32 {constant}, found {len(constant_matches)}"
+            )
+            continue
+        expected = int(constant_matches[0])
+
+        for doc, pattern in claims:
+            doc_text = doc.read_text(encoding="utf-8")
+            stated = re.findall(pattern, doc_text)
+            doc_rel = doc.relative_to(ROOT).as_posix()
+            if len(stated) != 1:
+                errors.append(
+                    f"{doc_rel}: expected exactly one current {label} schema version claim, found {len(stated)}"
+                )
+                continue
+            actual = int(stated[0])
+            if actual != expected:
+                errors.append(
+                    f"{doc_rel}: {label} schema version {actual} does not match "
+                    f"{source_rel} {constant} ({expected})"
+                )
+
+
 def check_quickstart_contract(errors: list[str]) -> None:
     """Keep the quickstart aligned with the compiled in-repo facade."""
     quickstart = (DOCS / "quickstart.html").read_text(encoding="utf-8")
@@ -585,6 +647,7 @@ def main() -> int:
     check_pagers(errors, canonical, pages)
     check_bold_cross_refs(errors, pages)
     check_release_version_pins(errors)
+    check_schema_version_claims(errors)
     check_quickstart_contract(errors)
     check_code_snippets(errors, fix)
     if errors:
