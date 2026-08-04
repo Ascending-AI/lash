@@ -4872,18 +4872,23 @@ pub async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint(
 
     let successor =
         claim_session_execution_lease_for_test(&store, SESSION_ID, "fig905-active-successor").await;
-    let successor_claim = store
-        .claim_active_turn_inputs(
+    let (successor_claim, queued_claim) = store
+        .claim_checkpoint_work(
             SESSION_ID,
             &successor.fence(),
             &lease_owner("fig905-active-successor"),
             TURN_ID,
             crate::CheckpointKind::AfterWork,
             10,
+            10,
         )
         .await
-        .expect("reacquire accepted input after unrecorded checkpoint")
-        .expect("successor reacquires accepted input");
+        .expect("reacquire accepted input after unrecorded checkpoint");
+    let successor_claim = successor_claim.expect("successor reacquires accepted input");
+    assert!(
+        queued_claim.is_none(),
+        "accepted-only checkpoint fixture must not rely on queued work to open the claim path"
+    );
     assert_eq!(successor_claim.inputs[0].input_id, input.input_id);
     assert!(successor_claim.session_lease_generation > predecessor_claim.session_lease_generation);
     assert!(successor_claim.fencing_token > predecessor_claim.fencing_token);

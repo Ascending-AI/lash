@@ -2558,7 +2558,7 @@ async fn checkpoint_work_pending_sqlite(
                         SELECT 1
                         FROM pending_turn_inputs
                         WHERE session_id = ?1
-                          AND state = ?4
+                          AND state IN (?4, 'accepted')
                           AND (claim_token IS NULL OR claim_session_lease_generation <> ?3)
                           AND json_extract(ingress_json, '$.scope') = 'active_turn'
                           AND json_extract(ingress_json, '$.turn_id') = ?5

@@ -1120,7 +1120,10 @@ impl RuntimeEffectController for CrashAfterCheckpointExecutionController {
         if !matches!(
             &envelope.command,
             crate::RuntimeEffectCommand::Checkpoint {
-                checkpoint: crate::CheckpointKind::AfterWork,
+                // The recorded AfterWork outcome supplies predecessor
+                // authority. Crashing after BeforeCompletion executes forces
+                // recovery to reclaim and journal its replacement authority.
+                checkpoint: crate::CheckpointKind::BeforeCompletion,
             }
         ) {
             return self.inner.execute_effect(envelope, executor).await;

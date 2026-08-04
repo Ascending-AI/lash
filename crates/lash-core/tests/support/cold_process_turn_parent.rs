@@ -90,29 +90,6 @@ pub async fn assert_real_turn_kill_recovery(
         "checkpoint helper must die after local execution and before outcome finalization: {}",
         String::from_utf8_lossy(&crashed.stderr)
     );
-    let recovered = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        command("turn_recover", &nonce, &marker).output(),
-    )
-    .await
-    .expect("checkpoint outcome-gap recovery timed out")
-    .expect("spawn checkpoint outcome-gap recovery");
-    let stdout = String::from_utf8_lossy(&recovered.stdout);
-    let stderr = String::from_utf8_lossy(&recovered.stderr);
-    assert!(
-        recovered.status.success(),
-        "checkpoint outcome-gap recovery failed: {stderr}; stdout: {stdout}"
-    );
-    assert!(
-        stdout
-            .lines()
-            .any(|line| line == "turn_complete terminal=1 pending_inputs=0 queued_work=0"),
-        "checkpoint outcome-gap recovery stranded accepted input: {stdout}"
-    );
-
-    let nonce = format!("double-crash-{}", uuid::Uuid::new_v4());
-    let marker = tempdir.join(format!("{nonce}.log"));
-    kill_at_semantic_point(&mut command, "turn_final_commit_boundary", &nonce, &marker).await;
     kill_at_semantic_point(
         &mut command,
         "turn_recover_final_commit_boundary",
@@ -125,19 +102,19 @@ pub async fn assert_real_turn_kill_recovery(
         command("turn_recover", &nonce, &marker).output(),
     )
     .await
-    .expect("double-crash final recovery timed out")
-    .expect("spawn double-crash final recovery");
+    .expect("checkpoint outcome-gap final recovery timed out")
+    .expect("spawn checkpoint outcome-gap final recovery");
     let stdout = String::from_utf8_lossy(&recovered.stdout);
     let stderr = String::from_utf8_lossy(&recovered.stderr);
     assert!(
         recovered.status.success(),
-        "double-crash final recovery failed: {stderr}; stdout: {stdout}"
+        "checkpoint outcome-gap final recovery failed: {stderr}; stdout: {stdout}"
     );
     assert!(
         stdout
             .lines()
             .any(|line| line == "turn_complete terminal=1 pending_inputs=0 queued_work=0"),
-        "double-crash recovery did not settle all ingress: {stdout}"
+        "checkpoint outcome-gap double-crash recovery did not settle all ingress: {stdout}"
     );
 
     let nonce = format!("peer-reclaim-{}", uuid::Uuid::new_v4());

@@ -678,7 +678,10 @@ impl InMemorySessionStore {
                 .iter()
                 .any(|entry| {
                     entry.input.session_id == session_id
-                        && entry.input.state == crate::TurnInputState::PendingActive
+                        && matches!(
+                            entry.input.state,
+                            crate::TurnInputState::PendingActive | crate::TurnInputState::Accepted
+                        )
                         && (entry.claim_token.is_none()
                             || entry.claim_session_lease_generation != generation)
                         && entry

@@ -2474,7 +2474,7 @@ async fn checkpoint_work_pending_postgres(
                 SELECT 1
                 FROM lash_pending_turn_inputs
                 WHERE session_id = $1
-                  AND state = 'pending_active'
+                  AND state IN ('pending_active', 'accepted')
                   AND (claim_token IS NULL OR claim_session_lease_generation <> $2)
                   AND ingress_json::jsonb ->> 'scope' = 'active_turn'
                   AND ingress_json::jsonb ->> 'turn_id' = $3
