@@ -324,3 +324,66 @@ async fn finish_schema(core: &lash::LashCore) -> anyhow::Result<()> {
     // docs:end:finish-schema
     Ok(())
 }
+
+#[cfg(test)]
+mod asserted_examples {
+    use std::convert::Infallible;
+    use std::future;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn cancellation_tree_stops_borrowed_owned_and_guarded_work() {
+        let parent: lash::CancellationToken = lash::CancellationToken::new();
+        let child = lash::CancellationToken::child_token(&parent);
+        let borrowed_work = lash::CancellationToken::run_until_cancelled(&child, future::pending());
+        lash::CancellationToken::cancel(&parent);
+
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,
+            Ok(None::<Infallible>),
+            "cancelling a parent must stop work guarded by its child"
+        );
+        assert!(lash::CancellationToken::is_cancelled(&child));
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            lash::CancellationToken::cancelled(&child),
+        )
+        .await
+        .expect("borrowed cancellation waiter must complete");
+
+        let owned = lash::CancellationToken::new();
+        let owned_waiter = tokio::spawn(lash::CancellationToken::cancelled_owned(owned.clone()));
+        let owned_work = tokio::spawn(lash::CancellationToken::run_until_cancelled_owned(
+            owned.clone(),
+            future::pending::<Infallible>(),
+        ));
+        lash::CancellationToken::cancel(&owned);
+        tokio::time::timeout(Duration::from_secs(1), owned_waiter)
+            .await
+            .expect("owned cancellation waiter must complete")
+            .expect("owned cancellation waiter must not panic");
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), owned_work)
+                .await
+                .expect("owned guarded work must complete")
+                .expect("owned guarded work must not panic"),
+            None,
+            "owned guarded work must stop on cancellation"
+        );
+
+        let guarded = lash::CancellationToken::new();
+        let observed_guarded = guarded.clone();
+        drop(lash::CancellationToken::drop_guard(guarded));
+        assert!(
+            lash::CancellationToken::is_cancelled(&observed_guarded),
+            "dropping an owned guard must publish cancellation"
+        );
+
+        let borrowed_guarded = lash::CancellationToken::new();
+        drop(lash::CancellationToken::drop_guard_ref(&borrowed_guarded));
+        assert!(
+            lash::CancellationToken::is_cancelled(&borrowed_guarded),
+            "dropping a borrowed guard must publish cancellation"
+        );
+    }
+}

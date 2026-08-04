@@ -95,3 +95,433 @@ fn budget_stack() -> lash::PluginStack {
     // docs:end:budget-stack
     plugins
 }
+
+#[cfg(test)]
+mod asserted_examples {
+    use lash::tools::{
+        LashlangToolBinding, ToolActivation, ToolArgumentProjectionPolicy, ToolContract,
+        ToolDefinition, ToolDefinitionLashlangExt, ToolManifest, ToolManifestLashlangExt,
+        ToolOutputContract, ToolRetryPolicy,
+    };
+    use schemars::JsonSchema;
+
+    #[derive(JsonSchema)]
+    struct WriteArgs {
+        path: String,
+        contents: String,
+    }
+
+    #[derive(JsonSchema)]
+    struct WriteReceipt {
+        bytes_written: usize,
+    }
+
+    #[test]
+    fn tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts() {
+        let argument_projection =
+            ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("contents");
+        assert!(
+            !ToolArgumentProjectionPolicy::is_materialize_projected_values(&argument_projection),
+            "the runtime must preserve content references for this tool"
+        );
+        let ToolArgumentProjectionPolicy::PreserveProjectedRefsInField { field } =
+            &argument_projection
+        else {
+            panic!("the configured projection policy must retain a target field");
+        };
+        assert_eq!(field, "contents");
+        assert!(
+            ToolArgumentProjectionPolicy::is_materialize_projected_values(
+                &ToolArgumentProjectionPolicy::MaterializeProjectedValues
+            )
+        );
+
+        let binding = LashlangToolBinding::new(["workspace", "files"], "write")
+            .with_authority_type("WorkspaceAuthority")
+            .with_aliases(["write_text"]);
+        let definition: ToolDefinition = ToolDefinition::typed::<WriteArgs, WriteReceipt>(
+            "tool:write_file",
+            "write_file",
+            "Replace a UTF-8 file and report the committed byte count.",
+        )
+        .with_examples(vec![
+            r#"write_file({ path: "notes.md", contents: "ready" })"#.to_string(),
+            r#"write_file({ path: "status.txt", contents: "green" })"#.to_string(),
+            r#"write_file({ path: "extra.txt", contents: "trimmed" })"#.to_string(),
+        ])
+        .with_activation(ToolActivation::Internal)
+        .with_argument_projection(argument_projection)
+        .with_retry_policy(ToolRetryPolicy::safe(3, 25, 100))
+        .with_output_contract(ToolOutputContract::Static)
+        .with_input_schema_projection(
+            "provider:test",
+            serde_json::json!({ "type": "object", "required": ["path"] }),
+        )
+        .with_output_schema_projection(
+            "provider:test",
+            serde_json::json!({ "type": "object", "required": ["bytes_written"] }),
+        )
+        .with_lashlang_binding(binding);
+
+        assert_eq!(ToolDefinition::id(&definition).as_str(), "tool:write_file");
+        assert_eq!(ToolDefinition::name(&definition), "write_file");
+        assert_eq!(
+            ToolDefinition::description(&definition),
+            "Replace a UTF-8 file and report the committed byte count."
+        );
+        assert!(ToolDefinition::input_signature(&definition).contains("contents: str"));
+        assert_eq!(
+            ToolDefinition::output_summary(&definition),
+            "record{bytes_written: int}"
+        );
+        assert!(ToolDefinition::signature(&definition).ends_with("record{bytes_written: int}"));
+        assert_eq!(ToolDefinition::parameter_metadata(&definition).len(), 2);
+        assert_eq!(ToolDefinition::model_tool(&definition).name, "write_file");
+
+        let compact = ToolDefinition::compact_contract(&definition);
+        assert_eq!(
+            compact.examples.len(),
+            2,
+            "catalogs cap examples by default"
+        );
+        let one_example = ToolDefinition::compact_contract_with_example_limit(&definition, 1);
+        assert_eq!(one_example.examples.len(), 1);
+
+        let manifest: ToolManifest = ToolDefinition::manifest(&definition);
+        let contract: ToolContract = ToolDefinition::contract(&definition);
+        assert_eq!(manifest.id.as_str(), "tool:write_file");
+        assert_eq!(manifest.name, "write_file");
+        assert_eq!(
+            manifest.description,
+            "Replace a UTF-8 file and report the committed byte count."
+        );
+        assert_eq!(manifest.activation, ToolActivation::Internal);
+        assert!(manifest.compact_contract.is_some());
+        assert_eq!(manifest.retry_policy, ToolRetryPolicy::safe(3, 25, 100));
+        assert_eq!(
+            manifest.argument_projection,
+            definition.manifest.argument_projection
+        );
+        assert!(manifest.bindings.contains_key("lashlang.tool"));
+        let decoded_binding = ToolManifestLashlangExt::lashlang_binding(&manifest)
+            .expect("the binding must decode")
+            .expect("the binding must be present");
+        assert_eq!(decoded_binding.module_path, ["workspace", "files"]);
+        assert_eq!(decoded_binding.operation.as_deref(), Some("write"));
+        assert_eq!(
+            decoded_binding.authority_type.as_deref(),
+            Some("WorkspaceAuthority")
+        );
+        assert_eq!(decoded_binding.aliases, ["write_text"]);
+        let resolved_binding =
+            LashlangToolBinding::required_executable_for_remote(&decoded_binding, "write_file")
+                .expect("a complete binding must resolve for remote execution");
+        assert_eq!(resolved_binding.operation, "write");
+        assert_eq!(
+            LashlangToolBinding::required_for_remote(&manifest)
+                .expect("the projected manifest must remain remotely executable"),
+            resolved_binding
+        );
+
+        assert_eq!(contract.examples.len(), 3);
+        assert!(contract.output_contract.is_static());
+        assert!(
+            contract
+                .input_schema
+                .canonical()
+                .get("properties")
+                .is_some()
+        );
+        assert!(
+            contract
+                .output_schema
+                .canonical()
+                .get("properties")
+                .is_some()
+        );
+        assert_eq!(
+            contract.input_schema.projection.overrides[0].dialect,
+            "provider:test"
+        );
+        assert_eq!(
+            contract.output_schema.projection.overrides[0].dialect,
+            "provider:test"
+        );
+        assert_eq!(
+            ToolContract::input_signature(&contract, &manifest),
+            definition.input_signature()
+        );
+        assert!(
+            ToolContract::input_signature_with_name(&contract, &manifest, "save")
+                .starts_with("save(")
+        );
+        assert_eq!(
+            ToolContract::output_summary(&contract),
+            definition.output_summary()
+        );
+        assert_eq!(ToolContract::parameter_metadata(&contract).len(), 2);
+        assert_eq!(
+            ToolContract::model_tool(&contract, &manifest).name,
+            "write_file"
+        );
+        assert_eq!(
+            ToolContract::compact_contract(&contract, &manifest)
+                .examples
+                .len(),
+            2
+        );
+        assert_eq!(
+            ToolContract::compact_contract_with_example_limit(&contract, &manifest, 1)
+                .examples
+                .len(),
+            1
+        );
+        assert_eq!(
+            ToolContract::compact_contract_with_signature_name(&contract, &manifest, "save").name,
+            "save"
+        );
+        assert_eq!(
+            ToolContract::compact_contract_with_signature_name_and_example_limit(
+                &contract, &manifest, "save", 1,
+            )
+            .examples
+            .len(),
+            1
+        );
+
+        let recomposed = ToolDefinition::from_parts(manifest.clone(), contract.clone());
+        assert_eq!(recomposed.manifest.id, manifest.id);
+        assert_eq!(recomposed.contract.examples, contract.examples);
+
+        let docs = ToolDefinition::format_tool_docs(std::slice::from_ref(&definition));
+        assert_eq!(
+            docs,
+            ToolDefinition::format_tool_docs_iter([&definition]),
+            "slice and iterator catalog rendering must agree"
+        );
+        assert!(docs.contains("### write_file({ contents: str, path: str })"));
+        assert!(docs.contains("-> record{bytes_written: int}"));
+        assert!(docs.contains("Replace a UTF-8 file"));
+        assert!(docs.contains("notes.md"));
+        assert!(
+            !docs.contains("extra.txt"),
+            "catalog example limits must affect rendered docs"
+        );
+
+        let dynamic_contract = ToolOutputContract::from_input_schema(
+            "schema",
+            Some(serde_json::json!({ "type": "string" })),
+        );
+        let ToolOutputContract::FromInputSchema {
+            input_field,
+            default_schema,
+        } = &dynamic_contract
+        else {
+            panic!("the dynamic output constructor must retain its schema source");
+        };
+        assert_eq!(input_field, "schema");
+        assert_eq!(
+            default_schema
+                .as_ref()
+                .and_then(|value| value["type"].as_str()),
+            Some("string")
+        );
+        assert!(!ToolOutputContract::is_static(&dynamic_contract));
+
+        let dynamic = ToolDefinition::raw(
+            "tool:decode",
+            "decode",
+            "Decode according to a caller-provided schema.",
+            serde_json::json!({
+                "type": "object",
+                "properties": { "schema": { "type": "object" } },
+                "required": ["schema"]
+            }),
+            ToolDefinition::default_input_schema(),
+        )
+        .with_output_from_input_schema("schema", Some(serde_json::json!({ "type": "string" })));
+        assert!(dynamic.signature().starts_with("decode<T = str>"));
+        assert_eq!(
+            ToolContract::default_input_schema(),
+            ToolDefinition::default_input_schema()
+        );
+        assert_eq!(dynamic.manifest.activation, ToolActivation::Always);
+    }
+
+    #[test]
+    fn tool_results_expose_host_visible_completion_modes_and_failure_details() {
+        use std::time::Duration;
+
+        use lash::tools::{
+            CancelHint, PendingCompletion, TimeoutBehavior, ToolCallOutput, ToolFailure,
+            ToolFailureClass, ToolFailureSource, ToolResult, ToolValue,
+        };
+
+        let success: ToolResult = ToolResult::ok(serde_json::json!({ "saved": true }));
+        assert!(ToolResult::is_success(&success));
+        assert!(!ToolResult::is_pending(&success));
+        assert_eq!(
+            ToolResult::value_for_projection(&success),
+            serde_json::json!({ "saved": true })
+        );
+        let output = ToolResult::as_done_output(&success).expect("success must be complete");
+        assert_eq!(
+            serde_json::to_value(ToolCallOutput::status(output))
+                .expect("tool status must serialize"),
+            serde_json::json!("success")
+        );
+        assert!(ToolCallOutput::is_success(output));
+        assert_eq!(
+            ToolCallOutput::value_for_projection(output),
+            serde_json::json!({ "saved": true })
+        );
+        assert!(output.control.is_none());
+        assert_eq!(
+            serde_json::to_value(&output.outcome).expect("tool outcome must serialize")["status"],
+            "success"
+        );
+        let ToolResult::Done(done) = success.clone() else {
+            panic!("an inline success must use the completed result mode");
+        };
+        assert_eq!(
+            serde_json::to_value(done.status()).expect("tool status must serialize"),
+            serde_json::json!("success")
+        );
+        let consumed = ToolResult::into_done_output(success).expect("success must unwrap");
+        assert_eq!(
+            ToolCallOutput::into_value_for_projection(consumed),
+            serde_json::json!({ "saved": true })
+        );
+
+        let direct_output = ToolCallOutput::success(serde_json::json!({ "generation": 7 }));
+        let wrapped = ToolResult::from_output(direct_output);
+        assert_eq!(
+            ToolResult::as_output(&wrapped).value_for_projection(),
+            serde_json::json!({ "generation": 7 })
+        );
+        let json_error = ToolResult::err(serde_json::json!({ "path": "missing.md" }));
+        assert_eq!(
+            ToolResult::value_for_projection(&json_error),
+            serde_json::json!({ "path": "missing.md" })
+        );
+        let formatted_error = ToolResult::err_fmt("provider unavailable");
+        assert_eq!(
+            ToolResult::value_for_projection(&formatted_error),
+            serde_json::json!("provider unavailable")
+        );
+
+        let mut tool_failure = ToolFailure::tool(
+            ToolFailureClass::InvalidRequest,
+            "invalid_path",
+            "path leaves the workspace",
+        );
+        tool_failure.raw = Some(ToolValue::from(serde_json::json!({ "path": "../secret" })));
+        assert_eq!(tool_failure.class, ToolFailureClass::InvalidRequest);
+        assert_eq!(tool_failure.code, "invalid_path");
+        assert_eq!(tool_failure.message, "path leaves the workspace");
+        assert_eq!(
+            tool_failure.raw.as_ref().map(ToolValue::to_json_value),
+            Some(serde_json::json!({ "path": "../secret" }))
+        );
+        assert_eq!(ToolFailure::to_json_value(&tool_failure)["source"], "tool");
+        let failed = ToolResult::failure(tool_failure.clone());
+        assert_eq!(
+            serde_json::to_value(ToolResult::as_output(&failed).status())
+                .expect("tool status must serialize"),
+            serde_json::json!("failure")
+        );
+        let direct_failure = ToolCallOutput::failure(tool_failure);
+        assert_eq!(
+            serde_json::to_value(direct_failure.status()).expect("tool status must serialize"),
+            serde_json::json!("failure")
+        );
+
+        let runtime_failure = ToolFailure::runtime(
+            ToolFailureClass::Internal,
+            "runtime_fault",
+            "runtime could not dispatch the tool",
+        );
+        assert_eq!(
+            ToolFailure::to_json_value(&runtime_failure)["source"],
+            "runtime"
+        );
+        let retryable = ToolResult::retryable_failure(
+            ToolFailureClass::Unavailable,
+            "service_busy",
+            "try again",
+            Some(250),
+        );
+        assert_eq!(
+            ToolResult::as_output(&retryable).value_for_projection()["retry"]["after_ms"],
+            250
+        );
+
+        let cancelled = ToolResult::cancelled("operator stopped the tool");
+        assert_eq!(
+            serde_json::to_value(ToolResult::as_output(&cancelled).status())
+                .expect("tool status must serialize"),
+            serde_json::json!("cancelled")
+        );
+        let cancelled_with_raw = ToolResult::cancelled_with_raw(
+            "operator stopped the tool",
+            serde_json::json!({ "checkpoint": 4 }),
+        );
+        assert_eq!(
+            ToolResult::value_for_projection(&cancelled_with_raw),
+            serde_json::json!({ "checkpoint": 4 })
+        );
+        let default_pending = PendingCompletion::new();
+        assert_eq!(default_pending.deadline, None);
+        assert_eq!(default_pending.on_timeout, TimeoutBehavior::ErrorAsResult);
+        assert_eq!(default_pending.on_cancel, CancelHint::CancelExternalWork);
+        let pending_spec = PendingCompletion::fail_turn_on_timeout(
+            PendingCompletion::with_deadline(default_pending, Duration::from_secs(30)),
+        );
+        assert_eq!(pending_spec.deadline, Some(Duration::from_secs(30)));
+        assert_eq!(pending_spec.on_timeout, TimeoutBehavior::FailTurn);
+        let pending = ToolResult::pending(pending_spec.clone());
+        assert!(ToolResult::is_pending(&pending));
+        let ToolResult::Pending(observed_pending) = pending.clone() else {
+            panic!("a deferred completion must use the pending result mode");
+        };
+        assert_eq!(observed_pending, pending_spec);
+        assert_eq!(
+            ToolResult::into_done_output(pending).expect_err("pending must not unwrap"),
+            pending_spec
+        );
+
+        let failure_classes = [
+            ToolFailureClass::InvalidRequest,
+            ToolFailureClass::Unavailable,
+            ToolFailureClass::PermissionDenied,
+            ToolFailureClass::Timeout,
+            ToolFailureClass::Execution,
+            ToolFailureClass::External,
+            ToolFailureClass::ResourceLimit,
+            ToolFailureClass::Internal,
+        ];
+        assert_eq!(
+            serde_json::to_value(failure_classes).expect("failure classes must serialize"),
+            serde_json::json!([
+                "invalid_request",
+                "unavailable",
+                "permission_denied",
+                "timeout",
+                "execution",
+                "external",
+                "resource_limit",
+                "internal"
+            ])
+        );
+        let host_failure_sources = [
+            ToolFailureSource::Runtime,
+            ToolFailureSource::Plugin,
+            ToolFailureSource::Policy,
+            ToolFailureSource::Cancellation,
+        ];
+        assert_eq!(
+            serde_json::to_value(host_failure_sources).expect("failure sources must serialize"),
+            serde_json::json!(["runtime", "plugin", "policy", "cancellation"])
+        );
+    }
+}
