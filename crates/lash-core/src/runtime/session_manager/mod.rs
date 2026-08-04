@@ -42,6 +42,9 @@ impl CurrentSnapshot {
 
 pub(super) struct ManagedSessionTurn {
     pub(super) session_id: String,
+    /// Identity of the registration attempt that created this entry. Only the
+    /// lease carrying the same nonce may release it.
+    pub(super) registration: u64,
 }
 
 #[derive(Clone)]
