@@ -177,9 +177,10 @@ async fn triage_stuck_turn(core: &LashCore, session_id: &str) -> lash::Result<()
             let _ = expires_in_ms;
         }
 
-        // Renewals stopped. `session_execution_lease.renew_failed` followed by
-        // `session_execution_lease.taken_over` names the successor in the log.
-        // Do NOT kill the displaced runner: it may still win the commit CAS.
+        // Renewals stopped. The worker that swept the lane logs
+        // `session_execution_lease.taken_over` naming this holder as
+        // `displaced_owner_id`, so the handoff is in the log even if this holder
+        // died without noticing. Do NOT kill it: it may still win the commit CAS.
         // Only `session_execution_lease.commit_cas_rejected` proves it lost.
         SessionLeaseRenewal::Lapsed { expired_for_ms } => {
             let _ = expired_for_ms;

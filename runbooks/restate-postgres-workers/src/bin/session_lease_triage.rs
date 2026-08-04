@@ -10,23 +10,22 @@
 //!   second `LashCore` reads the lane while the turn is in flight and must see a
 //!   named holder whose renewals are landing. Releasing the provider lets the
 //!   turn commit, after which the lane reads as unheld and no lease event fired.
-//! * `takeover`: the same parked turn, but its durable lane is swept by a peer
-//!   mid-turn. The displaced holder's renewal is then rejected, so the trace must
-//!   carry `renew_failed` followed by `taken_over` naming the successor at a
-//!   higher generation. Releasing the provider afterwards records what actually
-//!   happened to the turn, which is the claim the docs stake the most on: a lost
-//!   lease is not a failed turn.
+//! * `takeover`: a lane left held by a worker that is gone, swept by a real turn.
+//!   The winner's claim must emit `taken_over` naming the abandoned holder and a
+//!   strictly higher generation, and the dead holder must emit nothing at all:
+//!   that is the case a takeover reported from the loser's renewal path missed
+//!   entirely.
 //! * `livelock`: the cause the procedure names for repeated CAS rejections: two
 //!   concurrent writers on one session under a single explicit
 //!   `session_execution_owner`, so the second reenters the first's lease instead
 //!   of being rejected as busy, and the loser's commit dies on the head CAS.
 //!
-//! Fault injection is deliberate and uses only public store surface. The sweep in
-//! the `takeover` phase reads the live holder out of a busy claim outcome (which
-//! carries the observed lease by contract, so a claimant can reclaim exactly what
-//! it saw), releases it under that fence, and claims it for a named successor.
-//! That is the peer's own mechanism, run on demand instead of after a TTL, so the
-//! events the phase judges come from the production renewal path unchanged.
+//! Fault injection is deliberate and uses only public store surface. The
+//! `takeover` phase seeds an abandoned lease row (TTL zero, claimed through the
+//! store, so no guard and no renewal task exist behind it) and then lets a real
+//! turn claim the session. Nothing is released on the dead worker's behalf and
+//! nothing waits for it to notice, because it never will: that absence is the
+//! point of the scenario.
 //!
 //! Every phase runs against each configured backend (SQLite always, PostgreSQL
 //! when `LASH_POSTGRES_DATABASE_URL` is set) and prints one JSON `checkpoint`
@@ -56,6 +55,9 @@ const SCRIPTED_PROGRAM: &str = "<lashlang>\nfinish \"ok\"\n</lashlang>";
 const RENEW_INTERVAL: Duration = Duration::from_millis(50);
 const LEASE_TTL: Duration = Duration::from_millis(5_000);
 const GATE_TIMEOUT: Duration = Duration::from_secs(30);
+/// Rounds of sustained misrouting. One collision is contention; the docs
+/// diagnose recurrence, so the scenario has to show the cycle repeating.
+const LIVELOCK_ROUNDS: usize = 3;
 
 /// Timings for the two phases that watch the renewal loop work.
 fn observable_timings() -> lash::durability::LeaseTimings {
@@ -134,12 +136,6 @@ impl LeaseTraceCapture {
             .into_iter()
             .filter(|value| value.get("event").and_then(Value::as_str) == Some(event))
             .collect()
-    }
-
-    fn position_of(&self, event: &str) -> Option<usize> {
-        self.timeline()
-            .iter()
-            .position(|value| value.get("event").and_then(Value::as_str) == Some(event))
     }
 
     /// Wait until `event` has been emitted, or fail the phase. Polling the
@@ -393,12 +389,18 @@ impl StallingProvider {
             let entered = Arc::clone(&entered);
             let release = Arc::clone(&release);
             lash_core::testing::TestProvider::builder()
-                .kind("session-lease-triage-stall")
+                // Same provider kind as the scripted variant: a session records the
+                // provider id it was created under, so a later core that registers
+                // a different kind cannot drive it.
+                .kind("session-lease-triage")
                 .complete(move |_request| {
                     let entered = Arc::clone(&entered);
                     let release = Arc::clone(&release);
                     async move {
-                        entered.notify_waiters();
+                        // `notify_one` stores a permit when no waiter has registered
+                        // yet, so the harness cannot miss the parked signal by
+                        // reaching the provider before the gate is awaited.
+                        entered.notify_one();
                         // Park the way a provider call with no timeout does. The
                         // renewal loop keeps the lane alive underneath.
                         release
@@ -553,13 +555,19 @@ async fn provider_hang(
 // Phase: takeover
 // ---------------------------------------------------------------------------
 
-/// A parked turn whose lane is swept out from under it by a peer.
+/// The flagship production takeover: a worker is gone, and a peer sweeps its lane.
 ///
-/// The sweep uses the peer's own mechanism (observe the busy holder, release it
-/// under that fence, claim it) rather than waiting out a TTL, so the events come
-/// from the production renewal path with no timing luck involved. What the turn
-/// then does is the point: the docs claim a lost lease is not a failed turn, and
-/// this phase records the answer instead of asserting it.
+/// The abandoned row is seeded through the store by an owner that has no guard and
+/// no renewal task anywhere in this process, which is what a killed or frozen
+/// worker actually leaves behind. Nothing that worker would have logged happens.
+/// A real turn then claims the session, and the truthful takeover has to come from
+/// that winner, atomically with its claim.
+///
+/// Deliberately not rigged: nothing releases the lane on the dead worker's behalf,
+/// and nothing waits for it to notice, because in this case it never will. The
+/// live-loser variant (a holder that is still running when its lane moves, which
+/// additionally logs its own `renew_failed`) is covered by the lash-core unit
+/// tests; it is a strictly easier case and not the one that used to go unreported.
 async fn lease_takeover(
     backend: &Backend,
     capture: &LeaseTraceCapture,
@@ -567,106 +575,87 @@ async fn lease_takeover(
 ) -> Result<Value> {
     capture.reset();
     let session_id = session_id("takeover", backend, run_id);
-    let displaced = owner("triage-displaced-worker", "triage-displaced-worker:boot-1");
+    let abandoned_by = owner("triage-dead-worker", "triage-dead-worker:boot-1");
     let successor = owner("triage-successor-worker", "triage-successor-worker:boot-1");
-    let provider = StallingProvider::new();
 
-    let running = backend.core(
-        provider.handle.clone(),
-        Some(displaced.clone()),
-        observable_timings(),
+    // Materialize the session with one committed turn, so the lane belongs to a
+    // real session rather than a bare row.
+    let seed = backend.core(
+        scripted_provider(),
+        Some(successor.clone()),
+        quiet_timings(),
     )?;
-    let session = running.open(&session_id).await?;
-    let turn = tokio::spawn(async move {
-        session
-            .turn(lash::TurnInput::text(TURN_PROMPT))
-            .turn_id("lease-triage-takeover-turn".to_string())
-            .run()
-            .await
-    });
-    provider.wait_until_parked().await?;
+    let seed_session = seed.open(&session_id).await?;
+    seed_session
+        .turn(lash::TurnInput::text(TURN_PROMPT))
+        .turn_id("lease-triage-takeover-seed".to_string())
+        .run()
+        .await
+        .map_err(anyhow::Error::msg)?;
+    drop(seed_session);
+
+    // Leave the row held by a worker that is gone: TTL zero, claimed straight
+    // through the store, so there is no guard and no renewal loop behind it.
+    let store = backend.store(&session_id).await?;
+    let abandoned = store
+        .try_claim_session_execution_lease(&session_id, &abandoned_by, 0)
+        .await
+        .map_err(anyhow::Error::msg)
+        .context("seed the abandoned lane")?
+        .acquired()
+        .context("an unheld lane is acquirable")?;
+    capture.reset();
 
     let observer = backend.core(scripted_provider(), None, quiet_timings())?;
-    capture
-        .await_event("session_execution_lease.claimed", GATE_TIMEOUT)
-        .await?;
     let before = observer
         .core
         .session_lease_diagnostics(&session_id)
         .await
         .map_err(anyhow::Error::msg)?;
 
-    // Observe the live holder the way a peer claimant does: a busy outcome
-    // carries the exact lease it lost to.
-    let store = backend.store(&session_id).await?;
-    let observed = match store
-        .try_claim_session_execution_lease(&session_id, &successor, LEASE_TTL.as_millis() as u64)
-        .await
-        .map_err(anyhow::Error::msg)
-        .context("probe the lane held by the parked turn")?
-    {
-        lash::persistence::SessionExecutionLeaseClaimOutcome::Busy { holder } => holder,
-        lash::persistence::SessionExecutionLeaseClaimOutcome::Acquired(_) => {
-            bail!("the parked turn was not holding its lane; the phase has nothing to displace")
-        }
+    // A real turn sweeps the lane. Its claim is the takeover.
+    let sweeper = backend.core(
+        scripted_provider(),
+        Some(successor.clone()),
+        quiet_timings(),
+    )?;
+    let sweeper_session = sweeper.open(&session_id).await?;
+    let swept = sweeper_session
+        .turn(lash::TurnInput::text(TURN_PROMPT))
+        .turn_id("lease-triage-takeover-sweep".to_string())
+        .run()
+        .await;
+    let (turn_committed, turn_error) = match &swept {
+        Ok(output) => (output.final_value() == Some(&json!("ok")), None),
+        Err(err) => (false, Some(err.to_string())),
     };
-    // Sweep it: release under the observed fence, then claim as the successor.
-    store
-        .release_session_execution_lease(&observed.completion())
-        .await
-        .map_err(anyhow::Error::msg)
-        .context("release the lane under the observed fence")?;
-    let taken = store
-        .try_claim_session_execution_lease(&session_id, &successor, LEASE_TTL.as_millis() as u64)
-        .await
-        .map_err(anyhow::Error::msg)
-        .context("claim the swept lane as the successor")?
-        .acquired()
-        .context("a swept lane must be claimable")?;
 
-    // The displaced holder's renewal loop now presents a fence the row no longer
-    // honors; the production path reports it and names the successor.
-    let renew_failed = capture
-        .await_event("session_execution_lease.renew_failed", GATE_TIMEOUT)
-        .await?;
     let taken_over = capture
         .await_event("session_execution_lease.taken_over", GATE_TIMEOUT)
         .await?;
-    let order_ok = capture.position_of("session_execution_lease.renew_failed")
-        < capture.position_of("session_execution_lease.taken_over");
-
     let after = observer
         .core
         .session_lease_diagnostics(&session_id)
         .await
         .map_err(anyhow::Error::msg)?;
-
-    provider.release();
-    let settled = tokio::time::timeout(GATE_TIMEOUT, turn)
-        .await
-        .context("the displaced turn never settled")?
-        .context("the turn task panicked")?;
-    let (turn_committed, turn_error) = match &settled {
-        Ok(output) => (output.final_value() == Some(&json!("ok")), None),
-        Err(err) => (false, Some(err.to_string())),
-    };
     let rejections = capture.named("session_execution_lease.commit_cas_rejected");
 
     Ok(json!({
         "checkpoint": "lease_takeover",
         "backend": backend.name,
         "session_id": session_id,
-        "displaced_owner_id": displaced.owner_id,
+        "abandoned_owner_id": abandoned_by.owner_id,
         "successor_owner_id": successor.owner_id,
-        "displaced_generation": observed.fencing_token,
-        "superseding_generation": taken.fencing_token,
-        "renew_failed_before_taken_over": order_ok,
-        "renew_failed": renew_failed,
+        "abandoned_generation": abandoned.fencing_token,
         "taken_over": taken_over,
+        "taken_over_count": capture.named("session_execution_lease.taken_over").len(),
+        // The dead holder runs nothing, so it reports nothing. This is precisely
+        // the case a loser-emitted takeover event would have missed entirely.
+        "renew_failed_count": capture.named("session_execution_lease.renew_failed").len(),
         "reading_before_takeover": reading(before.as_ref()),
         "reading_after_takeover": reading(after.as_ref()),
-        "turn_committed_after_lease_loss": turn_committed,
-        "turn_error_after_lease_loss": turn_error,
+        "turn_committed_after_takeover": turn_committed,
+        "turn_error_after_takeover": turn_error,
         "commit_cas_rejected_count": rejections.len(),
         "commit_cas_rejected": rejections,
         "lease_trace": capture.timeline(),
@@ -677,14 +666,16 @@ async fn lease_takeover(
 // Phase: livelock
 // ---------------------------------------------------------------------------
 
-/// Two writers on one session under a single explicit owner identity.
+/// Sustained misrouting: two writers keep being handed the same session under one
+/// explicit owner identity, and each retries after losing.
 ///
-/// The docs name this as the cause of repeated CAS rejections, and it is the
-/// case where the lease cannot help by construction: sharing an identity means
-/// the second writer reenters the first's lease instead of seeing
-/// `session_execution_busy`, so only the head compare-and-set stops it. Both
-/// writers open before either commits, which is the state a host reaches by
-/// routing two requests for one session to two writers that share an identity.
+/// One collision is ordinary contention and proves nothing; the docs diagnose
+/// *repeated* `commit_cas_rejected` with `lease_lost = false` as livelock, so the
+/// harness has to produce recurrence. Sharing an identity is what makes it
+/// recur: the second writer reenters the first's lease instead of being rejected
+/// as busy, so nothing serializes the pair and every round collides again. Each
+/// round the loser reloads and retries, exactly as a retry-on-conflict host does,
+/// which is the shape that turns contention into a cycle.
 async fn commit_cas_livelock(
     backend: &Backend,
     capture: &LeaseTraceCapture,
@@ -693,51 +684,78 @@ async fn commit_cas_livelock(
     capture.reset();
     let session_id = session_id("livelock", backend, run_id);
     let shared = owner("triage-shared-worker", "triage-shared-worker:boot-1");
+    let mut rounds = Vec::new();
 
-    let first = backend.core(scripted_provider(), Some(shared.clone()), quiet_timings())?;
-    let second = backend.core(scripted_provider(), Some(shared.clone()), quiet_timings())?;
-    let first_session = first.open(&session_id).await?;
-    let second_session = second.open(&session_id).await?;
+    for round in 0..LIVELOCK_ROUNDS {
+        let before = capture
+            .named("session_execution_lease.commit_cas_rejected")
+            .len();
+        // Both writers open before either commits, so both snapshot the same head
+        // revision. Parking one inside its provider is what makes the overlap
+        // deterministic: without it the two turns can serialize by scheduling luck
+        // and the round proves nothing.
+        let stalled_provider = StallingProvider::new();
+        let stalled_core = backend.core(
+            stalled_provider.handle.clone(),
+            Some(shared.clone()),
+            quiet_timings(),
+        )?;
+        let racer_core =
+            backend.core(scripted_provider(), Some(shared.clone()), quiet_timings())?;
+        let stalled_session = stalled_core.open(&session_id).await?;
+        let racer_session = racer_core.open(&session_id).await?;
 
-    // Race them. Sharing an identity means neither is rejected as busy, so both
-    // reach the commit with the same expected head revision and the CAS is the
-    // only thing that can separate them.
-    let left = tokio::spawn(async move {
-        first_session
+        let stalled = tokio::spawn(async move {
+            stalled_session
+                .turn(lash::TurnInput::text(TURN_PROMPT))
+                .turn_id(format!("lease-triage-livelock-{round}-stalled"))
+                .run()
+                .await
+        });
+        if stalled_provider.wait_until_parked().await.is_err() {
+            // The parked turn is the fixture; if it failed before reaching the
+            // provider, report that failure rather than a bare timeout.
+            let settled = tokio::time::timeout(Duration::from_secs(5), stalled).await;
+            bail!("round {round}: the stalled turn never reached the provider: {settled:?}");
+        }
+
+        // The peer reenters the same lease (shared identity, so no busy rejection)
+        // and publishes first.
+        let racer = racer_session
             .turn(lash::TurnInput::text(TURN_PROMPT))
-            .turn_id("lease-triage-livelock-left".to_string())
+            .turn_id(format!("lease-triage-livelock-{round}-racer"))
             .run()
+            .await;
+        let racer_committed = racer
+            .as_ref()
+            .is_ok_and(|output| output.final_value() == Some(&json!("ok")));
+
+        // Now let the parked writer try to publish against a head that moved.
+        stalled_provider.release();
+        let stalled = tokio::time::timeout(GATE_TIMEOUT, stalled)
             .await
-    });
-    let right = tokio::spawn(async move {
-        second_session
-            .turn(lash::TurnInput::text(TURN_PROMPT))
-            .turn_id("lease-triage-livelock-right".to_string())
-            .run()
-            .await
-    });
-    let outcomes = [
-        tokio::time::timeout(GATE_TIMEOUT, left)
-            .await
-            .context("the first racing turn never settled")?
-            .context("the first turn task panicked")?,
-        tokio::time::timeout(GATE_TIMEOUT, right)
-            .await
-            .context("the second racing turn never settled")?
-            .context("the second turn task panicked")?,
-    ];
-    let committed = outcomes
-        .iter()
-        .filter(|outcome| {
-            outcome
-                .as_ref()
-                .is_ok_and(|output| output.final_value() == Some(&json!("ok")))
-        })
-        .count();
-    let winner_committed = committed == 1;
-    let loser_error = outcomes
-        .iter()
-        .find_map(|outcome| outcome.as_ref().err().map(ToString::to_string));
+            .with_context(|| format!("round {round}: the parked turn never settled"))?
+            .with_context(|| format!("round {round}: the parked turn panicked"))?;
+        let stalled_committed = stalled
+            .as_ref()
+            .is_ok_and(|output| output.final_value() == Some(&json!("ok")));
+        let loser_error = stalled
+            .as_ref()
+            .err()
+            .map(ToString::to_string)
+            .or_else(|| racer.as_ref().err().map(ToString::to_string));
+        let rejected_this_round = capture
+            .named("session_execution_lease.commit_cas_rejected")
+            .len()
+            - before;
+        rounds.push(json!({
+            "round": round,
+            "committed": usize::from(racer_committed) + usize::from(stalled_committed),
+            "loser_rejected": loser_error.is_some(),
+            "loser_error": loser_error,
+            "commit_cas_rejected_in_round": rejected_this_round,
+        }));
+    }
 
     let rejections = capture.named("session_execution_lease.commit_cas_rejected");
     let observer = backend.core(scripted_provider(), None, quiet_timings())?;
@@ -746,15 +764,19 @@ async fn commit_cas_livelock(
         .session_lease_diagnostics(&session_id)
         .await
         .map_err(anyhow::Error::msg)?;
+    let rounds_with_a_rejection = rounds
+        .iter()
+        .filter(|round| round["commit_cas_rejected_in_round"].as_u64().unwrap_or(0) > 0)
+        .count();
 
     Ok(json!({
         "checkpoint": "commit_cas_livelock",
         "backend": backend.name,
         "session_id": session_id,
         "shared_owner_id": shared.owner_id,
-        "winner_committed": winner_committed,
-        "loser_rejected": loser_error.is_some(),
-        "loser_error": loser_error,
+        "rounds_attempted": LIVELOCK_ROUNDS,
+        "rounds_with_a_rejection": rounds_with_a_rejection,
+        "rounds": rounds,
         "commit_cas_rejected_count": rejections.len(),
         "commit_cas_rejected": rejections,
         "renew_failed_count": capture.named("session_execution_lease.renew_failed").len(),

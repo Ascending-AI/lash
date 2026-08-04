@@ -134,62 +134,89 @@ for backend, record in checkpoints("provider_hang_shape", "02-provider-hang.json
     if record["reading_after_commit"]["renewal"] != "unheld":
         fail(f"{backend}: a committed turn must release its lane: {record['reading_after_commit']}")
 
-# Phase 2: a takeover is two ordered events plus a higher generation, and the
-# displaced turn's fate is recorded rather than assumed.
+# Phase 2: the winner reports the takeover truthfully, and the dead holder
+# reports nothing at all. The second half is the whole point: an event emitted by
+# the displaced runner would be absent here.
 for backend, record in checkpoints("lease_takeover", "03-lease-takeover.jsonl").items():
-    renew_failed = event(record, "session_execution_lease.renew_failed")
     taken_over = event(record, "session_execution_lease.taken_over")
-    require_identity_fields(record, "renew_failed", renew_failed)
     require_identity_fields(record, "taken_over", taken_over)
-    if renew_failed["level"] != "WARN":
-        fail(f"{backend}: renew_failed must warn, got {renew_failed['level']}")
     if taken_over["level"] != "INFO":
         fail(f"{backend}: taken_over must be operator-visible, got {taken_over['level']}")
-    if not record["renew_failed_before_taken_over"]:
-        fail(f"{backend}: the timeline did not order renew_failed before taken_over: {record}")
-    if renew_failed["generation"] != taken_over["generation"]:
-        fail(f"{backend}: the two events name different displaced generations: {record}")
-    if taken_over["superseding_generation"] <= taken_over["generation"]:
+    if record["taken_over_count"] != 1:
+        fail(f"{backend}: exactly one takeover must be reported: {record}")
+    if record["renew_failed_count"]:
+        fail(
+            f"{backend}: the abandoned holder runs nothing and must report nothing, so a "
+            f"renew_failed here means the scenario is not testing a dead loser: {record}"
+        )
+    if taken_over["owner_id"] != record["successor_owner_id"]:
+        fail(f"{backend}: the takeover was not emitted by the winner: {taken_over}")
+    if taken_over["displaced_owner_id"] != record["abandoned_owner_id"]:
+        fail(f"{backend}: the takeover named the wrong displaced holder: {taken_over}")
+    if taken_over["displaced_generation"] != record["abandoned_generation"]:
+        fail(f"{backend}: the takeover named the wrong displaced generation: {taken_over}")
+    if taken_over["generation"] <= taken_over["displaced_generation"]:
         fail(f"{backend}: takeover did not advance the generation: {taken_over}")
-    if taken_over["superseding_owner_id"] == taken_over["owner_id"]:
-        fail(f"{backend}: takeover named the displaced holder as its own successor: {taken_over}")
-    if record["superseding_generation"] <= record["displaced_generation"]:
-        fail(f"{backend}: the swept lane did not advance the durable generation: {record}")
+    if taken_over["displaced_owner_id"] == taken_over["owner_id"]:
+        fail(f"{backend}: a claim reported displacing itself: {taken_over}")
     before = record["reading_before_takeover"]
     after = record["reading_after_takeover"]
-    if before["holder_owner_id"] != record["displaced_owner_id"]:
+    if before["holder_owner_id"] != record["abandoned_owner_id"]:
         fail(f"{backend}: the pre-takeover reading named the wrong holder: {before}")
-    if after["holder_owner_id"] != record["successor_owner_id"]:
-        fail(f"{backend}: the post-takeover reading did not name the successor: {after}")
-    if after["generation"] <= before["generation"]:
-        fail(f"{backend}: the operator read did not show a higher generation: {before} -> {after}")
+    if before["renewal"] != "lapsed":
+        fail(f"{backend}: an abandoned lane must read as lapsed: {before}")
+    # After the sweep the abandoned holder must be gone from the read. The lane is
+    # either held by the successor or already unheld, because a committing turn
+    # releases it; both are correct and the run records which happened.
+    if after["holder_owner_id"] == record["abandoned_owner_id"]:
+        fail(f"{backend}: the operator read still names the displaced holder: {after}")
+    if after["renewal"] not in ("unheld", "current"):
+        fail(f"{backend}: unexpected post-sweep reading: {after}")
+    if after["generation"] is not None and after["generation"] <= before["generation"]:
+        fail(f"{backend}: a still-held lane must show a higher generation: {before} -> {after}")
     # The doctrine under test: lease loss is not a turn verdict. Whichever way
-    # this turn settled, the run must record it and it must be self-consistent.
-    if record["turn_committed_after_lease_loss"] and record["commit_cas_rejected_count"]:
+    # the sweeping turn settled, the run must record it, self-consistently.
+    if record["turn_committed_after_takeover"] and record["commit_cas_rejected_count"]:
         fail(f"{backend}: a committed turn cannot also have lost the head CAS: {record}")
-    if not record["turn_committed_after_lease_loss"] and not record["turn_error_after_lease_loss"]:
-        fail(f"{backend}: the displaced turn neither committed nor reported an error: {record}")
+    if not record["turn_committed_after_takeover"] and not record["turn_error_after_takeover"]:
+        fail(f"{backend}: the sweeping turn neither committed nor reported an error: {record}")
 
-# Phase 3: livelock is a rejected commit while the writer still holds a lane.
+# Phase 3: livelock is *repeated* rejection under sustained misrouting, while the
+# writer still holds a lane. One collision is ordinary contention and is not what
+# the documented decision procedure keys on.
 for backend, record in checkpoints("commit_cas_livelock", "04-commit-cas-livelock.jsonl").items():
-    if not record["winner_committed"]:
-        fail(f"{backend}: the first writer did not commit: {record}")
-    if not record["loser_rejected"]:
-        fail(f"{backend}: the stale writer's commit was accepted: {record}")
-    rejected = event(record, "session_execution_lease.commit_cas_rejected")
-    require_identity_fields(record, "commit_cas_rejected", rejected)
-    if rejected["level"] != "WARN":
-        fail(f"{backend}: commit_cas_rejected must warn, got {rejected['level']}")
-    if rejected["lease_lost"] is not False:
-        fail(f"{backend}: livelock is a rejection while the lane is still held: {rejected}")
-    if rejected["actual_head_revision"] <= rejected["expected_head_revision"]:
-        fail(f"{backend}: the rejection did not name a head that had moved on: {rejected}")
+    if record["rounds_attempted"] < 2:
+        fail(f"{backend}: recurrence needs more than one round: {record}")
+    if record["rounds_with_a_rejection"] != record["rounds_attempted"]:
+        fail(
+            f"{backend}: misrouting must keep colliding to be livelock rather than a one-off; "
+            f"only {record['rounds_with_a_rejection']}/{record['rounds_attempted']} rounds "
+            f"produced a rejection: {record}"
+        )
+    if record["commit_cas_rejected_count"] < record["rounds_attempted"]:
+        fail(f"{backend}: expected at least one rejection per round: {record}")
+    for round_record in record["rounds"]:
+        if round_record["committed"] != 1:
+            fail(f"{backend}: each round must have exactly one winner: {round_record}")
+        if not round_record["loser_rejected"]:
+            fail(f"{backend}: a round's stale writer was accepted: {round_record}")
+    for rejected in record["commit_cas_rejected"]:
+        require_identity_fields(record, "commit_cas_rejected", rejected)
+        if rejected["level"] != "WARN":
+            fail(f"{backend}: commit_cas_rejected must warn, got {rejected['level']}")
+        if rejected["lease_lost"] is not False:
+            fail(f"{backend}: livelock is a rejection while the lane is still held: {rejected}")
+        if rejected["lane_held"] is not True:
+            fail(f"{backend}: these writers do hold the lane by reentry: {rejected}")
+        if rejected["actual_head_revision"] <= rejected["expected_head_revision"]:
+            fail(f"{backend}: the rejection did not name a head that had moved on: {rejected}")
     if record["renew_failed_count"] or record["taken_over_count"]:
         fail(f"{backend}: livelock must be distinguishable from a handoff: {record}")
 
 print(
-    "session-lease-triage gates: provider hang, takeover ordering, and CAS livelock "
-    f"asserted on {', '.join(backends)}; all four lease events observed"
+    "session-lease-triage gates: provider hang, winner-emitted takeover of a dead holder, "
+    f"and recurring CAS livelock asserted on {', '.join(backends)}; all four lease events "
+    "observed"
 )
 PY
 

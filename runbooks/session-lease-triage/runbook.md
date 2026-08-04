@@ -32,14 +32,19 @@ runbook.
 fixed Lashlang program, plus a variant of it that parks forever. Do not configure a live
 provider for this scenario.
 
-**Fixture honesty.** Two faults are injected rather than waited for. The parked turn is a
-provider that never returns, which is the real shape of a provider hang with no timeout.
-The takeover is performed on demand with the peer's own mechanism: a busy claim outcome
-carries the lease it lost to by contract, so the harness releases that exact fence and
-claims it for a named successor instead of idling out a TTL. Both leave the production
-renewal and commit paths untouched, so the events under judgment are the real ones. What
-the harness does *not* reproduce is a worker whose whole process stalls; the events are
-identical from the row's point of view, and no claim here depends on the difference.
+**Fixture honesty.** The parked turn is a provider that never returns, which is the real
+shape of a provider hang with no timeout. The takeover is staged as an *abandoned lease
+row*: a TTL-zero claim made straight through the store, so no guard and no renewal task
+exist behind it, which is what a killed or frozen worker leaves behind. Nothing releases the
+lane on the dead worker's behalf and nothing waits for it to notice, because it never will.
+That absence is the scenario, not a shortcut around it.
+
+Emitter liveness is exactly what separates the two loser shapes, and the harness deliberately
+tests the harder one. A *live* holder that loses its lane additionally logs its own
+`renew_failed`; a dead one logs nothing at all. Those event sets are **not** identical, and a
+takeover reported from the loser would be absent in the dead case. The live-loser variant is
+covered by the `lash-core` unit tests (`session_lease_observability`); this runbook covers
+the case that used to go unreported.
 
 ## Scenario-specific golden rules
 
@@ -47,18 +52,21 @@ identical from the row's point of view, and no claim here depends on the differe
    must produce a `Current` reading naming the parked worker and produce **no**
    `renew_failed`, `taken_over`, or `commit_cas_rejected` event. A run that finds lease
    trouble around a hanging provider has not isolated the provider.
-2. **Order is the evidence in a takeover.** `renew_failed` must precede `taken_over`, both
-   must name the same displaced generation, and `taken_over` must name a strictly higher
-   superseding generation under a different owner. Two unordered events do not reconstruct
-   a handoff.
+2. **The winner reports the takeover, and it reports the truth.** `taken_over` must be
+   emitted by the worker that claimed the lane, name the abandoned holder as
+   `displaced_owner_id`/`displaced_generation`, and carry a strictly higher `generation` of
+   its own. The dead holder must emit **zero** events: a run that finds a `renew_failed`
+   here is not testing a dead loser and its takeover evidence proves nothing about the case
+   under review.
 3. **A lost lease is not a failed turn.** The displaced turn's fate is recorded, not
    assumed. If it committed, no `commit_cas_rejected` may exist for it; if it failed, the
    error is captured. A run that treats lease loss as proof of failure contradicts the
    contract the docs stake the "do not kill it" instruction on.
-4. **Livelock is told apart by `lease_lost`, not by vibes.** The rejected commit must carry
-   `lease_lost = false` and name a head revision that moved on, with no `taken_over` in the
-   timeline. That combination, and only it, separates two racing writers from an ordinary
-   handoff.
+4. **Livelock is recurrence, not one collision.** Every round of sustained misrouting must
+   produce a rejection carrying `lease_lost = false`, `lane_held = true`, and a head revision
+   that moved on, with no `taken_over` in the timeline. A single rejection is ordinary
+   concurrent-writer contention and the operations page says so separately; a run that shows
+   one collision has not evidenced the diagnosis that prescribes an identity fix.
 5. **Diagnostics never authorize an action.** No phase may use the reading to fence, cancel,
    or kill anything. If a step needs the lease to decide behavior, the step is wrong.
 6. **Docs claims are assertions.** Each documented statement about triage is scored against
@@ -118,48 +126,52 @@ while the turn is provably in flight, carries no headroom, or any lease-trouble 
 A reading that cannot be taken at all while a turn holds the lane is the sharpest possible
 failure: the whole point is that triage is free to run against a live session.
 
-## Phase 2 — Takeover: the lane moved, and the turn may still commit
+## Phase 2 — Takeover: a dead worker's lane, swept by a real turn
 
-**Setup.** `03-lease-takeover.jsonl`. The same parked turn, with its durable lane swept
-mid-turn by a named successor.
+**Setup.** `03-lease-takeover.jsonl`. One committed turn materializes the session, then an
+abandoned lease row is seeded: TTL zero, claimed through the store, no guard and no renewal
+task behind it. A real turn then claims the session.
 
-**Action.** Read the `renew_failed` and `taken_over` events with every field, the ordering
-flag, the readings either side of the sweep, and the displaced turn's recorded fate.
+**Action.** Read the `taken_over` event with every field, the `renew_failed` count, the
+readings either side of the sweep, and the sweeping turn's recorded fate.
 
-**Expected observable evidence.** `renew_failed` is `WARN`; `taken_over` is `INFO` and adds
-`superseding_generation`, `superseding_owner_id`, and `superseding_incarnation_id`.
-`renew_failed` precedes `taken_over`, both name the displaced generation, and the
-superseding generation is strictly higher under a different owner. The pre-sweep reading
-names the displaced holder; the post-sweep reading names the successor at a higher
-generation. The displaced turn then settles, and the run records which way.
+**Expected observable evidence.** Exactly one `taken_over`, at `INFO`, emitted by the
+successor: its own `generation`/`owner_id`/`incarnation_id` are the winner's, and
+`displaced_owner_id`/`displaced_generation` name the abandoned holder exactly, strictly
+below the winner's generation. `renew_failed_count` is `0`, because the abandoned holder runs
+nothing. The pre-sweep reading names the abandoned holder as `lapsed`; the post-sweep reading
+names the successor at a higher generation. The sweeping turn then settles, and the run
+records which way.
 
-**Judgment — FAIL if:** either event is missing or omits an identity field, the two are out
-of order or disagree about the displaced generation, the successor is reported as its own
-predecessor, the generation did not advance, the operator read still shows the old holder
-afterwards, or the turn neither committed nor reported an error. A run in which the
-displaced turn committed is not a failure; it is the contract, and the scorecard says so.
+**Judgment — FAIL if:** no `taken_over` appears, it is emitted by anyone but the winner, it
+names the wrong displaced holder or generation, the generation did not advance, a claim
+reports displacing itself, the pre-sweep reading is not a lapsed row naming the abandoned
+holder, the operator read still shows the old holder afterwards, or the turn neither
+committed nor reported an error. A `renew_failed` in this phase is also a failure: it means
+the loser was alive, so the run silently substituted the easy case for the one under test.
 
-## Phase 3 — Livelock: two writers, one head
+## Phase 3 — Livelock: sustained misrouting, repeated rejections
 
-**Setup.** `04-commit-cas-livelock.jsonl`. Two writers open the same session under one
-explicit `session_execution_owner`, so the second reenters the first's lease instead of
-being rejected as busy, then both run a turn at once.
+**Setup.** `04-commit-cas-livelock.jsonl`. Three rounds of the misconfiguration the docs
+name: two writers are handed the same session under one explicit
+`session_execution_owner`, so the second reenters the first's lease instead of being
+rejected as busy, and both run a turn at once. Each round is a fresh pair, which is what a
+retry-on-conflict host does after losing.
 
-**Action.** Read `winner_committed`, `loser_rejected`, the `commit_cas_rejected` event, and
-the handoff counters.
+**Action.** Read `rounds_attempted`, `rounds_with_a_rejection`, the per-round records, and
+every `commit_cas_rejected` event.
 
-**Expected observable evidence.** Exactly one turn committed. The other failed with a head
-revision conflict, and exactly one `commit_cas_rejected` event fired: `WARN`, carrying
-session id, generation, owner id, incarnation id, `lease_lost = false`, and an
-`actual_head_revision` strictly above `expected_head_revision`. No `renew_failed` and no
-`taken_over` appear, so the situation is unambiguously a race rather than a handoff.
+**Expected observable evidence.** Every round has exactly one winner and one rejected
+commit, so `rounds_with_a_rejection` equals `rounds_attempted` and the rejection count is at
+least one per round. Each rejection is `WARN` and carries session id, generation, owner id,
+incarnation id, `lease_lost = false`, `lane_held = true`, and an `actual_head_revision`
+strictly above `expected_head_revision`. No `renew_failed` and no `taken_over` appear, so the
+situation is unambiguously a recurring race rather than a handoff.
 
-**Judgment — FAIL if:** both writers committed (the lease was treated as authority and the
-CAS did not fence), neither committed, the rejection is missing or reports `lease_lost =
-true`, the head revisions do not show the head moving on, or a handoff event appears
-alongside. Note that the misconfiguration under test is the one the docs name: a shared
-explicit identity. A run that cannot stage it has lost the ability to test the case an
-operator will actually hit.
+**Judgment — FAIL if:** any round has zero or two winners, any round produces no rejection
+(then the misrouting is not actually recurring and the run has proved contention, not
+livelock), a rejection reports `lease_lost = true` or `lane_held = false`, the head revisions
+do not show the head moving on, or a handoff event appears alongside.
 
 ## Phase 4 — Score the documented procedure against the observed run
 
@@ -174,9 +186,9 @@ rendered section text as `06-docs-claims.txt`.
 | Every lease event carries session id, generation, and holder identity | all three phase artifacts |
 | The four events sit at the levels the table names | `claimed`/`taken_over` INFO, `renew_failed`/`commit_cas_rejected` WARN, in all three artifacts |
 | `Current` with no `renew_failed` means the turn is blocked inside itself | `02-provider-hang.jsonl` |
-| `renew_failed` then `taken_over` orders a handoff and names the successor | `03-lease-takeover.jsonl` |
-| A lost lease does not mean the turn failed, so do not kill the runner | `03-lease-takeover.jsonl` (`turn_committed_after_lease_loss`) |
-| Repeated rejections with `lease_lost = false` are livelock, and the fix is worker identity | `04-commit-cas-livelock.jsonl` |
+| The winner reports `taken_over` naming the holder it displaced, even when that holder is dead | `03-lease-takeover.jsonl` (`renew_failed_count` is 0) |
+| A lost lease does not mean the turn failed, so do not kill the runner | `03-lease-takeover.jsonl` (`turn_committed_after_takeover`) |
+| One rejection is contention; *repeated* rejections with `lease_lost = false` are livelock, and the fix is worker identity | `04-commit-cas-livelock.jsonl` (per-round records) |
 | Only `commit_cas_rejected` proves a turn did not publish | `03-lease-takeover.jsonl` versus `04-commit-cas-livelock.jsonl` |
 | Lease churn is trace telemetry, not durable session history | absence of any lease entry in session events; the events exist only in the captured timeline |
 
@@ -185,9 +197,9 @@ page omits, is a **contract violation** between docs and behavior: report it as 
 
 The livelock row's *cause* is only partly observable here: the harness stages the shared
 identity directly rather than routing two host requests into it, so it evidences the
-mechanism (reentry plus a rejected commit) and leaves the host-routing half to the
-deployment. Say so in the scorecard rather than claiming the cause was reproduced end to
-end.
+mechanism (reentry, recurrence, and a rejected commit each round) and leaves the
+host-routing half to the deployment. Say so in the scorecard rather than claiming the cause
+was reproduced end to end.
 
 ## Phase 5 — Teardown and score
 
@@ -200,10 +212,10 @@ confirm no container or host port was left behind (the companion owns none).
 | Contract coverage | four-event suite and facade-read suite green; docs lint green | | `00-trace-event-tests.log`, `01-facade-read-tests.log`, `05-docs-lint.log` |
 | Provider hang | `current` reading naming the parked worker, positive headroom, zero lease-trouble events | | `02-provider-hang.jsonl` |
 | Lease release on commit | the committed turn's lane reads `unheld` | | `02-provider-hang.jsonl` |
-| Takeover ordering | `renew_failed` before `taken_over`, same displaced generation | | `03-lease-takeover.jsonl` |
-| Named successor | higher superseding generation under a different owner, visible in the read | | `03-lease-takeover.jsonl` |
-| Lease loss is not failure | the displaced turn's fate recorded and self-consistent | | `03-lease-takeover.jsonl` |
-| CAS livelock | one commit, one rejection with `lease_lost = false` and a moved head | | `04-commit-cas-livelock.jsonl` |
+| Winner-emitted takeover | one `taken_over` from the winner naming the abandoned holder and generation | | `03-lease-takeover.jsonl` |
+| Dead loser stays silent | `renew_failed_count` is 0, so the event does not depend on loser liveness | | `03-lease-takeover.jsonl` |
+| Lease loss is not failure | the sweeping turn's fate recorded and self-consistent | | `03-lease-takeover.jsonl` |
+| CAS livelock recurs | every round: one commit, one rejection with `lease_lost = false` and `lane_held = true` | | `04-commit-cas-livelock.jsonl` |
 | Backend agreement | every phase reported the same verdicts on each configured backend | | all phase artifacts |
 | Docs agreement | every scored claim matched an artifact | | `06-docs-claims.txt` |
 | Teardown | panic gate clean; no owned containers or ports remain | | `session-lease-triage-e2e.log` |

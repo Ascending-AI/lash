@@ -1649,8 +1649,8 @@ kind = "function"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:280#.session_lease_diagnostics(SESSION_ID)"
-assertion = "examples/agent-service/src/lease_triage.rs:297#assert_eq!(diagnostics.session_id, SESSION_ID);"
+usage = "examples/agent-service/src/lease_triage.rs:289#.session_lease_diagnostics(SESSION_ID)"
+assertion = "examples/agent-service/src/lease_triage.rs:306#assert_eq!(diagnostics.session_id, SESSION_ID);"
 
 [[api]]
 symbol = "lash::LashCore::tool_catalog"
@@ -5960,7 +5960,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:196#let elapsed = output.result.duration(); // claim -> commit + post-persist hooks"
+usage = "examples/docs-snippets/src/operations.rs:197#let elapsed = output.result.duration(); // claim -> commit + post-persist hooks"
 
 [[api]]
 symbol = "lash::TurnResult::errors"
@@ -6016,7 +6016,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:195#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
+usage = "examples/docs-snippets/src/operations.rs:196#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
 
 [[api]]
 symbol = "lash::TurnResult::state"
@@ -13503,6 +13503,46 @@ disposition = "unused-add"
 reason = "Add lash::persistence::SessionExecutionLease::session_id to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::persistence::SessionExecutionLeaseAcquisition"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseAcquisition::displaced"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseAcquisition::displacing_observed"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseAcquisition::fresh"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseAcquisition::lease"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
 symbol = "lash::persistence::SessionExecutionLeaseClaimOutcome"
 kind = "enum"
 availability = "default+all-features"
@@ -13551,6 +13591,14 @@ disposition = "unused-add"
 reason = "Add lash::persistence::SessionExecutionLeaseClaimOutcome::acquired to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::persistence::SessionExecutionLeaseClaimOutcome::acquisition"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
 symbol = "lash::persistence::SessionExecutionLeaseCompletion"
 kind = "struct"
 availability = "default+all-features"
@@ -13589,6 +13637,38 @@ availability = "default+all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::persistence::SessionExecutionLeaseCompletion::session_id to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseDisplacement"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseDisplacement::expired_at_epoch_ms"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseDisplacement::generation"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash::persistence::SessionExecutionLeaseDisplacement::owner"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
 
 [[api]]
 symbol = "lash::persistence::SessionExecutionLeaseFence"
@@ -13644,8 +13724,8 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:289#.get_session_execution_lease(SESSION_ID)"
-assertion = "examples/agent-service/src/lease_triage.rs:293#assert_eq!(holder.owner, row.owner);"
+usage = "examples/agent-service/src/lease_triage.rs:298#.get_session_execution_lease(SESSION_ID)"
+assertion = "examples/agent-service/src/lease_triage.rs:302#assert_eq!(holder.owner, row.owner);"
 
 [[api]]
 symbol = "lash::persistence::SessionExecutionLeaseStore::release_session_execution_lease"
@@ -13997,8 +14077,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:279#let diagnostics: SessionLeaseDiagnostics = core"
-assertion = "examples/agent-service/src/lease_triage.rs:297#assert_eq!(diagnostics.session_id, SESSION_ID);"
+usage = "examples/agent-service/src/lease_triage.rs:288#let diagnostics: SessionLeaseDiagnostics = core"
+assertion = "examples/agent-service/src/lease_triage.rs:306#assert_eq!(diagnostics.session_id, SESSION_ID);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseDiagnostics::holder"
@@ -14006,8 +14086,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:285#            .holder"
-assertion = "examples/agent-service/src/lease_triage.rs:293#assert_eq!(holder.owner, row.owner);"
+usage = "examples/agent-service/src/lease_triage.rs:294#            .holder"
+assertion = "examples/agent-service/src/lease_triage.rs:302#assert_eq!(holder.owner, row.owner);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseDiagnostics::observed_at_epoch_ms"
@@ -14016,7 +14096,7 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-service/src/lease_triage.rs:129#observed_at_epoch_ms: Some(diagnostics.observed_at_epoch_ms),"
-assertion = "examples/agent-service/src/lease_triage.rs:298#assert!(diagnostics.observed_at_epoch_ms > 0);"
+assertion = "examples/agent-service/src/lease_triage.rs:307#assert!(diagnostics.observed_at_epoch_ms > 0);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseDiagnostics::renewal"
@@ -14025,7 +14105,7 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-service/src/lease_triage.rs:118#let renewal = diagnostics.renewal();"
-assertion = "examples/agent-service/src/lease_triage.rs:299#assert!(matches!("
+assertion = "examples/agent-service/src/lease_triage.rs:308#assert!(matches!("
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseDiagnostics::session_id"
@@ -14034,7 +14114,7 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-service/src/lease_triage.rs:126#session_id: diagnostics.session_id.clone(),"
-assertion = "examples/agent-service/src/lease_triage.rs:297#assert_eq!(diagnostics.session_id, SESSION_ID);"
+assertion = "examples/agent-service/src/lease_triage.rs:306#assert_eq!(diagnostics.session_id, SESSION_ID);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseHolder"
@@ -14042,8 +14122,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:284#let holder: &SessionLeaseHolder = diagnostics"
-assertion = "examples/agent-service/src/lease_triage.rs:293#assert_eq!(holder.owner, row.owner);"
+usage = "examples/agent-service/src/lease_triage.rs:293#let holder: &SessionLeaseHolder = diagnostics"
+assertion = "examples/agent-service/src/lease_triage.rs:302#assert_eq!(holder.owner, row.owner);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseHolder::claimed_at_epoch_ms"
@@ -14052,7 +14132,7 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-service/src/lease_triage.rs:133#claimed_at_epoch_ms: holder.map(|holder| holder.claimed_at_epoch_ms),"
-assertion = "examples/agent-service/src/lease_triage.rs:295#assert_eq!(holder.claimed_at_epoch_ms, row.claimed_at_epoch_ms);"
+assertion = "examples/agent-service/src/lease_triage.rs:304#assert_eq!(holder.claimed_at_epoch_ms, row.claimed_at_epoch_ms);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseHolder::expires_at_epoch_ms"
@@ -14061,7 +14141,7 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-service/src/lease_triage.rs:134#expires_at_epoch_ms: holder.map(|holder| holder.expires_at_epoch_ms),"
-assertion = "examples/agent-service/src/lease_triage.rs:296#assert_eq!(holder.expires_at_epoch_ms, row.expires_at_epoch_ms);"
+assertion = "examples/agent-service/src/lease_triage.rs:305#assert_eq!(holder.expires_at_epoch_ms, row.expires_at_epoch_ms);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseHolder::generation"
@@ -14070,7 +14150,7 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-service/src/lease_triage.rs:132#generation: holder.map(|holder| holder.generation),"
-assertion = "examples/agent-service/src/lease_triage.rs:294#assert_eq!(holder.generation, row.fencing_token);"
+assertion = "examples/agent-service/src/lease_triage.rs:303#assert_eq!(holder.generation, row.fencing_token);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseHolder::owner"
@@ -14079,7 +14159,7 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-service/src/lease_triage.rs:130#holder_owner_id: holder.map(|holder| holder.owner.owner_id.clone()),"
-assertion = "examples/agent-service/src/lease_triage.rs:293#assert_eq!(holder.owner, row.owner);"
+assertion = "examples/agent-service/src/lease_triage.rs:302#assert_eq!(holder.owner, row.owner);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseRenewal"
@@ -14088,7 +14168,7 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-service/src/lease_triage.rs:120#SessionLeaseRenewal::Unheld => LeaseTriage::Unheld,"
-assertion = "examples/agent-service/src/lease_triage.rs:400#assert_eq!(report.triage, LeaseTriage::Unheld);"
+assertion = "examples/agent-service/src/lease_triage.rs:409#assert_eq!(report.triage, LeaseTriage::Unheld);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseRenewal::Current"
@@ -14097,7 +14177,7 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-service/src/lease_triage.rs:121#SessionLeaseRenewal::Current { .. } => LeaseTriage::ProviderHangShape,"
-assertion = "examples/agent-service/src/lease_triage.rs:263#assert_eq!(report.triage, LeaseTriage::ProviderHangShape);"
+assertion = "examples/agent-service/src/lease_triage.rs:272#assert_eq!(report.triage, LeaseTriage::ProviderHangShape);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseRenewal::Current::expires_in_ms"
@@ -14106,7 +14186,7 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-service/src/lease_triage.rs:136#SessionLeaseRenewal::Current { expires_in_ms } => Some(expires_in_ms),"
-assertion = "examples/agent-service/src/lease_triage.rs:271#report.expires_in_ms.is_some_and(|remaining| remaining > 0),"
+assertion = "examples/agent-service/src/lease_triage.rs:280#report.expires_in_ms.is_some_and(|remaining| remaining > 0),"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseRenewal::Lapsed"
@@ -14115,7 +14195,7 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-service/src/lease_triage.rs:122#SessionLeaseRenewal::Lapsed { .. } => LeaseTriage::LeaseLost,"
-assertion = "examples/agent-service/src/lease_triage.rs:323#assert_eq!(report.triage, LeaseTriage::LeaseLost);"
+assertion = "examples/agent-service/src/lease_triage.rs:332#assert_eq!(report.triage, LeaseTriage::LeaseLost);"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseRenewal::Lapsed::expired_for_ms"
@@ -14124,7 +14204,7 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-service/src/lease_triage.rs:140#SessionLeaseRenewal::Lapsed { expired_for_ms } => Some(expired_for_ms),"
-assertion = "examples/agent-service/src/lease_triage.rs:326#assert!(report.expired_for_ms.is_some());"
+assertion = "examples/agent-service/src/lease_triage.rs:335#assert!(report.expired_for_ms.is_some());"
 
 [[api]]
 symbol = "lash::persistence::SessionLeaseRenewal::Unheld"
@@ -14133,7 +14213,7 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-service/src/lease_triage.rs:120#SessionLeaseRenewal::Unheld => LeaseTriage::Unheld,"
-assertion = "examples/agent-service/src/lease_triage.rs:400#assert_eq!(report.triage, LeaseTriage::Unheld);"
+assertion = "examples/agent-service/src/lease_triage.rs:409#assert_eq!(report.triage, LeaseTriage::Unheld);"
 
 [[api]]
 symbol = "lash::persistence::SessionMeta"
@@ -20095,8 +20175,8 @@ kind = "function"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/lease_triage.rs:280#.session_lease_diagnostics(SESSION_ID)"
-assertion = "examples/agent-service/src/lease_triage.rs:297#assert_eq!(diagnostics.session_id, SESSION_ID);"
+usage = "examples/agent-service/src/lease_triage.rs:289#.session_lease_diagnostics(SESSION_ID)"
+assertion = "examples/agent-service/src/lease_triage.rs:306#assert_eq!(diagnostics.session_id, SESSION_ID);"
 
 [[api]]
 symbol = "lash::prelude::LashCore::standard_builder"
@@ -23486,7 +23566,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:196#let elapsed = output.result.duration(); // claim -> commit + post-persist hooks"
+usage = "examples/docs-snippets/src/operations.rs:197#let elapsed = output.result.duration(); // claim -> commit + post-persist hooks"
 
 [[api]]
 symbol = "lash::prelude::TurnResult::errors"
@@ -23542,7 +23622,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:195#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
+usage = "examples/docs-snippets/src/operations.rs:196#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
 
 [[api]]
 symbol = "lash::prelude::TurnResult::state"
@@ -59391,7 +59471,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:196#let elapsed = output.result.duration(); // claim -> commit + post-persist hooks"
+usage = "examples/docs-snippets/src/operations.rs:197#let elapsed = output.result.duration(); // claim -> commit + post-persist hooks"
 
 [[api]]
 symbol = "lash::turn::TurnResult::errors"
@@ -59447,7 +59527,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:195#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
+usage = "examples/docs-snippets/src/operations.rs:196#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
 
 [[api]]
 symbol = "lash::turn::TurnResult::state"
@@ -60122,6 +60202,86 @@ availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
 reason = "The public observed-processes field already permits assignment; retaining the builder narrows no promise."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseAcquisition"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseAcquisition::displaced"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseAcquisition::displacing_observed"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseAcquisition::fresh"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseAcquisition::lease"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseClaimOutcome::acquisition"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseDisplacement"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseDisplacement::expired_at_epoch_ms"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseDisplacement::generation"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
+
+[[api]]
+symbol = "lash_core::SessionExecutionLeaseDisplacement::owner"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. A granted claim must hand the winner the lapsed holder it displaced, because that is the only atomic and liveness-independent report of a takeover; bundled examples use repository backends and do not implement this backend-facing contract, which the runtime-persistence conformance suite pins instead."
 
 [[api]]
 symbol = "lash_core::SessionExecutionLeaseStore::get_session_execution_lease"
@@ -70322,7 +70482,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:434#.prune(cutoff, lash::process::ProjectionWatermark::NoProjector)"
+usage = "examples/agent-service/src/main.rs:437#.prune(cutoff, lash::process::ProjectionWatermark::NoProjector)"
 
 [[api]]
 symbol = "lash_core::ProjectionWatermark::NoProjector"
@@ -70330,7 +70490,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/main.rs:434#.prune(cutoff, lash::process::ProjectionWatermark::NoProjector)"
+usage = "examples/agent-service/src/main.rs:437#.prune(cutoff, lash::process::ProjectionWatermark::NoProjector)"
 
 [[api]]
 symbol = "lash_core::ProjectionWatermark::UpTo"
