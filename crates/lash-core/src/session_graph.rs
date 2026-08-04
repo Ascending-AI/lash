@@ -6,6 +6,12 @@ use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryReco
 use crate::{BaseRenderCache, Clock, Message, MessageRole, PromptUsage, TokenUsage};
 use facade_ops::{SessionGraphFacadeOps, SessionNodeRecordFacadeOps};
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RealizedNodeTimestamp {
+    pub node_id: String,
+    pub timestamp: String,
+}
+
 pub(crate) mod facade_ops {
     use super::*;
 
@@ -867,10 +873,7 @@ impl SessionGraph {
         }
     }
 
-    pub(crate) fn apply_realized_node_timestamps(
-        &mut self,
-        realized: &[crate::store::RealizedNodeTimestamp],
-    ) {
+    pub(crate) fn apply_realized_node_timestamps(&mut self, realized: &[RealizedNodeTimestamp]) {
         if realized.is_empty() {
             return;
         }

@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use crate::ToolProvider;
-use crate::plugin::PromptContribution;
+use lash_sansio::PromptContribution;
 
 /// Output of the per-turn context transform pipeline — the messages,
 /// prompt contributions, and tool providers the runtime hands to the

@@ -218,13 +218,13 @@ pub mod persistence {
         SlotPolicy, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputCompletion,
         TurnInputIngress, TurnInputState,
     };
+    pub use lash_core::session_graph::RealizedNodeTimestamp;
     pub use lash_core::store::queued_work;
     pub use lash_core::store::{
-        GraphAppend, HydratedSessionCheckpoint, OperationId, PersistedSessionRead,
-        RealizedNodeTimestamp, RuntimeCommit, RuntimeCommitResult, RuntimeTurnCommitStamp,
-        RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionHead,
-        SessionHeadMeta, SessionHeadPayload, commit_runtime_state_verified,
-        load_persisted_session_state,
+        GraphAppend, HydratedSessionCheckpoint, OperationId, PersistedSessionRead, RuntimeCommit,
+        RuntimeCommitResult, RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
+        SessionCheckpoint, SessionHead, SessionHeadMeta, SessionHeadPayload,
+        commit_runtime_state_verified, load_persisted_session_state,
     };
     pub use lash_core::{
         AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStorePersistence,

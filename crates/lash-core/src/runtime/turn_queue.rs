@@ -1,4 +1,5 @@
 use super::process::ProcessWakeDelivery;
+use crate::store::QueuedWorkClass;
 use crate::{PluginMessage, TurnCause, TurnInput};
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -192,13 +193,6 @@ pub enum QueuedWorkPayload {
     SessionCommand {
         command: Box<SessionCommand>,
     },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum QueuedWorkClass {
-    SessionCommand,
-    TurnWork,
 }
 
 impl QueuedWorkPayload {

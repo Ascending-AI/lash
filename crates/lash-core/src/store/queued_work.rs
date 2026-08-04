@@ -12,8 +12,15 @@
 use sha2::{Digest, Sha256};
 
 use super::LeaseOwnerIdentity;
-use crate::runtime::QueuedWorkClass;
 use crate::{DeliveryPolicy, MergeKey, QueuedWorkClaimBoundary, SlotPolicy};
+
+/// Whether a durable queued-work row carries a session command or turn work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueuedWorkClass {
+    SessionCommand,
+    TurnWork,
+}
 
 /// Decoded claim-relevant fields of one ready queued-work batch row.
 ///
