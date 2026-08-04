@@ -1,4 +1,44 @@
+use std::sync::Arc;
+
 use super::InMemorySessionStore;
+
+/// Test seam that suspends `release_session_execution_lease` at its backend
+/// await so a caller can drop the release future at exactly that point.
+#[derive(Debug)]
+pub(crate) struct SessionExecutionLeaseReleaseGate {
+    entered: tokio::sync::Notify,
+    admitted: tokio::sync::Semaphore,
+}
+
+impl Default for SessionExecutionLeaseReleaseGate {
+    fn default() -> Self {
+        Self {
+            entered: tokio::sync::Notify::new(),
+            admitted: tokio::sync::Semaphore::new(0),
+        }
+    }
+}
+
+impl SessionExecutionLeaseReleaseGate {
+    /// Wait until a release attempt has reached the gate.
+    pub(crate) async fn wait_entered(&self) {
+        self.entered.notified().await;
+    }
+
+    /// Let exactly one release attempt through.
+    pub(crate) fn admit_one(&self) {
+        self.admitted.add_permits(1);
+    }
+
+    pub(super) async fn enter(&self) {
+        self.entered.notify_one();
+        self.admitted
+            .acquire()
+            .await
+            .expect("lease release gate stays open")
+            .forget();
+    }
+}
 
 impl InMemorySessionStore {
     pub(crate) async fn save_session_head_meta(&self, meta: crate::SessionHeadMeta) {
@@ -22,6 +62,24 @@ impl InMemorySessionStore {
     pub(crate) fn fail_next_session_execution_lease_renewal(&self) {
         self.fail_next_session_execution_lease_renewal
             .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Suspend every subsequent `release_session_execution_lease` at its
+    /// backend await until the returned gate admits it.
+    pub(crate) fn gate_session_execution_lease_release(
+        &self,
+    ) -> Arc<SessionExecutionLeaseReleaseGate> {
+        let gate = Arc::new(SessionExecutionLeaseReleaseGate::default());
+        *self
+            .session_execution_lease_release_gate
+            .lock()
+            .expect("lock lease release gate") = Some(Arc::clone(&gate));
+        gate
+    }
+
+    pub(crate) fn session_execution_lease_release_count(&self) -> usize {
+        self.session_execution_lease_release_count
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     pub(crate) fn session_execution_lease_renewal_count(&self) -> usize {
