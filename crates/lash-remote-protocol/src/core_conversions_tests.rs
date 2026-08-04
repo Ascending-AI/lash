@@ -1293,7 +1293,7 @@ fn trigger_subscription_draft() -> lash_core::TriggerSubscriptionDraft {
 fn trigger_subscription_record() -> lash_core::TriggerSubscriptionRecord {
     let draft = trigger_subscription_draft();
     lash_core::TriggerSubscriptionRecord {
-        subscription_id: "trigger-subscription:v1:sha256:test".to_string(),
+        subscription_id: "trigger-subscription:v2:sha256:test".to_string(),
         owner_scope: lash_core::TriggerOwnerScope::session("session-a"),
         subscription_key: draft.subscription_key,
         incarnation: "incarnation-a".to_string(),

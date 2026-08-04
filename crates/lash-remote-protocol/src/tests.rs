@@ -801,7 +801,7 @@ fn remote_trigger_subscription_dtos_json_round_trip() {
     assert_eq!(decoded.source_type, "ui.button.pressed");
 
     let record = RemoteTriggerSubscriptionRecord {
-        subscription_id: "trigger-subscription:v1:sha256:test".to_string(),
+        subscription_id: "trigger-subscription:v2:sha256:test".to_string(),
         owner_scope: RemoteTriggerOwnerScope::Session {
             session_id: "session".to_string(),
         },

@@ -22,7 +22,8 @@ use mutation::{
 pub use router::*;
 use router::{default_enabled, reserve_in_memory_for_occurrence};
 use router::{
-    project_trigger_actor, project_trigger_draft, project_trigger_json_value, project_trigger_owner,
+    project_trigger_actor, project_trigger_draft, project_trigger_owner,
+    project_trigger_payload_leaf,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1147,7 +1148,7 @@ fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
             ] {
                 fingerprint.optional(value, |fingerprint, value| fingerprint.string(value));
             }
-            fingerprint.optional(target.as_ref(), project_trigger_json_value);
+            fingerprint.optional(target.as_ref(), project_trigger_payload_leaf);
             fingerprint.optional(*enabled, |fingerprint, enabled| {
                 fingerprint.tag(u8::from(enabled));
             });

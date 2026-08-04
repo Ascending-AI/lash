@@ -129,6 +129,10 @@ impl<'run> DirectCompletionClient<'run> {
 
     /// Executes an already-normalized request using its non-empty
     /// `scope.request_id` as the caller-owned durable replay key.
+    ///
+    /// The request id must be unique for each logical direct call. Reusing it
+    /// in the same session, turn, and usage source deliberately replays the
+    /// first result even when the rest of the request differs.
     pub async fn direct_llm_completion(
         &self,
         request: crate::LlmRequest,
@@ -203,17 +207,23 @@ pub(in crate::runtime::session_manager) struct DirectInvocationContext<'a> {
 }
 
 impl DirectInvocationContext<'_> {
-    fn replay_lane(caused_by: Option<&crate::CausalRef>) -> String {
-        caused_by
+    fn replay_lane(caused_by: Option<&crate::CausalRef>, usage_source: &str) -> String {
+        let cause = caused_by
             .map(crate::runtime::causal::causal_replay_discriminator)
-            .unwrap_or_else(|| "independent".to_string())
+            .unwrap_or_else(|| "independent".to_string());
+        format!(
+            "{}:{cause}{}:{usage_source}",
+            cause.len(),
+            usage_source.len()
+        )
     }
 
     fn next_replay_ordinal(
         &self,
         caused_by: Option<&crate::CausalRef>,
+        usage_source: &str,
     ) -> Result<u64, crate::PluginError> {
-        let lane = Self::replay_lane(caused_by);
+        let lane = Self::replay_lane(caused_by, usage_source);
         let mut ordinals = self.replay_ordinals.lock().map_err(|_| {
             crate::PluginError::Session("direct replay ordinal lock poisoned".to_string())
         })?;
@@ -227,8 +237,9 @@ impl DirectInvocationContext<'_> {
     fn claim_unkeyed_lane(
         &self,
         caused_by: Option<&crate::CausalRef>,
+        usage_source: &str,
     ) -> Result<DirectUnkeyedGuard<'_>, crate::PluginError> {
-        let lane = Self::replay_lane(caused_by);
+        let lane = Self::replay_lane(caused_by, usage_source);
         let mut in_flight = self.unkeyed_in_flight.lock().map_err(|_| {
             crate::PluginError::Session("direct unkeyed replay lock poisoned".to_string())
         })?;
@@ -406,7 +417,7 @@ impl DirectCompletionCapability {
         let _unkeyed_guard = if context.position == DirectExecutionPosition::Independent
             && replay.as_ref().is_none_or(|replay| replay.key.is_empty())
         {
-            Some(context.claim_unkeyed_lane(caused_by.as_ref())?)
+            Some(context.claim_unkeyed_lane(caused_by.as_ref(), usage_source)?)
         } else {
             None
         };
@@ -418,7 +429,7 @@ impl DirectCompletionCapability {
         {
             0
         } else {
-            context.next_replay_ordinal(caused_by.as_ref())?
+            context.next_replay_ordinal(caused_by.as_ref(), usage_source)?
         };
         let normalized = crate::direct::build_llm_request(&provider, request, model);
         let plan = self

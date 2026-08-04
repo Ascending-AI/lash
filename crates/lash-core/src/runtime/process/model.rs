@@ -98,7 +98,11 @@ pub enum ProcessInput {
     },
     SessionTurn {
         /// Caller-owned revision for the growable session request/input pair.
-        /// Change this key whenever their executable meaning changes.
+        /// Change this key whenever their executable meaning changes. The
+        /// definition fingerprint deliberately excludes `create_request` and
+        /// `turn_input`: keeping the key stable after changing either is a
+        /// deliberate false merge, so the process id must otherwise be unique
+        /// per definition.
         definition_key: String,
         create_request: Box<crate::SessionCreateRequest>,
         turn_input: Box<crate::TurnInput>,
@@ -242,7 +246,9 @@ impl ProcessExecutionEnvSpec {
     /// Version 2 is a clean cutover from the former live-model serde hash.
     /// Store backends reject older schema versions and must be recreated; a
     /// future byte-format change requires a new textual family version and the
-    /// same explicit old-row policy.
+    /// same explicit old-row policy. These bytes follow the final binary's
+    /// serde-json feature set; enabling order-preserving maps is therefore an
+    /// identity-format change that requires a new family version.
     pub fn stable_ref(&self) -> Result<ProcessExecutionEnvRef, serde_json::Error> {
         self.to_store_bytes()
             .map(|bytes| process_execution_env_ref_for_bytes(&bytes))

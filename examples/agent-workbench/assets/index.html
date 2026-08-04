@@ -3799,7 +3799,7 @@
     }
 
     function truncateSubscriptionId(value) {
-      const prefix = "trigger-subscription:v1:sha256:";
+      const prefix = "trigger-subscription:v2:sha256:";
       if (!value) return "unknown";
       if (value.startsWith(prefix)) {
         return "sha256:" + truncateTriggerDetail(value.slice(prefix.length), 10);

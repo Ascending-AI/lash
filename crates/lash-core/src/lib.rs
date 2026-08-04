@@ -13,6 +13,7 @@
 pub mod attachments;
 pub mod chronological;
 pub mod direct;
+mod identity_json;
 pub mod llm;
 mod model;
 pub mod plugin;

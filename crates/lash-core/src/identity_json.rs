@@ -1,0 +1,179 @@
+//! Canonical opaque leaves for arbitrary JSON carried by durable definitions.
+//!
+//! Identity families frame each JSON-bearing field as one byte leaf. They do
+//! not admit JSON arrays, objects, numbers, or future object members into the
+//! family grammar. A byte change in a payload leaf is an executable definition
+//! conflict. Schema leaves additionally discard JSON Schema annotations that
+//! do not affect validation; a byte change after that reduction is a schema
+//! definition conflict.
+
+const SCHEMA_ANNOTATIONS: &[&str] = &[
+    "$comment",
+    "default",
+    "deprecated",
+    "description",
+    "examples",
+    "readOnly",
+    "title",
+    "writeOnly",
+];
+
+pub(crate) fn payload_leaf(value: &serde_json::Value) -> Vec<u8> {
+    encode_leaf(normalize_payload(value))
+}
+
+pub(crate) fn schema_leaf(value: &serde_json::Value) -> Vec<u8> {
+    encode_leaf(normalize_schema(value))
+}
+
+fn encode_leaf(normalized: serde_json::Value) -> Vec<u8> {
+    serde_json::to_vec(&normalized).expect("serializing a JSON value cannot fail")
+}
+
+fn normalize_payload(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::String(_) => {
+            value.clone()
+        }
+        serde_json::Value::Number(number) => {
+            if number.as_f64() == Some(0.0) && number.to_string().starts_with('-') {
+                serde_json::Value::Number(
+                    serde_json::Number::from_f64(0.0).expect("zero is a finite JSON number"),
+                )
+            } else {
+                value.clone()
+            }
+        }
+        serde_json::Value::Array(values) => {
+            serde_json::Value::Array(values.iter().map(normalize_payload).collect())
+        }
+        serde_json::Value::Object(values) => {
+            let mut entries = values.iter().collect::<Vec<_>>();
+            entries.sort_by_key(|(key, _)| *key);
+            let mut normalized = serde_json::Map::new();
+            for (key, value) in entries {
+                normalized.insert(key.clone(), normalize_payload(value));
+            }
+            serde_json::Value::Object(normalized)
+        }
+    }
+}
+
+fn normalize_schema(value: &serde_json::Value) -> serde_json::Value {
+    let serde_json::Value::Object(values) = value else {
+        return normalize_payload(value);
+    };
+    let mut entries = values.iter().collect::<Vec<_>>();
+    entries.sort_by_key(|(key, _)| *key);
+    let mut normalized = serde_json::Map::new();
+    for (key, value) in entries {
+        if SCHEMA_ANNOTATIONS.contains(&key.as_str()) {
+            continue;
+        }
+        let value = match key.as_str() {
+            "$defs" | "definitions" | "dependentSchemas" | "patternProperties" | "properties" => {
+                normalize_schema_map(value)
+            }
+            "additionalItems"
+            | "additionalProperties"
+            | "contains"
+            | "contentSchema"
+            | "else"
+            | "if"
+            | "items"
+            | "not"
+            | "propertyNames"
+            | "then"
+            | "unevaluatedItems"
+            | "unevaluatedProperties" => normalize_schema_or_sequence(value),
+            "allOf" | "anyOf" | "oneOf" | "prefixItems" => normalize_schema_sequence(value),
+            // These keywords contain instance values, not nested schemas.
+            "const" | "enum" => normalize_payload(value),
+            // Constraints such as type, required, minimum, and format contain
+            // primitives or instance-name collections. Unknown future
+            // keywords remain opaque rather than silently becoming schema
+            // grammar under this family version.
+            _ => normalize_payload(value),
+        };
+        normalized.insert(key.clone(), value);
+    }
+    serde_json::Value::Object(normalized)
+}
+
+fn normalize_schema_map(value: &serde_json::Value) -> serde_json::Value {
+    let serde_json::Value::Object(values) = value else {
+        return normalize_payload(value);
+    };
+    let mut entries = values.iter().collect::<Vec<_>>();
+    entries.sort_by_key(|(key, _)| *key);
+    let mut normalized = serde_json::Map::new();
+    for (key, value) in entries {
+        normalized.insert(key.clone(), normalize_schema(value));
+    }
+    serde_json::Value::Object(normalized)
+}
+
+fn normalize_schema_sequence(value: &serde_json::Value) -> serde_json::Value {
+    let serde_json::Value::Array(values) = value else {
+        return normalize_payload(value);
+    };
+    serde_json::Value::Array(values.iter().map(normalize_schema).collect())
+}
+
+fn normalize_schema_or_sequence(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Array(_) => normalize_schema_sequence(value),
+        serde_json::Value::Object(_) | serde_json::Value::Bool(_) => normalize_schema(value),
+        _ => normalize_payload(value),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn payload_leaf_has_pinned_feature_independent_bytes() {
+        let first =
+            serde_json::from_str(r#"{"b":-0.0,"a":[true,null]}"#).expect("parse payload leaf");
+        let second = serde_json::from_str(r#"{"a":[true,null],"b":0.0}"#)
+            .expect("parse reordered payload leaf");
+        assert_eq!(payload_leaf(&first), br#"{"a":[true,null],"b":0.0}"#);
+        assert_eq!(payload_leaf(&first), payload_leaf(&second));
+    }
+
+    #[test]
+    fn schema_leaf_excludes_non_executable_annotations() {
+        let annotated = serde_json::json!({
+            "title": "display only",
+            "description": "display only",
+            "type": "object",
+            "properties": {
+                "value": {"type": "string", "description": "display only"}
+            },
+            "required": ["value"]
+        });
+        let semantic = serde_json::json!({
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+            "required": ["value"]
+        });
+        assert_eq!(schema_leaf(&annotated), schema_leaf(&semantic));
+        assert_eq!(
+            schema_leaf(&semantic),
+            br#"{"properties":{"value":{"type":"string"}},"required":["value"],"type":"object"}"#
+        );
+
+        let title_property = serde_json::json!({
+            "type": "object",
+            "properties": {"title": {"type": "string"}},
+            "required": ["title"]
+        });
+        let no_properties = serde_json::json!({"type": "object"});
+        assert_ne!(schema_leaf(&title_property), schema_leaf(&no_properties));
+
+        let title_in_const = serde_json::json!({"const": {"title": "identity-bearing value"}});
+        let empty_const = serde_json::json!({"const": {}});
+        assert_ne!(schema_leaf(&title_in_const), schema_leaf(&empty_const));
+    }
+}

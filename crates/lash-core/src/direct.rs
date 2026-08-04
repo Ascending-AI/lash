@@ -68,10 +68,13 @@ pub struct DirectRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Caller-owned durable position for this request.
     ///
-    /// Sequential unkeyed calls use runtime ordinals. Calls that may be
-    /// polled concurrently must provide distinct keys so task scheduling
-    /// cannot choose their replay identity; the runtime rejects overlapping
-    /// unkeyed calls in the same causal lane.
+    /// Sequential unkeyed calls use runtime ordinals scoped by causal lane and
+    /// usage source. Their call order must be deterministic on every redrive;
+    /// conditional or reordered calls must use stable explicit keys. Calls
+    /// that may be polled concurrently under one usage source must provide
+    /// distinct keys so task scheduling cannot choose their replay identity.
+    /// Independent lifecycle hooks should use distinct usage sources; fan-out
+    /// inside one hook still requires per-branch keys.
     pub replay: Option<crate::RuntimeReplay>,
 }
 
@@ -379,6 +382,10 @@ pub(crate) fn build_llm_request(
     }
 
     let scope = match session_id {
+        // This request id is transport metadata for the DirectRequest path;
+        // its durable position was selected from replay/ordinal before
+        // normalization. Callers of direct_llm_completion must instead supply
+        // their own per-logical-call request id.
         Some(session_id) => LlmRequestScope::new(
             session_id.clone(),
             format!("{session_id}:frame:direct"),
