@@ -106,8 +106,14 @@ pub fn sign_material(
     wait: &AwaitEventWaitIdentity,
     key_id: &str,
 ) -> Vec<u8> {
-    serde_json::to_vec(&(scope, wait, key_id))
-        .expect("await-event signing material contains only infallible JSON values")
+    let key_preimage = promise_key_preimage(scope, wait);
+    let mut material = crate::stable_identity::IdentityEncoder::new(
+        "lash.await-event-auth",
+        AWAIT_EVENT_FAMILY_VERSION,
+    );
+    material.bytes(&key_preimage);
+    material.string(key_id);
+    material.finish()
 }
 
 /// State observed by a backend while holding its promise transition fence.
@@ -364,14 +370,14 @@ mod tests {
     }
 
     #[test]
-    fn signing_material_is_the_canonical_scope_wait_key_tuple() {
+    fn signing_material_is_the_stable_framed_key_projection() {
         let scope = ExecutionScope::turn("session", "turn");
         let wait = AwaitEventWaitIdentity::tool_completion("call");
         let key_id = derive_key_id(&scope, &wait).expect("derive key id");
 
         assert_eq!(
-            sign_material(&scope, &wait, &key_id),
-            serde_json::to_vec(&(scope, wait, key_id)).expect("serialize tuple")
+            hex(&sign_material(&scope, &wait, &key_id)),
+            "6c6173682d737461626c652d6964656e74697479010300000000000000156c6173682e61776169742d6576656e742d6175746800000000000000576c6173682d737461626c652d6964656e74697479010300000000000000106c6173682e61776169742d6576656e7401000000000000000773657373696f6e00000000000000047475726e01000000000000000463616c6c000000000000005661776169742d6576656e743a76333a7368613235363a37323934363636313632336137333661643764646466656163653231383265623531643565323566313864346165663138396637396561633438626263666562"
         );
     }
 

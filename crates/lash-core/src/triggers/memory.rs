@@ -442,7 +442,7 @@ fn execute_in_memory_trigger_command(
 ) -> Result<TriggerEffectResult, PluginError> {
     let is_mutation = command.is_mutation();
     let request_fingerprint = trigger_command_fingerprint(&command);
-    let receipt_id = trigger_operation_receipt_id(command.owner_scope(), operation_id)?;
+    let receipt_id = trigger_operation_receipt_id(command.owner_scope(), operation_id);
     if is_mutation
         && let Some((existing_hash, existing_result, _)) = state.mutation_receipts.get(&receipt_id)
     {
@@ -512,8 +512,7 @@ pub(super) fn apply_in_memory_trigger_command(
         } => {
             draft.validate().map_err(TriggerOperationError::from)?;
             let subscription_id =
-                deterministic_subscription_id(&owner_scope, &draft.subscription_key)
-                    .map_err(TriggerOperationError::from)?;
+                deterministic_subscription_id(&owner_scope, &draft.subscription_key);
             let definition_fingerprint =
                 trigger_subscription_definition_fingerprint(&owner_scope, &draft);
             if let Some(existing) = state.subscriptions.get(&subscription_id).cloned() {
@@ -566,8 +565,7 @@ pub(super) fn apply_in_memory_trigger_command(
         } => {
             draft.subscription_key.clone_from(&subscription_key);
             draft.validate().map_err(TriggerOperationError::from)?;
-            let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key)
-                .map_err(TriggerOperationError::from)?;
+            let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key);
             let requested_hash = trigger_subscription_definition_fingerprint(&owner_scope, &draft);
             let Some(existing) = state.subscriptions.get(&subscription_id).cloned() else {
                 return Err(subscription_conflict(
@@ -632,8 +630,7 @@ pub(super) fn apply_in_memory_trigger_command(
             subscription_key,
             expected_revision,
         } => {
-            let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key)
-                .map_err(TriggerOperationError::from)?;
+            let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key);
             let Some(existing) = state.subscriptions.get_mut(&subscription_id) else {
                 return Err(subscription_conflict(
                     &subscription_key,
@@ -665,8 +662,7 @@ pub(super) fn apply_in_memory_trigger_command(
         } => {
             draft.subscription_key.clone_from(&subscription_key);
             draft.validate().map_err(TriggerOperationError::from)?;
-            let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key)
-                .map_err(TriggerOperationError::from)?;
+            let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key);
             let requested_hash = trigger_subscription_definition_fingerprint(&owner_scope, &draft);
             let Some(existing) = state.subscriptions.get(&subscription_id).cloned() else {
                 return Err(subscription_conflict(

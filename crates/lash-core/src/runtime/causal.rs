@@ -383,5 +383,27 @@ mod tests {
             direct_request_discriminator(Some(&RuntimeReplay { key: String::new() }), None, 0,),
             "direct:v2:ordinal:0"
         );
+        assert_eq!(
+            direct_request_discriminator(
+                None,
+                Some(&CausalRef::Turn {
+                    session_id: "ab".to_string(),
+                    turn_id: "c".to_string(),
+                }),
+                1,
+            ),
+            "direct:v2:cause:1:2:ab:1:c:ordinal:1"
+        );
+        assert_eq!(
+            direct_request_discriminator(
+                None,
+                Some(&CausalRef::Turn {
+                    session_id: "a".to_string(),
+                    turn_id: "bc".to_string(),
+                }),
+                1,
+            ),
+            "direct:v2:cause:1:1:a:2:bc:ordinal:1"
+        );
     }
 }

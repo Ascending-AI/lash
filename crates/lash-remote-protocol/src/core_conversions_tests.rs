@@ -589,6 +589,7 @@ fn process_start_requests_round_trip_core_values() {
     let session_turn = lash_core::ProcessStartRequest::new(
         "process:session-turn",
         lash_core::ProcessInput::SessionTurn {
+            definition_key: "remote-session-turn:v1".to_string(),
             create_request: Box::new(
                 lash_core::SessionCreateRequest::child_session(
                     "session-a",
@@ -1273,7 +1274,7 @@ fn trigger_subscription_draft() -> lash_core::TriggerSubscriptionDraft {
     lash_core::TriggerSubscriptionDraft {
         subscription_key: "button-watcher".to_string(),
         env_ref: lash_core::ProcessExecutionEnvRef::new(
-            "process-env:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "process-env:v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         ),
         wake_target: Some(lash_core::SessionScope::new("session-a")),
         name: Some("button watcher".to_string()),

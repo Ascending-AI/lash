@@ -43,7 +43,7 @@ impl RemoteSessionScope {
 pub struct RemoteProcessExecutionEnvRef(String);
 
 impl RemoteProcessExecutionEnvRef {
-    pub const PREFIX: &'static str = "process-env:sha256:";
+    pub const PREFIX: &'static str = "process-env:v2:sha256:";
 
     pub fn parse(value: impl Into<String>) -> Result<Self, RemoteProtocolError> {
         let value = value.into();
@@ -52,7 +52,8 @@ impl RemoteProcessExecutionEnvRef {
         } else {
             Err(RemoteProtocolError::InvalidEnvelope {
                 type_name: "RemoteProcessExecutionEnvRef",
-                message: "env_ref must match `process-env:sha256:<64 lowercase hex>`".to_string(),
+                message: "env_ref must match `process-env:v2:sha256:<64 lowercase hex>`"
+                    .to_string(),
             })
         }
     }
@@ -67,7 +68,8 @@ impl RemoteProcessExecutionEnvRef {
         } else {
             Err(RemoteProtocolError::InvalidEnvelope {
                 type_name,
-                message: "env_ref must match `process-env:sha256:<64 lowercase hex>`".to_string(),
+                message: "env_ref must match `process-env:v2:sha256:<64 lowercase hex>`"
+                    .to_string(),
             })
         }
     }
@@ -193,6 +195,7 @@ pub enum RemoteProcessInput {
         payload: serde_json::Value,
     },
     SessionTurn {
+        definition_key: String,
         #[serde(default)]
         create_request: serde_json::Value,
         turn_input: RemoteTurnInput,
@@ -213,10 +216,12 @@ impl RemoteProcessInput {
             } => Ok(()),
             Self::Engine { kind, payload: _ } => require_non_empty(type_name, "kind", kind),
             Self::SessionTurn {
+                definition_key,
                 create_request: _,
                 turn_input,
                 output_contract,
             } => {
+                require_non_empty(type_name, "definition_key", definition_key)?;
                 turn_input.validate()?;
                 match output_contract {
                     RemoteToolOutputContract::Static => Ok(()),

@@ -23,12 +23,12 @@ impl TriggerStore for PostgresTriggerStore {
         let receipt_id = lash_core::facade_support::trigger_operation_receipt_id(
             command.owner_scope(),
             operation_id,
-        )?;
+        );
         let subscription_key = command.subscription_key().unwrap_or_default().to_string();
         let subscription_id = lash_core::facade_support::deterministic_subscription_id(
             command.owner_scope(),
             &subscription_key,
-        )?;
+        );
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
             .bind(&subscription_id)

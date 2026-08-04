@@ -412,7 +412,7 @@ async fn sqlite_process_registry_rejects_pre_unit_external_owner_schema_before_s
     };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash process registry schema"));
-    assert!(message.contains("supports schema version 19"));
+    assert!(message.contains("supports schema version 20"));
     assert!(message.contains("delete the process registry database and start fresh"));
 }
 
@@ -581,7 +581,7 @@ async fn sqlite_trigger_store_rejects_pre_keyed_schema_before_serving() {
     };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash trigger store schema"));
-    assert!(message.contains("supports schema version 2"));
+    assert!(message.contains("supports schema version 3"));
     assert!(message.contains("delete the trigger store database and start fresh"));
 }
 
@@ -603,7 +603,7 @@ async fn sqlite_effect_controller_rejects_pre_retirement_journal_schema_before_s
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 6"));
+    assert!(message.contains("supports schema version 7"));
     assert!(message.contains("delete the effect replay database and start fresh"));
 }
 

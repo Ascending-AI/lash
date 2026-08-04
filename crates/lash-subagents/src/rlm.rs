@@ -63,6 +63,7 @@ impl RlmSubagentToolsProvider {
         let request = lash_core::ProcessStartRequest::new(
             prepared.process_id.clone(),
             lash_core::ProcessInput::SessionTurn {
+                definition_key: "lash-subagent-session-turn:v1".to_string(),
                 create_request: prepared.create_request,
                 turn_input: Box::new(prepared.turn_input),
                 output_contract: lash_core::ToolOutputContract::Static,

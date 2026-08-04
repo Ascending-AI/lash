@@ -20,11 +20,10 @@ use mutation::{
     ensure_live_revision, mutate_enabled, subscription_conflict, subscription_record_from_draft,
 };
 pub use router::*;
-use router::{
-    append_owner_address, project_trigger_actor, project_trigger_draft, project_trigger_json_value,
-    project_trigger_owner,
-};
 use router::{default_enabled, reserve_in_memory_for_occurrence};
+use router::{
+    project_trigger_actor, project_trigger_draft, project_trigger_json_value, project_trigger_owner,
+};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TriggerEvent {
@@ -499,6 +498,13 @@ impl TriggerSubscriptionDraft {
     /// process identity label before trigger-store implementors persist the draft.
     pub fn validate(&self) -> Result<(), PluginError> {
         validate_subscription_key(&self.subscription_key, false)?;
+        if let crate::ProcessInput::SessionTurn { definition_key, .. } = &self.target
+            && definition_key.trim().is_empty()
+        {
+            return Err(PluginError::Session(
+                "trigger session-turn definition_key must not be empty".to_string(),
+            ));
+        }
         validate_trigger_subscription_target_label(
             self.target_label.as_deref(),
             self.target_identity.label.as_deref(),
@@ -1090,6 +1096,7 @@ pub fn evaluate_trigger_prune(
 }
 
 const TRIGGER_COMMAND_FAMILY_VERSION: u8 = 2;
+const TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION: u8 = 2;
 
 /// Fingerprint one trigger command independently of its caller-supplied
 /// operation-id lookup address.
@@ -1217,11 +1224,9 @@ fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
             fingerprint.tag(8);
             project_trigger_owner(&mut fingerprint, owner_scope);
             project_trigger_actor(&mut fingerprint, actor);
-            fingerprint.sequence(
-                subscription_keys.iter(),
-                subscription_keys.len(),
-                |fingerprint, key| fingerprint.string(key),
-            );
+            fingerprint.sequence(subscription_keys.iter(), |fingerprint, key| {
+                fingerprint.string(key)
+            });
         }
     }
     fingerprint.finish()
@@ -1236,20 +1241,28 @@ pub fn trigger_command_fingerprint(command: &TriggerCommand) -> String {
     )
 }
 
-pub fn trigger_operation_receipt_id(
+pub fn trigger_operation_receipt_id(owner_scope: &TriggerOwnerScope, operation_id: &str) -> String {
+    // The fixed-size v2 caller-operation address is independent from the
+    // command fingerprint and safe for indexed store keys of any input size.
+    let preimage = trigger_operation_receipt_preimage(owner_scope, operation_id);
+    crate::stable_identity::rendered_hash(
+        "trigger-operation",
+        TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION,
+        &preimage,
+    )
+}
+
+fn trigger_operation_receipt_preimage(
     owner_scope: &TriggerOwnerScope,
     operation_id: &str,
-) -> Result<String, PluginError> {
-    // The v2 caller operation address is stored independently from the v2
-    // command fingerprint. Trigger schema v3 rejects the former hash-addressed
-    // receipts; external stores must recreate them before deploying v2.
-    let mut address = String::from("trigger-operation:v2:");
-    append_owner_address(&mut address, owner_scope);
-    address.push(':');
-    address.push_str(&operation_id.len().to_string());
-    address.push(':');
-    address.push_str(operation_id);
-    Ok(address)
+) -> Vec<u8> {
+    let mut address = crate::stable_identity::IdentityEncoder::new(
+        "lash.trigger-operation-address",
+        TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION,
+    );
+    project_trigger_owner(&mut address, owner_scope);
+    address.string(operation_id);
+    address.finish()
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

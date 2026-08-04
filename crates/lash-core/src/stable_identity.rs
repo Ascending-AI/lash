@@ -76,10 +76,10 @@ impl IdentityEncoder {
     pub(crate) fn sequence<T>(
         &mut self,
         values: impl IntoIterator<Item = T>,
-        len: usize,
         mut element: impl FnMut(&mut Self, T),
     ) {
-        self.u64(len as u64);
+        let values = values.into_iter().collect::<Vec<_>>();
+        self.u64(values.len() as u64);
         for value in values {
             element(self, value);
         }
@@ -119,7 +119,7 @@ mod tests {
         encoder.bytes(&[0, 1]);
         encoder.optional::<u8>(None, |_, _| unreachable!());
         encoder.optional(Some(9_u8), IdentityEncoder::u8);
-        encoder.sequence([4_u8, 5], 2, IdentityEncoder::u8);
+        encoder.sequence([4_u8, 5], IdentityEncoder::u8);
 
         assert_eq!(
             hex(&encoder.finish()),

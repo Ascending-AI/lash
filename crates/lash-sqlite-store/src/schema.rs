@@ -505,8 +505,9 @@ CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_subscription
     ON trigger_deliveries(subscription_id);
 ";
 
-// Version 3 rejects live-serde trigger addresses/fingerprints and stores the
-// FIG-886 v2 families. There is deliberately no compatibility read path.
+// Version 3 rejects the live-serde subscription/command identities and stores
+// the FIG-886 v2 families. Occurrence request hashing is a separate family.
+// There is deliberately no compatibility read path.
 pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 3;
 
 pub(crate) const EFFECT_SCHEMA: &str = "

@@ -536,9 +536,12 @@ const PROCESS_REGISTRATION_FAMILY_VERSION: u8 = 2;
 /// Input kinds: 1 tool call, 2 engine, 3 session turn, 4 external. Recovery:
 /// 1 rerunnable, 2 owner bound, 3 externally owned. Originators: 1 host,
 /// 2 session. Causal refs: 1 turn, 2 effect, 3 tool call, 4 process,
-/// 5 process event, 6 trigger occurrence, 7 session node. JSON values used by
-/// explicit `ProcessIdentity::definition`: 1 null, 2 false, 3 true, 4 i64,
-/// 5 u64, 6 f64, 7 string, 8 array, 9 object. Retired tags remain burned.
+/// 5 process event, 6 trigger occurrence, 7 session node. JSON values: 1 null,
+/// 2 false, 3 true, 4 i64, 5 u64, 6 f64, 7 string, 8 array, 9 object. Tool
+/// output contracts: 1 static, 2 from-input-schema. Value selectors: 1
+/// payload, 2 pointer, 3 const, 4 template, 5 present. Process statuses: 1
+/// running, 2 waiting, 3 completed, 4 failed, 5 cancelled, 6 abandoned.
+/// Retired tags remain burned.
 fn process_registration_fingerprint_preimage(
     registration: &ProcessRegistration,
     observers: &[SessionId],
@@ -565,25 +568,41 @@ fn process_registration_fingerprint_preimage(
                 call_id,
                 tool_id,
                 tool_name,
-                args: _,
-                replay: _,
-                prepared_payload: _,
+                args,
+                replay,
+                prepared_payload,
             } = call;
             fingerprint.tag(1);
             fingerprint.string(call_id);
             fingerprint.string(tool_id.as_str());
             fingerprint.string(tool_name);
+            project_registration_json_value(&mut fingerprint, args);
+            fingerprint.optional(replay.as_ref(), |identity, replay| {
+                let lash_sansio::llm::types::ProviderReplayMeta { item_id, opaque } = replay;
+                identity.optional(item_id.as_deref(), |identity, value| identity.string(value));
+                identity.optional(opaque.as_deref(), |identity, value| identity.string(value));
+            });
+            project_registration_json_value(&mut fingerprint, prepared_payload);
         }
-        super::model::ProcessInput::Engine { kind, payload: _ } => {
+        super::model::ProcessInput::Engine { kind, payload } => {
             fingerprint.tag(2);
             fingerprint.string(kind);
+            project_registration_json_value(&mut fingerprint, payload);
         }
         super::model::ProcessInput::SessionTurn {
+            definition_key,
             create_request: _,
             turn_input: _,
-            output_contract: _,
-        } => fingerprint.tag(3),
-        super::model::ProcessInput::External { metadata: _ } => fingerprint.tag(4),
+            output_contract,
+        } => {
+            fingerprint.tag(3);
+            fingerprint.string(definition_key);
+            project_registration_output_contract(&mut fingerprint, output_contract);
+        }
+        super::model::ProcessInput::External { metadata } => {
+            fingerprint.tag(4);
+            project_registration_json_value(&mut fingerprint, metadata);
+        }
     }
     fingerprint.tag(match disposition {
         super::model::RecoveryDisposition::Rerunnable => 1,
@@ -625,10 +644,9 @@ fn process_registration_fingerprint_preimage(
 
     // Runtime lifecycle declarations never participate. They are core-owned
     // vocabulary, not caller definition, so adding one cannot rotate a stored
-    // process fingerprint again. Prepared registrations retain only the
-    // explicit application declarations; their stable names form the
-    // reductive allowlist while growable schemas/semantics remain persisted
-    // content outside identity.
+    // process fingerprint again. Application declarations are projected in
+    // full because schema and terminal/wake semantics are executable
+    // definition, not display metadata.
     let core_event_names = default_process_event_types()
         .into_iter()
         .map(|event_type| event_type.name)
@@ -639,24 +657,99 @@ fn process_registration_fingerprint_preimage(
         .collect::<Vec<_>>();
     fingerprint.sequence(
         application_event_types.iter().copied(),
-        application_event_types.len(),
         |identity, event_type| {
-            let super::events::ProcessEventType {
-                name,
-                payload_schema: _,
-                semantics: _,
-            } = event_type;
-            identity.string(name);
+            project_registration_event_type(identity, event_type);
         },
     );
 
     let mut observers = observers.to_vec();
     observers.sort();
     observers.dedup();
-    fingerprint.sequence(observers.iter(), observers.len(), |identity, observer| {
+    fingerprint.sequence(observers.iter(), |identity, observer| {
         identity.string(observer);
     });
     fingerprint.finish()
+}
+
+fn project_registration_output_contract(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    contract: &crate::ToolOutputContract,
+) {
+    match contract {
+        crate::ToolOutputContract::Static => identity.tag(1),
+        crate::ToolOutputContract::FromInputSchema {
+            input_field,
+            default_schema,
+        } => {
+            identity.tag(2);
+            identity.string(input_field);
+            identity.optional(default_schema.as_ref(), project_registration_json_value);
+        }
+    }
+}
+
+fn project_registration_event_type(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    event_type: &super::events::ProcessEventType,
+) {
+    let super::events::ProcessEventType {
+        name,
+        payload_schema,
+        semantics,
+    } = event_type;
+    identity.string(name);
+    let crate::LashSchema { schema } = payload_schema;
+    project_registration_json_value(identity, schema);
+    let super::events::ProcessEventSemanticsSpec { terminal, wake } = semantics;
+    identity.optional(terminal.as_ref(), |identity, terminal| {
+        let super::events::ProcessTerminalSpec {
+            status,
+            await_output,
+        } = terminal;
+        identity.tag(match status {
+            super::model::ProcessStatus::Running => 1,
+            super::model::ProcessStatus::Waiting => 2,
+            super::model::ProcessStatus::Completed => 3,
+            super::model::ProcessStatus::Failed => 4,
+            super::model::ProcessStatus::Cancelled => 5,
+            super::model::ProcessStatus::Abandoned => 6,
+        });
+        identity.optional(await_output.as_ref(), project_registration_value_selector);
+    });
+    identity.optional(wake.as_ref(), |identity, wake| {
+        let super::events::ProcessWakeSpec { when, input } = wake;
+        identity.optional(when.as_ref(), project_registration_value_selector);
+        project_registration_value_selector(identity, input);
+    });
+}
+
+fn project_registration_value_selector(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    selector: &super::events::ProcessValueSelector,
+) {
+    match selector {
+        super::events::ProcessValueSelector::Payload => identity.tag(1),
+        super::events::ProcessValueSelector::Pointer(pointer) => {
+            identity.tag(2);
+            identity.string(pointer);
+        }
+        super::events::ProcessValueSelector::Const(value) => {
+            identity.tag(3);
+            project_registration_json_value(identity, value);
+        }
+        super::events::ProcessValueSelector::Template { template, fields } => {
+            identity.tag(4);
+            identity.string(template);
+            identity.sequence(fields.iter(), |identity, (name, selector)| {
+                identity.string(name);
+                project_registration_value_selector(identity, selector);
+            });
+        }
+        super::events::ProcessValueSelector::Present(pointer) => {
+            identity.tag(5);
+            identity.string(pointer);
+        }
+    }
 }
 
 fn project_registration_causal_ref(
@@ -765,13 +858,13 @@ fn project_registration_json_value(
         }
         serde_json::Value::Array(values) => {
             identity.tag(8);
-            identity.sequence(values, values.len(), project_registration_json_value);
+            identity.sequence(values, project_registration_json_value);
         }
         serde_json::Value::Object(values) => {
             identity.tag(9);
             let mut entries = values.iter().collect::<Vec<_>>();
             entries.sort_by_key(|(key, _)| *key);
-            identity.sequence(entries, values.len(), |identity, (key, value)| {
+            identity.sequence(entries, |identity, (key, value)| {
                 identity.string(key);
                 project_registration_json_value(identity, value);
             });
@@ -885,8 +978,21 @@ pub(super) fn validate_process_registration(
                 )));
             }
         }
-        super::model::ProcessInput::External { .. }
-        | super::model::ProcessInput::SessionTurn { .. } => {
+        super::model::ProcessInput::External { .. } => {
+            if registration.env_ref.is_some() {
+                return Err(PluginError::Session(format!(
+                    "process `{}` must not capture an execution env for this input kind",
+                    registration.id
+                )));
+            }
+        }
+        super::model::ProcessInput::SessionTurn { definition_key, .. } => {
+            if definition_key.trim().is_empty() {
+                return Err(PluginError::Session(format!(
+                    "process `{}` session-turn definition_key must not be empty",
+                    registration.id
+                )));
+            }
             if registration.env_ref.is_some() {
                 return Err(PluginError::Session(format!(
                     "process `{}` must not capture an execution env for this input kind",
@@ -991,6 +1097,7 @@ mod tests {
                 payload: serde_json::json!({"ignored": true}),
             },
             ProcessInput::SessionTurn {
+                definition_key: "registration-golden-session-turn:v1".to_string(),
                 create_request: Box::new(
                     crate::SessionCreateRequest::root(
                         crate::SessionStartPoint::Empty,
@@ -1000,6 +1107,21 @@ mod tests {
                 ),
                 turn_input: Box::new(crate::TurnInput::empty()),
                 output_contract: crate::ToolOutputContract::Static,
+            },
+            ProcessInput::SessionTurn {
+                definition_key: "registration-golden-dynamic-session-turn:v1".to_string(),
+                create_request: Box::new(
+                    crate::SessionCreateRequest::root(
+                        crate::SessionStartPoint::Empty,
+                        crate::PluginOptions::default(),
+                    )
+                    .with_session_id("dynamic-child"),
+                ),
+                turn_input: Box::new(crate::TurnInput::empty()),
+                output_contract: crate::ToolOutputContract::from_input_schema(
+                    "result_schema",
+                    Some(serde_json::json!({"type": "object"})),
+                ),
             },
             ProcessInput::External {
                 metadata: serde_json::json!({"ignored": true}),
@@ -1071,12 +1193,66 @@ mod tests {
         );
         enriched.env_ref = Some(crate::ProcessExecutionEnvRef::new("env"));
         enriched.wake_session_id = Some("wake".to_string());
+        let mut selector_fields = std::collections::BTreeMap::new();
+        selector_fields.insert(
+            "const".to_string(),
+            crate::ProcessValueSelector::Const(serde_json::json!(0)),
+        );
+        selector_fields.insert("payload".to_string(), crate::ProcessValueSelector::Payload);
+        selector_fields.insert(
+            "pointer".to_string(),
+            crate::ProcessValueSelector::Pointer("/x".to_string()),
+        );
+        selector_fields.insert(
+            "present".to_string(),
+            crate::ProcessValueSelector::Present("/y".to_string()),
+        );
         enriched.event_types = vec![crate::ProcessEventType {
             name: "app.event".to_string(),
-            payload_schema: crate::LashSchema::any(),
-            semantics: crate::ProcessEventSemanticsSpec::default(),
+            payload_schema: crate::LashSchema::new(serde_json::json!({"type": "object"})),
+            semantics: crate::ProcessEventSemanticsSpec {
+                terminal: Some(crate::ProcessTerminalSpec {
+                    status: crate::ProcessStatus::Completed,
+                    await_output: Some(crate::ProcessValueSelector::Template {
+                        template: "{payload}:{pointer}:{const}:{present}".to_string(),
+                        fields: selector_fields,
+                    }),
+                }),
+                wake: Some(crate::ProcessWakeSpec {
+                    when: None,
+                    input: crate::ProcessValueSelector::Payload,
+                }),
+            },
         }];
         registrations.push(enriched);
+
+        let mut terminal_statuses = registration_for_input(ProcessInput::External {
+            metadata: serde_json::Value::Null,
+        });
+        terminal_statuses.event_types = [
+            crate::ProcessStatus::Running,
+            crate::ProcessStatus::Waiting,
+            crate::ProcessStatus::Completed,
+            crate::ProcessStatus::Failed,
+            crate::ProcessStatus::Cancelled,
+            crate::ProcessStatus::Abandoned,
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, status)| crate::ProcessEventType {
+            name: format!("status.{index}"),
+            payload_schema: crate::LashSchema::new(serde_json::Value::Bool(true)),
+            semantics: crate::ProcessEventSemanticsSpec {
+                terminal: Some(crate::ProcessTerminalSpec {
+                    status,
+                    await_output: (status != crate::ProcessStatus::Completed)
+                        .then_some(crate::ProcessValueSelector::Payload),
+                }),
+                wake: None,
+            },
+        })
+        .collect();
+        registrations.push(terminal_statuses);
 
         let actual = registrations
             .iter()
@@ -1093,52 +1269,60 @@ mod tests {
             .collect::<Vec<_>>();
         let expected = [
             (
-                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e01000000000000000463616c6c0000000000000007746f6f6c2d69640000000000000004746f6f6c01000000000000000004746f6f6c010000000000000004746f6f6c0001000000000000000000000000000000000000000200000000000000016100000000000000026162",
-                "process-registration-definition:v2:sha256:6bfbff587abbddcb4388ccee70e1790b5ede7312d3afd8ce8bde504f8c215c82",
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e01000000000000000463616c6c0000000000000007746f6f6c2d69640000000000000004746f6f6c090000000000000001000000000000000769676e6f72656403000101000000000000000004746f6f6c010000000000000004746f6f6c0001000000000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:2d8acec808001b06a4c78a7acfa638e40e2d076c8834122516d2e9c44247ce29",
             ),
             (
-                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e020000000000000006656e67696e6502000000000000000006656e67696e65000001000000000000000000000000000000000000000200000000000000016100000000000000026162",
-                "process-registration-definition:v2:sha256:0058fcdeb9f16e42ab5d13bb753f437584dfcd90848e568e24038d630952cff3",
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e020000000000000006656e67696e65090000000000000001000000000000000769676e6f7265640302000000000000000006656e67696e65000001000000000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:6fe2e83910adb766ce57c2bb8c854a723a741d52ae67f878886fd64772c2e178",
             ),
             (
-                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e030300000000000000000c73657373696f6e5f7475726e0100000000000000056368696c640001000000000000000000000000000000000000000200000000000000016100000000000000026162",
-                "process-registration-definition:v2:sha256:4f851d4fbdd01b1cfc21650e1c8fae64b2b87bb1e0fa9f121b3599a6ba8d8af3",
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e030000000000000023726567697374726174696f6e2d676f6c64656e2d73657373696f6e2d7475726e3a7631010300000000000000000c73657373696f6e5f7475726e0100000000000000056368696c640001000000000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:e3fb715f1bdb9b700378a7338ca748223a11b9e931f89af669e6df1b1499ffb7",
             ),
             (
-                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e040300000000000000000865787465726e616c000001000000000000000000000000000000000000000200000000000000016100000000000000026162",
-                "process-registration-definition:v2:sha256:507b81461bb218093001d018e8c40da424c02e19bb1d9093f3f720a7422322d8",
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e03000000000000002b726567697374726174696f6e2d676f6c64656e2d64796e616d69632d73657373696f6e2d7475726e3a763102000000000000000d726573756c745f736368656d61010900000000000000010000000000000004747970650700000000000000066f626a6563740300000000000000000c73657373696f6e5f7475726e01000000000000000d64796e616d69632d6368696c640001000000000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:6bd6e3774e404725b6aa0ab8a9fd00e236f020485acad0f5e6f4823532936276",
             ),
             (
-                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e040100000000000000000865787465726e616c00000100010100000000000000017300000000000000017400000000000000000000000000000000000200000000000000016100000000000000026162",
-                "process-registration-definition:v2:sha256:62887483e4cc7e733432879c2c7fda44830c5bb7aacfb04f7f5686b45abc91f0",
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e04090000000000000001000000000000000769676e6f726564030300000000000000000865787465726e616c000001000000000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:ed70558618eac147a173ca4222556d16a50faeea924a0cc828cae2a096d7c5ec",
             ),
             (
-                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e040100000000000000000865787465726e616c0000010001020000000000000001730000000000000000016500000000000000000000000000000000000200000000000000016100000000000000026162",
-                "process-registration-definition:v2:sha256:6d65b4cbaa86dbbc8009a943d7c0277d4ea1e61f14e7b9dd4ac3f6030143f175",
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e04010100000000000000000865787465726e616c00000100010100000000000000017300000000000000017400000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:11cbe26f30606f383330b139ee977ae40ee2ca5e5e10f2609a42471e9e1323b9",
             ),
             (
-                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e040100000000000000000865787465726e616c00000100010300000000000000017300000000000000016300000000000000000000000000000000000200000000000000016100000000000000026162",
-                "process-registration-definition:v2:sha256:6c690358615243b1415bac7f94768c7cceb11314eb8b8aabd8ff08ab35751d09",
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e04010100000000000000000865787465726e616c0000010001020000000000000001730000000000000000016500000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:f57777ddfe718ecc96df8aaa5dd1c2c6a8773871f5824ad0d780211c51b348d1",
             ),
             (
-                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e040100000000000000000865787465726e616c00000100010400000000000000017000000000000000000000000000000000000200000000000000016100000000000000026162",
-                "process-registration-definition:v2:sha256:155ea758aef0b5a5e52b3fad007143ea243fb69df7569d527926748014c6827b",
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e04010100000000000000000865787465726e616c00000100010300000000000000017300000000000000016300000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:295644f7eec5decf5801a0caecf84c555a10abe1a2307a81119d058bd20365f3",
             ),
             (
-                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e040100000000000000000865787465726e616c000001000105000000000000000170000000000000000000000000000000000000000000000000000200000000000000016100000000000000026162",
-                "process-registration-definition:v2:sha256:47c72e46aec4fdca73d3d8f1c76612a7f7ea967f6c1ee3354a8b7898041317ae",
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e04010100000000000000000865787465726e616c00000100010400000000000000017000000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:f8b458311fc88fe78951ce78c8312d34e51e245a41318da203e8644fad248b94",
             ),
             (
-                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e040100000000000000000865787465726e616c00000100010600000000000000016f010000000000000001730001000000000000000000000000000000000000000000000000000200000000000000016100000000000000026162",
-                "process-registration-definition:v2:sha256:f86b98fa11d37a7aec8621c064c89f728cc9af16928e6b9afced9b1bcd7060eb",
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e04010100000000000000000865787465726e616c000001000105000000000000000170000000000000000000000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:40ec80a3460947e2895a6260c926dca4b7f77450129d22ecb1a801fcaf251eed",
             ),
             (
-                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e040100000000000000000865787465726e616c00000100010700000000000000017300000000000000016e00000000000000000000000000000000000200000000000000016100000000000000026162",
-                "process-registration-definition:v2:sha256:4d610a19025212ddf2d821e968e2db4ebc4594c4fe2178eac13d840623b664f9",
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e04010100000000000000000865787465726e616c00000100010600000000000000016f010000000000000001730001000000000000000000000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:b0ae2dbbad25922c859e97f36d57971d3b0749fb4a9275773ab2e07c9b485d26",
             ),
             (
-                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e0401010000000000000000000000046b696e64010000000000000003613a620108000000000000000a01020304ffffffffffffffff04000000000000000005ffffffffffffffff063ff8000000000000070000000000000003613a6208000000000000000009000000000000000100000000000000017804000000000000000002000000000000000773657373696f6e00010000000000000003656e7601000000000000000477616b65000000000000000100000000000000096170702e6576656e74000000000000000200000000000000016100000000000000026162",
-                "process-registration-definition:v2:sha256:d06123fed71f64003836390d84bd836e6b5333121989c40db7c17cf98864655d",
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e04010100000000000000000865787465726e616c00000100010700000000000000017300000000000000016e00000000000000000000000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:0470e29540550531b9df98a6e5c9923768c9c048d919cb8b9421ada78ee6d936",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e040101010000000000000000000000046b696e64010000000000000003613a620108000000000000000a01020304ffffffffffffffff04000000000000000005ffffffffffffffff063ff8000000000000070000000000000003613a6208000000000000000009000000000000000100000000000000017804000000000000000002000000000000000773657373696f6e00010000000000000003656e7601000000000000000477616b65000000000000000100000000000000096170702e6576656e740900000000000000010000000000000004747970650700000000000000066f626a6563740103010400000000000000257b7061796c6f61647d3a7b706f696e7465727d3a7b636f6e73747d3a7b70726573656e747d00000000000000040000000000000005636f6e73740304000000000000000000000000000000077061796c6f6164010000000000000007706f696e7465720200000000000000022f78000000000000000770726573656e740500000000000000022f79010001000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:b16178c141a06ba065fd4c8a02a9d72708be090a84d738be8840d1edf78c537d",
+            ),
+            (
+                "6c6173682d737461626c652d6964656e74697479010200000000000000246c6173682e70726f636573732d726567697374726174696f6e2d646566696e6974696f6e04010100000000000000000865787465726e616c00000100000000000000000000000600000000000000087374617475732e3003010101010000000000000000087374617475732e3103010201010000000000000000087374617475732e32030103000000000000000000087374617475732e3303010401010000000000000000087374617475732e3403010501010000000000000000087374617475732e35030106010100000000000000000200000000000000016100000000000000026162",
+                "process-registration-definition:v2:sha256:7c6f4b84fffb087c42da0996120fe40443c0363af31443531c22df7a48658938",
             ),
         ];
         assert_eq!(actual.len(), expected.len());
@@ -1207,6 +1391,36 @@ mod tests {
         assert_eq!(
             process_registration_fingerprint(&with_core_events, &[]),
             process_registration_fingerprint(&without_core_events, &[])
+        );
+    }
+
+    #[test]
+    fn executable_registration_changes_rotate_the_definition_fingerprint() {
+        let base = registration_for_input(ProcessInput::Engine {
+            kind: "engine".to_string(),
+            payload: serde_json::json!({"revision": 1}),
+        });
+        let changed_input = registration_for_input(ProcessInput::Engine {
+            kind: "engine".to_string(),
+            payload: serde_json::json!({"revision": 2}),
+        });
+        assert_ne!(
+            process_registration_fingerprint(&base, &[]),
+            process_registration_fingerprint(&changed_input, &[])
+        );
+
+        let mut changed_event = base.clone();
+        changed_event.event_types = vec![crate::ProcessEventType {
+            name: "app.event".to_string(),
+            payload_schema: crate::LashSchema::new(serde_json::json!({"type": "string"})),
+            semantics: crate::ProcessEventSemanticsSpec::default(),
+        }];
+        let mut other_event = changed_event.clone();
+        other_event.event_types[0].payload_schema =
+            crate::LashSchema::new(serde_json::json!({"type": "number"}));
+        assert_ne!(
+            process_registration_fingerprint(&changed_event, &[]),
+            process_registration_fingerprint(&other_event, &[])
         );
     }
 

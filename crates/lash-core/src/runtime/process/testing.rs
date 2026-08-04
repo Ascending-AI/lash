@@ -26,6 +26,7 @@ use super::validation::{
 };
 
 mod continuation;
+#[cfg(test)]
 mod identity;
 mod raw_state;
 mod support;

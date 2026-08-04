@@ -66,6 +66,12 @@ pub struct DirectRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caused_by: Option<crate::CausalRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Caller-owned durable position for this request.
+    ///
+    /// Sequential unkeyed calls use runtime ordinals. Calls that may be
+    /// polled concurrently must provide distinct keys so task scheduling
+    /// cannot choose their replay identity; the runtime rejects overlapping
+    /// unkeyed calls in the same causal lane.
     pub replay: Option<crate::RuntimeReplay>,
 }
 

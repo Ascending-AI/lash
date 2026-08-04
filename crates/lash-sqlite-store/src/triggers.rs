@@ -159,14 +159,14 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         let operation_id = lash_core::facade_support::trigger_operation_receipt_id(
             command.owner_scope(),
             operation_id,
-        )?;
+        );
         let request_fingerprint = lash_core::facade_support::trigger_command_fingerprint(&command);
         let owner_scope = command.owner_scope().clone();
         let subscription_key = command.subscription_key().unwrap_or_default().to_string();
         let subscription_id = lash_core::facade_support::deterministic_subscription_id(
             &owner_scope,
             &subscription_key,
-        )?;
+        );
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {

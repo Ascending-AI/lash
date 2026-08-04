@@ -10,7 +10,6 @@ struct RuntimeDirectSource<'run> {
     manager: Arc<RuntimeSessionServices>,
     effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
     turn_id: Option<String>,
-    replay_ordinals: Arc<std::sync::Mutex<BTreeMap<String, u64>>>,
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -50,7 +49,6 @@ impl<'run> DirectCompletionClient<'run> {
                 manager,
                 effect_controller,
                 turn_id,
-                replay_ordinals: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
             }),
         }
     }
@@ -62,7 +60,6 @@ impl<'run> DirectCompletionClient<'run> {
                     manager: Arc::clone(&source.manager),
                     effect_controller: source.effect_controller.to_static()?,
                     turn_id: source.turn_id.clone(),
-                    replay_ordinals: Arc::clone(&source.replay_ordinals),
                 })
             }
             #[cfg(any(test, feature = "testing"))]
@@ -130,6 +127,8 @@ impl<'run> DirectCompletionClient<'run> {
         }
     }
 
+    /// Executes an already-normalized request using its non-empty
+    /// `scope.request_id` as the caller-owned durable replay key.
     pub async fn direct_llm_completion(
         &self,
         request: crate::LlmRequest,
@@ -187,7 +186,8 @@ impl<'run> RuntimeDirectSource<'run> {
             effect_controller: self.effect_controller.controller(),
             turn_id: self.turn_id.as_deref(),
             position,
-            replay_ordinals: self.replay_ordinals.as_ref(),
+            replay_ordinals: self.manager.direct_replay_ordinals.as_ref(),
+            unkeyed_in_flight: self.manager.direct_unkeyed_in_flight.as_ref(),
         }
     }
 }
@@ -199,16 +199,21 @@ pub(in crate::runtime::session_manager) struct DirectInvocationContext<'a> {
     turn_id: Option<&'a str>,
     position: DirectExecutionPosition,
     replay_ordinals: &'a std::sync::Mutex<BTreeMap<String, u64>>,
+    unkeyed_in_flight: &'a std::sync::Mutex<std::collections::BTreeSet<String>>,
 }
 
 impl DirectInvocationContext<'_> {
+    fn replay_lane(caused_by: Option<&crate::CausalRef>) -> String {
+        caused_by
+            .map(crate::runtime::causal::causal_replay_discriminator)
+            .unwrap_or_else(|| "independent".to_string())
+    }
+
     fn next_replay_ordinal(
         &self,
         caused_by: Option<&crate::CausalRef>,
     ) -> Result<u64, crate::PluginError> {
-        let lane = caused_by
-            .map(crate::runtime::causal::causal_replay_discriminator)
-            .unwrap_or_else(|| "independent".to_string());
+        let lane = Self::replay_lane(caused_by);
         let mut ordinals = self.replay_ordinals.lock().map_err(|_| {
             crate::PluginError::Session("direct replay ordinal lock poisoned".to_string())
         })?;
@@ -218,6 +223,38 @@ impl DirectInvocationContext<'_> {
         })?;
         Ok(*ordinal)
     }
+
+    fn claim_unkeyed_lane(
+        &self,
+        caused_by: Option<&crate::CausalRef>,
+    ) -> Result<DirectUnkeyedGuard<'_>, crate::PluginError> {
+        let lane = Self::replay_lane(caused_by);
+        let mut in_flight = self.unkeyed_in_flight.lock().map_err(|_| {
+            crate::PluginError::Session("direct unkeyed replay lock poisoned".to_string())
+        })?;
+        if !in_flight.insert(lane.clone()) {
+            return Err(crate::PluginError::Session(
+                "concurrent direct completions require distinct explicit replay keys".to_string(),
+            ));
+        }
+        Ok(DirectUnkeyedGuard {
+            in_flight: self.unkeyed_in_flight,
+            lane,
+        })
+    }
+}
+
+struct DirectUnkeyedGuard<'a> {
+    in_flight: &'a std::sync::Mutex<std::collections::BTreeSet<String>>,
+    lane: String,
+}
+
+impl Drop for DirectUnkeyedGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut in_flight) = self.in_flight.lock() {
+            in_flight.remove(&self.lane);
+        }
+    }
 }
 
 struct DirectEffectPlan {
@@ -225,6 +262,13 @@ struct DirectEffectPlan {
     envelope: crate::RuntimeEffectEnvelope,
     request: Box<crate::LlmRequest>,
     usage_source: String,
+}
+
+#[derive(Clone, Copy)]
+struct DirectReplayPosition<'a> {
+    replay: Option<&'a crate::RuntimeReplay>,
+    caused_by: Option<&'a crate::CausalRef>,
+    ordinal: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -246,8 +290,7 @@ impl DirectCompletionCapability {
         provider: crate::ProviderHandle,
         request: crate::LlmRequest,
         usage_source: &str,
-        replay: Option<&crate::RuntimeReplay>,
-        caused_by: Option<&crate::CausalRef>,
+        replay_position: DirectReplayPosition<'_>,
     ) -> Result<DirectEffectPlan, crate::PluginError> {
         let current = context.current;
         let usage_source = usage_source.to_string();
@@ -264,11 +307,11 @@ impl DirectCompletionCapability {
             current.host.core.durability.attachment_store.as_ref(),
         )
         .await?;
-        let ordinal = if replay.is_some_and(|replay| !replay.key.is_empty()) {
-            0
-        } else {
-            context.next_replay_ordinal(caused_by)?
-        };
+        let DirectReplayPosition {
+            replay,
+            caused_by,
+            ordinal,
+        } = replay_position;
         let discriminator =
             crate::runtime::causal::direct_request_discriminator(replay, caused_by, ordinal);
         let invocation = crate::runtime::causal::direct_effect_invocation(
@@ -297,7 +340,7 @@ impl DirectCompletionCapability {
     /// applies usage/trace bookkeeping, yielding the raw provider response.
     async fn run_direct_effect(
         &self,
-        context: DirectInvocationContext<'_>,
+        context: &DirectInvocationContext<'_>,
         plan: DirectEffectPlan,
         caused_by: Option<crate::CausalRef>,
     ) -> Result<(crate::LlmResponse, crate::TokenUsage, crate::LlmCallRecord), crate::PluginError>
@@ -360,6 +403,23 @@ impl DirectCompletionCapability {
             .map_err(|error| crate::PluginError::Session(error.message))?;
         let replay = request.replay.clone();
         let caused_by = request.caused_by.clone();
+        let _unkeyed_guard = if context.position == DirectExecutionPosition::Independent
+            && replay.as_ref().is_none_or(|replay| replay.key.is_empty())
+        {
+            Some(context.claim_unkeyed_lane(caused_by.as_ref())?)
+        } else {
+            None
+        };
+        // Allocate the sequential fallback before request preparation performs
+        // any await. Concurrent callers must provide explicit replay keys;
+        // this ordinal represents sequential program order only.
+        let replay_ordinal = if context.position == DirectExecutionPosition::ToolAttempt
+            || replay.as_ref().is_some_and(|replay| !replay.key.is_empty())
+        {
+            0
+        } else {
+            context.next_replay_ordinal(caused_by.as_ref())?
+        };
         let normalized = crate::direct::build_llm_request(&provider, request, model);
         let plan = self
             .plan_direct_effect(
@@ -367,11 +427,14 @@ impl DirectCompletionCapability {
                 provider,
                 normalized,
                 usage_source,
-                replay.as_ref(),
-                caused_by.as_ref(),
+                DirectReplayPosition {
+                    replay: replay.as_ref(),
+                    caused_by: caused_by.as_ref(),
+                    ordinal: replay_ordinal,
+                },
             )
             .await?;
-        let (response, usage, llm_call) = self.run_direct_effect(context, plan, caused_by).await?;
+        let (response, usage, llm_call) = self.run_direct_effect(&context, plan, caused_by).await?;
         Ok(crate::DirectCompletion {
             text: response.full_text,
             usage,
@@ -386,17 +449,28 @@ impl DirectCompletionCapability {
         usage_source: &str,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
         let resolved = context.current.resolve_policy()?;
+        if request.scope.request_id.trim().is_empty() {
+            return Err(crate::PluginError::Session(
+                "direct LLM completion request_id must be non-empty for durable replay".to_string(),
+            ));
+        }
+        let replay = crate::RuntimeReplay {
+            key: request.scope.request_id.clone(),
+        };
         let plan = self
             .plan_direct_effect(
                 &context,
                 resolved.binding.provider,
                 request,
                 usage_source,
-                None,
-                None,
+                DirectReplayPosition {
+                    replay: Some(&replay),
+                    caused_by: None,
+                    ordinal: 0,
+                },
             )
             .await?;
-        let (response, usage, llm_call) = self.run_direct_effect(context, plan, None).await?;
+        let (response, usage, llm_call) = self.run_direct_effect(&context, plan, None).await?;
         Ok(crate::DirectLlmCompletion {
             response,
             usage,

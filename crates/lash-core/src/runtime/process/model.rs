@@ -97,6 +97,9 @@ pub enum ProcessInput {
         payload: serde_json::Value,
     },
     SessionTurn {
+        /// Caller-owned revision for the growable session request/input pair.
+        /// Change this key whenever their executable meaning changes.
+        definition_key: String,
         create_request: Box<crate::SessionCreateRequest>,
         turn_input: Box<crate::TurnInput>,
         output_contract: crate::ToolOutputContract,
@@ -116,10 +119,12 @@ impl Clone for ProcessInput {
                 payload: payload.clone(),
             },
             Self::SessionTurn {
+                definition_key,
                 create_request,
                 turn_input,
                 output_contract,
             } => Self::SessionTurn {
+                definition_key: definition_key.clone(),
                 create_request: create_request.clone(),
                 turn_input: turn_input.clone(),
                 output_contract: output_contract.clone(),

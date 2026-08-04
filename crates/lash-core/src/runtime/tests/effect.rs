@@ -18,6 +18,13 @@ struct RecordingEffectController {
     inline: InlineRuntimeEffectController,
     cancel_after_llm: bool,
     controller_owned_replay: bool,
+    direct_gate: Option<
+        Arc<(
+            tokio::sync::Notify,
+            tokio::sync::Notify,
+            std::sync::atomic::AtomicBool,
+        )>,
+    >,
 }
 
 impl RecordingEffectController {
@@ -28,6 +35,18 @@ impl RecordingEffectController {
 
     fn with_controller_owned_replay(mut self) -> Self {
         self.controller_owned_replay = true;
+        self
+    }
+
+    fn with_direct_gate(
+        mut self,
+        gate: Arc<(
+            tokio::sync::Notify,
+            tokio::sync::Notify,
+            std::sync::atomic::AtomicBool,
+        )>,
+    ) -> Self {
+        self.direct_gate = Some(gate);
         self
     }
 
@@ -294,6 +313,12 @@ impl RuntimeEffectController for RecordingEffectController {
                 Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution: None })
             }
             RuntimeEffectCommand::Direct { request, .. } => {
+                if let Some(gate) = &self.direct_gate
+                    && gate.2.swap(false, Ordering::SeqCst)
+                {
+                    gate.0.notify_one();
+                    gate.1.notified().await;
+                }
                 // Both the text-only (`direct_completion`) and full-response
                 // (`direct_llm_completion`) client methods now flow through the
                 // single `Direct` effect; they differ only in how the caller
@@ -1893,6 +1918,133 @@ async fn in_turn_direct_completion_uses_effect_controller_without_out_of_band_co
     let ledger = runtime.shared_token_ledger.lock().expect("token ledger");
     assert_eq!(ledger.len(), 1);
     assert_eq!(ledger[0].usage.input_tokens, 7);
+}
+
+#[tokio::test]
+async fn direct_clients_from_one_turn_share_sequential_replay_ordinals() {
+    let recorder = RecordingEffectController::default();
+    let response = || MockCall {
+        stream_events: Vec::new(),
+        response: Ok(LlmResponse {
+            full_text: "direct answer".to_string(),
+            ..LlmResponse::default()
+        }),
+    };
+    let host = EmbeddedRuntimeHost::new(runtime_host_config_with_inline_controller(Arc::new(
+        recorder.clone(),
+    )));
+    let runtime = runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(vec![response(), response()]),
+        host,
+    )
+    .await;
+    let manager = runtime.runtime_session_services().expect("session manager");
+    let first = manager.direct_completion_client(
+        RuntimeEffectControllerHandle::shared(Arc::new(recorder.clone())),
+        Some("turn-direct".to_string()),
+    );
+    let second = manager.direct_completion_client(
+        RuntimeEffectControllerHandle::shared(Arc::new(recorder.clone())),
+        Some("turn-direct".to_string()),
+    );
+
+    first
+        .direct_completion(
+            crate::DirectRequest::text("mock-model", "first"),
+            "direct-test",
+        )
+        .await
+        .expect("first direct completion");
+    second
+        .direct_completion(
+            crate::DirectRequest::text("mock-model", "second"),
+            "direct-test",
+        )
+        .await
+        .expect("second direct completion");
+
+    let replay_keys = recorder
+        .records()
+        .into_iter()
+        .filter(|record| record.kind == RuntimeEffectKind::Direct)
+        .map(|record| record.replay_key)
+        .collect::<Vec<_>>();
+    assert_eq!(replay_keys.len(), 2);
+    assert!(replay_keys[0].ends_with("direct:v2:ordinal:1"));
+    assert!(replay_keys[1].ends_with("direct:v2:ordinal:2"));
+}
+
+#[tokio::test]
+async fn direct_concurrency_requires_keys_and_releases_unkeyed_guard() {
+    let gate = Arc::new((
+        tokio::sync::Notify::new(),
+        tokio::sync::Notify::new(),
+        std::sync::atomic::AtomicBool::new(true),
+    ));
+    let recorder = RecordingEffectController::default().with_direct_gate(Arc::clone(&gate));
+    let runtime = runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        EmbeddedRuntimeHost::new(runtime_host_config_with_inline_controller(Arc::new(
+            recorder.clone(),
+        ))),
+    )
+    .await;
+    let manager = runtime.runtime_session_services().expect("session manager");
+    let client = manager.direct_completion_client(
+        RuntimeEffectControllerHandle::shared(Arc::new(recorder)),
+        Some("turn-direct".to_string()),
+    );
+
+    let first_client = client.clone();
+    let mut first = crate::task::spawn(async move {
+        first_client
+            .direct_completion(
+                crate::DirectRequest::text("mock-model", "first"),
+                "direct-test",
+            )
+            .await
+    });
+    gate.0.notified().await;
+    let overlap = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        client.direct_completion(
+            crate::DirectRequest::text("mock-model", "overlap"),
+            "direct-test",
+        ),
+    )
+    .await
+    .expect("overlap rejected promptly")
+    .expect_err("overlapping unkeyed call must fail");
+    assert!(overlap.to_string().contains("explicit replay keys"));
+    gate.1.notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(5), &mut first)
+        .await
+        .expect("first completion returned")
+        .expect("first task")
+        .expect("first completion");
+
+    let keyed_a = client.direct_completion(
+        crate::DirectRequest::text("mock-model", "a").with_replay_key("a"),
+        "direct-test",
+    );
+    let keyed_b = client.direct_completion(
+        crate::DirectRequest::text("mock-model", "b").with_replay_key("b"),
+        "direct-test",
+    );
+    let (a, b) = tokio::join!(keyed_a, keyed_b);
+    a.expect("first keyed call");
+    b.expect("second keyed call");
+    client
+        .direct_completion(
+            crate::DirectRequest::text("mock-model", "after"),
+            "direct-test",
+        )
+        .await
+        .expect("guard released after completion");
 }
 
 #[tokio::test]

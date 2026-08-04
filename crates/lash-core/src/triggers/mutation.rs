@@ -31,8 +31,7 @@ pub(super) fn mutate_enabled(
     enabled: bool,
     now: u64,
 ) -> TriggerEffectResult {
-    let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key)
-        .map_err(TriggerOperationError::from)?;
+    let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key);
     let Some(existing) = state.subscriptions.get_mut(&subscription_id) else {
         return Err(subscription_conflict(
             &subscription_key,

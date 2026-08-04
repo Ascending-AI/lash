@@ -377,10 +377,12 @@ impl TryFrom<lash_core::ProcessInput> for RemoteProcessInput {
                 Ok(Self::Engine { kind, payload })
             }
             lash_core::ProcessInput::SessionTurn {
+                definition_key,
                 create_request,
                 turn_input,
                 output_contract,
             } => Ok(Self::SessionTurn {
+                definition_key,
                 create_request: serde_json::to_value(create_request.as_ref()).map_err(|err| {
                     RemoteProtocolError::InvalidEnvelope {
                         type_name: "RemoteProcessInput",
@@ -410,10 +412,12 @@ impl TryFrom<RemoteProcessInput> for lash_core::ProcessInput {
             }),
             RemoteProcessInput::Engine { kind, payload } => Ok(Self::Engine { kind, payload }),
             RemoteProcessInput::SessionTurn {
+                definition_key,
                 create_request,
                 turn_input,
                 output_contract,
             } => Ok(Self::SessionTurn {
+                definition_key,
                 create_request: Box::new(decode_remote_json(
                     create_request,
                     "RemoteProcessInput",
