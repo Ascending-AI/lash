@@ -44,7 +44,8 @@ Each slug hashes with `cksum` into one of 64 disjoint 64-port blocks spanning
 - `+20..+23` agent-service Restate and endpoint;
 - `+30..+34` agent-workbench Restate, endpoint, and PostgreSQL;
 - `+40` distributed-worker MinIO; and
-- `+41..+46` process-operations MinIO, Restate, and PostgreSQL.
+- `+41..+46` process-operations MinIO, Restate, and PostgreSQL; and
+- `+47` version-bump recreation PostgreSQL.
 
 Explicit existing environment overrides such as `LASH_PUSH_GATE_PORT_BASE`,
 `LASH_PUSH_GATE_POSTGRES_PORT`, `LASH_CONFIDENCE_OUT_DIR`, and each recipe's

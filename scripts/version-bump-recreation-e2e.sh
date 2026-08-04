@@ -8,19 +8,18 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
+# shellcheck source=scripts/worktree-gate-env.sh
+source "$repo/scripts/worktree-gate-env.sh"
+lash_gate_acquire version-bump-recreation-e2e
 
-postgres_port="${LASH_VERSION_BUMP_POSTGRES_PORT:-5463}"
+postgres_port="${LASH_VERSION_BUMP_POSTGRES_PORT:-$((LASH_E2E_PORT_BASE + 47))}"
 export LASH_VERSION_BUMP_POSTGRES_PORT="$postgres_port"
-# Fixed project and external network: the fixed host port already serializes
-# runs, and a stable network name means repeated invocations never create or
-# destroy Docker networks (host-level watchers treat that as interface churn).
-compose_project="lash-version-bump"
+compose_project="${LASH_VERSION_BUMP_COMPOSE_PROJECT:-lash-version-bump-${LASH_GATE_WORKTREE_SLUG}}"
 compose=(docker compose -p "$compose_project" -f "$repo/runbooks/version-bump-recreation/docker-compose.yml")
-docker network inspect lash-e2e >/dev/null 2>&1 || docker network create lash-e2e >/dev/null
 if [ -n "${LASH_VERSION_BUMP_ARTIFACT_DIR:-}" ]; then
   artifact_dir="$LASH_VERSION_BUMP_ARTIFACT_DIR"
 else
-  artifact_dir="$(mktemp -d "${TMPDIR:-/tmp}/lash-version-bump.XXXXXX")"
+  artifact_dir="$(mktemp -d "${TMPDIR:-/tmp}/lash-version-bump-${LASH_GATE_WORKTREE_SLUG}.XXXXXX")"
 fi
 mkdir -p "$artifact_dir"
 test_output="$artifact_dir/version-bump-recreation-e2e.log"
@@ -47,7 +46,8 @@ harness() {
 "${compose[@]}" up -d postgres
 
 deadline=$((SECONDS + 90))
-until docker run --rm --network host postgres:16-alpine \
+until docker run --rm --name "lash-version-bump-postgres-probe-${LASH_GATE_WORKTREE_SLUG}-$$" \
+  --label "$LASH_GATE_LABEL" --network host postgres:16-alpine \
   pg_isready -h 127.0.0.1 -p "$postgres_port" -U lash -d lash >/dev/null 2>&1; do
   if ((SECONDS >= deadline)); then
     "${compose[@]}" logs postgres >&2 || true
@@ -63,7 +63,8 @@ if [ ! -s "$artifact_dir/00-postgres-service.json" ]; then
   echo "No running container publishes the assigned PostgreSQL port $postgres_port" >&2
   exit 1
 fi
-docker run --rm --network host -e PGPASSWORD=lash postgres:16-alpine \
+docker run --rm --name "lash-version-bump-postgres-query-${LASH_GATE_WORKTREE_SLUG}-$$" \
+  --label "$LASH_GATE_LABEL" --network host -e PGPASSWORD=lash postgres:16-alpine \
   psql -h 127.0.0.1 -p "$postgres_port" -U lash -d lash -Atqc \
   "SELECT json_build_object('postgres_version', current_setting('server_version'), 'port', ${postgres_port})" \
   >"$artifact_dir/00-postgres.json"

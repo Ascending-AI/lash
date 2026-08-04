@@ -19,10 +19,11 @@ what the companion observed.
 LASH_VERSION_BUMP_ARTIFACT_DIR=<fresh-dir> just version-bump-recreation-e2e
 ```
 
-The companion owns one PostgreSQL service on host port **5463** under the fixed
-`lash-version-bump` compose project on the shared external `lash-e2e` network (created
-idempotently, never destroyed), and removes the project's services and volume on exit. It
-never touches another worktree's assigned PostgreSQL service. It seeds the pre-bump deployment with a real turn
+The companion owns one PostgreSQL service on the worktree's deterministic host-port offset
+**+47** under the fixed `lash-version-bump-<worktree-slug>` compose project on the external
+`lash-e2e-<worktree-slug>` network (created idempotently, never destroyed), and removes the
+project's services and volume on exit. `LASH_VERSION_BUMP_POSTGRES_PORT` remains an explicit
+port override. It never touches another worktree's assigned PostgreSQL service. It seeds the pre-bump deployment with a real turn
 per session, a live background process holding a pending wake, and a fired trigger
 delivery, then rewinds the recorded component schema version by one. It emits
 `version-bump recreation e2e passed: scenarios=4` only after every phase assertion holds.
@@ -73,13 +74,14 @@ depends on that. Treat any judgment that needs the old table shapes as out of sc
 Run the deterministic companion. Require all of these before judging later phases:
 
 - `00-live-services.json` contains a running PostgreSQL service;
-- `00-postgres-service.json` identifies the container publishing port `5463`;
-- `00-postgres.json` reports port `5463`; and
+- `00-postgres-service.json` identifies the container publishing the assigned port;
+- `00-postgres.json` reports that assigned port; and
 - `01-seed.jsonl` carries `seeded_older_deployment` with two session ids, one live process
   id, one reserved trigger delivery, `committed_sessions` equal to the session count, a
   pending wake sequence, and a `recorded_version` exactly one below `expected_version`.
 
-**Fail if:** PostgreSQL is exposed on another host port, a seeded session shows no
+**Fail if:** PostgreSQL is exposed on a host port other than the assigned derived or
+explicitly overridden port, a seeded session shows no
 committed content (`committed_sessions` below the session count, or `committed_nodes` at
 zero), the seeded process is already terminal, or the script leaves its compose project
 running after exit.
@@ -172,7 +174,7 @@ and volume no longer exist.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
-| Pre-bump deployment | PostgreSQL:5463 live; live sessions, process, trigger, and a rewound version | | `00-*`, `01-seed.jsonl` |
+| Pre-bump deployment | Assigned PostgreSQL port live; live sessions, process, trigger, and a rewound version | | `00-*`, `01-seed.jsonl` |
 | Older-store refusal | open refused; found and expected versions named | | `02-refusal.jsonl` |
 | Forward-only refusal | a store one version ahead is refused identically | | `02-refusal.jsonl` |
 | Recreation bump | every lash table dropped; fresh open records the expected version | | `03-recreation.jsonl` |
