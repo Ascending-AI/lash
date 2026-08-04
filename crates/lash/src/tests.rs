@@ -77,6 +77,14 @@ struct SnapshotStore {
     usage_delta_identities:
         std::sync::Mutex<std::collections::HashSet<lash_core::store::RuntimeUsageDeltaIdentity>>,
     session_execution_leases: std::sync::Mutex<HashMap<String, lash_core::SessionExecutionLease>>,
+    /// Highest generation ever minted per session, retained across release.
+    ///
+    /// `SessionExecutionLeaseStore` is a fencing trait: ADR 0029 requires every
+    /// fresh acquisition after release or expiry to mint `previous + 1`, and a
+    /// double is not exempt. This store drops the live lease row on release, so
+    /// generation authority has to live somewhere that survives it, or a stale
+    /// generation would be reissued and fencing would silently stop working.
+    session_execution_lease_generations: std::sync::Mutex<HashMap<String, u64>>,
 }
 
 impl SnapshotStore {
@@ -113,6 +121,7 @@ impl SnapshotStore {
             runtime_turn_commits: std::sync::Mutex::new(std::collections::HashMap::new()),
             usage_delta_identities: std::sync::Mutex::new(std::collections::HashSet::new()),
             session_execution_leases: std::sync::Mutex::new(HashMap::new()),
+            session_execution_lease_generations: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -392,10 +401,20 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
                 )
             })
         });
-        let next_fencing_token = leases
+        // Mint from the retained counter, not from the live row: the row is gone
+        // after a release, and restarting the fence there would reissue a
+        // generation a stale claim still pins.
+        let mut generations = self
+            .session_execution_lease_generations
+            .lock()
+            .expect("session execution lease generations lock");
+        let next_fencing_token = generations
             .get(session_id)
-            .map(|lease| lease.fencing_token.saturating_add(1))
-            .unwrap_or(1);
+            .copied()
+            .unwrap_or(0)
+            .saturating_add(1);
+        generations.insert(session_id.to_string(), next_fencing_token);
+        drop(generations);
         let lease =
             test_session_execution_lease(session_id, owner, lease_ttl_ms, next_fencing_token);
         leases.insert(session_id.to_string(), lease.clone());
@@ -450,6 +469,8 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
             .get(&completion.session_id)
             .is_some_and(|lease| session_completion_matches(lease, completion))
         {
+            // The live row goes; the generation counter deliberately stays, so
+            // the next claim mints `previous + 1` (ADR 0029).
             leases.remove(&completion.session_id);
         }
         Ok(())

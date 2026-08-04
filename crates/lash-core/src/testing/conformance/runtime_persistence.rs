@@ -2086,10 +2086,18 @@ async fn session_execution_lease_diagnostic_read_contract(store: Arc<dyn Runtime
 /// exactly that case, and can name whichever holder happens to be current by the
 /// time it wakes rather than the one that displaced it.
 ///
-/// Every implementation of [`crate::store::SessionExecutionLeaseStore`] answers this, including
-/// in-process doubles: a double that reports no displacement silently disables the
-/// takeover event for whatever it stands in for. Callers pass a session id they
-/// own, because a claim mutates the lane.
+/// The same vector carries the generation law the displacement is measured
+/// against: [`crate::store::SessionExecutionLeaseStore`] is a fencing trait, and
+/// ADR 0029 requires every fresh acquisition after release or TTL expiry to mint
+/// `previous + 1`. Both halves are checked against the generations this run
+/// actually observed, never against a constant, so a store frozen at one
+/// generation cannot pass.
+///
+/// Every implementation answers this, in-process doubles included. A double that
+/// reports no displacement silently disables the takeover event for whatever it
+/// stands in for, and one that restarts the fence after release reissues a
+/// generation that stale claims still pin, which stops fencing working at all.
+/// Callers pass a session id they own, because a claim mutates the lane.
 pub async fn session_execution_lease_displacement(
     store: &(dyn crate::store::SessionExecutionLeaseStore + '_),
     session_id: &str,
@@ -2131,9 +2139,12 @@ pub async fn session_execution_lease_displacement(
         displaced.fencing_token, opening.lease.fencing_token,
         "the displacement must name the generation actually displaced"
     );
-    assert!(
-        displaced.fencing_token < takeover.lease.fencing_token,
-        "a displacement must sit strictly below the acquired generation: {displaced:?} vs {}",
+    assert_eq!(
+        takeover.lease.fencing_token,
+        opening.lease.fencing_token + 1,
+        "a claim over an expired lease must mint exactly the previous generation plus one \
+         (ADR 0029): displaced {}, acquired {}",
+        opening.lease.fencing_token,
         takeover.lease.fencing_token
     );
     assert_eq!(
@@ -2172,28 +2183,29 @@ pub async fn session_execution_lease_displacement(
         "claiming a cleanly released lane displaces nobody: {:?}",
         after_release.displaced
     );
+    assert_eq!(
+        after_release.lease.fencing_token,
+        reentry.lease.fencing_token + 1,
+        "a claim after a release must mint exactly the released generation plus one \
+         (ADR 0029): released {}, acquired {}. Restarting or repeating the generation here \
+         reissues one that stale claims still pin, so fencing stops working",
+        reentry.lease.fencing_token,
+        after_release.lease.fencing_token
+    );
     store
         .release_session_execution_lease(&after_release.lease.completion())
         .await
         .expect("release the reclaimed lane");
 }
 
-/// The durable-backend wrapper: the shared displacement contract plus the
-/// generation monotonicity a persistent store additionally owes across a release.
+/// The durable-backend entry point for the shared lease-acquisition contract.
+///
+/// The contract itself lives in [`session_execution_lease_displacement`] because
+/// it binds every implementation of the fencing trait, doubles included. There is
+/// nothing extra a durable backend owes here: the displacement report and the
+/// `previous + 1` generation law are both trait-level obligations.
 async fn session_execution_lease_displacement_contract(store: Arc<dyn RuntimePersistence>) {
-    let session = "lease-displacement";
-    session_execution_lease_displacement(store.as_ref(), session).await;
-
-    // A durable backend keeps the fence across a release, so a later reclaim
-    // still advances it. Doubles that drop the row on release are held only to
-    // the displacement contract above.
-    let reclaimed =
-        claim_session_execution_lease_for_test(&store, session, "displacement-third").await;
-    assert!(
-        reclaimed.fencing_token > 1,
-        "a durable reclaim must not restart the fencing generation: {reclaimed:?}"
-    );
-    release_session_execution_lease_for_test(&store, &reclaimed).await;
+    session_execution_lease_displacement(store.as_ref(), "lease-displacement").await;
 }
 
 async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>) {
