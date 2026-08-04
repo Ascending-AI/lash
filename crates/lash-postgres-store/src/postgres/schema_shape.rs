@@ -595,8 +595,12 @@ const ARTIFACT_HEADER: &str = "\
 # catalog the DDL artifact actually produces. Every attribute recorded here
 # renders identically on PostgreSQL 14 through 18; CI asserts that on all three.
 #
-# Columns are matched by name (never ordinal position); uniqueness guards and
-# foreign keys are matched by column set and kind (never by constraint name).
+# Columns are matched by name, never by ordinal position. Uniqueness guards and
+# foreign keys are identified by their column set and kind, never by constraint or
+# index name -- but identity is not equality: a guard whose key columns are in
+# another order is reported as a mismatch rather than accepted, because index
+# column order is operationally load-bearing. Every object is read from the one
+# namespace where lash_schema_versions resolves.
 ";
 
 fn parse_column_line(rest: &str) -> Option<ColumnShape> {
