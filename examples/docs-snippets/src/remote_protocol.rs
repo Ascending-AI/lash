@@ -1036,3 +1036,254 @@ mod asserted_process_examples {
         );
     }
 }
+
+#[cfg(test)]
+mod asserted_tool_examples {
+    use lash::remote::tools::{
+        RemoteToolActivation, RemoteToolArgumentProjectionPolicy, RemoteToolGrant,
+        RemoteToolOutputContract, RemoteToolRegistry, RemoteToolRetryPolicy,
+        assert_remote_tool_registry_reopenable,
+    };
+    use lash::remote::{REMOTE_PROTOCOL_VERSION, RemoteProtocolError};
+    use lash::tools::{
+        DeferredToolGrant as ToolGrant, LASHLANG_TOOL_BINDING_KEY, LashlangToolBinding,
+        PLUGIN_TOOL_SOURCE_ID, RemoteToolGrantLashlangExt, ToolDefinition, ToolExecutionGrant,
+        ToolId,
+    };
+
+    #[derive(Clone)]
+    struct ExampleRegistry(Vec<RemoteToolGrant>);
+
+    impl RemoteToolRegistry for ExampleRegistry {
+        fn grants(&self) -> Vec<RemoteToolGrant> {
+            self.0.clone()
+        }
+    }
+
+    fn remote_grant(name: &str, operation: &str) -> RemoteToolGrant {
+        serde_json::from_value(serde_json::json!({
+            "protocol_version": REMOTE_PROTOCOL_VERSION,
+            "id": format!("remote-tool:{name}"),
+            "name": name,
+            "description": "Search the host knowledge base.",
+            "input_schema": {
+                "canonical": {
+                    "type": "object",
+                    "properties": { "query": { "type": "string" } },
+                    "required": ["query"]
+                }
+            },
+            "output_schema": {
+                "canonical": {
+                    "type": "object",
+                    "properties": { "matches": { "type": "array" } },
+                    "required": ["matches"]
+                }
+            },
+            "output_contract": {
+                "kind": "from_input_schema",
+                "input_field": "result_schema",
+                "default_schema": { "type": "array" }
+            },
+            "examples": [format!(r#"{operation}({{ query: \"release notes\" }})"#)],
+            "activation": "internal",
+            "argument_projection": {
+                "kind": "preserve_projected_refs_in_field",
+                "field": "query"
+            },
+            "retry_policy": {
+                "type": "safe",
+                "max_attempts": 3,
+                "base_delay_ms": 25,
+                "max_delay_ms": 250
+            },
+            "bindings": {}
+        }))
+        .expect("the host-authored grant must satisfy the remote wire schema")
+    }
+
+    #[test]
+    fn remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants() {
+        let binding = LashlangToolBinding::new(["knowledge", "docs"], "search");
+        let grant = remote_grant("search_docs", "search").with_lashlang_binding(binding);
+        assert_eq!(grant.protocol_version, REMOTE_PROTOCOL_VERSION);
+        assert_eq!(grant.id, "remote-tool:search_docs");
+        assert_eq!(grant.name, "search_docs");
+        assert_eq!(grant.description, "Search the host knowledge base.");
+        assert_eq!(grant.input_schema.canonical["required"][0], "query");
+        assert_eq!(grant.output_schema.canonical["required"][0], "matches");
+        assert_eq!(grant.examples.len(), 1);
+        assert_eq!(grant.activation, Some(RemoteToolActivation::Internal));
+        assert_eq!(
+            grant.argument_projection,
+            Some(
+                RemoteToolArgumentProjectionPolicy::PreserveProjectedRefsInField {
+                    field: "query".to_string(),
+                }
+            )
+        );
+        assert_eq!(
+            grant.retry_policy,
+            Some(RemoteToolRetryPolicy::Safe {
+                max_attempts: 3,
+                base_delay_ms: 25,
+                max_delay_ms: 250,
+            })
+        );
+        let RemoteToolOutputContract::FromInputSchema {
+            input_field,
+            default_schema,
+        } = &grant.output_contract
+        else {
+            panic!("the remote grant must preserve its dynamic output contract");
+        };
+        assert_eq!(input_field, "result_schema");
+        assert_eq!(default_schema.as_ref().unwrap()["type"], "array");
+        assert!(grant.bindings.contains_key(LASHLANG_TOOL_BINDING_KEY));
+        let decoded_binding = RemoteToolGrantLashlangExt::lashlang_binding(&grant)
+            .expect("the binding must decode")
+            .expect("the binding must be present");
+        assert_eq!(decoded_binding.module_path, ["knowledge", "docs"]);
+        assert_eq!(decoded_binding.operation.as_deref(), Some("search"));
+        assert_eq!(
+            grant.binding_call_path(LASHLANG_TOOL_BINDING_KEY).unwrap(),
+            "knowledge.docs.search"
+        );
+        assert_eq!(
+            grant.call_path_bindings().unwrap(),
+            ["knowledge.docs.search"]
+        );
+        grant.validate().expect("the complete grant must validate");
+        RemoteToolGrant::validate_all(std::slice::from_ref(&grant))
+            .expect("the registry must have unique authority");
+
+        let registry = ExampleRegistry(vec![grant.clone()]);
+        RemoteToolRegistry::validate_registry(&registry).expect("the registry must validate");
+        assert_eq!(RemoteToolRegistry::grants(&registry).len(), 1);
+        assert_remote_tool_registry_reopenable(&registry, &registry)
+            .expect("an unchanged registry must reopen");
+
+        let changed = ExampleRegistry(vec![
+            remote_grant("search_docs", "lookup")
+                .with_lashlang_binding(LashlangToolBinding::new(["knowledge", "docs"], "lookup")),
+        ]);
+        let mismatch = assert_remote_tool_registry_reopenable(&registry, &changed)
+            .expect_err("a changed call path must fail reopen validation");
+        let RemoteProtocolError::RemoteToolRegistryReopenMismatch {
+            before_call_paths,
+            after_call_paths,
+        } = mismatch
+        else {
+            panic!("call-path drift must report a reopen mismatch");
+        };
+        assert_eq!(before_call_paths, ["knowledge.docs.search"]);
+        assert_eq!(after_call_paths, ["knowledge.docs.lookup"]);
+
+        let missing = grant
+            .binding_call_path("missing.binding")
+            .expect_err("missing authority must fail closed");
+        let RemoteProtocolError::MissingToolBinding { tool_name, binding } = missing else {
+            panic!("missing authority must identify the binding");
+        };
+        assert_eq!(tool_name, "search_docs");
+        assert_eq!(binding, "missing.binding");
+
+        let mut invalid = grant.clone();
+        invalid.id.clear();
+        let RemoteProtocolError::InvalidToolGrant { tool_name, message } = invalid
+            .validate()
+            .expect_err("blank tool ids must be rejected")
+        else {
+            panic!("invalid grants must retain host-visible details");
+        };
+        assert_eq!(tool_name, "search_docs");
+        assert!(message.contains("id cannot be empty"));
+
+        let definition = ToolDefinition::try_from(&grant)
+            .expect("a validated remote grant must project into a local definition");
+        assert_eq!(definition.id().as_str(), "remote-tool:search_docs");
+        assert_eq!(definition.name(), "search_docs");
+        assert_eq!(
+            definition.manifest.activation,
+            lash::tools::ToolActivation::Internal
+        );
+        assert_eq!(definition.contract.examples.len(), 1);
+
+        let tool_id = ToolId::new("remote-tool:search_docs");
+        assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());
+        let tool_grant = ToolGrant::new(definition.clone())
+            .with_source_id(PLUGIN_TOOL_SOURCE_ID)
+            .with_execution_binding(serde_json::json!({ "tenant": "acme" }));
+        assert_eq!(tool_grant.definition.name(), "search_docs");
+        assert_eq!(tool_grant.source_id.as_deref(), Some(PLUGIN_TOOL_SOURCE_ID));
+        assert_eq!(tool_grant.execution_binding["tenant"], "acme");
+
+        let direct_execution_grant =
+            ToolExecutionGrant::new(definition.manifest(), definition.contract());
+        assert_eq!(direct_execution_grant.manifest.name, "search_docs");
+        assert_eq!(direct_execution_grant.contract.examples.len(), 1);
+        let execution_grant = ToolExecutionGrant::from_definition(definition)
+            .with_source_id(PLUGIN_TOOL_SOURCE_ID)
+            .with_execution_binding(serde_json::json!({ "tenant": "acme" }));
+        assert_eq!(
+            execution_grant.source_id.as_deref(),
+            Some(PLUGIN_TOOL_SOURCE_ID)
+        );
+        assert_eq!(execution_grant.execution_binding["tenant"], "acme");
+
+        assert_eq!(
+            serde_json::to_value([RemoteToolActivation::Always, RemoteToolActivation::Internal,])
+                .unwrap(),
+            serde_json::json!(["always", "internal"])
+        );
+        assert_eq!(
+            serde_json::to_value([
+                RemoteToolArgumentProjectionPolicy::MaterializeProjectedValues,
+                RemoteToolArgumentProjectionPolicy::PreserveProjectedRefsInField {
+                    field: "content".to_string(),
+                },
+            ])
+            .unwrap(),
+            serde_json::json!([
+                { "kind": "materialize_projected_values" },
+                { "kind": "preserve_projected_refs_in_field", "field": "content" }
+            ])
+        );
+        assert_eq!(
+            serde_json::to_value([
+                RemoteToolOutputContract::Static,
+                RemoteToolOutputContract::FromInputSchema {
+                    input_field: "schema".to_string(),
+                    default_schema: Some(serde_json::json!({ "type": "string" })),
+                },
+            ])
+            .unwrap(),
+            serde_json::json!([
+                { "kind": "static" },
+                { "kind": "from_input_schema", "input_field": "schema", "default_schema": { "type": "string" } }
+            ])
+        );
+        assert_eq!(
+            serde_json::to_value([
+                RemoteToolRetryPolicy::Never,
+                RemoteToolRetryPolicy::Safe {
+                    max_attempts: 2,
+                    base_delay_ms: 10,
+                    max_delay_ms: 100,
+                },
+                RemoteToolRetryPolicy::Idempotent {
+                    max_attempts: 4,
+                    base_delay_ms: 20,
+                    max_delay_ms: 200,
+                },
+            ])
+            .unwrap()[2],
+            serde_json::json!({
+                "type": "idempotent",
+                "max_attempts": 4,
+                "base_delay_ms": 20,
+                "max_delay_ms": 200
+            })
+        );
+    }
+}

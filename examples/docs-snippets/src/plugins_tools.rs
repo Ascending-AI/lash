@@ -524,4 +524,113 @@ mod asserted_examples {
             serde_json::json!(["runtime", "plugin", "policy", "cancellation"])
         );
     }
+
+    #[test]
+    fn catalogued_tools_render_searchable_lashlang_module_previews() {
+        use lash::tools::{
+            CataloguePreviewEntry, CataloguePreviewOptions,
+            DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT, DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT,
+            catalogue_preview_contribution, catalogue_preview_contribution_for_entries,
+            catalogue_preview_contribution_for_entries_with_options,
+            catalogue_preview_contribution_for_manifests,
+            catalogue_preview_contribution_with_options,
+            catalogue_preview_entries_from_catalog_records,
+            catalogue_preview_entries_from_manifests, catalogue_preview_entry_from_catalog_record,
+            catalogue_preview_entry_from_manifest,
+        };
+
+        let search = ToolDefinition::raw(
+            "tool:search_docs",
+            "search_docs",
+            "Search documentation.",
+            ToolDefinition::default_input_schema(),
+            serde_json::json!({ "type": "object" }),
+        )
+        .with_lashlang_binding(LashlangToolBinding::new(["knowledge", "docs"], "search"));
+        let fetch = ToolDefinition::raw(
+            "tool:fetch_url",
+            "fetch_url",
+            "Fetch a public URL.",
+            ToolDefinition::default_input_schema(),
+            serde_json::json!({ "type": "object" }),
+        )
+        .with_lashlang_binding(LashlangToolBinding::new(["network", "http"], "fetch"));
+        let manifests = [search.manifest(), fetch.manifest()];
+
+        let direct = CataloguePreviewEntry::new(["workspace", "files"], "read");
+        assert_eq!(direct.module_path, ["workspace", "files"]);
+        assert_eq!(direct.call, "read");
+        assert_eq!(direct.module_path_string(), "workspace.files");
+        let executable = LashlangToolBinding::new(["workspace", "files"], "write")
+            .required_executable_for_remote("write_file")
+            .expect("complete bindings must expose an executable call path");
+        let executable_entry = CataloguePreviewEntry::from_lashlang_executable(executable);
+        assert_eq!(executable_entry.call, "workspace.files.write");
+
+        let manifest_entry = catalogue_preview_entry_from_manifest(&manifests[0])
+            .expect("lashlang-bound manifests must project into preview entries");
+        assert_eq!(manifest_entry.module_path_string(), "knowledge.docs");
+        assert_eq!(manifest_entry.call, "knowledge.docs.search");
+        let manifest_entries = catalogue_preview_entries_from_manifests(&manifests);
+        assert_eq!(manifest_entries.len(), 2);
+
+        let records = manifests
+            .iter()
+            .map(|manifest| {
+                serde_json::json!({
+                    "name": manifest.name,
+                    "bindings": manifest.bindings,
+                })
+            })
+            .collect::<Vec<_>>();
+        let record_entry = catalogue_preview_entry_from_catalog_record(&records[1])
+            .expect("catalog records must preserve executable call paths");
+        assert_eq!(record_entry.module_path_string(), "network.http");
+        assert_eq!(record_entry.call, "network.http.fetch");
+        let record_entries = catalogue_preview_entries_from_catalog_records(&records);
+        assert_eq!(record_entries, manifest_entries);
+
+        let defaults = CataloguePreviewOptions::default();
+        assert_eq!(defaults.title, "Catalogued Capabilities");
+        assert_eq!(defaults.search_tool_name, "search_tools");
+        assert_eq!(defaults.search_call_path, "tools.search");
+        assert_eq!(
+            defaults.module_limit,
+            DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT
+        );
+        assert_eq!(
+            defaults.call_name_limit,
+            DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT
+        );
+
+        let options = CataloguePreviewOptions {
+            title: "Remote capabilities".to_string(),
+            search_tool_name: "find_tools".to_string(),
+            search_call_path: "catalog.find".to_string(),
+            module_limit: 10,
+            call_name_limit: 10,
+        };
+        let contribution = catalogue_preview_contribution_for_entries_with_options(
+            [direct, manifest_entry, record_entry],
+            options.clone(),
+        )
+        .expect("non-empty catalogues must render a preview");
+        assert_eq!(contribution.title.as_deref(), Some("Remote capabilities"));
+        assert_eq!(contribution.gate.tools, ["find_tools"]);
+        assert!(contribution.content.contains("catalog.find"));
+        assert!(contribution.content.contains("knowledge.docs.search"));
+        assert!(contribution.content.contains("network.http.fetch"));
+        assert!(contribution.content.contains("workspace.files: read"));
+
+        let from_entries = catalogue_preview_contribution_for_entries(manifest_entries.clone())
+            .expect("entries must render");
+        let from_manifests = catalogue_preview_contribution_for_manifests(&manifests)
+            .expect("manifests must render");
+        let from_records = catalogue_preview_contribution(&records).expect("records must render");
+        assert_eq!(from_entries.content, from_manifests.content);
+        assert_eq!(from_manifests.content, from_records.content);
+        let customized = catalogue_preview_contribution_with_options(&records, options)
+            .expect("customized records must render");
+        assert_eq!(customized.title.as_deref(), Some("Remote capabilities"));
+    }
 }
