@@ -373,12 +373,24 @@ jobs:
           if-no-files-found: error
 
   postgres-store:
-    name: Test Postgres store
+    name: Test Postgres store (PG ${{ matrix.postgres }})
     runs-on: blacksmith-4vcpu-ubuntu-2404
+
+    # The structural schema check at open (`SchemaProvisioning`/`SchemaCheck`)
+    # compares the live catalog against a generated expectation artifact, so a
+    # catalog attribute that renders differently on a major lash has not tested
+    # would reject every host on that major with no remedy but a lash release.
+    # 14 and 18 bracket the supported range — 18 is where NOT NULL became
+    # `pg_constraint` rows, 14 is before `pg_index.indnullsnotdistinct` existed —
+    # and the shape suite asserts all three produce the byte-identical artifact.
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["14", "16", "18"]
 
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:${{ matrix.postgres }}-alpine
         env:
           POSTGRES_USER: lash
           POSTGRES_PASSWORD: lash
@@ -414,8 +426,11 @@ jobs:
       # RuntimePersistence / SessionStoreFactory / ProcessRegistry /
       # TriggerStore / LashlangArtifactStore suites against a real Postgres.
       # Required mode fails when the URL is unset, so missing CI configuration
-      # cannot silently skip this lane. `connect()` runs `ensure_schema`
-      # (CREATE TABLE IF NOT EXISTS), so no separate migrate step.
+      # cannot silently skip this lane. `connect()` applies the crate's
+      # `schema.sql` artifact itself, so no separate migrate step. The same run
+      # carries the `schema_shape` and `schema_drift` suites, which assert this
+      # major produces the committed expectation artifact byte-for-byte and that
+      # each seeded drift class is rejected by name.
       # The suites self-serialize on a shared in-process guard (they share one
       # database and reset() truncates all lash_* tables), so no --test-threads=1.
       # That guard is per-process, so this must stay `cargo test` — nextest's
@@ -426,7 +441,10 @@ jobs:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"
 
+      # The differential compares backend semantics, not catalog rendering, so it
+      # runs once on the primary major instead of three times.
       - name: Test cross-backend store differential
+        if: matrix.postgres == '16'
         run: >-
           cargo nextest run -p lash-sim
           --test cross_backend_store_differential
