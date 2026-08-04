@@ -110,14 +110,14 @@ impl SessionExecutionLeaseStore for FacadeStore {
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
         Ok(SessionExecutionLeaseClaimOutcome::Acquired(
-            SessionExecutionLease {
+            SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
                 session_id: session_id.to_string(),
                 owner: owner.clone(),
                 lease_token: "facade-token".to_string(),
                 fencing_token: 1,
                 claimed_at_epoch_ms: 0,
                 expires_at_epoch_ms: lease_ttl_ms,
-            },
+            }),
         ))
     }
 

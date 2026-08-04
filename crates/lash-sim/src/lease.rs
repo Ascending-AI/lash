@@ -31,7 +31,7 @@ mod tests {
             .await
             .expect("claim sim runtime lease")
         {
-            SessionExecutionLeaseClaimOutcome::Acquired(lease) => lease,
+            SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => acquisition.lease,
             SessionExecutionLeaseClaimOutcome::Busy { .. } => {
                 panic!("fresh sim runtime lease was busy")
             }
@@ -55,7 +55,7 @@ mod tests {
             .await
             .expect("claim deliberate finite lease")
         {
-            SessionExecutionLeaseClaimOutcome::Acquired(lease) => lease,
+            SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => acquisition.lease,
             SessionExecutionLeaseClaimOutcome::Busy { .. } => {
                 panic!("fresh deliberate lease was busy")
             }

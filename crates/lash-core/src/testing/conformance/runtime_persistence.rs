@@ -198,6 +198,7 @@ where
     session_execution_lease_contract(make()).await;
     session_execution_lease_expires_by_ttl_contract(make()).await;
     session_execution_lease_diagnostic_read_contract(make()).await;
+    session_execution_lease_displacement_contract(make()).await;
     // [`QueuedWorkStore`]: durable queued-work ingress, ordering, and claim
     // leases, plus the commit-side completion atomicity it shares with
     // [`SessionCommitStore`].
@@ -2074,6 +2075,96 @@ async fn session_execution_lease_diagnostic_read_contract(store: Arc<dyn Runtime
         "takeover must be visible read-side as a strictly higher generation"
     );
     release_session_execution_lease_for_test(&store, &successor).await;
+}
+
+/// A granted claim must name the lapsed holder it displaced, read inside the same
+/// atomic operation.
+///
+/// This is the only truthful report of a takeover. The displaced runner is
+/// usually *why* the lease lapsed, so it is frequently dead, frozen, or already
+/// replaced; a takeover inferred from its own renewal-failure path is missing in
+/// exactly that case, and can name whichever holder happens to be current by the
+/// time it wakes rather than the one that displaced it.
+async fn session_execution_lease_displacement_contract(store: Arc<dyn RuntimePersistence>) {
+    let session = "lease-displacement";
+    let first = lease_owner("displacement-first");
+    let second = lease_owner("displacement-second");
+
+    // A first claim on a row nobody ever held displaces nobody.
+    let opening = store
+        .try_claim_session_execution_lease(session, &first, 0)
+        .await
+        .expect("first claim")
+        .acquisition()
+        .expect("an unheld lane is acquirable");
+    assert!(
+        opening.displaced.is_none(),
+        "a first claim must not report displacing anyone: {:?}",
+        opening.displaced
+    );
+
+    // Taking over a lapsed holder must name that exact holder and generation.
+    let takeover = store
+        .try_claim_session_execution_lease(session, &second, 60_000)
+        .await
+        .expect("claim the lapsed lane")
+        .acquisition()
+        .expect("a lapsed lane is claimable");
+    let displaced = takeover
+        .displaced
+        .as_ref()
+        .expect("displacing a lapsed holder must be reported on the claim");
+    assert_eq!(
+        displaced.owner, opening.lease.owner,
+        "the displacement must name the holder actually displaced"
+    );
+    assert_eq!(
+        displaced.fencing_token, opening.lease.fencing_token,
+        "the displacement must name the generation actually displaced"
+    );
+    assert!(
+        displaced.fencing_token < takeover.lease.fencing_token,
+        "a displacement must sit strictly below the acquired generation: {displaced:?} vs {}",
+        takeover.lease.fencing_token
+    );
+    assert_eq!(
+        displaced.expired_at_epoch_ms, opening.lease.expires_at_epoch_ms,
+        "the displacement must report the lapsed holder's own expiry"
+    );
+
+    // Same-incarnation reentry advances nothing, so it displaces nobody.
+    let reentry = store
+        .try_claim_session_execution_lease(session, &second, 60_000)
+        .await
+        .expect("reenter the live lane")
+        .acquisition()
+        .expect("the same incarnation reenters its own lease");
+    assert_eq!(reentry.lease.fencing_token, takeover.lease.fencing_token);
+    assert!(
+        reentry.displaced.is_none(),
+        "reentry must not report a displacement: {:?}",
+        reentry.displaced
+    );
+
+    // A holder that released its lane hands it over; the next claimant took
+    // nothing from anyone and must not report a takeover.
+    release_session_execution_lease_for_test(&store, &reentry.lease).await;
+    let after_release = store
+        .try_claim_session_execution_lease(session, &first, 60_000)
+        .await
+        .expect("claim a released lane")
+        .acquisition()
+        .expect("a released lane is acquirable");
+    assert!(
+        after_release.lease.fencing_token > reentry.lease.fencing_token,
+        "a reclaim must still advance the generation"
+    );
+    assert!(
+        after_release.displaced.is_none(),
+        "claiming a cleanly released lane displaces nobody: {:?}",
+        after_release.displaced
+    );
+    release_session_execution_lease_for_test(&store, &after_release.lease).await;
 }
 
 async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>) {

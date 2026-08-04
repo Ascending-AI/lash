@@ -133,6 +133,36 @@ pub(super) struct SessionExecutionLeaseGuard {
 }
 
 impl SessionExecutionLeaseGuard {
+    /// Claim the lane, or hand back the live holder that blocked the claim.
+    ///
+    /// Callers that proceed under the commit CAS anyway need the holder's
+    /// identity, so a later rejection is attributable; callers that simply give
+    /// up use [`Self::try_acquire`].
+    pub(super) async fn try_acquire_or_observe_holder(
+        store: Arc<dyn RuntimePersistence>,
+        session_id: &str,
+        owner: &crate::LeaseOwnerIdentity,
+        timings: LeaseTimings,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Result<Self, SessionExecutionLease>, StoreError> {
+        let acquisition = match store
+            .try_claim_session_execution_lease(session_id, owner, timings.ttl_ms())
+            .await?
+        {
+            SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => acquisition,
+            SessionExecutionLeaseClaimOutcome::Busy { holder } => {
+                trace_busy(session_id, owner, &holder);
+                return Ok(Err(holder));
+            }
+        };
+        Ok(Ok(Self::from_acquisition(
+            store,
+            acquisition,
+            timings,
+            clock,
+        )))
+    }
+
     pub(super) async fn try_acquire(
         store: Arc<dyn RuntimePersistence>,
         session_id: &str,
@@ -140,16 +170,36 @@ impl SessionExecutionLeaseGuard {
         timings: LeaseTimings,
         clock: Arc<dyn Clock>,
     ) -> Result<Option<Self>, StoreError> {
-        let lease = match store
+        let acquisition = match store
             .try_claim_session_execution_lease(session_id, owner, timings.ttl_ms())
             .await?
         {
-            SessionExecutionLeaseClaimOutcome::Acquired(lease) => lease,
+            SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => acquisition,
             SessionExecutionLeaseClaimOutcome::Busy { holder } => {
                 trace_busy(session_id, owner, &holder);
                 return Ok(None);
             }
         };
+        Ok(Some(Self::from_acquisition(
+            store,
+            acquisition,
+            timings,
+            clock,
+        )))
+    }
+
+    /// Report the claim, then start renewing it.
+    ///
+    /// `taken_over` is emitted here, by the winner, because this is the only
+    /// moment the displaced holder is known to be the one this claim actually
+    /// displaced, and the only party guaranteed alive to say so.
+    fn from_acquisition(
+        store: Arc<dyn RuntimePersistence>,
+        acquisition: crate::store::SessionExecutionLeaseAcquisition,
+        timings: LeaseTimings,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        let lease = acquisition.lease;
         tracing::info!(
             session_id = %lease.session_id,
             owner_id = %lease.owner.owner_id,
@@ -159,6 +209,9 @@ impl SessionExecutionLeaseGuard {
             event = "session_execution_lease.acquired",
             "acquired session execution lease"
         );
+        if let Some(displaced) = acquisition.displaced.as_ref() {
+            trace_taken_over(&lease, displaced);
+        }
         let lease = Arc::new(StdMutex::new(lease));
         let release_state = Arc::new(AtomicU8::new(release_state::LIVE));
         let lost = Arc::new(AtomicBool::new(false));
@@ -170,7 +223,7 @@ impl SessionExecutionLeaseGuard {
             timings,
             Arc::clone(&clock),
         );
-        Ok(Some(Self {
+        Self {
             store,
             lease,
             release_state,
@@ -178,7 +231,7 @@ impl SessionExecutionLeaseGuard {
             clock,
             guard_id: NEXT_LEASE_GUARD_ID.fetch_add(1, Ordering::Relaxed),
             renew_task,
-        }))
+        }
     }
 
     pub(super) fn fence(&self) -> SessionExecutionLeaseFence {
@@ -331,6 +384,7 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
             "session execution lease for session `{session_id}` is busy"
         )));
     };
+    let evidence = lease.commit_evidence();
     let commit = commit.releasing_session_execution_lease(lease.completion());
     match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await {
         Ok(result) => {
@@ -338,6 +392,7 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
             Ok(result)
         }
         Err(error) => {
+            trace_commit_cas_rejected(&session_id, Some(&evidence), &error);
             if let Err(release_error) = lease.release_if_live().await {
                 tracing::warn!(
                     error = %release_error,
@@ -465,7 +520,6 @@ fn spawn_renewal_task(
                             event = "session_execution_lease.lost",
                             "lost session execution lease"
                         );
-                        trace_takeover(store.as_ref(), &fence).await;
                     } else {
                         tracing::warn!(
                             error = %err,
@@ -487,44 +541,30 @@ fn spawn_renewal_task(
     })
 }
 
-/// Name the successor after a fence-rejected renewal so a log timeline
-/// reconstructs takeover order. Diagnostics only: the read never fences anything,
-/// and a failure to read is not allowed to escalate a lost lease into an error.
-async fn trace_takeover(store: &dyn RuntimePersistence, fence: &SessionExecutionLeaseFence) {
-    let current = match store.get_session_execution_lease(&fence.session_id).await {
-        Ok(current) => current,
-        Err(err) => {
-            tracing::debug!(
-                error = %err,
-                session_id = %fence.session_id,
-                consulted = "session_execution_lease_row",
-                outcome = "successor_unknown",
-                event = "session_execution_lease.takeover_unknown",
-                "could not read the session execution lease row after renewal failure"
-            );
-            return;
-        }
-    };
-    let Some(current) = current else {
-        return;
-    };
-    if current.owner.same_incarnation(&fence.owner) && current.fencing_token == fence.fencing_token
-    {
-        return;
-    }
+/// Report a takeover from the winning claim, naming the holder it displaced.
+///
+/// The fields describe the emitter, as they do on every other lease event:
+/// `fencing_token`/`owner_id`/`incarnation_id` are the *new* holder, and the
+/// `displaced_*` fields are the lapsed holder this claim took the lane from. Both
+/// come from one atomic claim, so a log line here is true regardless of whether
+/// the displaced runner is still alive to notice.
+fn trace_taken_over(
+    lease: &SessionExecutionLease,
+    displaced: &crate::store::SessionExecutionLeaseDisplacement,
+) {
     tracing::info!(
-        session_id = %fence.session_id,
-        owner_id = %fence.owner.owner_id,
-        incarnation_id = %fence.owner.incarnation_id,
-        fencing_token = fence.fencing_token,
-        superseding_owner_id = %current.owner.owner_id,
-        superseding_incarnation_id = %current.owner.incarnation_id,
-        superseding_fencing_token = current.fencing_token,
-        superseding_expires_at_epoch_ms = current.expires_at_epoch_ms,
-        consulted = "session_execution_lease_row",
+        session_id = %lease.session_id,
+        owner_id = %lease.owner.owner_id,
+        incarnation_id = %lease.owner.incarnation_id,
+        fencing_token = lease.fencing_token,
+        displaced_owner_id = %displaced.owner.owner_id,
+        displaced_incarnation_id = %displaced.owner.incarnation_id,
+        displaced_fencing_token = displaced.fencing_token,
+        displaced_expired_at_epoch_ms = displaced.expired_at_epoch_ms,
+        consulted = "session_execution_lease_claim",
         outcome = "taken_over",
         event = "session_execution_lease.taken_over",
-        "the session execution lane was taken over by a named successor"
+        "took the session execution lane over from a lapsed holder"
     );
 }
 

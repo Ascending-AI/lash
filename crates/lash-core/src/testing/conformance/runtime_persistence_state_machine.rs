@@ -858,23 +858,36 @@ async fn claim_lease(
                 return Err("Busy reported a different live generation".to_string());
             }
         }
-        (Some(current), SessionExecutionLeaseClaimOutcome::Acquired(lease)) => {
+        (Some(current), SessionExecutionLeaseClaimOutcome::Acquired(acquisition)) => {
             if !current.owner.same_incarnation(&owner)
-                || lease.fencing_token != current.fencing_token
+                || acquisition.lease.fencing_token != current.fencing_token
             {
                 return Err("competing owner acquired an unexpired lease".to_string());
             }
-            model.current_lease = Some(lease);
+            if acquisition.displaced.is_some() {
+                return Err("same-incarnation reentry reported a displaced holder".to_string());
+            }
+            model.current_lease = Some(acquisition.lease);
         }
-        (None, SessionExecutionLeaseClaimOutcome::Acquired(lease)) => {
+        (None, SessionExecutionLeaseClaimOutcome::Acquired(acquisition)) => {
             if model
                 .stale_leases
                 .last()
-                .is_some_and(|stale| lease.fencing_token <= stale.fencing_token)
+                .is_some_and(|stale| acquisition.lease.fencing_token <= stale.fencing_token)
             {
                 return Err("successor lease did not advance the fencing generation".to_string());
             }
-            model.current_lease = Some(lease);
+            if let Some(displaced) = acquisition.displaced.as_ref() {
+                if displaced.fencing_token >= acquisition.lease.fencing_token {
+                    return Err(
+                        "displaced generation was not below the acquired generation".to_string()
+                    );
+                }
+                if displaced.owner.same_incarnation(&owner) {
+                    return Err("a claim reported displacing its own incarnation".to_string());
+                }
+            }
+            model.current_lease = Some(acquisition.lease);
             shape.lease_acquisitions += 1;
         }
         (None, SessionExecutionLeaseClaimOutcome::Busy { .. }) => {

@@ -971,30 +971,52 @@ impl SessionExecutionLeaseStore for Store {
                                 params![session_id, expires_at as i64],
                             )
                             .map_err(sqlite_error)?;
+                            // Reentry advances no generation: nobody is displaced.
                             return Ok(SessionExecutionLeaseClaimOutcome::Acquired(
-                                SessionExecutionLease {
+                                SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
                                     session_id,
                                     owner,
                                     lease_token: current.lease_token.expect("live lease token set"),
                                     fencing_token: current.fencing_token,
                                     claimed_at_epoch_ms: current.claimed_at_ms,
                                     expires_at_epoch_ms: expires_at,
-                                },
+                                }),
                             ));
                         }
                         return Ok(SessionExecutionLeaseClaimOutcome::Busy {
                             holder: row_to_session_execution_lease(&session_id, current)?,
                         });
                     }
+                    // The lapsed holder, read inside the claim transaction. The
+                    // winner is the only party guaranteed alive to report the
+                    // takeover, so the row must hand it over here.
+                    let displaced = current.as_ref().and_then(|lease| {
+                        lease
+                            .owner
+                            .clone()
+                            .filter(|previous| !previous.same_incarnation(&owner))
+                            .map(|previous| (previous, lease.fencing_token, lease.expires_at_ms))
+                    });
+                    let acquired = acquire_session_execution_lease_conn(
+                        tx,
+                        &session_id,
+                        &owner,
+                        current.as_ref().map_or(0, |lease| lease.fencing_token),
+                        now,
+                        lease_ttl_ms,
+                    )?;
                     Ok(SessionExecutionLeaseClaimOutcome::Acquired(
-                        acquire_session_execution_lease_conn(
-                            tx,
-                            &session_id,
-                            &owner,
-                            current.as_ref().map_or(0, |lease| lease.fencing_token),
-                            now,
-                            lease_ttl_ms,
-                        )?,
+                        match displaced {
+                            Some((previous, generation, expired_at_epoch_ms)) => {
+                                SessionExecutionLeaseAcquisition::displacing_observed(
+                                    acquired,
+                                    previous,
+                                    generation,
+                                    expired_at_epoch_ms,
+                                )
+                            }
+                            None => SessionExecutionLeaseAcquisition::fresh(acquired),
+                        },
                     ))
                 })(
                 );

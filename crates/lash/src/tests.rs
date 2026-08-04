@@ -373,7 +373,7 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
                 lease.expires_at_epoch_ms = now_epoch_ms().saturating_add(lease_ttl_ms);
                 leases.insert(session_id.to_string(), lease.clone());
                 return Ok(lash_core::SessionExecutionLeaseClaimOutcome::Acquired(
-                    lease,
+                    lash_core::SessionExecutionLeaseAcquisition::fresh(lease),
                 ));
             }
             return Ok(lash_core::SessionExecutionLeaseClaimOutcome::Busy {
@@ -388,7 +388,7 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
             test_session_execution_lease(session_id, owner, lease_ttl_ms, next_fencing_token);
         leases.insert(session_id.to_string(), lease.clone());
         Ok(lash_core::SessionExecutionLeaseClaimOutcome::Acquired(
-            lease,
+            lash_core::SessionExecutionLeaseAcquisition::fresh(lease),
         ))
     }
 
@@ -756,7 +756,12 @@ impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
         lash_core::store::StoreError,
     > {
         Ok(lash_core::SessionExecutionLeaseClaimOutcome::Acquired(
-            test_session_execution_lease(session_id, owner, lease_ttl_ms, 1),
+            lash_core::SessionExecutionLeaseAcquisition::fresh(test_session_execution_lease(
+                session_id,
+                owner,
+                lease_ttl_ms,
+                1,
+            )),
         ))
     }
 

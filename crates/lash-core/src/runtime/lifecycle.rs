@@ -240,6 +240,7 @@ impl LashRuntime {
             services,
             state,
             runtime_lease_owner,
+            unheld_lease_commit_evidence: None,
             managed_sessions: Arc::new(Mutex::new(HashMap::new())),
             managed_turns: Arc::new(StdMutex::new(HashMap::new())),
             protocol_turn_options,

@@ -12,6 +12,7 @@ mod load;
 pub mod queued_work;
 mod realization;
 mod runtime_commit;
+mod session_execution_lease;
 
 pub use attachment_manifest::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
@@ -27,6 +28,11 @@ pub use realization::{RealizedNodeTimestamp, commit_runtime_state_verified};
 pub use runtime_commit::{
     RuntimeCommit, RuntimeCommitResult, RuntimeTurnCommitStamp, RuntimeUsageDelta,
     RuntimeUsageDeltaIdentity,
+};
+pub use session_execution_lease::{
+    LeaseOwnerIdentity, SessionExecutionLease, SessionExecutionLeaseAcquisition,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
+    SessionExecutionLeaseDisplacement, SessionExecutionLeaseFence,
 };
 
 fn default_root_session_id() -> String {
@@ -433,119 +439,6 @@ pub struct GraphAppend {
 impl GraphAppend {
     pub fn leaf_node_id(&self) -> Option<&String> {
         self.leaf_node_id.as_ref()
-    }
-}
-
-/// Stable identity for a lease holder.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct LeaseOwnerIdentity {
-    pub owner_id: String,
-    pub incarnation_id: String,
-}
-
-impl LeaseOwnerIdentity {
-    /// Constructs explicit owner and incarnation identity for store implementors; equality and
-    /// fencing depend on both components, not a display-form concatenation.
-    pub fn opaque(
-        owner_id: impl Into<String>,
-        incarnation_id: impl Into<String>,
-    ) -> LeaseOwnerIdentity {
-        LeaseOwnerIdentity {
-            owner_id: owner_id.into(),
-            incarnation_id: incarnation_id.into(),
-        }
-    }
-
-    /// Stable owner identity for one Restate process execution invocation.
-    ///
-    /// Construction and recognition share this single representation so a
-    /// formatting drift cannot silently turn a continuation into a fresh
-    /// execution.
-    pub fn restate_process_execution(
-        process_id: &str,
-        execution_id: impl Into<String>,
-    ) -> LeaseOwnerIdentity {
-        Self::opaque(format!("restate:{process_id}"), execution_id)
-    }
-
-    /// Return the Restate execution id when this owner belongs to `process_id`.
-    pub fn restate_process_execution_id(&self, process_id: &str) -> Option<&str> {
-        let expected = Self::restate_process_execution(process_id, &self.incarnation_id);
-        self.same_incarnation(&expected)
-            .then_some(self.incarnation_id.as_str())
-    }
-
-    /// Reports the same lease incarnation to store implementors only when both owner ID and
-    /// incarnation ID match exactly.
-    pub fn same_incarnation(&self, other: &LeaseOwnerIdentity) -> bool {
-        self.owner_id == other.owner_id && self.incarnation_id == other.incarnation_id
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct SessionExecutionLease {
-    pub session_id: String,
-    pub owner: LeaseOwnerIdentity,
-    pub lease_token: String,
-    pub fencing_token: u64,
-    pub claimed_at_epoch_ms: u64,
-    pub expires_at_epoch_ms: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct SessionExecutionLeaseFence {
-    pub session_id: String,
-    pub owner: LeaseOwnerIdentity,
-    pub lease_token: String,
-    pub fencing_token: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct SessionExecutionLeaseCompletion {
-    pub session_id: String,
-    pub owner: LeaseOwnerIdentity,
-    pub lease_token: String,
-    pub fencing_token: u64,
-}
-
-impl SessionExecutionLease {
-    /// Captures session, owner, lease token, and fencing generation that store implementors must
-    /// verify before accepting execution writes.
-    pub fn fence(&self) -> SessionExecutionLeaseFence {
-        SessionExecutionLeaseFence {
-            session_id: self.session_id.clone(),
-            owner: self.owner.clone(),
-            lease_token: self.lease_token.clone(),
-            fencing_token: self.fencing_token,
-        }
-    }
-
-    /// Captures session, owner, lease token, and fencing generation that store implementors must
-    /// verify before releasing the execution lease.
-    pub fn completion(&self) -> SessionExecutionLeaseCompletion {
-        SessionExecutionLeaseCompletion {
-            session_id: self.session_id.clone(),
-            owner: self.owner.clone(),
-            lease_token: self.lease_token.clone(),
-            fencing_token: self.fencing_token,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum SessionExecutionLeaseClaimOutcome {
-    Acquired(SessionExecutionLease),
-    Busy { holder: SessionExecutionLease },
-}
-
-impl SessionExecutionLeaseClaimOutcome {
-    /// Returns the newly acquired session lease to store implementors and `None` when another
-    /// holder remains busy; the observed busy holder is discarded only by this projection.
-    pub fn acquired(self) -> Option<SessionExecutionLease> {
-        match self {
-            Self::Acquired(lease) => Some(lease),
-            Self::Busy { .. } => None,
-        }
     }
 }
 
@@ -1348,6 +1241,14 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
     /// holds an unexpired lease. Expired or released leases may be reclaimed
     /// and receive a higher fencing token. An unexpired lease held by the same
     /// owner id but a different incarnation is busy.
+    ///
+    /// A granted claim must carry
+    /// [`SessionExecutionLeaseAcquisition::displaced`] naming the lapsed holder
+    /// it took the lane from, read inside the same atomic operation. This is the
+    /// only truthful report of a takeover: the displaced runner is frequently
+    /// dead or frozen (that is why its lease lapsed), so nothing it would have
+    /// logged is guaranteed to happen. A claim that displaced nobody, including
+    /// same-incarnation reentry and a reclaim of a released row, reports `None`.
     async fn try_claim_session_execution_lease(
         &self,
         session_id: &str,

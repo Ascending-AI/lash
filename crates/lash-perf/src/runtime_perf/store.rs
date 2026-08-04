@@ -13,10 +13,11 @@ use lash_core::store::{
 };
 use lash_core::{
     BlobRef, GcReport, LeaseOwnerIdentity, QueuedWorkStore, RuntimeCommit, RuntimePersistence,
-    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
-    SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
-    SessionGraph, SessionNodeRecord, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
-    StoreMaintenance, TurnInputStore, VacuumReport, facade_support::current_epoch_ms,
+    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion, SessionExecutionLeaseFence,
+    SessionExecutionLeaseStore, SessionGraph, SessionNodeRecord, SessionStoreCreateRequest,
+    SessionStoreFactory, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
+    facade_support::current_epoch_ms,
 };
 
 #[derive(Clone)]
@@ -864,14 +865,14 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
             {
                 current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
                 return Ok(SessionExecutionLeaseClaimOutcome::Acquired(
-                    SessionExecutionLease {
+                    SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
                         session_id: session_id.to_string(),
                         owner: owner.clone(),
                         lease_token: current.lease_token.clone().expect("live lease token set"),
                         fencing_token: current.fencing_token,
                         claimed_at_epoch_ms: current.claimed_at_epoch_ms,
                         expires_at_epoch_ms: current.expires_at_epoch_ms,
-                    },
+                    }),
                 ));
             }
             return Ok(SessionExecutionLeaseClaimOutcome::Busy {
@@ -894,14 +895,14 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
         current.claimed_at_epoch_ms = now;
         current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
         Ok(SessionExecutionLeaseClaimOutcome::Acquired(
-            SessionExecutionLease {
+            SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
                 session_id: session_id.to_string(),
                 owner: owner.clone(),
                 lease_token: current.lease_token.clone().expect("lease token set"),
                 fencing_token: current.fencing_token,
                 claimed_at_epoch_ms: current.claimed_at_epoch_ms,
                 expires_at_epoch_ms: current.expires_at_epoch_ms,
-            },
+            }),
         ))
     }
 

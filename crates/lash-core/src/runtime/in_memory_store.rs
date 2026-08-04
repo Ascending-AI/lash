@@ -1478,22 +1478,44 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
                 .is_some_and(|current_owner| current_owner.same_incarnation(owner))
             {
                 current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
+                // Reentry advances no generation, so it displaces nobody.
                 return Ok(crate::SessionExecutionLeaseClaimOutcome::Acquired(
-                    Self::in_memory_session_execution_lease(session_id, current),
+                    crate::SessionExecutionLeaseAcquisition::fresh(
+                        Self::in_memory_session_execution_lease(session_id, current),
+                    ),
                 ));
             }
             return Ok(crate::SessionExecutionLeaseClaimOutcome::Busy {
                 holder: Self::in_memory_session_execution_lease(session_id, current),
             });
         }
+        // Read the lapsed holder before overwriting it: this claim is the only
+        // atomic moment a takeover is observable, and the displaced runner is
+        // usually why the lease lapsed and so cannot be relied on to report it.
+        let displaced = current
+            .owner
+            .clone()
+            .filter(|previous| !previous.same_incarnation(owner))
+            .map(|previous| (previous, current.fencing_token, current.expires_at_epoch_ms));
+        let lease = Self::acquire_session_execution_lease_in_memory(
+            session_id,
+            owner,
+            current,
+            now,
+            lease_ttl_ms,
+        );
         Ok(crate::SessionExecutionLeaseClaimOutcome::Acquired(
-            Self::acquire_session_execution_lease_in_memory(
-                session_id,
-                owner,
-                current,
-                now,
-                lease_ttl_ms,
-            ),
+            match displaced {
+                Some((previous, generation, expired_at_epoch_ms)) => {
+                    crate::SessionExecutionLeaseAcquisition::displacing_observed(
+                        lease,
+                        previous,
+                        generation,
+                        expired_at_epoch_ms,
+                    )
+                }
+                None => crate::SessionExecutionLeaseAcquisition::fresh(lease),
+            },
         ))
     }
 

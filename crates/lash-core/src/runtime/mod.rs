@@ -1355,6 +1355,11 @@ pub struct LashRuntime {
     pub(in crate::runtime) services: RuntimeServices,
     pub(in crate::runtime) state: RuntimeSessionState,
     pub(in crate::runtime) runtime_lease_owner: crate::LeaseOwnerIdentity,
+    /// Set for the current turn when the lane was busy and the turn proceeded
+    /// under the commit CAS anyway, so a rejected commit still names the writer
+    /// and the generation it knowingly raced.
+    pub(in crate::runtime) unheld_lease_commit_evidence:
+        Option<session_execution_lease::SessionExecutionLeaseCommitEvidence>,
     pub(in crate::runtime) managed_sessions: Arc<Mutex<HashMap<String, RuntimeHandle>>>,
     /// Active managed child turns, keyed by turn id. Guarded by a synchronous
     /// mutex so a `ManagedTurnLease` can release its registration from `Drop`:

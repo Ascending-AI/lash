@@ -1205,15 +1205,16 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
                 .await
                 .map_err(store_sqlx_error)?;
                 tx.commit().await.map_err(store_sqlx_error)?;
+                // Reentry advances no generation: nobody is displaced.
                 return Ok(SessionExecutionLeaseClaimOutcome::Acquired(
-                    SessionExecutionLease {
+                    SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
                         session_id: session_id.to_string(),
                         owner: owner.clone(),
                         lease_token: current.lease_token.expect("live lease token set"),
                         fencing_token: current.fencing_token,
                         claimed_at_epoch_ms: current.claimed_at_ms,
                         expires_at_epoch_ms: expires_at,
-                    },
+                    }),
                 ));
             }
             let holder = row_to_session_execution_lease(session_id, current)?;
@@ -1221,6 +1222,15 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
             return Ok(SessionExecutionLeaseClaimOutcome::Busy { holder });
         }
         let previous_fencing_token = current.as_ref().map_or(0, |lease| lease.fencing_token);
+        // The lapsed holder, read under the same row lock as the claim. The
+        // winner is the only party guaranteed alive to report the takeover.
+        let displaced = current.as_ref().and_then(|lease| {
+            lease
+                .owner
+                .clone()
+                .filter(|previous| !previous.same_incarnation(owner))
+                .map(|previous| (previous, lease.fencing_token, lease.expires_at_ms))
+        });
         let lease = acquire_session_execution_lease_tx(
             &mut tx,
             session_id,
@@ -1231,7 +1241,19 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         )
         .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(SessionExecutionLeaseClaimOutcome::Acquired(lease))
+        Ok(SessionExecutionLeaseClaimOutcome::Acquired(
+            match displaced {
+                Some((previous, generation, expired_at_epoch_ms)) => {
+                    SessionExecutionLeaseAcquisition::displacing_observed(
+                        lease,
+                        previous,
+                        generation,
+                        expired_at_epoch_ms,
+                    )
+                }
+                None => SessionExecutionLeaseAcquisition::fresh(lease),
+            },
+        ))
     }
 
     async fn renew_session_execution_lease(
@@ -2876,13 +2898,19 @@ pub(crate) async fn load_session_execution_lease_tx(
     .fetch_optional(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    Ok(row.map(|row| SessionExecutionLeaseRow {
+    Ok(row.map(session_execution_lease_row_from_columns))
+}
+
+fn session_execution_lease_row_from_columns(
+    row: sqlx::postgres::PgRow,
+) -> SessionExecutionLeaseRow {
+    SessionExecutionLeaseRow {
         owner: lease_owner_from_columns(row.get(0), row.get(5), row.get(6)),
         lease_token: row.get(1),
         fencing_token: row.get::<i64, _>(2) as u64,
         claimed_at_ms: row.get::<i64, _>(3) as u64,
         expires_at_ms: row.get::<i64, _>(4) as u64,
-    }))
+    }
 }
 
 pub(crate) fn lease_owner_from_columns(

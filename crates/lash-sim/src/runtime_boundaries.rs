@@ -146,7 +146,7 @@ impl RuntimeBoundaryHarness {
             .await
             .map_err(|err| RuntimeBoundaryError::new(format!("claim lease probe failed: {err}")))?
         {
-            SessionExecutionLeaseClaimOutcome::Acquired(lease) => lease,
+            SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => acquisition.lease,
             SessionExecutionLeaseClaimOutcome::Busy { holder } => {
                 return Err(RuntimeBoundaryError::new(format!(
                     "lease probe claim unexpectedly busy for `{probe_scope}`; holder fence={}",
@@ -527,7 +527,7 @@ impl RuntimeBoundaryHarness {
             .map_err(|err| {
                 RuntimeBoundaryError::new(format!("claim session lease failed: {err}"))
             })? {
-            SessionExecutionLeaseClaimOutcome::Acquired(lease) => lease,
+            SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => acquisition.lease,
             SessionExecutionLeaseClaimOutcome::Busy { holder } => {
                 return Ok(json!({
                     "session": session,
@@ -668,7 +668,7 @@ impl RuntimeBoundaryHarness {
             .await
             .map_err(|err| RuntimeBoundaryError::new(format!("claim stale lease failed: {err}")))?
         {
-            SessionExecutionLeaseClaimOutcome::Acquired(lease) => lease,
+            SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => acquisition.lease,
             SessionExecutionLeaseClaimOutcome::Busy { .. } => {
                 return Ok(json!({
                     "worker_alias": event.actor_alias,
@@ -705,7 +705,7 @@ impl RuntimeBoundaryHarness {
             .map_err(|err| {
                 RuntimeBoundaryError::new(format!("take over expired worker lease failed: {err}"))
             })? {
-            SessionExecutionLeaseClaimOutcome::Acquired(lease) => lease,
+            SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => acquisition.lease,
             SessionExecutionLeaseClaimOutcome::Busy { holder } => {
                 return Err(RuntimeBoundaryError::new(format!(
                     "worker lease reclaim unexpectedly busy for `{session}`; holder={}",

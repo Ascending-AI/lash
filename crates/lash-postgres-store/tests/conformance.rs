@@ -473,7 +473,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .await
         .expect("claim target session")
     {
-        lash_core::SessionExecutionLeaseClaimOutcome::Acquired(lease) => lease,
+        lash_core::SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => acquisition.lease,
         lash_core::SessionExecutionLeaseClaimOutcome::Busy { .. } => {
             panic!("fresh source-lock target lease must be available")
         }

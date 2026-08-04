@@ -248,9 +248,17 @@ impl LashRuntime {
         self.state.effective_policy().context_window_tokens()
     }
 
+    /// Claim the lane for this turn, or record why the turn proceeds without it.
+    ///
+    /// A busy lane does not stop the turn: the commit CAS is the authority
+    /// (ADR 0029), so the turn continues and may well win. It must not continue
+    /// *anonymously* though, or a later `commit_cas_rejected` cannot say who was
+    /// writing under whose generation, so the observed holder is retained as
+    /// lane-less commit evidence for this turn.
     async fn claim_session_execution_lease(
-        &self,
+        &mut self,
     ) -> Result<Option<SessionExecutionLeaseGuard>, RuntimeError> {
+        self.unheld_lease_commit_evidence = None;
         let Some(store) = self
             .session
             .as_ref()
@@ -258,7 +266,7 @@ impl LashRuntime {
         else {
             return Ok(None);
         };
-        match SessionExecutionLeaseGuard::try_acquire(
+        match SessionExecutionLeaseGuard::try_acquire_or_observe_holder(
             store,
             &self.state.session_id,
             &self.runtime_lease_owner,
@@ -268,13 +276,20 @@ impl LashRuntime {
         .await
         .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?
         {
-            Some(lease) => Ok(Some(lease)),
-            None => {
+            Ok(guard) => Ok(Some(guard)),
+            Err(busy_holder) => {
                 tracing::debug!(
                     session_id = %self.state.session_id,
+                    holder_generation = busy_holder.fencing_token,
+                    holder_owner_id = %busy_holder.owner.owner_id,
                     event = "session_execution_lease.busy_advisory",
                     "session execution lease is busy; proceeding under the commit CAS fence"
                 );
+                self.unheld_lease_commit_evidence =
+                    Some(SessionExecutionLeaseCommitEvidence::without_lane(
+                        &self.runtime_lease_owner,
+                        &busy_holder,
+                    ));
                 Ok(None)
             }
         }
@@ -566,7 +581,9 @@ impl LashRuntime {
                 release_session_execution_lease
                     .then(|| session_execution_lease.map(SessionExecutionLeaseGuard::completion))
                     .flatten(),
-                session_execution_lease.map(SessionExecutionLeaseGuard::commit_evidence),
+                session_execution_lease
+                    .map(SessionExecutionLeaseGuard::commit_evidence)
+                    .or_else(|| self.unheld_lease_commit_evidence.clone()),
             )
             .await
         {

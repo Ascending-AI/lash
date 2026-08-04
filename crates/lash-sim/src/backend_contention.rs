@@ -252,13 +252,15 @@ async fn competing_first_claim(
         SessionExecutionLeaseClaimOutcome::Busy { .. } => "right",
     };
     match (&left, &right) {
-        (SessionExecutionLeaseClaimOutcome::Acquired(lease), _) => {
+        (SessionExecutionLeaseClaimOutcome::Acquired(acquisition), _) => {
+            let lease = &acquisition.lease;
             left_release_store
                 .release_session_execution_lease(&lease.completion())
                 .await
                 .map_err(|err| format!("release left first-claim winner: {err}"))?;
         }
-        (_, SessionExecutionLeaseClaimOutcome::Acquired(lease)) => {
+        (_, SessionExecutionLeaseClaimOutcome::Acquired(acquisition)) => {
+            let lease = &acquisition.lease;
             right_release_store
                 .release_session_execution_lease(&lease.completion())
                 .await
@@ -557,10 +559,12 @@ fn single_acquired(
     right: &SessionExecutionLeaseClaimOutcome,
 ) -> Result<SessionExecutionLease, String> {
     let mut leases = Vec::new();
-    if let SessionExecutionLeaseClaimOutcome::Acquired(lease) = left {
+    if let SessionExecutionLeaseClaimOutcome::Acquired(acquisition) = left {
+        let lease = &acquisition.lease;
         leases.push(lease.clone());
     }
-    if let SessionExecutionLeaseClaimOutcome::Acquired(lease) = right {
+    if let SessionExecutionLeaseClaimOutcome::Acquired(acquisition) = right {
+        let lease = &acquisition.lease;
         leases.push(lease.clone());
     }
     match leases.len() {
@@ -573,7 +577,7 @@ fn single_acquired(
 
 fn acquired(outcome: SessionExecutionLeaseClaimOutcome) -> Result<SessionExecutionLease, String> {
     match outcome {
-        SessionExecutionLeaseClaimOutcome::Acquired(lease) => Ok(lease),
+        SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => Ok(acquisition.lease),
         SessionExecutionLeaseClaimOutcome::Busy { holder } => Err(format!(
             "expected acquired lease, observed busy holder {} fencing {}",
             holder.owner.owner_id, holder.fencing_token
@@ -583,9 +587,13 @@ fn acquired(outcome: SessionExecutionLeaseClaimOutcome) -> Result<SessionExecuti
 
 fn claim_outcome_summary(outcome: &SessionExecutionLeaseClaimOutcome) -> Value {
     match outcome {
-        SessionExecutionLeaseClaimOutcome::Acquired(lease) => json!({
+        SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => json!({
             "outcome": "acquired",
-            "lease": lease_summary(lease),
+            "lease": lease_summary(&acquisition.lease),
+            "displaced_fencing_token": acquisition
+                .displaced
+                .as_ref()
+                .map(|displaced| displaced.fencing_token),
         }),
         SessionExecutionLeaseClaimOutcome::Busy { holder } => json!({
             "outcome": "busy",

@@ -832,8 +832,9 @@ pub use session_model::{ProtocolEvent, SessionHistoryRecord};
 pub use store::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, GcReport,
     LeaseOwnerIdentity, QueuedWorkStore, RuntimePersistence, SessionAdmission, SessionBinding,
-    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseClaimOutcome,
-    SessionExecutionLeaseCompletion, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
+    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseCompletion,
+    SessionExecutionLeaseDisplacement, SessionExecutionLeaseFence, SessionExecutionLeaseStore,
     SessionMeta, StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
 };
 #[allow(unused_imports)]
