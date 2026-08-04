@@ -322,3 +322,226 @@ async fn tone_session(
     // docs:end:tone-session
     Ok(())
 }
+
+#[cfg(test)]
+mod asserted_examples {
+    use std::collections::HashMap;
+
+    use lash::prompt::{
+        PromptBuiltin, PromptContribution, PromptLayer, PromptSlot, PromptTemplate,
+        PromptTemplateEntry, PromptTemplateSection, default_prompt_template,
+    };
+    use lash::remote::prompt::{
+        RemotePromptBuiltin, RemotePromptContribution, RemotePromptContributionGate,
+        RemotePromptLayer, RemotePromptSlot, RemotePromptSlotLayer, RemotePromptTemplate,
+        RemotePromptTemplateEntry, RemotePromptTemplateSection,
+    };
+
+    #[test]
+    fn prompt_layers_preserve_host_overrides_across_the_remote_boundary() {
+        let empty = PromptLayer::new();
+        assert!(PromptLayer::is_empty(&empty));
+
+        let template = PromptTemplate::new(vec![
+            PromptTemplateSection::untitled(vec![
+                PromptTemplateEntry::builtin(PromptBuiltin::MainAgentIntro),
+                PromptTemplateEntry::slot(PromptSlot::Intro),
+                PromptTemplateEntry::Text {
+                    content: "Host preamble".to_string(),
+                },
+                PromptTemplateEntry::text("Host contract"),
+            ]),
+            PromptTemplateSection::titled(
+                "Execution",
+                vec![
+                    PromptTemplateEntry::Builtin {
+                        builtin: PromptBuiltin::ExecutionInstructions,
+                    },
+                    PromptTemplateEntry::Slot {
+                        slot: PromptSlot::Execution,
+                    },
+                ],
+            ),
+            PromptTemplateSection::new(
+                Some("Guidance".to_string()),
+                vec![
+                    PromptTemplateEntry::Builtin {
+                        builtin: PromptBuiltin::CoreGuidance,
+                    },
+                    PromptTemplateEntry::Slot {
+                        slot: PromptSlot::ProjectInstructions,
+                    },
+                    PromptTemplateEntry::slot(PromptSlot::Guidance),
+                    PromptTemplateEntry::slot(PromptSlot::RuntimeContext),
+                    PromptTemplateEntry::slot(PromptSlot::Environment),
+                ],
+            ),
+        ]);
+        assert_eq!(template.sections.len(), 3);
+        assert_eq!(template.sections[1].title.as_deref(), Some("Execution"));
+        assert_eq!(template.sections[2].entries.len(), 5);
+
+        let gated = PromptContribution::new(
+            PromptSlot::Guidance,
+            "Repository policy",
+            "Use the workspace formatter.",
+        )
+        .with_priority(-20)
+        .requires_any_tool(["read_file", "write_file"]);
+        assert_eq!(gated.slot, PromptSlot::Guidance);
+        assert_eq!(gated.title.as_deref(), Some("Repository policy"));
+        assert_eq!(gated.priority, -20);
+        assert_eq!(gated.content.as_ref(), "Use the workspace formatter.");
+        assert!(!gated.gate.is_empty());
+        assert_eq!(gated.gate.tools, ["read_file", "write_file"]);
+        let single_gate =
+            PromptContribution::guidance("Safety", "Ask before publishing.").requires_tool("ask");
+        assert_eq!(single_gate.gate.tools, ["ask"]);
+
+        let mut layer = PromptLayer::with_template(template.clone());
+        assert_eq!(layer.template.as_ref(), Some(&template));
+        assert!(layer.slots.is_empty());
+        layer.add_contribution(PromptContribution::intro(
+            "Host",
+            "Welcome to the workbench.",
+        ));
+        layer.add_contribution(PromptContribution::execution(
+            "Runbook",
+            "Validate before reporting completion.",
+        ));
+        layer.add_contribution(gated);
+        layer.add_contribution(PromptContribution::project_instructions(
+            "Keep public contracts stable.",
+        ));
+        layer.add_contribution(PromptContribution::runtime_context(
+            "PostgreSQL is available on the test port.",
+        ));
+        layer.add_contribution(PromptContribution::environment(
+            "Workspace",
+            "/workspace/code/lash",
+        ));
+        layer = layer.with_contribution(single_gate);
+        layer.replace_slot(
+            PromptSlot::Environment,
+            [PromptContribution::environment(
+                "Workspace",
+                "/workspace/code/lash-figex2a",
+            )],
+        );
+        layer.clear_slot(PromptSlot::RuntimeContext);
+
+        let configured = PromptLayer::new()
+            .prompt_template(template.clone())
+            .with_replaced_slot(
+                PromptSlot::Guidance,
+                [PromptContribution::guidance(
+                    "Override",
+                    "Prefer exact evidence.",
+                )],
+            )
+            .with_cleared_slot(PromptSlot::ProjectInstructions);
+        assert_eq!(configured.template.as_ref(), Some(&template));
+        assert!(configured.slots[&PromptSlot::Guidance].reset);
+        assert!(configured.slots[&PromptSlot::ProjectInstructions].reset);
+        assert!(
+            configured.slots[&PromptSlot::ProjectInstructions]
+                .contributions
+                .is_empty()
+        );
+        assert!(
+            PromptLayer::with_template(template.clone())
+                .clear_template()
+                .template
+                .is_none()
+        );
+
+        let remote: RemotePromptLayer = layer.clone().into();
+        assert!(!RemotePromptLayer::is_empty(&remote));
+        assert!(remote.slots[&RemotePromptSlot::Environment].reset);
+        assert_eq!(
+            remote.slots[&RemotePromptSlot::Environment].contributions[0].content,
+            "/workspace/code/lash-figex2a"
+        );
+        assert!(
+            remote.slots[&RemotePromptSlot::RuntimeContext]
+                .contributions
+                .is_empty()
+        );
+        let round_trip: PromptLayer = remote.clone().into();
+        assert_eq!(round_trip, layer);
+
+        let remote_template = RemotePromptTemplate {
+            sections: vec![RemotePromptTemplateSection {
+                title: Some("Remote policy".to_string()),
+                entries: vec![
+                    RemotePromptTemplateEntry::Text {
+                        content: "Remote preamble".to_string(),
+                    },
+                    RemotePromptTemplateEntry::Builtin {
+                        builtin: RemotePromptBuiltin::MainAgentIntro,
+                    },
+                    RemotePromptTemplateEntry::Builtin {
+                        builtin: RemotePromptBuiltin::ExecutionInstructions,
+                    },
+                    RemotePromptTemplateEntry::Builtin {
+                        builtin: RemotePromptBuiltin::CoreGuidance,
+                    },
+                    RemotePromptTemplateEntry::Slot {
+                        slot: RemotePromptSlot::Guidance,
+                    },
+                ],
+            }],
+        };
+        let remote_layer = RemotePromptLayer {
+            template: Some(remote_template),
+            slots: HashMap::from([
+                (
+                    RemotePromptSlot::Intro,
+                    RemotePromptSlotLayer {
+                        reset: false,
+                        contributions: vec![RemotePromptContribution {
+                            slot: RemotePromptSlot::Intro,
+                            title: Some("Remote host".to_string()),
+                            priority: -10,
+                            gate: RemotePromptContributionGate {
+                                tools: vec!["remote_search".to_string()],
+                            },
+                            content: "Use the remote tool registry.".to_string(),
+                        }],
+                    },
+                ),
+                (
+                    RemotePromptSlot::Execution,
+                    RemotePromptSlotLayer::default(),
+                ),
+                (
+                    RemotePromptSlot::ProjectInstructions,
+                    RemotePromptSlotLayer::default(),
+                ),
+                (
+                    RemotePromptSlot::RuntimeContext,
+                    RemotePromptSlotLayer::default(),
+                ),
+                (
+                    RemotePromptSlot::Environment,
+                    RemotePromptSlotLayer::default(),
+                ),
+            ]),
+        };
+        assert!(
+            !remote_layer.slots[&RemotePromptSlot::Intro].contributions[0]
+                .gate
+                .is_empty()
+        );
+        let wire = serde_json::to_value(&remote_layer).expect("remote prompt layer must serialize");
+        assert_eq!(wire["template"]["sections"][0]["title"], "Remote policy");
+        assert_eq!(
+            wire["slots"]["intro"]["contributions"][0]["gate"]["tools"][0],
+            "remote_search"
+        );
+        assert_eq!(RemotePromptLayer::new(), RemotePromptLayer::default());
+
+        let default_template = default_prompt_template();
+        assert_eq!(default_template.sections.len(), 4);
+    }
+}
