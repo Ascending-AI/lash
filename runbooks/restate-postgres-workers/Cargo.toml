@@ -33,6 +33,10 @@ path = "src/bin/process_operations_worker.rs"
 name = "lash-e2e-version-bump"
 path = "src/bin/version_bump.rs"
 
+[[bin]]
+name = "lash-e2e-session-lease-triage"
+path = "src/bin/session_lease_triage.rs"
+
 [lints]
 workspace = true
 
@@ -48,6 +52,7 @@ lash-postgres-store = { workspace = true }
 lash-protocol-rlm = { workspace = true }
 lash-provider-openai = { workspace = true }
 lash-restate = { workspace = true }
+lash-sqlite-store = { workspace = true }
 lash-s3-store = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 restate-sdk = { workspace = true }
