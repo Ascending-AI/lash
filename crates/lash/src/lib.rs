@@ -213,7 +213,7 @@ pub mod persistence {
         DeliveryPolicy, ForkPoint, ForkSessionRequest, ForkSessionResult, InMemorySessionStore,
         InMemorySessionStoreFactory, MergeKey, PendingTurnInputClaimDiagnostics,
         PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
-        QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkClass, QueuedWorkCompletion,
+        QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkCompletion,
         QueuedWorkCompletionData, QueuedWorkItem, QueuedWorkPayload, RuntimeSessionState,
         SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, TurnInputCheckpointBoundary,
         TurnInputClaim, TurnInputClaimData, TurnInputCompletion, TurnInputCompletionData,

@@ -10,10 +10,12 @@
 pub struct TurnId(String);
 
 impl TurnId {
+    /// Borrows the durable turn identity as text for store and durable-substrate implementors.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
+    /// Returns the owned durable turn identity to store and durable-substrate implementors.
     pub fn into_inner(self) -> String {
         self.0
     }

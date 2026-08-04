@@ -11477,30 +11477,6 @@ disposition = "unused-add"
 reason = "Add lash::persistence::QueuedWorkClaimData::batches to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::persistence::QueuedWorkClass"
-kind = "enum"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClass to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkClass::SessionCommand"
-kind = "variant"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClass::SessionCommand to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkClass::TurnWork"
-kind = "variant"
-availability = "default+all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::persistence::QueuedWorkClass::TurnWork to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::persistence::QueuedWorkCompletion"
 kind = "type_alias"
 availability = "default+all-features"

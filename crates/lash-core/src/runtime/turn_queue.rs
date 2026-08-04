@@ -430,6 +430,8 @@ pub struct QueuedWorkClaimData {
 pub type QueuedWorkClaim = crate::WorkClaim<QueuedWorkClaimData>;
 
 impl crate::WorkClaim<QueuedWorkClaimData> {
+    /// Builds the settlement receipt a queued-work store implementor passes back after applying
+    /// every batch in this claim.
     pub fn completion(&self) -> QueuedWorkCompletion {
         QueuedWorkCompletion {
             session_id: self.session_id.clone(),
@@ -445,10 +447,12 @@ impl crate::WorkClaim<QueuedWorkClaimData> {
         }
     }
 
+    /// Reports whether a queued-work store or conformance-suite implementor received no items.
     pub fn is_empty(&self) -> bool {
         self.batches.iter().all(|batch| batch.items.is_empty())
     }
 
+    /// Materializes checkpoint input from a claim for runtime and conformance-suite implementors.
     pub fn materialize_queued_checkpoint_work(&self) -> QueuedCheckpointWork {
         let messages = Vec::new();
         let transient_messages = Vec::new();
@@ -471,6 +475,8 @@ impl crate::WorkClaim<QueuedWorkClaimData> {
         }
     }
 
+    /// Materializes checkpoint input through the attachment-aware seam used by runtime and
+    /// conformance-suite implementors.
     pub async fn materialize_queued_checkpoint_work_with_attachments(
         &self,
         _attachment_store: &crate::SessionAttachmentStore,
@@ -496,6 +502,7 @@ impl crate::WorkClaim<QueuedWorkClaimData> {
         })
     }
 
+    /// Extracts the sole exclusive session command for queued-work driver implementors.
     pub fn exclusive_session_command(&self) -> Option<(&QueuedWorkBatch, &SessionCommand)> {
         if self.batches.len() != 1 {
             return None;
@@ -511,6 +518,7 @@ impl crate::WorkClaim<QueuedWorkClaimData> {
         }
     }
 
+    /// Materializes turn-producing input from a claim for queued-work driver implementors.
     pub fn materialize_queued_turn_work(&self) -> QueuedTurnWork {
         let checkpoint = self.materialize_queued_checkpoint_work();
         let mut input = TurnInput::empty();
