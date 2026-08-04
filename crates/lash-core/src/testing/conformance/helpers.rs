@@ -32,19 +32,29 @@ pub struct ReopenableProcessRegistry {
     pub reopen: Arc<dyn ProcessRegistry>,
 }
 
-/// Three independent [`RuntimePersistence`] handles opened against one durable
+/// A pair of [`RuntimePersistence`] handles opened against the same durable
 /// backing store.
-///
-/// `open` performs the first write, `reopen` performs the ref-only successor
-/// write after `open` is dropped, and `cold_reopen` proves the resulting state
-/// from a handle that participated in neither write.
-///
-/// Integrator class: conformance-suite embedders (ADR 0051 class 4).
 pub struct ReopenableRuntimePersistence {
     pub open: Arc<dyn RuntimePersistence>,
     pub reopen: Arc<dyn RuntimePersistence>,
-    /// Final independent reader used only after both writer handles are gone.
-    pub cold_reopen: Arc<dyn RuntimePersistence>,
+}
+
+/// Bind every conformance read to the session it intends to inspect.
+///
+/// This makes SQLite's exactly-one unbound lookup and PostgreSQL's ASC-first
+/// unbound lookup unreachable from conformance laws.
+pub(crate) async fn bind_conformance_session(
+    store: &Arc<dyn RuntimePersistence>,
+    session_id: &str,
+) {
+    let state = RuntimeSessionState {
+        session_id: session_id.to_string(),
+        ..RuntimeSessionState::default()
+    };
+    store
+        .admit_and_bind_session(&crate::SessionBinding::root(session_id, &state.policy))
+        .await
+        .expect("bind conformance store to its explicit session");
 }
 
 /// A pair of [`AttachmentStore`](crate::AttachmentStore) handles opened against

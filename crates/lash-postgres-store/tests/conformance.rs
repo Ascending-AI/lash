@@ -105,18 +105,21 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
         return;
     };
     let storage = Arc::new(storage);
+    let database_url = database_url().expect("configured Postgres database URL");
     lash_core::testing::conformance::runtime_persistence_reopenable(|| {
         let storage = Arc::clone(&storage);
+        let database_url = database_url.clone();
         sync_await(async move {
             reset(&storage).await;
-            let open = Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>;
-            let reopen = Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>;
-            let cold_reopen =
-                Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>;
+            let open_storage = PostgresStorage::connect(&database_url)
+                .await
+                .expect("open first Postgres conformance pool");
+            let reopen_storage = PostgresStorage::connect(&database_url)
+                .await
+                .expect("open independent Postgres conformance pool");
             ReopenableRuntimePersistence {
-                open,
-                reopen,
-                cold_reopen,
+                open: Arc::new(open_storage.unbound_session_store()),
+                reopen: Arc::new(reopen_storage.unbound_session_store()),
             }
         })
     })
@@ -124,13 +127,42 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_turn_crash_phase_recovery_matrix_when_configured() {
+async fn postgres_runtime_persistence_recovery_laws_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres turn crash matrix: LASH_POSTGRES_DATABASE_URL is not set");
+        eprintln!("skipping Postgres store-recovery laws: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
     reset(&storage).await;
-    lash_core::testing::conformance::turn_crash_phase_recovery_matrix(|_| {
+    let database_url = database_url().expect("configured Postgres database URL");
+    lash_core::testing::conformance::runtime_persistence_recovery_laws(|_| {
+        let database_url = database_url.clone();
+        let storage = sync_await(async move {
+            PostgresStorage::connect(&database_url)
+                .await
+                .expect("construct fresh Postgres store-recovery pool")
+        });
+        Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_checkpoint_component_refs_survive_cold_reopens_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres checkpoint-component recovery: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    let database_url = database_url().expect("configured Postgres database URL");
+    lash_core::testing::conformance::checkpoint_component_refs_survive_cold_reopens(|| {
+        let database_url = database_url.clone();
+        let storage = sync_await(async move {
+            PostgresStorage::connect(&database_url)
+                .await
+                .expect("construct post-write Postgres checkpoint pool")
+        });
         Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>
     })
     .await;
@@ -145,19 +177,38 @@ async fn postgres_artifact_store_satisfies_conformance_when_configured() {
         return;
     };
     let storage = Arc::new(storage);
+    let database_url = database_url().expect("configured Postgres database URL");
     lash_lashlang_runtime::testing::conformance::artifact_store_reopenable(|| {
         let storage = Arc::clone(&storage);
+        let database_url = database_url.clone();
         sync_await(async move {
             reset(&storage).await;
-            let handles = || lash_lashlang_runtime::testing::conformance::ArtifactStoreHandles {
-                artifacts: Arc::new(storage.lashlang_artifact_store())
+            let open_storage = PostgresStorage::connect(&database_url)
+                .await
+                .expect("open first Postgres artifact pool");
+            let open = lash_lashlang_runtime::testing::conformance::ArtifactStoreHandles {
+                artifacts: Arc::new(open_storage.lashlang_artifact_store())
                     as Arc<dyn lashlang::LashlangArtifactStore>,
-                process_env: Arc::new(storage.process_env_store())
+                process_env: Arc::new(open_storage.process_env_store())
                     as Arc<dyn ProcessExecutionEnvStore>,
             };
+            let reopen_url = database_url.clone();
             lash_lashlang_runtime::testing::conformance::ReopenableArtifactStore {
-                open: handles(),
-                reopen: handles(),
+                open,
+                reopen: Arc::new(move || {
+                    let reopen_url = reopen_url.clone();
+                    let reopened = sync_await(async move {
+                        PostgresStorage::connect(&reopen_url)
+                            .await
+                            .expect("construct post-write Postgres artifact pool")
+                    });
+                    lash_lashlang_runtime::testing::conformance::ArtifactStoreHandles {
+                        artifacts: Arc::new(reopened.lashlang_artifact_store())
+                            as Arc<dyn lashlang::LashlangArtifactStore>,
+                        process_env: Arc::new(reopened.process_env_store())
+                            as Arc<dyn ProcessExecutionEnvStore>,
+                    }
+                }),
             }
         })
     })
@@ -943,7 +994,7 @@ async fn postgres_effect_host_satisfies_cold_process_await_event_conformance_whe
                 None,
             ))
             .await
-            .expect("request cancellation through a successor process");
+            .expect("request cancellation through a successor owner");
             assert!(matches!(
                 receipt.outcome,
                 lash_core::runtime::TurnCancelOutcome::Requested(_)

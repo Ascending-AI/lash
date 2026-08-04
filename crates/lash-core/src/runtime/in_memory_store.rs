@@ -156,10 +156,6 @@ pub type RawQueuedWorkForTesting = (
     Option<u64>,
 );
 
-#[cfg(test)]
-type ClaimAfterLeaseValidationHook = Arc<dyn Fn() + Send + Sync>;
-
-#[derive(Clone)]
 pub struct InMemorySessionStore {
     clock: Arc<dyn crate::Clock>,
     /// Serializes every operation whose correctness depends on observing the
@@ -167,9 +163,9 @@ pub struct InMemorySessionStore {
     /// mutexes still guard their data; this mutex supplies the transaction
     /// boundary and lock ordering that SQLite/Postgres provide natively.
     write_transaction: Arc<Mutex<()>>,
-    pub(crate) session_head_meta: Arc<Mutex<Option<crate::SessionHeadMeta>>>,
-    pub(crate) session_meta: Arc<Mutex<Option<crate::SessionMeta>>>,
-    pub(crate) session_graph: Arc<Mutex<crate::SessionGraph>>,
+    pub(crate) session_head_meta: Mutex<Option<crate::SessionHeadMeta>>,
+    pub(crate) session_meta: Mutex<Option<crate::SessionMeta>>,
+    pub(crate) session_graph: Mutex<crate::SessionGraph>,
     global_session_graph: Arc<Mutex<crate::SessionGraph>>,
     global_node_owners: Arc<Mutex<HashMap<String, String>>>,
     global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
@@ -178,47 +174,47 @@ pub struct InMemorySessionStore {
     /// Permanent per-factory deletion ledger. Maintenance never prunes this:
     /// an id, once used and deleted in this store, must never be reused.
     deleted_session_ids: Arc<Mutex<HashSet<String>>>,
-    pub(crate) checkpoint: Arc<Mutex<Option<crate::HydratedSessionCheckpoint>>>,
-    tool_state_blobs: Arc<Mutex<HashMap<crate::BlobRef, crate::ToolState>>>,
-    plugin_snapshot_blobs: Arc<Mutex<HashMap<crate::BlobRef, crate::PluginSessionSnapshot>>>,
-    execution_state_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
-    pub(crate) usage_deltas: Arc<Mutex<Vec<crate::TokenLedgerEntry>>>,
-    pub(crate) runtime_commit_count: Arc<Mutex<usize>>,
-    runtime_turn_commits: Arc<Mutex<RuntimeTurnCommitMap>>,
-    session_execution_leases: Arc<Mutex<HashMap<String, InMemorySessionExecutionLease>>>,
-    queued_work: Arc<Mutex<Vec<InMemoryQueuedBatch>>>,
-    queued_work_next_seq: Arc<Mutex<u64>>,
+    pub(crate) checkpoint: Mutex<Option<crate::HydratedSessionCheckpoint>>,
+    tool_state_blobs: Mutex<HashMap<crate::BlobRef, crate::ToolState>>,
+    plugin_snapshot_blobs: Mutex<HashMap<crate::BlobRef, crate::PluginSessionSnapshot>>,
+    execution_state_blobs: Mutex<HashMap<crate::BlobRef, Vec<u8>>>,
+    pub(crate) usage_deltas: Mutex<Vec<crate::TokenLedgerEntry>>,
+    pub(crate) runtime_commit_count: Mutex<usize>,
+    runtime_turn_commits: Mutex<RuntimeTurnCommitMap>,
+    session_execution_leases: Mutex<HashMap<String, InMemorySessionExecutionLease>>,
+    queued_work: Mutex<Vec<InMemoryQueuedBatch>>,
+    queued_work_next_seq: Mutex<u64>,
     /// Receiver-side sender allocation floor. This is a redelivery fence, not
     /// a consumption watermark: selected-batch settlement may be out of order.
-    wake_redelivery_fences: Arc<Mutex<HashMap<(String, String), u64>>>,
-    pending_turn_inputs: Arc<Mutex<Vec<InMemoryPendingTurnInput>>>,
-    pending_turn_input_next_seq: Arc<Mutex<u64>>,
+    wake_redelivery_fences: Mutex<HashMap<(String, String), u64>>,
+    pending_turn_inputs: Mutex<Vec<InMemoryPendingTurnInput>>,
+    pending_turn_input_next_seq: Mutex<u64>,
     attachment_manifest:
-        Arc<Mutex<HashMap<(String, crate::AttachmentId), crate::AttachmentManifestEntry>>>,
+        Mutex<HashMap<(String, crate::AttachmentId), crate::AttachmentManifestEntry>>,
     #[cfg(test)]
-    claim_after_lease_validation_hook: Arc<Mutex<Option<ClaimAfterLeaseValidationHook>>>,
+    claim_after_lease_validation_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     #[cfg(test)]
-    fail_next_exact_queue_claim: Arc<std::sync::atomic::AtomicBool>,
+    fail_next_exact_queue_claim: std::sync::atomic::AtomicBool,
     #[cfg(test)]
-    load_session_count: Arc<std::sync::atomic::AtomicUsize>,
+    load_session_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
-    checkpoint_probe_count: Arc<std::sync::atomic::AtomicUsize>,
+    checkpoint_probe_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
-    checkpoint_write_transaction_count: Arc<std::sync::atomic::AtomicUsize>,
+    checkpoint_write_transaction_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
-    commit_write_transaction_count: Arc<std::sync::atomic::AtomicUsize>,
+    commit_write_transaction_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
-    fail_next_runtime_commit: Arc<Mutex<Option<crate::StoreError>>>,
+    fail_next_runtime_commit: Mutex<Option<crate::StoreError>>,
     #[cfg(test)]
-    fail_next_session_execution_lease_renewal: Arc<std::sync::atomic::AtomicBool>,
+    fail_next_session_execution_lease_renewal: std::sync::atomic::AtomicBool,
     #[cfg(test)]
-    session_execution_lease_renewal_count: Arc<std::sync::atomic::AtomicUsize>,
+    session_execution_lease_renewal_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
-    abandoned_queued_work_claim_count: Arc<std::sync::atomic::AtomicUsize>,
+    abandoned_queued_work_claim_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
-    abandoned_turn_input_claim_count: Arc<std::sync::atomic::AtomicUsize>,
+    abandoned_turn_input_claim_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
-    pub(crate) session_admission_count: Arc<std::sync::atomic::AtomicUsize>,
+    pub(crate) session_admission_count: std::sync::atomic::AtomicUsize,
 }
 
 type RuntimeTurnCommitRecord = (String, crate::store::RuntimeCommitResult, u64);
@@ -263,55 +259,53 @@ impl InMemorySessionStore {
         Self {
             clock,
             write_transaction,
-            session_head_meta: Arc::new(Mutex::new(None)),
-            session_meta: Arc::new(Mutex::new(None)),
-            session_graph: Arc::new(Mutex::new(crate::SessionGraph::default())),
+            session_head_meta: Mutex::new(None),
+            session_meta: Mutex::new(None),
+            session_graph: Mutex::new(crate::SessionGraph::default()),
             global_session_graph,
             global_node_owners,
             global_session_heads,
             node_anchors,
             tombstoned_node_ids,
             deleted_session_ids,
-            checkpoint: Arc::new(Mutex::new(None)),
-            tool_state_blobs: Arc::new(Mutex::new(HashMap::new())),
-            plugin_snapshot_blobs: Arc::new(Mutex::new(HashMap::new())),
-            execution_state_blobs: Arc::new(Mutex::new(HashMap::new())),
-            usage_deltas: Arc::new(Mutex::new(Vec::new())),
-            runtime_commit_count: Arc::new(Mutex::new(0)),
-            runtime_turn_commits: Arc::new(Mutex::new(std::collections::HashMap::new())),
-            session_execution_leases: Arc::new(Mutex::new(HashMap::new())),
-            queued_work: Arc::new(Mutex::new(Vec::new())),
-            queued_work_next_seq: Arc::new(Mutex::new(0)),
-            wake_redelivery_fences: Arc::new(Mutex::new(HashMap::new())),
-            pending_turn_inputs: Arc::new(Mutex::new(Vec::new())),
-            pending_turn_input_next_seq: Arc::new(Mutex::new(0)),
-            attachment_manifest: Arc::new(Mutex::new(HashMap::new())),
+            checkpoint: Mutex::new(None),
+            tool_state_blobs: Mutex::new(HashMap::new()),
+            plugin_snapshot_blobs: Mutex::new(HashMap::new()),
+            execution_state_blobs: Mutex::new(HashMap::new()),
+            usage_deltas: Mutex::new(Vec::new()),
+            runtime_commit_count: Mutex::new(0),
+            runtime_turn_commits: Mutex::new(std::collections::HashMap::new()),
+            session_execution_leases: Mutex::new(HashMap::new()),
+            queued_work: Mutex::new(Vec::new()),
+            queued_work_next_seq: Mutex::new(0),
+            wake_redelivery_fences: Mutex::new(HashMap::new()),
+            pending_turn_inputs: Mutex::new(Vec::new()),
+            pending_turn_input_next_seq: Mutex::new(0),
+            attachment_manifest: Mutex::new(HashMap::new()),
             #[cfg(test)]
-            claim_after_lease_validation_hook: Arc::new(Mutex::new(None)),
+            claim_after_lease_validation_hook: Mutex::new(None),
             #[cfg(test)]
-            fail_next_exact_queue_claim: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            fail_next_exact_queue_claim: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
-            load_session_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            load_session_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
-            checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            checkpoint_probe_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
-            checkpoint_write_transaction_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            checkpoint_write_transaction_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
-            commit_write_transaction_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            commit_write_transaction_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
-            fail_next_runtime_commit: Arc::new(Mutex::new(None)),
+            fail_next_runtime_commit: Mutex::new(None),
             #[cfg(test)]
-            fail_next_session_execution_lease_renewal: Arc::new(
-                std::sync::atomic::AtomicBool::new(false),
-            ),
+            fail_next_session_execution_lease_renewal: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
-            session_execution_lease_renewal_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            session_execution_lease_renewal_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
-            abandoned_queued_work_claim_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            abandoned_queued_work_claim_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
-            abandoned_turn_input_claim_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            abandoned_turn_input_claim_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
-            session_admission_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            session_admission_count: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 

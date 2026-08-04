@@ -106,9 +106,10 @@ async fn sqlite_artifact_store_satisfies_conformance() {
     let dirs = Arc::new(Mutex::new(Vec::new()));
     lash_lashlang_runtime::testing::conformance::artifact_store_reopenable(|| {
         let path = fresh_db_path(&dirs, "artifacts.db");
+        let reopen_path = path.clone();
         lash_lashlang_runtime::testing::conformance::ReopenableArtifactStore {
             open: artifact_store_handles(&path),
-            reopen: artifact_store_handles(&path),
+            reopen: Arc::new(move || artifact_store_handles(&reopen_path)),
         }
     })
     .await;
@@ -682,17 +683,26 @@ async fn sqlite_store_satisfies_runtime_persistence_conformance() {
         ReopenableRuntimePersistence {
             open: open_store(&path),
             reopen: open_store(&path),
-            cold_reopen: open_store(&path),
         }
     })
     .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_turn_crash_phase_recovery_matrix() {
-    let dir = tempfile::tempdir().expect("turn crash matrix tempdir");
-    lash_core::testing::conformance::turn_crash_phase_recovery_matrix(|scenario| {
-        open_store(&dir.path().join(format!("turn-crash-{scenario}.db")))
+async fn sqlite_runtime_persistence_recovery_laws() {
+    let dir = tempfile::tempdir().expect("store-recovery tempdir");
+    lash_core::testing::conformance::runtime_persistence_recovery_laws(|scenario| {
+        open_store(&dir.path().join(format!("store-recovery-{scenario}.db")))
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn sqlite_checkpoint_component_refs_survive_cold_reopens() {
+    let dir = tempfile::tempdir().expect("checkpoint-component tempdir");
+    let path = dir.path().join("checkpoint-components.db");
+    lash_core::testing::conformance::checkpoint_component_refs_survive_cold_reopens(|| {
+        open_store(&path)
     })
     .await;
 }
@@ -920,7 +930,7 @@ async fn sqlite_effect_host_satisfies_cold_process_await_event_conformance() {
                 None,
             ))
             .await
-            .expect("request cancellation through a successor process");
+            .expect("request cancellation through a successor owner");
             assert!(matches!(
                 receipt.outcome,
                 lash_core::runtime::TurnCancelOutcome::Requested(_)

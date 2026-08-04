@@ -43631,14 +43631,6 @@ disposition = "unused-add"
 reason = "Add lash::runtime::RuntimeEffectLocalExecutor::sleep_with_clock to the docs-snippets embedding/turns example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::runtime::RuntimeEffectLocalExecutor::testing"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeEffectLocalExecutor::testing to the docs-snippets embedding/turns example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::runtime::RuntimeEffectLocalExecutor::triggers"
 kind = "function"
 availability = "default+all-features"
@@ -46735,14 +46727,6 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::ReopenableRuntimePersistence to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::testing::conformance::ReopenableRuntimePersistence::cold_reopen"
-kind = "field"
-availability = "all-features"
-area = "stores"
-disposition = "unused-add"
-reason = "Add lash::testing::conformance::ReopenableRuntimePersistence::cold_reopen to the agent-service persistence setup example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::testing::conformance::ReopenableRuntimePersistence::open"
 kind = "field"
 availability = "all-features"
@@ -47951,12 +47935,12 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::checkpoint_claim_probe_transaction_counts to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::testing::conformance::checkpoint_component_refs_preserve_clean_state"
+symbol = "lash::testing::conformance::checkpoint_component_refs_survive_cold_reopens"
 kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "unused-add"
-reason = "Add lash::testing::conformance::checkpoint_component_refs_preserve_clean_state to the agent-service persistence setup example and assert its externally observable result."
+reason = "Add lash::testing::conformance::checkpoint_component_refs_survive_cold_reopens to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::testing::conformance::checkpoint_rejects_unknown_component_ref"
@@ -48279,12 +48263,12 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::trigger_store_reopenable to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::testing::conformance::turn_crash_phase_recovery_matrix"
+symbol = "lash::testing::conformance::runtime_persistence_recovery_laws"
 kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "unused-add"
-reason = "Add lash::testing::conformance::turn_crash_phase_recovery_matrix to the agent-service persistence setup example and assert its externally observable result."
+reason = "Add lash::testing::conformance::runtime_persistence_recovery_laws to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::testing::conformance::turn_input_claims_supersede_across_session_lease_generations"
@@ -70948,14 +70932,6 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectLocalExecutor::sleep_with_clock. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::RuntimeEffectLocalExecutor::testing"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectLocalExecutor::testing. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
 symbol = "lash_core::RuntimeEffectLocalExecutor::triggers"

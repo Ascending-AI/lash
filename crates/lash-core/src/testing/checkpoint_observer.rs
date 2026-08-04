@@ -229,6 +229,18 @@ impl ObservedSessionStoreFactory {
     }
 }
 
+/// Give conformance roles distinct outer handles over one in-memory substrate
+/// without adding `Clone` or shared-field semantics to the production store.
+#[cfg(test)]
+pub(crate) fn fresh_runtime_persistence_handle(
+    inner: Arc<dyn RuntimePersistence>,
+) -> Arc<dyn RuntimePersistence> {
+    Arc::new(ObservedSessionStore {
+        inner,
+        collector: CheckpointWriteCollector::default(),
+    })
+}
+
 #[async_trait::async_trait]
 impl SessionStoreFactory for ObservedSessionStoreFactory {
     async fn create_store(

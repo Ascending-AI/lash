@@ -19,10 +19,10 @@ pub mod conformance {
     //! implementation against a contract by running the same suite the in-tree
     //! backends run.
     //!
-    //! Re-exports the lash-core trait suites
-    //! ([`process_registry`],
-    //! [`runtime_persistence`])
-    //! and adds [`runtime_rebuild_and_worker_recovery`] — a runtime-level suite
+    //! Re-exports all lash-core trait suites, including process registry,
+    //! runtime persistence, store-recovery, effect-host, trigger, attachment,
+    //! artifact, and state-machine conformance, and adds
+    //! [`runtime_rebuild_and_worker_recovery`] — a runtime-level suite
     //! that proves cold session rebuild and durable worker recovery use the
     //! same reconstructed runtime surface.
 

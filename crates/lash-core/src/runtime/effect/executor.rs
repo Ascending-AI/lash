@@ -470,7 +470,10 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Injects a one-shot local effect runner for conformance helpers.
+    /// Build a local executor for Lash's own conformance helpers.
+    ///
+    /// This is deliberately hidden from the published default documentation;
+    /// it is not an integrator seam for fabricating runtime effect outcomes.
     #[doc(hidden)]
     pub fn testing<F, Fut>(run: F) -> Self
     where

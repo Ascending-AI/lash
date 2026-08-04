@@ -23,6 +23,17 @@ where
     F: Fn() -> Fut,
     Fut: Future<Output = ProcessTriggerRetentionHandles>,
 {
+    let first = make().await;
+    let second = make().await;
+    assert!(
+        !Arc::ptr_eq(&first.registry, &second.registry),
+        "process_trigger_retention reused one process-registry Arc"
+    );
+    assert!(
+        !Arc::ptr_eq(&first.triggers, &second.triggers),
+        "process_trigger_retention reused one trigger-store Arc"
+    );
+    drop((first, second));
     process_prune_preserves_trigger_mutation_receipts(make().await).await;
     delivery_delete_is_bound_to_observed_row_identity(make().await).await;
     process_prune_only_deletes_deliveries_for_pruned_processes(make().await).await;

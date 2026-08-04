@@ -42,14 +42,9 @@ where
 {
     let probe = make();
     assert_fresh_instances(&probe.open, &probe.reopen, "runtime_persistence_reopenable");
-    assert_fresh_instances(
-        &probe.reopen,
-        &probe.cold_reopen,
-        "runtime_persistence_reopenable",
-    );
+    drop(probe);
     runtime_persistence_suite(|| make().open).await;
     gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(make().open).await;
-    checkpoint_component_refs_preserve_clean_state(make()).await;
     runtime_persistence_survives_reopen(make()).await;
 }
 
@@ -224,14 +219,16 @@ where
 ///
 /// This is the standing regression for the checkpoint-component failure
 /// shape: write bodies, drop the writer, write only their refs through an
-/// independent handle, drop that writer, then hydrate through a third handle.
-pub async fn checkpoint_component_refs_preserve_clean_state(stores: ReopenableRuntimePersistence) {
-    assert!(
-        !Arc::ptr_eq(&stores.open, &stores.reopen)
-            && !Arc::ptr_eq(&stores.open, &stores.cold_reopen)
-            && !Arc::ptr_eq(&stores.reopen, &stores.cold_reopen),
-        "checkpoint-component roles must use independent backend instances"
-    );
+/// independently constructed handle, drop that writer, then construct a third
+/// handle and hydrate. The helper owns construction order so a caller cannot
+/// prebuild nominally cold handles before the writes they verify.
+pub async fn checkpoint_component_refs_survive_cold_reopens<F>(make: F)
+where
+    F: Fn() -> Arc<dyn RuntimePersistence>,
+{
+    let open = make();
+    let open_identity = Arc::downgrade(&open);
+    bind_conformance_session(&open, "checkpoint-component-refs").await;
     let mut state = RuntimeSessionState {
         session_id: "checkpoint-component-refs".to_string(),
         tool_state_snapshot: Some(ToolState::default().with_generation(91)),
@@ -242,7 +239,7 @@ pub async fn checkpoint_component_refs_preserve_clean_state(stores: ReopenableRu
     };
 
     let first = commit_runtime_state_for_test(
-        &stores.open,
+        &open,
         RuntimeCommit::persisted_state_for_test(&state, &[]),
         "checkpoint-component-refs-first",
     )
@@ -265,20 +262,34 @@ pub async fn checkpoint_component_refs_preserve_clean_state(stores: ReopenableRu
     assert!(state.tool_state_snapshot.is_none());
     assert!(state.plugin_snapshot.is_none());
     assert!(state.execution_state_snapshot.is_none());
-    drop(stores.open);
+    drop(open);
+
+    let reopen = make();
+    assert!(
+        !std::sync::Weak::ptr_eq(&open_identity, &Arc::downgrade(&reopen)),
+        "checkpoint-component reopen factory reused the writer handle"
+    );
+    let reopen_identity = Arc::downgrade(&reopen);
+    bind_conformance_session(&reopen, "checkpoint-component-refs").await;
 
     let second = commit_runtime_state_for_test(
-        &stores.reopen,
+        &reopen,
         RuntimeCommit::persisted_state_for_test(&state, &[]),
         "checkpoint-component-refs-second",
     )
     .await
     .expect("commit unchanged checkpoint component refs");
     state.apply_persisted_commit_result(second);
-    drop(stores.reopen);
+    drop(reopen);
 
-    let read = stores
-        .cold_reopen
+    let cold_reopen = make();
+    assert!(
+        !std::sync::Weak::ptr_eq(&open_identity, &Arc::downgrade(&cold_reopen))
+            && !std::sync::Weak::ptr_eq(&reopen_identity, &Arc::downgrade(&cold_reopen)),
+        "checkpoint-component cold reader reused a writer handle"
+    );
+    bind_conformance_session(&cold_reopen, "checkpoint-component-refs").await;
+    let read = cold_reopen
         .load_session()
         .await
         .expect("cold-load refs-only checkpoint")

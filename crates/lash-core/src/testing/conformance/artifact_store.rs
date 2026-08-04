@@ -11,11 +11,11 @@
 
 use super::*;
 
-/// A pair of [`crate::ProcessExecutionEnvStore`] handles opened against the same
-/// durable backing store, used by the reopen-persistence case.
+/// A writer plus a factory that constructs a post-write
+/// [`crate::ProcessExecutionEnvStore`] handle over the same backing store.
 pub struct ReopenableProcessExecutionEnvStore {
     pub open: Arc<dyn crate::ProcessExecutionEnvStore>,
-    pub reopen: Arc<dyn crate::ProcessExecutionEnvStore>,
+    pub reopen: Arc<dyn Fn() -> Arc<dyn crate::ProcessExecutionEnvStore> + Send + Sync>,
 }
 
 fn sample_env_spec() -> crate::ProcessExecutionEnvSpec {
@@ -42,12 +42,6 @@ pub async fn process_execution_env_store_reopenable<F>(make: F)
 where
     F: Fn() -> ReopenableProcessExecutionEnvStore,
 {
-    let probe = make();
-    assert_fresh_instances(
-        &probe.open,
-        &probe.reopen,
-        "process_execution_env_store_reopenable",
-    );
     process_execution_env_store(|| make().open).await;
     process_env_survives_reopen(make()).await;
 }
@@ -101,10 +95,17 @@ async fn process_env_overwrite(store: Arc<dyn crate::ProcessExecutionEnvStore>) 
 
 async fn process_env_survives_reopen(reopenable: ReopenableProcessExecutionEnvStore) {
     let ReopenableProcessExecutionEnvStore { open, reopen } = reopenable;
+    let open_identity = Arc::downgrade(&open);
     let env_ref = crate::ProcessExecutionEnvRef::new("process-env:reopen");
     open.put_process_execution_env(&env_ref, b"env-reopen")
         .await
         .expect("put env");
+    drop(open);
+    let reopen = reopen();
+    assert!(
+        !std::sync::Weak::ptr_eq(&open_identity, &Arc::downgrade(&reopen)),
+        "process execution env reopen factory reused the writer handle"
+    );
     assert_eq!(
         reopen
             .get_process_execution_env(&env_ref)

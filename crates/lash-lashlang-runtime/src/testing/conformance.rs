@@ -28,11 +28,11 @@ pub struct ArtifactStoreHandles {
     pub process_env: Arc<dyn ProcessExecutionEnvStore>,
 }
 
-/// A pair of [`ArtifactStoreHandles`] opened against the same durable backing
-/// store, used by the reopen-persistence cases.
+/// Writers plus a factory that constructs post-write handles over the same
+/// durable backing store.
 pub struct ReopenableArtifactStore {
     pub open: ArtifactStoreHandles,
-    pub reopen: ArtifactStoreHandles,
+    pub reopen: Arc<dyn Fn() -> ArtifactStoreHandles + Send + Sync>,
 }
 
 fn sample_module_artifact(source: &str) -> ModuleArtifact {
@@ -50,17 +50,19 @@ where
 {
     lashlang_artifact_store_reopenable(|| {
         let handles = make();
+        let reopen = Arc::clone(&handles.reopen);
         ReopenableLashlangArtifactStore {
             open: handles.open.artifacts,
-            reopen: handles.reopen.artifacts,
+            reopen: Arc::new(move || (reopen)().artifacts),
         }
     })
     .await;
     process_execution_env_store_reopenable(|| {
         let handles = make();
+        let reopen = Arc::clone(&handles.reopen);
         ReopenableProcessExecutionEnvStore {
             open: handles.open.process_env,
-            reopen: handles.reopen.process_env,
+            reopen: Arc::new(move || (reopen)().process_env),
         }
     })
     .await;

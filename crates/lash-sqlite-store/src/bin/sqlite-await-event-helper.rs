@@ -1,11 +1,16 @@
-use std::io::Write as _;
-use std::path::PathBuf;
+//! SQLite cold-process recovery helper for durable waits and effect replay.
 
-use lash_core::{AwaitEventResolver as _, RuntimeEffectController as _};
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use lash_core::AwaitEventResolver as _;
 use lash_core::{AwaitEventWaitIdentity, ExecutionScope};
 use lash_sqlite_store::{
     SqliteEffectHost, SqliteEffectReplayOptions, SqliteRuntimeEffectController,
 };
+
+#[path = "../../../lash-core/tests/support/cold_process_effect_driver.rs"]
+mod cold_process_effect_driver;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,12 +38,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "turn_cancel_gate" => AwaitEventWaitIdentity::TurnCancelGate,
         other => return Err(format!("unknown identity `{other}`").into()),
     };
-    let host = SqliteEffectHost::open(&database).await?;
+    let host = Arc::new(SqliteEffectHost::open(&database).await?);
     let key = host.await_event_key(&scope, wait).await?;
+    let waiter_host = Arc::clone(&host);
+    let waiter_key = key.clone();
+    let waiter = tokio::spawn(async move {
+        waiter_host
+            .await_await_event(
+                &waiter_key,
+                tokio_util::sync::CancellationToken::new(),
+                None,
+            )
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            let connection = rusqlite::Connection::open(&database)?;
+            let registered: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM await_event_waits WHERE key_id = ?1",
+                rusqlite::params![key.key_id.as_str()],
+                |row| row.get(0),
+            )?;
+            if registered == 1 {
+                break Ok::<(), rusqlite::Error>(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .map_err(|_| "timed out waiting for SQLite await-event registration")??;
     println!("{}", serde_json::to_string(&key)?);
-    std::io::stdout().flush()?;
+    std::io::Write::flush(&mut std::io::stdout())?;
 
-    std::future::pending::<()>().await;
+    waiter.await??;
     Ok(())
 }
 
@@ -56,96 +88,22 @@ async fn run_effect_action(
         scope,
         SqliteEffectReplayOptions {
             lease_timings: lash_core::facade_support::LeaseTimings::new(
-                std::time::Duration::from_millis(300),
-                std::time::Duration::from_millis(100),
+                cold_process_effect_driver::RECOVERY_TTL,
+                cold_process_effect_driver::RECOVERY_RENEW,
             )?,
         },
     )
     .await?;
-    let envelope = effect_envelope(&session_id, &turn_id, nonce);
-    match action {
-        "effect_crash" => {
-            let marker = marker.to_path_buf();
-            controller
-                .execute_effect(
-                    envelope,
-                    lash_core::RuntimeEffectLocalExecutor::testing(move |_| async move {
-                        append_effect_marker(&marker, "crashed");
-                        println!("effect_executed");
-                        std::io::stdout().flush().expect("flush effect marker");
-                        std::process::exit(86);
-                    }),
-                )
-                .await?;
-        }
-        "effect_complete" => {
-            let marker = marker.to_path_buf();
-            controller
-                .execute_effect(
-                    envelope,
-                    lash_core::RuntimeEffectLocalExecutor::testing(move |_| async move {
-                        append_effect_marker(&marker, "completed");
-                        Ok(effect_outcome("recorded"))
-                    }),
-                )
-                .await?;
-        }
-        "effect_replay" => {
-            controller.start_replay();
-            controller
-                .execute_effect(
-                    envelope,
-                    lash_core::RuntimeEffectLocalExecutor::unavailable(),
-                )
-                .await?;
-        }
-        other => return Err(format!("unknown effect action `{other}`").into()),
+    if action == "effect_replay" {
+        controller.start_replay();
     }
-    println!("ok");
-    Ok(())
-}
-
-fn effect_envelope(
-    session_id: &str,
-    turn_id: &str,
-    nonce: &str,
-) -> lash_core::RuntimeEffectEnvelope {
-    let replay_key = format!("cold-process-effect-{nonce}");
-    lash_core::RuntimeEffectEnvelope::new(
-        lash_core::RuntimeInvocation::effect(
-            lash_core::RuntimeScope::for_turn(session_id, turn_id, 1, 0),
-            replay_key.clone(),
-            lash_core::RuntimeEffectKind::ExecCode,
-            replay_key,
-        ),
-        lash_core::RuntimeEffectCommand::ExecCode {
-            language: "conformance".to_string(),
-            code: "external-effect".to_string(),
-        },
+    cold_process_effect_driver::run_effect_action(
+        &controller,
+        action,
+        &session_id,
+        &turn_id,
+        nonce,
+        marker,
     )
-}
-
-fn append_effect_marker(path: &std::path::Path, value: &str) {
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .expect("open external-effect marker");
-    writeln!(file, "{value}").expect("append external-effect marker");
-    file.flush().expect("flush external-effect marker");
-}
-
-fn effect_outcome(marker: &str) -> lash_core::RuntimeEffectOutcome {
-    lash_core::RuntimeEffectOutcome::ExecCode {
-        result: Box::new(Ok(lash_core::ExecResponse {
-            observations: Vec::new(),
-            observation_truncation: Vec::new(),
-            tool_calls: Vec::new(),
-            images: Vec::new(),
-            printed_images: Vec::new(),
-            error: None,
-            duration_ms: 0,
-            terminal_finish: Some(serde_json::json!(marker)),
-        })),
-    }
+    .await
 }

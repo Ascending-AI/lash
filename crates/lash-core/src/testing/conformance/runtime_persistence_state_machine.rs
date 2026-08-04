@@ -208,6 +208,13 @@ where
     F: Fn(u64) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future<Output = Arc<dyn RuntimePersistence>> + Send + 'static,
 {
+    let first = make(u64::MAX - 3).await;
+    let second = make(u64::MAX - 3).await;
+    assert!(
+        !Arc::ptr_eq(&first, &second),
+        "runtime_persistence_state_machine factory reused one Arc"
+    );
+    drop((first, second));
     let cases = std::env::var("LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES")
         .ok()
         .and_then(|value| value.parse().ok())

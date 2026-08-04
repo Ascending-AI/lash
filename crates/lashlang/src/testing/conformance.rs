@@ -18,11 +18,11 @@ use crate::{
     DurabilityTier, Expr, LashlangArtifactStore, ModuleArtifact, Program, ResourceRefExpr, parse,
 };
 
-/// A pair of [`LashlangArtifactStore`] handles opened against the same durable
-/// backing store, used by the reopen-persistence case.
+/// A writer plus a factory that constructs a post-write
+/// [`LashlangArtifactStore`] handle over the same durable backing store.
 pub struct ReopenableLashlangArtifactStore {
     pub open: Arc<dyn LashlangArtifactStore>,
-    pub reopen: Arc<dyn LashlangArtifactStore>,
+    pub reopen: Arc<dyn Fn() -> Arc<dyn LashlangArtifactStore> + Send + Sync>,
 }
 
 /// Build a real, self-consistent module artifact. `to_store_bytes` re-verifies
@@ -39,6 +39,13 @@ pub async fn lashlang_artifact_store<F>(make: F, expected_tier: DurabilityTier)
 where
     F: Fn() -> Arc<dyn LashlangArtifactStore>,
 {
+    let first = make();
+    let second = make();
+    assert!(
+        !Arc::ptr_eq(&first, &second),
+        "lashlang_artifact_store factory reused one Arc across conformance roles"
+    );
+    drop((first, second));
     assert_eq!(
         make().durability_tier(),
         expected_tier,
@@ -237,6 +244,7 @@ async fn module_and_raw_namespaces_isolate(store: Arc<dyn LashlangArtifactStore>
 
 async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
     let ReopenableLashlangArtifactStore { open, reopen } = reopenable;
+    let open_identity = Arc::downgrade(&open);
     let artifact = sample_module_artifact("process epsilon(root: str) -> str { finish root }");
 
     open.put_module_artifact(&artifact)
@@ -249,6 +257,13 @@ async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
     open.replace_current_trigger_manifest("session:reopen", &trigger_artifact)
         .await
         .expect("put current trigger manifest");
+    drop(open);
+
+    let reopen = reopen();
+    assert!(
+        !std::sync::Weak::ptr_eq(&open_identity, &Arc::downgrade(&reopen)),
+        "lashlang artifact reopen factory reused the writer handle"
+    );
 
     let module = reopen
         .get_module_artifact(&artifact.module_ref)
