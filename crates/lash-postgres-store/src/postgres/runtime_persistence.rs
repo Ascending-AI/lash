@@ -677,14 +677,19 @@ impl SessionCommitStore for PostgresSessionStore {
             })?;
             sqlx::query(
                 "INSERT INTO lash_usage_deltas (
-                    session_id, operation_storage_key, entry_ordinal, payload_hash, entry_json
-                 ) VALUES ($1, $2, $3, $4, $5)
-                 ON CONFLICT (session_id, operation_storage_key, entry_ordinal, payload_hash)
+                    session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash, entry_json
+                 ) VALUES ($1, $2, $3, $4, $5, $6)
+                 ON CONFLICT (session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash)
                  DO NOTHING",
             )
             .bind(&commit.session_id)
             .bind(&entry.identity.operation_storage_key)
             .bind(entry_ordinal)
+            .bind(i32::try_from(entry.identity.payload_encoding_version).map_err(|_| {
+                StoreError::Backend(
+                    "usage payload encoding version does not fit PostgreSQL INTEGER".to_string(),
+                )
+            })?)
             .bind(&entry.identity.payload_hash)
             .bind(encode_json(&entry.entry))
             .execute(&mut *tx)

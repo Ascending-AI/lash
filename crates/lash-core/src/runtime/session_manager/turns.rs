@@ -643,7 +643,7 @@ mod tests {
         );
     }
 
-    fn ledger_input_tokens(ledger: &Arc<StdMutex<Vec<TokenLedgerEntry>>>) -> i64 {
+    fn ledger_input_tokens(ledger: &Arc<StdMutex<Vec<PendingTokenLedgerEntry>>>) -> i64 {
         ledger
             .lock()
             .expect("ledger")

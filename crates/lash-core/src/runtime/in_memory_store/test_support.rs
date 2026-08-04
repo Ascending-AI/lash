@@ -41,6 +41,43 @@ impl SessionExecutionLeaseReleaseGate {
 }
 
 impl InMemorySessionStore {
+    pub(super) fn run_claim_after_lease_validation_hook(&self) {
+        let hook = self
+            .claim_after_lease_validation_hook
+            .lock()
+            .expect("lock claim validation hook")
+            .take();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+
+    pub(crate) fn set_claim_after_lease_validation_hook(&self, hook: Arc<dyn Fn() + Send + Sync>) {
+        *self
+            .claim_after_lease_validation_hook
+            .lock()
+            .expect("lock claim validation hook") = Some(hook);
+    }
+
+    pub(crate) fn fail_next_exact_queue_claim(&self) {
+        self.fail_next_exact_queue_claim
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub(crate) fn fail_next_runtime_commit(&self, error: crate::StoreError) {
+        *self
+            .fail_next_runtime_commit
+            .lock()
+            .expect("lock next runtime commit failure") = Some(error);
+    }
+
+    pub(crate) fn fail_next_runtime_commit_after_first_mutation(&self, error: crate::StoreError) {
+        *self
+            .fail_next_runtime_commit_after_first_mutation
+            .lock()
+            .expect("lock post-mutation runtime commit failure") = Some(error);
+    }
+
     pub(super) fn fail_after_first_runtime_commit_mutation_if_requested(
         &self,
         session_meta_before_commit: Option<crate::SessionMeta>,

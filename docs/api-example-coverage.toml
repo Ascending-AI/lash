@@ -84,6 +84,14 @@ disposition = "unused-justify"
 reason = "Concrete integrator class under ADR 0051: durable store implementors persist the canonical content hash in the full uniqueness key."
 
 [[api]]
+symbol = "lash::persistence::RuntimeUsageDeltaIdentity::payload_encoding_version"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: durable store implementors persist the payload projection version in the full uniqueness key."
+
+[[api]]
 symbol = "lash_core::RuntimeUsageDelta"
 kind = "struct"
 availability = "default+all-features"
@@ -146,6 +154,14 @@ availability = "default+all-features"
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete integrator class under ADR 0051: custom durable substrates persist the canonical content hash in the full uniqueness key."
+
+[[api]]
+symbol = "lash_core::RuntimeUsageDeltaIdentity::payload_encoding_version"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable substrates persist the payload projection version in the full uniqueness key."
 
 [[api]]
 symbol = "lash::persistence::StoreError::TokenUsageAccountingOverflow"

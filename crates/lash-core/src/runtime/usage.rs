@@ -11,6 +11,12 @@ use lash_sansio::PromptUsage;
 
 /// A single row in the token cost ledger. One per unique
 /// `(source, model)` pair — accumulated, not per-call.
+///
+/// Its semantic fields are projected by Lash's versioned usage-payload
+/// identity encoder. Adding or changing a field here or in nested
+/// [`TokenUsage`] requires an encoding version bump and replacement golden
+/// corpus; the serde representation itself is deliberately not the identity
+/// format.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct TokenLedgerEntry {
     /// Caller-supplied label: `"turn"`, `"subagent"`, `"compaction"`,

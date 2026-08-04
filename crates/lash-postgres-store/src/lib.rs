@@ -144,8 +144,9 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // sequences remain small and monotone across pruned incarnations.
 // Bumped to 36 for FIG-850 append-request identity receipts and idempotent
 // usage publication. Nullable receipt columns preserve exact-commit-hash
-// behavior for copied pre-upgrade rows; usage identities include the canonical
-// payload hash and are required.
+// behavior for copied pre-upgrade rows; usage identities include the required
+// payload-encoding version and canonical payload hash. This unreleased schema
+// was completed in place under the existing reject-and-recreate operator flow.
 const SCHEMA_VERSION: i32 = 36;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::facade_support::PROCESS_LEASE_SCHEMA_VERSION;
 

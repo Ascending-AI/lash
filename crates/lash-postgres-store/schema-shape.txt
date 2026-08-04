@@ -286,10 +286,11 @@ table lash_usage_deltas
   column entry_json text not-null
   column entry_ordinal bigint not-null
   column operation_storage_key text not-null
+  column payload_encoding_version integer not-null
   column payload_hash text not-null
   column seq bigint not-null default
   column session_id text not-null
-  unique (session_id, operation_storage_key, entry_ordinal, payload_hash)
+  unique (session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash)
   primary-key (seq)
 table lash_wake_allocation_floors
   column allocation_floor bigint not-null

@@ -676,17 +676,20 @@ impl RuntimeCommit {
                 delta.identity.entry_ordinal,
                 &delta.entry,
             )?;
-            if delta.identity.payload_hash != expected.payload_hash {
+            if delta.identity.payload_encoding_version != expected.payload_encoding_version
+                || delta.identity.payload_hash != expected.payload_hash
+            {
                 return Err(StoreError::Backend(format!(
-                    "runtime usage delta identity payload hash does not match canonical entry content ({}, {})",
+                    "runtime usage delta identity payload encoding version or hash does not match canonical entry content ({}, {})",
                     delta.identity.operation_storage_key, delta.identity.entry_ordinal
                 )));
             }
             if !seen.insert(&delta.identity) {
                 return Err(StoreError::Backend(format!(
-                    "runtime commit repeats usage delta identity ({}, {}, {})",
+                    "runtime commit repeats usage delta identity ({}, {}, {}, {})",
                     delta.identity.operation_storage_key,
                     delta.identity.entry_ordinal,
+                    delta.identity.payload_encoding_version,
                     delta.identity.payload_hash
                 )));
             }
@@ -1174,11 +1177,11 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// mutate nothing.
     ///
     /// Every [`RuntimeUsageDelta`] is published idempotently on `(session_id,
-    /// operation_storage_key, entry_ordinal, payload_hash)`, where the payload
-    /// hash is SHA-256 of the entry's stable compact JSON encoding documented
-    /// on [`RuntimeUsageDeltaIdentity`]. A duplicate full identity is a no-op
-    /// inside this same transaction. Fresh results list every identity made
-    /// durable by the commit in
+    /// operation_storage_key, entry_ordinal, payload_encoding_version,
+    /// payload_hash)`, where the versioned hand-written projection is
+    /// documented on [`RuntimeUsageDeltaIdentity`]. A duplicate full identity
+    /// is a no-op inside this same transaction. Fresh results list every
+    /// identity made durable by the commit in
     /// [`RuntimeCommitResult::committed_usage_delta_identities`]; stored
     /// receipt results retain the original attempt's list so callers do not
     /// clear staged rows that the original transaction never carried.
