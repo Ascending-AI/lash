@@ -23,6 +23,9 @@ use lash_sqlite_store::{
 };
 use tempfile::TempDir;
 
+#[path = "../../lash-core/tests/support/cold_process_turn_parent.rs"]
+mod cold_process_turn_parent;
+
 fn fresh_db_path(dirs: &Arc<Mutex<Vec<TempDir>>>, file_name: &str) -> PathBuf {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join(file_name);
@@ -697,6 +700,15 @@ async fn sqlite_runtime_persistence_recovery_laws() {
     .await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_real_turn_crash_matrix() {
+    let dir = tempfile::tempdir().expect("real-turn crash matrix tempdir");
+    Box::pin(lash_core::testing::conformance::turn_crash_matrix_level_1(
+        |scenario| open_store(&dir.path().join(format!("turn-crash-matrix-{scenario}.db"))),
+    ))
+    .await;
+}
+
 #[tokio::test]
 async fn sqlite_checkpoint_component_refs_survive_cold_reopens() {
     let dir = tempfile::tempdir().expect("checkpoint-component tempdir");
@@ -1047,6 +1059,22 @@ async fn sqlite_effect_replay_satisfies_cold_process_crash_conformance() {
         2,
         "a recorded outcome replays without another external effect"
     );
+}
+
+#[tokio::test]
+async fn sqlite_real_turn_satisfies_cold_process_crash_matrix() {
+    let dir = tempfile::tempdir().expect("SQLite cold-process real-turn tempdir");
+    let database = dir.path().join("cold-process-real-turn.db");
+    cold_process_turn_parent::assert_real_turn_kill_recovery(
+        dir.path(),
+        |action, nonce, marker| {
+            let mut command =
+                tokio::process::Command::new(env!("CARGO_BIN_EXE_sqlite-await-event-helper"));
+            command.arg(&database).arg(action).arg(nonce).arg(marker);
+            command
+        },
+    )
+    .await;
 }
 
 #[tokio::test]
