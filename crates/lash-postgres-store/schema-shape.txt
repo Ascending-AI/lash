@@ -1,0 +1,295 @@
+# lash-postgres-store expected schema shape.
+#
+# Generated artifact -- never edit by hand. Regenerate after any change to
+# schema.sql by running the crate's `schema_shape` suite against a live
+# PostgreSQL with LASH_UPDATE_SCHEMA_SHAPE=1, which rewrites this file from the
+# catalog the DDL artifact actually produces. Every attribute recorded here
+# renders identically on PostgreSQL 14 through 18; CI asserts that on all three.
+#
+# Columns are matched by name, never by ordinal position; constraint and index names
+# are never compared at all. A uniqueness guard is matched by its kind and its key
+# column SET -- UNIQUE (a, b) and UNIQUE (b, a) reject the same rows, so one standing
+# in for the other is not drift. A foreign key is matched by its parent table and the
+# SET OF ITS COLUMN PAIRINGS, so declaration order is likewise irrelevant while
+# (a, b) -> (x, y) stays distinct from the crossed (a, b) -> (y, x). What a matched
+# pair is then compared on is what changes the rows it affects: the partial predicate
+# and null-distinctness for a guard, the delete action for a foreign key. Column order
+# in this file records how the DDL declares it and is documentation, not a
+# requirement. Every object is read from the one namespace where lash_schema_versions
+# resolves.
+version 35
+table lash_attachment_manifest
+  column attachment_id text not-null
+  column canonical_uri text not-null
+  column committed_at_ms bigint nullable
+  column intent_at_ms bigint not-null
+  column owner_id text nullable
+  column owner_kind text nullable
+  column session_id text not-null
+  primary-key (session_id, attachment_id)
+table lash_await_event_meta
+  column signing_secret bytea not-null
+  column singleton boolean not-null default
+  primary-key (singleton)
+table lash_await_event_revoked_sessions
+  column revoked_at_ms bigint not-null
+  column session_id text not-null
+  primary-key (session_id)
+table lash_await_event_waits
+  column created_at_ms bigint not-null
+  column key_id text not-null
+  column resolved_at_ms bigint nullable
+  column scope_json text not-null
+  column session_id text nullable
+  column terminal_json text nullable
+  column turn_control boolean not-null
+  column wait_json text not-null
+  primary-key (key_id)
+table lash_blobs
+  column content bytea not-null
+  column hash text not-null
+  primary-key (hash)
+table lash_deleted_sessions
+  column session_id text not-null
+  primary-key (session_id)
+table lash_graph_nodes
+  column node_id text not-null
+  column node_json text not-null
+  column parent_node_id text nullable
+  column seq bigint not-null default
+  column session_id text not-null
+  column tombstoned boolean not-null default
+  primary-key (node_id)
+table lash_lashlang_artifacts
+  column artifact_bytes bytea not-null
+  column artifact_ref text not-null
+  column namespace text not-null
+  primary-key (namespace, artifact_ref)
+table lash_node_anchors
+  column checkpoint_ref text not-null
+  column node_id text not-null
+  column source_session_id text not-null
+  primary-key (node_id)
+table lash_pending_turn_inputs
+  column claim_fencing_token bigint not-null default
+  column claim_id text nullable
+  column claim_owner_id text nullable
+  column claim_owner_incarnation_id text nullable
+  column claim_owner_liveness_json text nullable
+  column claim_session_lease_generation bigint not-null default
+  column claim_token text nullable
+  column enqueue_seq bigint not-null default
+  column enqueued_at_ms bigint not-null
+  column ingress_json text not-null
+  column input_id text not-null
+  column input_json text not-null
+  column session_id text not-null
+  column source_key text nullable
+  column state text not-null
+  unique (input_id)
+  unique (session_id, source_key)
+  primary-key (enqueue_seq)
+table lash_process_change_clock
+  column current_seq bigint not-null
+  column singleton boolean not-null default
+  primary-key (singleton)
+table lash_process_events
+  column event_json text not-null
+  column event_type text not-null
+  column idempotency_key text nullable
+  column occurred_at_ms bigint not-null
+  column payload_hash text not-null
+  column process_id text not-null
+  column sequence bigint not-null
+  unique (process_id, idempotency_key) where idempotency_key is not null
+  primary-key (process_id, sequence)
+  foreign-key (process_id) references lash_processes (process_id) on delete cascade
+table lash_process_leases
+  column lease_claimed_at_ms bigint not-null default
+  column lease_expires_at_ms bigint not-null default
+  column lease_fencing_token bigint not-null default
+  column lease_owner_id text nullable
+  column lease_owner_incarnation_id text nullable
+  column lease_owner_liveness_json text nullable
+  column lease_token text nullable
+  column process_id text not-null
+  primary-key (process_id)
+  foreign-key (process_id) references lash_processes (process_id) on delete cascade
+table lash_process_observers
+  column process_id text not-null
+  column session_id text not-null
+  primary-key (session_id, process_id)
+  foreign-key (process_id) references lash_processes (process_id) on delete cascade
+table lash_process_segment_handovers
+  column handover_json text not-null
+  column process_id text not-null
+  column segment_ordinal bigint not-null
+  primary-key (process_id, segment_ordinal)
+  foreign-key (process_id) references lash_processes (process_id) on delete cascade
+table lash_process_tombstones
+  column process_id text not-null
+  column pruned_at_ms bigint not-null
+  column pruned_change_seq bigint not-null
+  column terminal_label text not-null
+  primary-key (process_id)
+table lash_process_wake_deliveries
+  column attempts bigint not-null default
+  column claim_token text nullable
+  column delivery_id text not-null
+  column delivery_json text not-null
+  column discard_reason text nullable
+  column expires_at_ms bigint not-null
+  column first_attempt_ms bigint nullable
+  column next_attempt_at_ms bigint not-null
+  column process_id text not-null
+  column sequence bigint not-null
+  column state text not-null
+  column target_session_id text not-null
+  primary-key (delivery_id)
+  foreign-key (process_id) references lash_processes (process_id) on delete cascade
+table lash_processes
+  column change_seq bigint not-null
+  column created_at_ms bigint not-null
+  column identity_kind text not-null
+  column identity_label text nullable
+  column is_waiting boolean not-null
+  column originator_id text not-null
+  column process_id text not-null
+  column record_json text not-null
+  column registration_hash text not-null
+  column status text not-null
+  column updated_at_ms bigint not-null
+  column wake_session_id text nullable
+  primary-key (process_id)
+table lash_queued_work_batches
+  column available_at_ms bigint not-null
+  column batch_id text not-null
+  column claim_fencing_token bigint not-null default
+  column claim_id text nullable
+  column claim_owner_id text nullable
+  column claim_owner_incarnation_id text nullable
+  column claim_owner_liveness_json text nullable
+  column claim_session_lease_generation bigint not-null default
+  column claim_token text nullable
+  column delivery_policy text not-null
+  column enqueue_seq bigint not-null default
+  column enqueued_at_ms bigint not-null
+  column merge_key_json text not-null
+  column session_id text not-null
+  column slot_policy text not-null
+  column source_key text nullable
+  unique (batch_id)
+  unique (session_id, source_key)
+  primary-key (enqueue_seq)
+table lash_queued_work_items
+  column batch_id text not-null
+  column item_id text not-null
+  column item_index integer not-null
+  column payload_json text not-null
+  primary-key (batch_id, item_index)
+  foreign-key (batch_id) references lash_queued_work_batches (batch_id) on delete cascade
+table lash_runtime_effect_replay
+  column created_at_ms bigint not-null
+  column due_at_ms bigint nullable
+  column envelope_hash text not-null
+  column envelope_json text not-null
+  column error_json text nullable
+  column lease_expires_at_ms bigint not-null default
+  column lease_owner_id text nullable
+  column lease_token text nullable
+  column outcome_json text nullable
+  column replay_key text not-null
+  column scope_id text not-null
+  column session_id text nullable
+  column status text not-null
+  column updated_at_ms bigint not-null
+  primary-key (scope_id, replay_key)
+table lash_runtime_turn_commits
+  column committed_at_ms bigint not-null
+  column result_json text not-null
+  column session_id text not-null
+  column turn_commit_hash text not-null
+  column turn_id text not-null
+  primary-key (session_id, turn_id)
+table lash_schema_versions
+  column component text not-null
+  column version integer not-null
+  primary-key (component)
+table lash_session_execution_leases
+  column lease_claimed_at_ms bigint not-null default
+  column lease_expires_at_ms bigint not-null default
+  column lease_fencing_token bigint not-null default
+  column lease_owner_id text nullable
+  column lease_owner_incarnation_id text nullable
+  column lease_owner_liveness_json text nullable
+  column lease_token text nullable
+  column session_id text not-null
+  primary-key (session_id)
+table lash_session_meta
+  column meta_json text not-null
+  column session_id text not-null
+  primary-key (session_id)
+table lash_sessions
+  column checkpoint_ref text nullable
+  column head_json text not-null
+  column head_revision bigint not-null default
+  column leaf_node_id text nullable
+  column session_id text not-null
+  primary-key (session_id)
+table lash_trigger_deliveries
+  column created_at_ms bigint not-null
+  column occurrence_id text not-null
+  column process_id text not-null
+  column subscription_id text not-null
+  column subscription_incarnation text not-null
+  column subscription_revision bigint not-null
+  column subscription_snapshot_json text not-null
+  primary-key (occurrence_id, subscription_id)
+  foreign-key (occurrence_id) references lash_trigger_occurrences (occurrence_id) on delete cascade
+table lash_trigger_mutation_receipts
+  column created_at_ms bigint not-null
+  column operation_id text not-null
+  column request_hash text not-null
+  column result_json text not-null
+  primary-key (operation_id)
+table lash_trigger_occurrences
+  column idempotency_key text not-null
+  column occurred_at_ms bigint not-null
+  column occurrence_id text not-null
+  column record_json text not-null
+  column request_hash text not-null
+  column source_key text not-null
+  column source_type text not-null
+  unique (idempotency_key)
+  primary-key (occurrence_id)
+table lash_trigger_subscriptions
+  column created_at_ms bigint not-null
+  column definition_hash text not-null
+  column enabled boolean not-null
+  column incarnation text not-null
+  column owner_scope text not-null
+  column record_json text not-null
+  column revision bigint not-null
+  column source_key text not-null
+  column source_type text not-null
+  column subscription_id text not-null
+  column subscription_key text not-null
+  column tombstoned boolean not-null
+  column updated_at_ms bigint not-null
+  unique (owner_scope, subscription_key)
+  primary-key (subscription_id)
+table lash_usage_deltas
+  column entry_json text not-null
+  column seq bigint not-null default
+  column session_id text not-null
+  primary-key (seq)
+table lash_wake_allocation_floors
+  column allocation_floor bigint not-null
+  column process_id text not-null
+  column target_session_id text not-null
+  primary-key (target_session_id, process_id)
+table lash_wake_redelivery_fences
+  column allocation_floor bigint not-null
+  column process_id text not-null
+  column session_id text not-null
+  primary-key (session_id, process_id)

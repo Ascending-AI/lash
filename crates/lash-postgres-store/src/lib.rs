@@ -4,6 +4,30 @@
 //! implementations for the runtime session store, process registry, trigger
 //! store, Lashlang artifact store, process execution environment store, and
 //! attachment manifest.
+//!
+//! # Who provisions the schema
+//!
+//! By default lash applies its own DDL at open, which needs `CREATE` on the
+//! target schema. A host that owns its migrations instead vendors
+//! [`PostgresStorage::schema_ddl`] — the same bytes are committed as this crate's
+//! `schema.sql` — into its own tooling and opens with
+//! [`SchemaProvisioning::HostProvisioned`], which runs no DDL at all. Copy those
+//! bytes; never transcribe them.
+//!
+//! Either way, open ends by reading the live catalog and comparing it against the
+//! shape this build requires, so a database whose version stamp is right but whose
+//! tables are not is rejected at open with a per-object diff rather than failing at
+//! the first query — or silently losing a guard, which is what a dropped unique
+//! index or a dropped cascade does. [`SchemaCheck`] controls whether a structural
+//! mismatch is fatal; the component version stamp is unconditional and no
+//! [`SchemaCheck`] relaxes it. [`PostgresStorage::verify_schema_for`] exposes the
+//! same check against a bare pool so a host can gate its own migration CI on it.
+//! See ADR 0052.
+//!
+//! Do not run schema migrations concurrently with an open or a verification:
+//! lash's advisory lock serializes only the participants that take it.
+//! [`PostgresStorage::schema_advisory_lock_key`] publishes the key so a host's
+//! migrations can participate.
 
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -200,6 +224,14 @@ pub struct PostgresStoreConfig {
     /// Postgres `statement_timeout` applied to every connection. Default 30s — a
     /// backstop so a wedged query can never hold a connection indefinitely.
     pub statement_timeout: Option<Duration>,
+    /// Who owns the DDL. Default [`SchemaProvisioning::LashManaged`]: lash applies
+    /// its own creation statements at open. Hosts that vendor
+    /// [`PostgresStorage::schema_ddl`] into their own migration tooling set
+    /// [`SchemaProvisioning::HostProvisioned`] so open runs no DDL at all.
+    pub schema_provisioning: SchemaProvisioning,
+    /// What open does when the live schema drifts from the shape this build
+    /// expects. Default [`SchemaCheck::Enforce`].
+    pub schema_check: SchemaCheck,
 }
 
 impl Default for PostgresStoreConfig {
@@ -212,6 +244,8 @@ impl Default for PostgresStoreConfig {
             max_lifetime: Some(Duration::from_secs(1800)),
             lock_timeout: Some(Duration::from_secs(10)),
             statement_timeout: Some(Duration::from_secs(30)),
+            schema_provisioning: SchemaProvisioning::default(),
+            schema_check: SchemaCheck::default(),
         }
     }
 }
@@ -258,7 +292,7 @@ impl PostgresStorage {
             .connect(database_url)
             .await
             .map_err(store_sqlx_error)?;
-        let await_event_signing_secret = ensure_schema(&pool).await?;
+        let await_event_signing_secret = ensure_schema(&pool, schema_open_options(&config)).await?;
         Ok(Self {
             pool,
             await_event_signing_secret: await_event_signing_secret.into(),
@@ -267,19 +301,175 @@ impl PostgresStorage {
 
     /// Build storage over an already-constructed pool.
     ///
-    /// This runs the same [`ensure_schema`] gate `connect`/`connect_with` do, so
-    /// every public construction path enforces the component schema version: a
-    /// pre-cutover (e.g. version-10) database is rejected loudly with the same
-    /// mismatch error rather than silently used, which would resurrect the
-    /// cross-version hazards the version bump exists to prevent. The
-    /// `CREATE TABLE IF NOT EXISTS` statements are idempotent, so running the gate
-    /// against an already-provisioned pool is safe.
+    /// This runs the same schema gate `connect`/`connect_with` do, so every public
+    /// construction path enforces both the component schema version and the
+    /// structural shape: a pre-cutover (e.g. version-10) database is rejected
+    /// loudly with the same mismatch error rather than silently used, which would
+    /// resurrect the cross-version hazards the version bump exists to prevent. The
+    /// creation statements are idempotent, so running the gate against an
+    /// already-provisioned pool is safe.
+    ///
+    /// Use [`PostgresStorage::from_pool_with`] to open a host-provisioned database
+    /// without running any DDL.
     pub async fn from_pool(pool: PgPool) -> Result<Self, StoreError> {
-        let await_event_signing_secret = ensure_schema(&pool).await?;
+        Self::from_pool_with(pool, PostgresStoreConfig::default()).await
+    }
+
+    /// Build storage over an already-constructed pool, choosing who provisions
+    /// the schema and how a mismatch is handled.
+    ///
+    /// Only [`PostgresStoreConfig::schema_provisioning`] and
+    /// [`PostgresStoreConfig::schema_check`] are read: the pool already exists, so
+    /// its sizing and per-connection timeouts were fixed by whoever built it.
+    pub async fn from_pool_with(
+        pool: PgPool,
+        config: PostgresStoreConfig,
+    ) -> Result<Self, StoreError> {
+        let await_event_signing_secret = ensure_schema(&pool, schema_open_options(&config)).await?;
         Ok(Self {
             pool,
             await_event_signing_secret: await_event_signing_secret.into(),
         })
+    }
+
+    /// The exact DDL this build provisions, including the seed rows every open
+    /// mode requires.
+    ///
+    /// A host that owns its own migrations should vendor these bytes verbatim —
+    /// the same content is committed as `crates/lash-postgres-store/schema.sql` —
+    /// and never transcribe them: lash verifies the resulting structure at open
+    /// and rejects a mismatch with a per-object diff. Every statement is
+    /// creation-only and idempotent, and nothing is schema-qualified, so the DDL
+    /// provisions into whichever schema the session's `search_path` resolves.
+    pub fn schema_ddl() -> &'static str {
+        SCHEMA_DDL
+    }
+
+    /// The component schema version this build implements, as stamped in
+    /// `lash_schema_versions`.
+    ///
+    /// The component schema is a reject-and-recreate boundary: there is no
+    /// migration chain between versions, and a database stamped with any other
+    /// version is rejected at open.
+    pub fn schema_version() -> i32 {
+        SCHEMA_VERSION
+    }
+
+    /// Compares the live database against the schema this build expects and
+    /// returns the structured result.
+    ///
+    /// This is the same check every open runs, exposed so a host can gate its own
+    /// migration CI on it — the intent being that a production open is the
+    /// backstop that never fires rather than the place drift is discovered.
+    /// Unlike open, this never fails on drift: inspect
+    /// [`SchemaReport::is_conformant`] and [`SchemaReport::findings`], or render
+    /// the report for a sectioned expected-versus-found diff.
+    ///
+    /// Use [`PostgresStorage::verify_schema_for`] to inspect a database that is
+    /// too broken to open, which is most of the ones worth inspecting.
+    pub async fn verify_schema(&self) -> Result<SchemaReport, StoreError> {
+        Self::verify_schema_for(&self.pool).await
+    }
+
+    /// Runs the same check against a pool, without opening storage over it.
+    ///
+    /// Constructing a [`PostgresStorage`] is strictly harder than verifying one:
+    /// open additionally insists on a matching component version stamp and a
+    /// usable await-event signing secret, and either of those can be exactly what
+    /// a host's migration produced wrongly. A check reachable only through a
+    /// successful open could therefore not describe the databases it exists to
+    /// describe, so this form needs no receiver and no successful open — it
+    /// reports every version, structural, and seed-row finding, including a
+    /// signing secret seeded at the wrong width, and returns them rather than
+    /// failing.
+    ///
+    /// Acquires [`PostgresStorage::schema_advisory_lock_key`] in shared mode and
+    /// then reads inside one `REPEATABLE READ` transaction, so every `pg_catalog`
+    /// read shares a single snapshot taken after the lock was granted and a host
+    /// migration holding the same key exclusively is excluded for the duration.
+    ///
+    /// Because it takes the key itself, this cannot be called by something that
+    /// already holds it — see [`PostgresStorage::verify_schema_on`] for that.
+    ///
+    /// This is the entry point for a host's migration CI:
+    ///
+    /// ```no_run
+    /// # async fn gate(pool: sqlx::PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    /// let report = lash_postgres_store::PostgresStorage::verify_schema_for(&pool).await?;
+    /// assert!(report.is_conformant(), "{report}");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn verify_schema_for(pool: &PgPool) -> Result<SchemaReport, StoreError> {
+        verify_schema_under_advisory_lock(pool).await
+    }
+
+    /// Runs the same check on a connection the caller already owns, taking no lock
+    /// and starting no transaction of its own.
+    ///
+    /// This is the verifier for the published migration protocol. A CI job that
+    /// holds [`PostgresStorage::schema_advisory_lock_key`] around its
+    /// migrate-then-verify sequence cannot use
+    /// [`PostgresStorage::verify_schema_for`]: that one acquires the key itself, so
+    /// it would queue behind the caller's own exclusive hold and never proceed.
+    /// Pass the locked connection here instead.
+    ///
+    /// The caller owns both guarantees this skips. Hold the key for the whole
+    /// sequence, and read inside a `REPEATABLE READ` transaction if the catalog
+    /// reads should share one snapshot — `SET TRANSACTION ISOLATION LEVEL
+    /// REPEATABLE READ` must be the transaction's first statement, before anything
+    /// that waits for a lock, or the snapshot predates the grant. An open
+    /// [`sqlx::Transaction`] derefs to the connection this wants, so
+    /// `verify_schema_on(&mut tx)` works directly.
+    ///
+    /// ```no_run
+    /// # use lash_postgres_store::PostgresStorage;
+    /// # async fn gate(pool: sqlx::PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    /// use sqlx::Connection as _;
+    ///
+    /// let (namespace, key) = PostgresStorage::schema_advisory_lock_key();
+    /// let mut connection = pool.acquire().await?;
+    /// sqlx::query("SELECT pg_advisory_lock($1, $2)")
+    ///     .bind(namespace)
+    ///     .bind(key)
+    ///     .execute(&mut *connection)
+    ///     .await?;
+    /// // ... run the migrations here, still holding the key ...
+    /// let report = PostgresStorage::verify_schema_on(&mut connection).await?;
+    /// assert!(report.is_conformant(), "{report}");
+    /// sqlx::query("SELECT pg_advisory_unlock($1, $2)")
+    ///     .bind(namespace)
+    ///     .bind(key)
+    ///     .execute(&mut *connection)
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn verify_schema_on(
+        connection: &mut sqlx::PgConnection,
+    ) -> Result<SchemaReport, StoreError> {
+        verify_schema_shape(connection).await
+    }
+
+    /// The advisory-lock key lash holds while provisioning, opening, or verifying
+    /// the schema, as `(namespace, key)` arguments to the `pg_advisory_lock` family.
+    ///
+    /// Open and provisioning take it exclusively;
+    /// [`PostgresStorage::verify_schema_for`] takes it in shared mode. Between them
+    /// that serializes everything lash does to the schema — but it cannot by itself
+    /// coordinate a host migration that does not participate. A non-participating
+    /// migration can commit before a verification's snapshot or after its commit, so
+    /// the report describes the schema as of that snapshot rather than as of now.
+    ///
+    /// The supported protocol is therefore to take this key around migrations —
+    /// `SELECT pg_advisory_xact_lock(715421, 907001)` in the migration's own
+    /// transaction, or the session-level form around a multi-statement migration.
+    /// A migration CI job should wrap it around the whole migrate-then-verify
+    /// sequence and verify with [`PostgresStorage::verify_schema_on`], which does
+    /// not try to take the key a second time. Deployments that can instead guarantee
+    /// no migration runs concurrently with an open need nothing.
+    pub fn schema_advisory_lock_key() -> (i32, i32) {
+        SCHEMA_ADVISORY_LOCK_KEY
     }
 
     pub fn pool(&self) -> &PgPool {
@@ -472,6 +662,8 @@ mod process_registry;
 mod runtime_persistence;
 #[path = "postgres/schema.rs"]
 mod schema;
+#[path = "postgres/schema_shape.rs"]
+mod schema_shape;
 #[path = "postgres/session_factory.rs"]
 mod session_factory;
 #[path = "postgres/support.rs"]
@@ -482,7 +674,23 @@ mod trigger_store;
 pub use effect_replay::{
     PostgresEffectHost, PostgresEffectReplayOptions, PostgresRuntimeEffectController,
 };
+use schema_shape::{
+    AWAIT_EVENT_SIGNING_SECRET_BYTES, ComponentVersion, SchemaShape, read_component_version,
+    read_search_path, resolve_installation, verify_schema_shape,
+};
+pub use schema_shape::{
+    ColumnShape, ColumnValueSource, ForeignKeyAction, ForeignKeyShape, SchemaCheck, SchemaFinding,
+    SchemaProvisioning, SchemaReport, UniqueGuard,
+};
 use {process_helpers::*, runtime_persistence::*, schema::*, session_factory::*, support::*};
+
+/// Extracts the schema-gate knobs one open should use from a store config.
+fn schema_open_options(config: &PostgresStoreConfig) -> SchemaOpenOptions {
+    SchemaOpenOptions {
+        provisioning: config.schema_provisioning,
+        check: config.schema_check,
+    }
+}
 
 #[cfg(test)]
 #[path = "../tests/support/mod.rs"]

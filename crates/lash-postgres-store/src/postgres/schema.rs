@@ -1,462 +1,258 @@
 use crate::*;
 
-pub(crate) async fn ensure_schema(pool: &PgPool) -> Result<Vec<u8>, StoreError> {
+/// The DDL this build provisions, committed verbatim as the crate's
+/// `schema.sql` artifact so a host can vendor the exact bytes lash executes.
+pub(crate) const SCHEMA_DDL: &str = include_str!("../../schema.sql");
+
+/// Advisory-lock key lash takes for the duration of a schema-provisioning or
+/// schema-verifying transaction. See
+/// [`crate::PostgresStorage::schema_advisory_lock_key`].
+pub(crate) const SCHEMA_ADVISORY_LOCK_KEY: (i32, i32) = (715421, 907001);
+
+/// How one open should treat the database's schema.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct SchemaOpenOptions {
+    pub(crate) provisioning: SchemaProvisioning,
+    pub(crate) check: SchemaCheck,
+}
+
+/// Brings the database to the state this build requires and returns the
+/// store-resident await-event signing secret.
+///
+/// Both provisioning modes end in the same structural verification, so a
+/// database that opens is a database whose shape lash has read — never one whose
+/// version stamp merely claimed the right number.
+pub(crate) async fn ensure_schema(
+    pool: &PgPool,
+    options: SchemaOpenOptions,
+) -> Result<Vec<u8>, StoreError> {
     let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
-    tx.execute("SELECT pg_advisory_xact_lock(715421, 907001)")
+    // Serializes lash's own openers, so two concurrent first opens cannot race
+    // each other's DDL and a verifying open cannot read a half-applied batch from
+    // a provisioning one. It does *not* coordinate with host migrations: nothing
+    // outside lash takes this key unless a host chooses to, which
+    // `PostgresStorage::schema_advisory_lock_key` exists to let it do. The lock
+    // needs no privileges, so it is taken in both modes.
+    let (lock_namespace, lock_key) = SCHEMA_ADVISORY_LOCK_KEY;
+    sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
+        .bind(lock_namespace)
+        .bind(lock_key)
+        .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-    tx.execute(
-        "CREATE TABLE IF NOT EXISTS lash_schema_versions (
-             component TEXT PRIMARY KEY,
-             version INTEGER NOT NULL
-         )",
-    )
-    .await
-    .map_err(store_sqlx_error)?;
-    let preflight_version: Option<i32> =
-        sqlx::query_scalar("SELECT version FROM lash_schema_versions WHERE component = $1")
-            .bind(SCHEMA_COMPONENT)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    if let Some(version) = preflight_version
-        && version != SCHEMA_VERSION
-    {
-        return Err(StoreError::Backend(format!(
-            "Postgres schema component `{SCHEMA_COMPONENT}` has version {version}, expected {SCHEMA_VERSION}"
-        )));
+    if options.provisioning == SchemaProvisioning::LashManaged {
+        // Preflight before the DDL: a stale baseline must be rejected rather than
+        // have this build's creation statements layered over it.
+        let search_path = read_search_path(&mut tx).await?;
+        if let Some(installation) = resolve_installation(&mut tx, &search_path).await?
+            && let ComponentVersion::Readable(Some(version)) =
+                read_component_version(&mut tx, &installation, &SchemaShape::expected()).await?
+            && version != SCHEMA_VERSION
+        {
+            // Same field set as every other outcome, built from what the preflight
+            // knows: it runs before the structural read, so the only finding it can
+            // have is the version itself.
+            let preflight = SchemaReport {
+                schema: Some(installation.namespace().to_string()),
+                expected_version: SCHEMA_VERSION,
+                found_version: Some(version),
+                findings: vec![SchemaFinding::VersionMismatch {
+                    expected: SCHEMA_VERSION,
+                    found: Some(version),
+                }],
+            };
+            record_schema_gate_decision(&preflight, options, "denied_version_preflight");
+            return Err(version_mismatch_error(Some(version)));
+        }
+        tx.execute(SCHEMA_DDL).await.map_err(store_sqlx_error)?;
     }
-    tx.execute(
-        r#"
-        CREATE TABLE IF NOT EXISTS lash_schema_versions (
-            component TEXT PRIMARY KEY,
-            version INTEGER NOT NULL
-        );
 
-        CREATE TABLE IF NOT EXISTS lash_blobs (
-            hash TEXT PRIMARY KEY,
-            content BYTEA NOT NULL
-        );
+    let report = verify_schema_shape(&mut tx).await?;
+    // The component version is the reject-and-recreate boundary, and it is
+    // unconditional: `SchemaCheck` governs the catalog comparison only. Letting
+    // `WarnOnly` downgrade this would turn lash's own recommended escape hatch
+    // into a path that silently runs one build against another schema generation,
+    // which is exactly the cross-version corruption the boundary exists to stop.
+    if report.found_version != Some(SCHEMA_VERSION) {
+        record_schema_gate_decision(&report, options, "denied_version");
+        return Err(version_mismatch_error(report.found_version));
+    }
+    let admitted_as = match (report.is_conformant(), options.check) {
+        (true, _) => "allowed",
+        (false, SchemaCheck::Enforce) => {
+            record_schema_gate_decision(&report, options, "denied_shape");
+            return Err(StoreError::Backend(report.to_string()));
+        }
+        (false, SchemaCheck::WarnOnly) => {
+            tracing::warn!(
+                "opening Postgres storage against a non-conformant schema because \
+                 SchemaCheck::WarnOnly is configured: {report}"
+            );
+            "allowed_warn_only"
+        }
+    };
 
-        CREATE TABLE IF NOT EXISTS lash_sessions (
-            session_id TEXT PRIMARY KEY,
-            head_revision BIGINT NOT NULL DEFAULT 0,
-            head_json TEXT NOT NULL,
-            checkpoint_ref TEXT,
-            leaf_node_id TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_lash_sessions_leaf
-            ON lash_sessions(leaf_node_id);
-
-        CREATE TABLE IF NOT EXISTS lash_node_anchors (
-            node_id TEXT PRIMARY KEY,
-            checkpoint_ref TEXT NOT NULL,
-            source_session_id TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS lash_deleted_sessions (
-            session_id TEXT PRIMARY KEY
-        );
-
-        CREATE TABLE IF NOT EXISTS lash_graph_nodes (
-            session_id TEXT NOT NULL,
-            seq BIGSERIAL,
-            node_id TEXT PRIMARY KEY,
-            parent_node_id TEXT,
-            node_json TEXT NOT NULL,
-            tombstoned BOOLEAN NOT NULL DEFAULT FALSE
-        );
-        CREATE INDEX IF NOT EXISTS idx_lash_graph_nodes_seq
-            ON lash_graph_nodes(session_id, seq);
-        CREATE INDEX IF NOT EXISTS idx_lash_graph_nodes_parent
-            ON lash_graph_nodes(parent_node_id);
-
-        CREATE TABLE IF NOT EXISTS lash_usage_deltas (
-            seq BIGSERIAL PRIMARY KEY,
-            session_id TEXT NOT NULL,
-            entry_json TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS lash_session_meta (
-            session_id TEXT PRIMARY KEY,
-            meta_json TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS lash_runtime_turn_commits (
-            session_id TEXT NOT NULL,
-            turn_id TEXT NOT NULL,
-            turn_commit_hash TEXT NOT NULL,
-            result_json TEXT NOT NULL,
-            committed_at_ms BIGINT NOT NULL,
-            PRIMARY KEY (session_id, turn_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS lash_session_execution_leases (
-            session_id TEXT PRIMARY KEY,
-            lease_owner_id TEXT,
-            lease_owner_incarnation_id TEXT,
-            lease_owner_liveness_json TEXT,
-            lease_token TEXT,
-            lease_fencing_token BIGINT NOT NULL DEFAULT 0,
-            lease_claimed_at_ms BIGINT NOT NULL DEFAULT 0,
-            lease_expires_at_ms BIGINT NOT NULL DEFAULT 0
-        );
-
-        CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
-            enqueue_seq BIGSERIAL PRIMARY KEY,
-            batch_id TEXT NOT NULL UNIQUE,
-            session_id TEXT NOT NULL,
-            source_key TEXT,
-            delivery_policy TEXT NOT NULL,
-            slot_policy TEXT NOT NULL,
-            merge_key_json TEXT NOT NULL,
-            available_at_ms BIGINT NOT NULL,
-            enqueued_at_ms BIGINT NOT NULL,
-            claim_id TEXT,
-            claim_owner_id TEXT,
-            claim_owner_incarnation_id TEXT,
-            claim_owner_liveness_json TEXT,
-            claim_token TEXT,
-            claim_fencing_token BIGINT NOT NULL DEFAULT 0,
-            claim_session_lease_generation BIGINT NOT NULL DEFAULT 0,
-            UNIQUE (session_id, source_key)
-        );
-        CREATE INDEX IF NOT EXISTS idx_lash_queued_work_ready
-            ON lash_queued_work_batches(session_id, available_at_ms, enqueue_seq);
-
-        CREATE TABLE IF NOT EXISTS lash_queued_work_items (
-            batch_id TEXT NOT NULL REFERENCES lash_queued_work_batches(batch_id) ON DELETE CASCADE,
-            item_index INTEGER NOT NULL,
-            item_id TEXT NOT NULL,
-            payload_json TEXT NOT NULL,
-            PRIMARY KEY (batch_id, item_index)
-        );
-
-        CREATE TABLE IF NOT EXISTS lash_wake_redelivery_fences (
-            session_id TEXT NOT NULL,
-            process_id TEXT NOT NULL,
-            allocation_floor BIGINT NOT NULL,
-            PRIMARY KEY (session_id, process_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
-            enqueue_seq BIGSERIAL PRIMARY KEY,
-            input_id TEXT NOT NULL UNIQUE,
-            session_id TEXT NOT NULL,
-            source_key TEXT,
-            ingress_json TEXT NOT NULL,
-            state TEXT NOT NULL,
-            input_json TEXT NOT NULL,
-            enqueued_at_ms BIGINT NOT NULL,
-            claim_id TEXT,
-            claim_owner_id TEXT,
-            claim_owner_incarnation_id TEXT,
-            claim_owner_liveness_json TEXT,
-            claim_token TEXT,
-            claim_fencing_token BIGINT NOT NULL DEFAULT 0,
-            claim_session_lease_generation BIGINT NOT NULL DEFAULT 0,
-            UNIQUE (session_id, source_key)
-        );
-        CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_session
-            ON lash_pending_turn_inputs(session_id, state, enqueue_seq);
-        CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_claim
-            ON lash_pending_turn_inputs(session_id, claim_id, claim_token);
-
-        CREATE TABLE IF NOT EXISTS lash_attachment_manifest (
-            attachment_id TEXT NOT NULL,
-            session_id TEXT NOT NULL,
-            canonical_uri TEXT NOT NULL,
-            intent_at_ms BIGINT NOT NULL,
-            committed_at_ms BIGINT,
-            owner_kind TEXT CHECK (owner_kind IN ('turn', 'process')),
-            owner_id TEXT,
-            CHECK ((owner_kind IS NULL) = (owner_id IS NULL)),
-            PRIMARY KEY (session_id, attachment_id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_lash_attachment_manifest_uncommitted
-            ON lash_attachment_manifest(committed_at_ms)
-            WHERE committed_at_ms IS NULL;
-        CREATE INDEX IF NOT EXISTS idx_lash_attachment_manifest_owner
-            ON lash_attachment_manifest(session_id, owner_kind, owner_id, committed_at_ms);
-
-        DROP SEQUENCE IF EXISTS lash_process_change_seq;
-
-        CREATE TABLE IF NOT EXISTS lash_process_change_clock (
-            singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
-            current_seq BIGINT NOT NULL,
-            CHECK (singleton)
-        );
-        INSERT INTO lash_process_change_clock (singleton, current_seq)
-        VALUES (TRUE, 0)
-        ON CONFLICT (singleton) DO NOTHING;
-
-        CREATE TABLE IF NOT EXISTS lash_processes (
-            process_id TEXT PRIMARY KEY,
-            registration_hash TEXT NOT NULL,
-            originator_id TEXT NOT NULL,
-            wake_session_id TEXT,
-            identity_kind TEXT NOT NULL,
-            identity_label TEXT,
-            is_waiting BOOLEAN NOT NULL,
-            created_at_ms BIGINT NOT NULL,
-            updated_at_ms BIGINT NOT NULL,
-            change_seq BIGINT NOT NULL,
-            status TEXT NOT NULL,
-            record_json TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_lash_processes_status
-            ON lash_processes(status);
-        CREATE INDEX IF NOT EXISTS idx_lash_processes_change_seq
-            ON lash_processes(change_seq);
-        CREATE INDEX IF NOT EXISTS idx_lash_processes_originator
-            ON lash_processes(originator_id);
-        CREATE INDEX IF NOT EXISTS idx_lash_processes_identity
-            ON lash_processes(identity_kind, identity_label);
-        CREATE INDEX IF NOT EXISTS idx_lash_processes_waiting
-            ON lash_processes(is_waiting);
-        CREATE INDEX IF NOT EXISTS idx_lash_processes_created
-            ON lash_processes(created_at_ms);
-        CREATE INDEX IF NOT EXISTS idx_lash_processes_wake_session
-            ON lash_processes(wake_session_id);
-
-        CREATE TABLE IF NOT EXISTS lash_process_events (
-            process_id TEXT NOT NULL REFERENCES lash_processes(process_id) ON DELETE CASCADE,
-            sequence BIGINT NOT NULL,
-            event_type TEXT NOT NULL,
-            payload_hash TEXT NOT NULL,
-            idempotency_key TEXT,
-            occurred_at_ms BIGINT NOT NULL,
-            event_json TEXT NOT NULL,
-            PRIMARY KEY (process_id, sequence)
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_process_events_key
-            ON lash_process_events(process_id, idempotency_key)
-            WHERE idempotency_key IS NOT NULL;
-
-        CREATE TABLE IF NOT EXISTS lash_wake_allocation_floors (
-            target_session_id TEXT NOT NULL,
-            process_id TEXT NOT NULL,
-            allocation_floor BIGINT NOT NULL,
-            PRIMARY KEY (target_session_id, process_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS lash_process_wake_deliveries (
-            delivery_id TEXT PRIMARY KEY,
-            process_id TEXT NOT NULL REFERENCES lash_processes(process_id) ON DELETE CASCADE,
-            target_session_id TEXT NOT NULL,
-            sequence BIGINT NOT NULL,
-            state TEXT NOT NULL,
-            claim_token TEXT,
-            attempts BIGINT NOT NULL DEFAULT 0,
-            first_attempt_ms BIGINT,
-            next_attempt_at_ms BIGINT NOT NULL,
-            expires_at_ms BIGINT NOT NULL,
-            discard_reason TEXT,
-            delivery_json TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_lash_wake_deliveries_pending
-            ON lash_process_wake_deliveries(
-                next_attempt_at_ms, target_session_id, process_id, sequence
-            )
-            WHERE state IN ('pending', 'enqueuing');
-        CREATE INDEX IF NOT EXISTS idx_lash_wake_deliveries_group_sequence
-            ON lash_process_wake_deliveries(target_session_id, process_id, sequence)
-            WHERE state <> 'enqueued';
-
-        CREATE TABLE IF NOT EXISTS lash_process_observers (
-            session_id TEXT NOT NULL,
-            process_id TEXT NOT NULL REFERENCES lash_processes(process_id) ON DELETE CASCADE,
-            PRIMARY KEY (session_id, process_id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_lash_process_observers_process
-            ON lash_process_observers(process_id, session_id);
-
-        CREATE TABLE IF NOT EXISTS lash_process_tombstones (
-            process_id TEXT PRIMARY KEY,
-            terminal_label TEXT NOT NULL,
-            pruned_at_ms BIGINT NOT NULL,
-            pruned_change_seq BIGINT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_lash_process_tombstones_change
-            ON lash_process_tombstones(pruned_change_seq);
-
-        CREATE TABLE IF NOT EXISTS lash_process_leases (
-            process_id TEXT PRIMARY KEY REFERENCES lash_processes(process_id) ON DELETE CASCADE,
-            lease_owner_id TEXT,
-            lease_owner_incarnation_id TEXT,
-            lease_owner_liveness_json TEXT,
-            lease_token TEXT,
-            lease_fencing_token BIGINT NOT NULL DEFAULT 0,
-            lease_claimed_at_ms BIGINT NOT NULL DEFAULT 0,
-            lease_expires_at_ms BIGINT NOT NULL DEFAULT 0
-        );
-
-        CREATE TABLE IF NOT EXISTS lash_process_segment_handovers (
-            process_id TEXT NOT NULL REFERENCES lash_processes(process_id) ON DELETE CASCADE,
-            segment_ordinal BIGINT NOT NULL,
-            handover_json TEXT NOT NULL,
-            PRIMARY KEY (process_id, segment_ordinal)
-        );
-
-        CREATE TABLE IF NOT EXISTS lash_runtime_effect_replay (
-            scope_id TEXT NOT NULL,
-            session_id TEXT,
-            replay_key TEXT NOT NULL,
-            envelope_hash TEXT NOT NULL,
-            envelope_json TEXT NOT NULL,
-            status TEXT NOT NULL,
-            outcome_json TEXT,
-            error_json TEXT,
-            lease_owner_id TEXT,
-            lease_token TEXT,
-            lease_expires_at_ms BIGINT NOT NULL DEFAULT 0,
-            due_at_ms BIGINT,
-            created_at_ms BIGINT NOT NULL,
-            updated_at_ms BIGINT NOT NULL,
-            PRIMARY KEY (scope_id, replay_key)
-        );
-        CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_lease
-            ON lash_runtime_effect_replay(status, lease_expires_at_ms);
-        CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_session
-            ON lash_runtime_effect_replay(session_id);
-
-        CREATE TABLE IF NOT EXISTS lash_await_event_meta (
-            singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
-            signing_secret BYTEA NOT NULL,
-            CHECK (singleton)
-        );
-
-        CREATE TABLE IF NOT EXISTS lash_await_event_waits (
-            key_id TEXT PRIMARY KEY,
-            scope_json TEXT NOT NULL,
-            wait_json TEXT NOT NULL,
-            session_id TEXT,
-            turn_control BOOLEAN NOT NULL,
-            terminal_json TEXT,
-            created_at_ms BIGINT NOT NULL,
-            resolved_at_ms BIGINT
-        );
-        CREATE INDEX IF NOT EXISTS idx_lash_await_event_waits_session
-            ON lash_await_event_waits(session_id);
-
-        -- Permanent by design: session ids cannot be reused, so revocation
-        -- evidence must remain after every retention-pruning pass.
-        CREATE TABLE IF NOT EXISTS lash_await_event_revoked_sessions (
-            session_id TEXT PRIMARY KEY,
-            revoked_at_ms BIGINT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS lash_trigger_subscriptions (
-            subscription_id TEXT PRIMARY KEY,
-            owner_scope TEXT NOT NULL,
-            subscription_key TEXT NOT NULL,
-            incarnation TEXT NOT NULL,
-            revision BIGINT NOT NULL,
-            definition_hash TEXT NOT NULL,
-            source_type TEXT NOT NULL,
-            source_key TEXT NOT NULL,
-            enabled BOOLEAN NOT NULL,
-            tombstoned BOOLEAN NOT NULL,
-            created_at_ms BIGINT NOT NULL,
-            updated_at_ms BIGINT NOT NULL,
-            record_json TEXT NOT NULL,
-            UNIQUE(owner_scope, subscription_key)
-        );
-        CREATE INDEX IF NOT EXISTS idx_lash_trigger_subscriptions_registrant
-            ON lash_trigger_subscriptions(owner_scope, subscription_key);
-        CREATE INDEX IF NOT EXISTS idx_lash_trigger_subscriptions_source
-            ON lash_trigger_subscriptions(source_type, source_key, enabled);
-
-        CREATE TABLE IF NOT EXISTS lash_trigger_occurrences (
-            occurrence_id TEXT PRIMARY KEY,
-            idempotency_key TEXT NOT NULL UNIQUE,
-            request_hash TEXT NOT NULL,
-            source_type TEXT NOT NULL,
-            source_key TEXT NOT NULL,
-            occurred_at_ms BIGINT NOT NULL,
-            record_json TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_lash_trigger_occurrences_source
-            ON lash_trigger_occurrences(source_type, source_key, occurred_at_ms);
-
-        CREATE TABLE IF NOT EXISTS lash_trigger_deliveries (
-            occurrence_id TEXT NOT NULL REFERENCES lash_trigger_occurrences(occurrence_id) ON DELETE CASCADE,
-            subscription_id TEXT NOT NULL,
-            process_id TEXT NOT NULL,
-            subscription_incarnation TEXT NOT NULL,
-            subscription_revision BIGINT NOT NULL,
-            subscription_snapshot_json TEXT NOT NULL,
-            created_at_ms BIGINT NOT NULL,
-            PRIMARY KEY (occurrence_id, subscription_id)
-        );
-        CREATE TABLE IF NOT EXISTS lash_trigger_mutation_receipts (
-            operation_id TEXT PRIMARY KEY,
-            request_hash TEXT NOT NULL,
-            result_json TEXT NOT NULL,
-            created_at_ms BIGINT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_lash_trigger_deliveries_subscription
-            ON lash_trigger_deliveries(subscription_id);
-        CREATE INDEX IF NOT EXISTS idx_lash_trigger_deliveries_process
-            ON lash_trigger_deliveries(process_id);
-
-        CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
-            namespace TEXT NOT NULL,
-            artifact_ref TEXT NOT NULL,
-            artifact_bytes BYTEA NOT NULL,
-            PRIMARY KEY (namespace, artifact_ref)
-        );
-        "#,
+    let signing_secret: Option<Vec<u8>> = sqlx::query_scalar(
+        "SELECT signing_secret FROM lash_await_event_meta WHERE singleton = TRUE",
     )
+    .fetch_optional(&mut *tx)
     .await
     .map_err(store_sqlx_error)?;
-
-    let existing: Option<i32> =
-        sqlx::query_scalar("SELECT version FROM lash_schema_versions WHERE component = $1")
-            .bind(SCHEMA_COMPONENT)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    match existing {
-        Some(version) if version == SCHEMA_VERSION => {}
-        Some(version) => {
+    // The secret is a data precondition, not a shape: `SchemaCheck::WarnOnly`
+    // relaxes structural enforcement, never the store's ability to construct
+    // itself. Without this row there is no key to authenticate durable await-event
+    // promises with, so there is nothing to hand back. A host-provisioned database
+    // missing it must apply the seed statements from `schema.sql`.
+    //
+    // The admission is recorded only after this succeeds. Logging it earlier would
+    // let a database with an unusable secret produce an admission event and then a
+    // rejected open, which is the one shape of decision evidence worse than none.
+    let signing_secret = match signing_secret {
+        Some(secret) if secret.len() == AWAIT_EVENT_SIGNING_SECRET_BYTES => secret,
+        Some(secret) => {
+            record_schema_gate_decision(&report, options, "denied_seed_secret_width");
             return Err(StoreError::Backend(format!(
-                "Postgres schema component `{SCHEMA_COMPONENT}` has version {version}, expected {SCHEMA_VERSION}"
+                "Postgres await-event signing secret has {} bytes, expected \
+                 {AWAIT_EVENT_SIGNING_SECRET_BYTES}",
+                secret.len()
             )));
         }
         None => {
-            sqlx::query("INSERT INTO lash_schema_versions (component, version) VALUES ($1, $2)")
-                .bind(SCHEMA_COMPONENT)
-                .bind(SCHEMA_VERSION)
-                .execute(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
+            record_schema_gate_decision(&report, options, "denied_seed_secret_missing");
+            return Err(StoreError::Backend(
+                "Postgres await-event signing secret row is missing from \
+                 lash_await_event_meta; apply the seed statements from this build's schema.sql \
+                 artifact"
+                    .to_string(),
+            ));
         }
-    }
-    let mut secret_candidate = Vec::with_capacity(32);
-    secret_candidate.extend_from_slice(uuid::Uuid::new_v4().as_bytes());
-    secret_candidate.extend_from_slice(uuid::Uuid::new_v4().as_bytes());
-    sqlx::query(
-        "INSERT INTO lash_await_event_meta (singleton, signing_secret)
-         VALUES (TRUE, $1)
-         ON CONFLICT (singleton) DO NOTHING",
-    )
-    .bind(secret_candidate)
-    .execute(&mut *tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    let signing_secret: Vec<u8> = sqlx::query_scalar(
-        "SELECT signing_secret FROM lash_await_event_meta WHERE singleton = TRUE",
-    )
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    if signing_secret.len() != 32 {
-        return Err(StoreError::Backend(format!(
-            "Postgres await-event signing secret has {} bytes, expected 32",
-            signing_secret.len()
-        )));
-    }
+    };
+    record_schema_gate_decision(&report, options, admitted_as);
     tx.commit().await.map_err(store_sqlx_error)?;
     Ok(signing_secret)
+}
+
+/// Runs the structural check under the published advisory key, held in *shared*
+/// mode, with every catalog read pinned to one snapshot.
+///
+/// Two orderings matter here and neither is incidental.
+///
+/// The key is taken at *session* scope, before the transaction begins, because a
+/// `REPEATABLE READ` snapshot is established by the transaction's first statement —
+/// and that includes the statement that waits for a lock. Acquiring an
+/// `xact`-scoped lock as the first statement would therefore snapshot the catalog
+/// *before* the lock was granted, so a verification that queued behind a host
+/// migration would go on to describe the schema as it was before that migration.
+/// Measured on PostgreSQL 16: a transaction whose first statement blocks on the key
+/// cannot see a table the lock holder committed while it waited.
+///
+/// The transaction is then `REPEATABLE READ` so every `pg_catalog` read shares one
+/// snapshot. `READ COMMITTED` would re-snapshot per statement, which is what let a
+/// concurrently committed catalog row appear midway through a verification.
+pub(crate) async fn verify_schema_under_advisory_lock(
+    pool: &PgPool,
+) -> Result<SchemaReport, StoreError> {
+    let (lock_namespace, lock_key) = SCHEMA_ADVISORY_LOCK_KEY;
+    // Detached rather than borrowed from the pool, because the lock this takes is
+    // *session*-scoped: a future cancelled between the lock and the unlock would
+    // otherwise hand a still-locked connection back to the pool and block every
+    // later exclusive holder for that connection's lifetime. An owned connection is
+    // closed when it drops — on the error and cancellation paths as much as the
+    // happy one — and the backend releases the session lock with it.
+    let mut connection = pool.acquire().await.map_err(store_sqlx_error)?.detach();
+    let verified = async {
+        sqlx::query("SELECT pg_advisory_lock_shared($1, $2)")
+            .bind(lock_namespace)
+            .bind(lock_key)
+            .execute(&mut connection)
+            .await
+            .map_err(store_sqlx_error)?;
+        verify_within_repeatable_read(&mut connection).await
+    }
+    .await;
+    let _ = sqlx::Connection::close(connection).await;
+    verified
+}
+
+/// Reads the schema inside one `REPEATABLE READ` transaction.
+async fn verify_within_repeatable_read(
+    connection: &mut sqlx::PgConnection,
+) -> Result<SchemaReport, StoreError> {
+    let mut tx = sqlx::Connection::begin(connection)
+        .await
+        .map_err(store_sqlx_error)?;
+    // Must precede every other statement in the transaction: PostgreSQL rejects the
+    // change once a snapshot has been established.
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    let report = verify_schema_shape(&mut tx).await?;
+    // Read-only, but committing rather than rolling back keeps the transaction's
+    // disposition unambiguous in a host's own logs.
+    tx.commit().await.map_err(store_sqlx_error)?;
+    Ok(report)
+}
+
+/// Emits the schema gate's decision basis.
+///
+/// A gate that can deny ships the inputs it consulted, not just its verdict
+/// (`docs/agents/way-of-working.md`): the stamped and expected versions, both
+/// policy knobs, and the finding counts per class, so a refused open can be
+/// diagnosed from a trace without reproducing it.
+fn record_schema_gate_decision(
+    report: &SchemaReport,
+    options: SchemaOpenOptions,
+    outcome: &'static str,
+) {
+    let counts = report.finding_counts();
+    let fields = tracing::field::display(
+        counts
+            .iter()
+            .map(|(section, count)| format!("{section}={count}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    let schema = report.schema.as_deref().unwrap_or("<unresolved>");
+    match outcome {
+        "allowed" => tracing::debug!(
+            component = SCHEMA_COMPONENT,
+            schema,
+            expected_version = report.expected_version,
+            found_version = ?report.found_version,
+            provisioning = ?options.provisioning,
+            schema_check = ?options.check,
+            findings = %fields,
+            finding_total = report.findings.len(),
+            outcome,
+            "lash Postgres schema gate admitted the database"
+        ),
+        _ => tracing::warn!(
+            component = SCHEMA_COMPONENT,
+            schema,
+            expected_version = report.expected_version,
+            found_version = ?report.found_version,
+            provisioning = ?options.provisioning,
+            schema_check = ?options.check,
+            findings = %fields,
+            finding_total = report.findings.len(),
+            outcome,
+            "lash Postgres schema gate decided against admitting the database as-is"
+        ),
+    }
+}
+
+/// Renders the reject-and-recreate boundary error, naming the remedy rather than
+/// only the numbers.
+fn version_mismatch_error(found: Option<i32>) -> StoreError {
+    let found = match found {
+        Some(version) => format!("has version {version}"),
+        None => "has no version stamp".to_string(),
+    };
+    StoreError::Backend(format!(
+        "Postgres schema component `{SCHEMA_COMPONENT}` {found}, expected {SCHEMA_VERSION}. \
+         The component schema is a reject-and-recreate boundary with no migration chain: \
+         provision a fresh database from this build's schema.sql artifact. This gate is \
+         unconditional; SchemaCheck::WarnOnly does not relax it."
+    ))
 }
