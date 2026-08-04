@@ -464,7 +464,8 @@ async fn a_lane_less_writer_that_loses_the_cas_is_still_attributable() {
     let holder = owner("worker-a", "worker-a:boot-1");
     let claimant = owner("worker-b", "worker-b:boot-1");
 
-    let held = store
+    // A live foreign holder, so the claimant below has no lane of its own.
+    let _held = store
         .try_claim_session_execution_lease(session_id, &holder, 60_000)
         .await
         .expect("claim the lane")
@@ -488,9 +489,8 @@ async fn a_lane_less_writer_that_loses_the_cas_is_still_attributable() {
         );
         trace_commit_cas_rejected(
             session_id,
-            Some(&SessionExecutionLeaseCommitEvidence::without_lane(
-                &claimant, &held,
-            )),
+            None,
+            &claimant,
             &StoreError::HeadRevisionConflict {
                 expected: 3,
                 actual: 4,
@@ -508,10 +508,9 @@ async fn a_lane_less_writer_that_loses_the_cas_is_still_attributable() {
         "the event must name the writer, not the holder it raced"
     );
     assert_eq!(rejected.field("incarnation_id"), "worker-b:boot-1");
-    assert_eq!(
-        rejected.field("fencing_token"),
-        held.fencing_token.to_string(),
-        "a lane-less writer reports the generation it knowingly raced"
+    assert!(
+        !rejected.fields.contains_key("fencing_token"),
+        "a lane-less writer held no generation, so it must not claim one: {rejected:?}"
     );
     assert_eq!(
         rejected.field("lane_held"),
@@ -549,6 +548,7 @@ async fn a_rejected_commit_cas_traces_the_losing_generation_and_head_revisions()
         trace_commit_cas_rejected(
             session_id,
             Some(&guard.commit_evidence()),
+            &holder,
             &StoreError::HeadRevisionConflict {
                 expected: 7,
                 actual: 9,
@@ -559,6 +559,7 @@ async fn a_rejected_commit_cas_traces_the_losing_generation_and_head_revisions()
         trace_commit_cas_rejected(
             session_id,
             Some(&guard.commit_evidence()),
+            &holder,
             &StoreError::Backend("unrelated backend failure".to_string()),
         );
         guard.release_if_live().await.expect("release the lane");
@@ -583,4 +584,15 @@ async fn a_rejected_commit_cas_traces_the_losing_generation_and_head_revisions()
         "this writer held the lane, so the generation is its own"
     );
     assert!(!rejected.field("fencing_token").is_empty());
+}
+
+#[test]
+fn probe_runtime_size() {
+    eprintln!(
+        "LashRuntime={} Guard={} Evidence={} Acquisition={}",
+        std::mem::size_of::<crate::runtime::LashRuntime>(),
+        std::mem::size_of::<SessionExecutionLeaseGuard>(),
+        std::mem::size_of::<SessionExecutionLeaseCommitEvidence>(),
+        std::mem::size_of::<crate::store::SessionExecutionLeaseAcquisition>(),
+    );
 }

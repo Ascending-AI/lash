@@ -77,49 +77,26 @@ pub(super) struct SessionExecutionLeaseContinuity {
     fencing_token: u64,
 }
 
-/// What a commit-time trace event says about the authority the writer had.
+/// What a commit-time trace event says about the lane the writer held.
 ///
-/// Captured before the commit so a rejection reports the generation that lost,
-/// not whatever the row holds afterwards. Both paths that reach a commit are
-/// represented, because both can lose the head CAS:
+/// Built only on the rejection path, from the guard that is already in scope
+/// there. It is deliberately never carried through the commit: a value alive
+/// across that await grows every turn future, and these facts are still readable
+/// when the rejection arrives.
 ///
-/// * the runner holds the lane, and `fencing_token` is its own; or
-/// * the lane was busy and the runner proceeded anyway under the advisory
-///   (ADR 0029 makes the CAS the authority, so this is legal), in which case
-///   `fencing_token` is the holder it knowingly raced and `lane_held` is false.
-///
-/// Either way the event carries the writer's identity and a generation, so a
-/// rejection is never anonymous.
+/// Absent evidence is meaningful, not missing: it means the writer proceeded under
+/// the busy advisory with no lane at all (ADR 0029 makes the CAS the authority, so
+/// that is legal). The event reports `lane_held = false` and names the writer from
+/// the claimant instead, so a rejection is never anonymous.
 #[derive(Clone, Debug)]
 pub(super) struct SessionExecutionLeaseCommitEvidence {
-    /// Identity of the runner attempting the commit, always present.
+    /// The lane holder's identity.
     owner: crate::LeaseOwnerIdentity,
-    /// The lane generation in play for this attempt: this runner's when it holds
-    /// the lane, otherwise the generation it observed holding it.
+    /// The generation this runner held.
     fencing_token: u64,
-    /// Whether `fencing_token` belongs to this runner. False on the busy-advisory
-    /// path, where no lane was ever held and `lease_lost` is meaningless.
-    lane_held: bool,
     /// Whether this runner had already observed its own lease loss before the
-    /// commit. Repeated rejections with `lane_held` true and this false are
-    /// livelock, not takeover.
+    /// commit. Repeated rejections with this false are livelock, not takeover.
     lease_lost: bool,
-}
-
-impl SessionExecutionLeaseCommitEvidence {
-    /// Evidence for a writer that proceeded under the busy advisory without the
-    /// lane, naming itself and the generation it chose to race.
-    pub(super) fn without_lane(
-        claimant: &crate::LeaseOwnerIdentity,
-        observed_holder: &SessionExecutionLease,
-    ) -> Self {
-        Self {
-            owner: claimant.clone(),
-            fencing_token: observed_holder.fencing_token,
-            lane_held: false,
-            lease_lost: false,
-        }
-    }
 }
 
 pub(super) struct SessionExecutionLeaseGuard {
@@ -133,36 +110,6 @@ pub(super) struct SessionExecutionLeaseGuard {
 }
 
 impl SessionExecutionLeaseGuard {
-    /// Claim the lane, or hand back the live holder that blocked the claim.
-    ///
-    /// Callers that proceed under the commit CAS anyway need the holder's
-    /// identity, so a later rejection is attributable; callers that simply give
-    /// up use [`Self::try_acquire`].
-    pub(super) async fn try_acquire_or_observe_holder(
-        store: Arc<dyn RuntimePersistence>,
-        session_id: &str,
-        owner: &crate::LeaseOwnerIdentity,
-        timings: LeaseTimings,
-        clock: Arc<dyn Clock>,
-    ) -> Result<Result<Self, SessionExecutionLease>, StoreError> {
-        let acquisition = match store
-            .try_claim_session_execution_lease(session_id, owner, timings.ttl_ms())
-            .await?
-        {
-            SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => acquisition,
-            SessionExecutionLeaseClaimOutcome::Busy { holder } => {
-                trace_busy(session_id, owner, &holder);
-                return Ok(Err(holder));
-            }
-        };
-        Ok(Ok(Self::from_acquisition(
-            store,
-            acquisition,
-            timings,
-            clock,
-        )))
-    }
-
     pub(super) async fn try_acquire(
         store: Arc<dyn RuntimePersistence>,
         session_id: &str,
@@ -253,17 +200,20 @@ impl SessionExecutionLeaseGuard {
     }
 
     /// Snapshot the holder facts a commit-rejection trace event reports.
-    pub(super) fn commit_evidence(&self) -> SessionExecutionLeaseCommitEvidence {
+    ///
+    /// Returned boxed: the caller holds this across the commit await, and even an
+    /// unboxed temporary inside that async body is enough to push the turn futures
+    /// past the workspace's large-future budget.
+    pub(super) fn commit_evidence(&self) -> Box<SessionExecutionLeaseCommitEvidence> {
         let lease = self
             .lease
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        SessionExecutionLeaseCommitEvidence {
+        Box::new(SessionExecutionLeaseCommitEvidence {
             owner: lease.owner.clone(),
             fencing_token: lease.fencing_token,
-            lane_held: true,
             lease_lost: self.lost.load(Ordering::Acquire),
-        }
+        })
     }
 
     /// Record an already-acknowledged release: the commit that carried this
@@ -392,7 +342,7 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
             Ok(result)
         }
         Err(error) => {
-            trace_commit_cas_rejected(&session_id, Some(&evidence), &error);
+            trace_commit_cas_rejected(&session_id, Some(&evidence), owner, &error);
             if let Err(release_error) = lease.release_if_live().await {
                 tracing::warn!(
                     error = %release_error,
@@ -577,18 +527,23 @@ fn trace_taken_over(
 pub(super) fn trace_commit_cas_rejected(
     session_id: &str,
     evidence: Option<&SessionExecutionLeaseCommitEvidence>,
+    claimant: &crate::LeaseOwnerIdentity,
     err: &StoreError,
 ) {
     let StoreError::HeadRevisionConflict { expected, actual } = err else {
         return;
     };
+    // The writer is always nameable: it is the lane holder when one was held, and
+    // otherwise the runner that proceeded under the busy advisory. A rejection is
+    // never anonymous.
+    let owner = evidence.map_or(claimant, |evidence| &evidence.owner);
     tracing::warn!(
         session_id,
         fencing_token = evidence.map(|evidence| evidence.fencing_token),
-        owner_id = evidence.map(|evidence| evidence.owner.owner_id.as_str()),
-        incarnation_id = evidence.map(|evidence| evidence.owner.incarnation_id.as_str()),
-        lane_held = evidence.map(|evidence| evidence.lane_held),
-        lease_lost = evidence.map(|evidence| evidence.lease_lost),
+        owner_id = %owner.owner_id,
+        incarnation_id = %owner.incarnation_id,
+        lane_held = evidence.is_some(),
+        lease_lost = evidence.is_some_and(|evidence| evidence.lease_lost),
         expected_head_revision = expected,
         actual_head_revision = actual,
         consulted = "session_head_revision",

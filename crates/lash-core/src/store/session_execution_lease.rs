@@ -119,8 +119,11 @@ pub struct SessionExecutionLeaseAcquisition {
     /// incarnation immediately before this claim, and `None` otherwise: a first
     /// claim, a reclaim of a row whose holder released it (nothing was taken from
     /// anyone), or same-incarnation reentry (which advances no generation).
+    /// Boxed for the same reason `ProcessRecord`'s optional facts are: a claim
+    /// outcome is awaited on the turn path, so an inline copy grows every turn
+    /// future, and this field is `None` on the common claim.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub displaced: Option<SessionExecutionLeaseDisplacement>,
+    pub displaced: Option<Box<SessionExecutionLeaseDisplacement>>,
 }
 
 /// The prior durable holder a claim displaced.
@@ -155,11 +158,11 @@ impl SessionExecutionLeaseAcquisition {
     ) -> Self {
         Self {
             lease,
-            displaced: Some(SessionExecutionLeaseDisplacement {
+            displaced: Some(Box::new(SessionExecutionLeaseDisplacement {
                 owner: displaced,
                 fencing_token: displaced_fencing_token,
                 expired_at_epoch_ms: displaced_expired_at_epoch_ms,
-            }),
+            })),
         }
     }
 }

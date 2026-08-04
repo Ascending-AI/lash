@@ -765,7 +765,8 @@ async fn run_user_turn_terminalized(
         &session_id,
         &turn_id,
         "restate_user_turn.failed",
-        AssertUnwindSafe(run_user_turn(state.clone(), request, controller))
+        // Boxed: this future is within a few bytes of the large-future budget.
+        AssertUnwindSafe(Box::pin(run_user_turn(state.clone(), request, controller)))
             .catch_unwind()
             .await,
     )
@@ -1027,9 +1028,14 @@ async fn run_queued_turn_terminalized(
         &session_id,
         &turn_id,
         "restate_queued_turn.failed",
-        AssertUnwindSafe(run_queued_turn(state.clone(), request, controller))
-            .catch_unwind()
-            .await,
+        // Boxed: this future is within a few bytes of the large-future budget.
+        AssertUnwindSafe(Box::pin(run_queued_turn(
+            state.clone(),
+            request,
+            controller,
+        )))
+        .catch_unwind()
+        .await,
     )
     .await
 }

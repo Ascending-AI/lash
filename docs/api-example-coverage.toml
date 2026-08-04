@@ -65281,7 +65281,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:1104#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
+usage = "examples/agent-workbench/src/restate.rs:1116#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
 
 [[api]]
 symbol = "lash_core::PendingTurnInputClaimDiagnostics"

@@ -258,7 +258,6 @@ impl LashRuntime {
     async fn claim_session_execution_lease(
         &mut self,
     ) -> Result<Option<SessionExecutionLeaseGuard>, RuntimeError> {
-        self.unheld_lease_commit_evidence = None;
         let Some(store) = self
             .session
             .as_ref()
@@ -266,7 +265,7 @@ impl LashRuntime {
         else {
             return Ok(None);
         };
-        match SessionExecutionLeaseGuard::try_acquire_or_observe_holder(
+        match SessionExecutionLeaseGuard::try_acquire(
             store,
             &self.state.session_id,
             &self.runtime_lease_owner,
@@ -276,20 +275,19 @@ impl LashRuntime {
         .await
         .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?
         {
-            Ok(guard) => Ok(Some(guard)),
-            Err(busy_holder) => {
+            Some(guard) => Ok(Some(guard)),
+            None => {
+                // The claim itself already logged the holder it lost to
+                // (`session_execution_lease.busy`). The turn proceeds without the
+                // lane because the commit CAS is the authority (ADR 0029), and a
+                // rejection still names this writer from its claimant identity.
                 tracing::debug!(
                     session_id = %self.state.session_id,
-                    holder_generation = busy_holder.fencing_token,
-                    holder_owner_id = %busy_holder.owner.owner_id,
+                    consulted = "session_execution_lease",
+                    outcome = "proceeding_under_commit_cas",
                     event = "session_execution_lease.busy_advisory",
                     "session execution lease is busy; proceeding under the commit CAS fence"
                 );
-                self.unheld_lease_commit_evidence =
-                    Some(SessionExecutionLeaseCommitEvidence::without_lane(
-                        &self.runtime_lease_owner,
-                        &busy_holder,
-                    ));
                 Ok(None)
             }
         }
@@ -581,17 +579,26 @@ impl LashRuntime {
                 release_session_execution_lease
                     .then(|| session_execution_lease.map(SessionExecutionLeaseGuard::completion))
                     .flatten(),
-                session_execution_lease
-                    .map(SessionExecutionLeaseGuard::commit_evidence)
-                    .or_else(|| self.unheld_lease_commit_evidence.clone()),
             )
             .await
         {
             Ok(batches) => batches,
             Err(err) => {
+                // Reported here, not inside the commit: the guard reference and the
+                // claimant are already live in this future, so naming the writer
+                // costs nothing, while carrying evidence through the commit await
+                // would grow every turn future.
+                trace_commit_cas_rejected(
+                    &self.state.session_id,
+                    session_execution_lease
+                        .map(SessionExecutionLeaseGuard::commit_evidence)
+                        .as_deref(),
+                    &self.runtime_lease_owner,
+                    &err,
+                );
                 self.mark_phase_end(RuntimeTurnPhase::FinalCommit);
                 self.mark_phase_end(RuntimeTurnPhase::PersistTurn);
-                return Err(err);
+                return Err(runtime_error_from_store_commit(err));
             }
         };
         staged_usage.confirm_identities(&confirmed_usage);
