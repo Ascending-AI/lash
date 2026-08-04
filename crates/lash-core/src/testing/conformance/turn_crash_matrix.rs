@@ -7,7 +7,14 @@
 //! call, and a final model response produces the committed golden trace. The
 //! crash matrix is generated from that trace: every operation has a boundary
 //! crash, every durable write has an inside-call lost-response crash, and the
-//! scripted provider contributes its own mid-stream crash points.
+//! scripted provider contributes its own mid-stream crash points. The scripted
+//! provider deliberately holds the initial stream until one lease renewal is
+//! observed, making the golden renewal position deterministic rather than a
+//! claim about scheduler ordering.
+//!
+//! Trace drift covers the operations explicitly decorated by this module.
+//! Durable-store methods that [`SeamStore`] passes through undecorated are
+//! outside that seam-coverage boundary until they are deliberately modeled.
 //!
 //! The outcome table is hand-written in `turn_crash_outcomes.json`. Its rulings
 //! follow ADR 0029's reclaim-mediated LAW/NON-LAW split, ADR 0045's stateless
@@ -24,6 +31,12 @@
 //! - in-process points between seam operations are durably equivalent to the
 //!   next seam boundary: no durable fact can change between two seam calls, so
 //!   killing anywhere in that interval recovers from the same durable prefix.
+//! - level 1 uses task cancellation to check every generated semantic point;
+//!   level 2 uses a separate process and `SIGKILL` at the selected durable-risk
+//!   points.
+//! - a level-2 known-defect ruling is not a skip: it requires a ticket and an
+//!   exact defective durable end state. Any other state fails until the entry
+//!   is consciously flipped to the exact correct state when the ticket lands.
 //!
 //! Integrator class: conformance-suite embedders (ADR 0051 class 4).
 
@@ -1651,10 +1664,10 @@ where
 {
     let identity = ReferenceIdentity::for_scenario(scenario);
     let owner = LeaseOwnerIdentity::opaque("recovery-probe", format!("{scenario}:probe"));
+    let store = make(scenario);
+    super::bind_conformance_session(&store, &identity.session_id).await;
     tokio::time::timeout(RECOVERY_TIMEOUT, async {
         loop {
-            let store = make(scenario);
-            super::bind_conformance_session(&store, &identity.session_id).await;
             let outcome = store
                 .try_claim_session_execution_lease(
                     &identity.session_id,
