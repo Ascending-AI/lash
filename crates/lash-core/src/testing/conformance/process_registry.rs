@@ -628,20 +628,23 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
         .await
         .expect("register renewal process");
     let short = registry
-        .claim_process_lease("lease-renew", &process_lease_owner("owner-a"), SHORT_TTL_MS)
+        .claim_process_lease("lease-renew", &process_lease_owner("owner-a"), 60_000)
         .await
         .expect("claim short lease")
         .acquired()
         .expect("short lease acquired");
     let renewed = registry
-        .renew_process_lease(&short, 60_000)
+        .renew_process_lease(&short, 120_000)
         .await
         .expect("renew lease");
-    tokio::time::sleep(std::time::Duration::from_millis(SHORT_TTL_MS + 10)).await;
+    assert!(
+        renewed.expires_at_epoch_ms > short.expires_at_epoch_ms,
+        "renewal must extend the persisted lease expiry"
+    );
     registry
-        .renew_process_lease(&renewed, 60_000)
+        .renew_process_lease(&renewed, 120_000)
         .await
-        .expect("renewed lease survives original expiry");
+        .expect("extended lease remains renewable");
 
     registry
         .register_process(registration("lease-release"))

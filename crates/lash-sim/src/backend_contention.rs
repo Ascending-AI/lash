@@ -11,6 +11,12 @@ use serde_json::{Value, json};
 use tokio::sync::Barrier;
 
 const LEASE_TTL_MS: u64 = 60_000;
+// Production-backed contention can be descheduled between database round
+// trips. This allowance bounds retries without making a 50 ms wall-clock race
+// part of the lease law.
+const LEASE_OBSERVATION_STALL_ALLOWANCE: std::time::Duration = std::time::Duration::from_secs(5);
+const LEASE_OBSERVATION_ATTEMPTS: usize = 3;
+const LEASE_EXPIRY_POLL: std::time::Duration = std::time::Duration::from_millis(10);
 
 #[derive(Debug, Serialize)]
 pub struct BackendContentionReport {
@@ -388,26 +394,62 @@ async fn stale_owner_ttl_preserves_live_successor(
 ) -> Result<BackendContentionOperation, String> {
     let stale_owner = LeaseOwnerIdentity::opaque("stale-worker-owner", "stale-worker-owner:001");
     let live_owner = LeaseOwnerIdentity::opaque("live-worker-owner", "live-worker-owner:001");
-    let stale_lease = acquired(
-        store
-            .try_claim_session_execution_lease(session_id, &stale_owner, 50)
-            .await
-            .map_err(|err| format!("claim stale-owner setup: {err}"))?,
-    )?;
-    let busy = store
-        .try_claim_session_execution_lease(session_id, &live_owner, LEASE_TTL_MS)
-        .await
-        .map_err(|err| format!("observe stale owner before TTL: {err}"))?;
-    if !matches!(busy, SessionExecutionLeaseClaimOutcome::Busy { .. }) {
-        return Err("stale owner was replaced before its lease TTL".to_string());
-    }
-    tokio::time::sleep(std::time::Duration::from_millis(75)).await;
-    let live_lease = acquired(
-        store
+    let stale_ttl_ms = LEASE_OBSERVATION_STALL_ALLOWANCE.as_millis() as u64;
+    let mut observed = None;
+    for _ in 0..LEASE_OBSERVATION_ATTEMPTS {
+        let observation_started = std::time::Instant::now();
+        let stale_lease = acquired(
+            store
+                .try_claim_session_execution_lease(session_id, &stale_owner, stale_ttl_ms)
+                .await
+                .map_err(|err| format!("claim stale-owner setup: {err}"))?,
+        )?;
+        let busy = store
             .try_claim_session_execution_lease(session_id, &live_owner, LEASE_TTL_MS)
             .await
-            .map_err(|err| format!("claim stale-owner lease after TTL: {err}"))?,
-    )?;
+            .map_err(|err| format!("observe stale owner before TTL: {err}"))?;
+        if observation_started.elapsed() < LEASE_OBSERVATION_STALL_ALLOWANCE {
+            if !matches!(busy, SessionExecutionLeaseClaimOutcome::Busy { .. }) {
+                return Err("stale owner was replaced while its lease was still live".to_string());
+            }
+            observed = Some(stale_lease);
+            break;
+        }
+        if let SessionExecutionLeaseClaimOutcome::Acquired(lapsed_successor) = busy {
+            store
+                .release_session_execution_lease(&lapsed_successor.completion())
+                .await
+                .map_err(|err| format!("release successor from lapsed observation: {err}"))?;
+        }
+    }
+    let stale_lease = observed.ok_or_else(|| {
+        format!(
+            "could not observe the stale owner within the {:?} stall allowance after {} attempts",
+            LEASE_OBSERVATION_STALL_ALLOWANCE, LEASE_OBSERVATION_ATTEMPTS
+        )
+    })?;
+    let expiry_deadline = std::time::Instant::now()
+        + LEASE_OBSERVATION_STALL_ALLOWANCE
+        + LEASE_OBSERVATION_STALL_ALLOWANCE;
+    let live_lease = loop {
+        match store
+            .try_claim_session_execution_lease(session_id, &live_owner, LEASE_TTL_MS)
+            .await
+            .map_err(|err| format!("claim stale-owner lease after TTL: {err}"))?
+        {
+            SessionExecutionLeaseClaimOutcome::Acquired(lease) => break lease,
+            SessionExecutionLeaseClaimOutcome::Busy { .. }
+                if std::time::Instant::now() < expiry_deadline =>
+            {
+                tokio::time::sleep(LEASE_EXPIRY_POLL).await;
+            }
+            SessionExecutionLeaseClaimOutcome::Busy { holder } => {
+                return Err(format!(
+                    "stale-owner lease remained busy after TTL: {holder:?}"
+                ));
+            }
+        }
+    };
     store
         .release_session_execution_lease(&stale_lease.completion())
         .await

@@ -11,6 +11,49 @@ pub(crate) use crate::{
 };
 pub(crate) use helpers::RecordingStore;
 
+#[derive(Debug)]
+struct RuntimeScenarioClock(std::sync::atomic::AtomicU64);
+
+impl RuntimeScenarioClock {
+    fn new(timestamp_ms: u64) -> Self {
+        Self(std::sync::atomic::AtomicU64::new(timestamp_ms))
+    }
+
+    fn advance(&self, duration_ms: u64) {
+        self.0
+            .fetch_add(duration_ms, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::Clock for RuntimeScenarioClock {
+    fn now(&self) -> std::time::Instant {
+        std::time::Instant::now()
+    }
+
+    fn timestamp_ms(&self) -> u64 {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn timestamp_rfc3339(&self) -> String {
+        self.timestamp_datetime().to_rfc3339()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.timestamp_ms()),
+        )
+    }
+
+    async fn sleep(&self, duration: std::time::Duration) {
+        tokio::time::sleep(duration).await;
+    }
+
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        tokio::time::sleep_until(deadline.into()).await;
+    }
+}
+
 #[path = "support/checkpoint.rs"]
 mod checkpoint;
 #[path = "support/claim.rs"]
@@ -131,6 +174,7 @@ struct RuntimeScenarioContext {
     name: &'static str,
     session_id: &'static str,
     host_behavior: RuntimeHostBehavior,
+    clock: Arc<RuntimeScenarioClock>,
     store: Arc<RecordingStore>,
     owner: Option<LeaseOwnerIdentity>,
     lease: Option<SessionExecutionLease>,
@@ -153,11 +197,13 @@ impl RuntimeScenarioContext {
             ..RuntimeSessionState::default()
         };
         state.ensure_agent_frame_initialized();
+        let clock = Arc::new(RuntimeScenarioClock::new(10_000));
         Self {
             name,
             session_id,
             host_behavior,
-            store: Arc::new(RecordingStore::default()),
+            store: Arc::new(RecordingStore::with_clock(clock.clone())),
+            clock,
             owner: None,
             lease: None,
             state,

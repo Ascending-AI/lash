@@ -82,6 +82,18 @@ fn open_store(path: &Path) -> Arc<dyn RuntimePersistence> {
     })) as Arc<dyn RuntimePersistence>
 }
 
+fn open_store_with_clock(
+    path: &Path,
+    clock: Arc<dyn lash_core::Clock>,
+) -> Arc<dyn RuntimePersistence> {
+    let path = path.to_path_buf();
+    Arc::new(sync_await(async move {
+        Store::open_with_clock(&path, clock)
+            .await
+            .expect("file store with conformance clock")
+    })) as Arc<dyn RuntimePersistence>
+}
+
 fn artifact_store_handles(
     path: &Path,
 ) -> lash_lashlang_runtime::testing::conformance::ArtifactStoreHandles {
@@ -681,13 +693,21 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
 #[tokio::test]
 async fn sqlite_store_satisfies_runtime_persistence_conformance() {
     let dirs = Arc::new(Mutex::new(Vec::new()));
-    lash_core::testing::conformance::runtime_persistence_reopenable(|| {
-        let path = fresh_db_path(&dirs, "session.db");
-        ReopenableRuntimePersistence {
-            open: open_store(&path),
-            reopen: open_store(&path),
-        }
-    })
+    let clock = Arc::new(ConformanceClock::new(10_000));
+    let store_clock = Arc::clone(&clock);
+    lash_core::testing::conformance::runtime_persistence_reopenable_with_lease_timing(
+        move || {
+            let path = fresh_db_path(&dirs, "session.db");
+            ReopenableRuntimePersistence {
+                open: open_store_with_clock(&path, store_clock.clone()),
+                reopen: open_store_with_clock(&path, store_clock.clone()),
+            }
+        },
+        lash_core::testing::conformance::RuntimePersistenceLeaseTiming::controlled({
+            let clock = Arc::clone(&clock);
+            move |duration_ms| clock.advance(duration_ms)
+        }),
+    )
     .await;
 }
 
