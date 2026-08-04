@@ -200,6 +200,14 @@ pub struct PostgresStoreConfig {
     /// Postgres `statement_timeout` applied to every connection. Default 30s — a
     /// backstop so a wedged query can never hold a connection indefinitely.
     pub statement_timeout: Option<Duration>,
+    /// Who owns the DDL. Default [`SchemaProvisioning::LashManaged`]: lash applies
+    /// its own creation statements at open. Hosts that vendor
+    /// [`PostgresStorage::schema_ddl`] into their own migration tooling set
+    /// [`SchemaProvisioning::HostProvisioned`] so open runs no DDL at all.
+    pub schema_provisioning: SchemaProvisioning,
+    /// What open does when the live schema drifts from the shape this build
+    /// expects. Default [`SchemaCheck::Enforce`].
+    pub schema_check: SchemaCheck,
 }
 
 impl Default for PostgresStoreConfig {
@@ -212,6 +220,8 @@ impl Default for PostgresStoreConfig {
             max_lifetime: Some(Duration::from_secs(1800)),
             lock_timeout: Some(Duration::from_secs(10)),
             statement_timeout: Some(Duration::from_secs(30)),
+            schema_provisioning: SchemaProvisioning::default(),
+            schema_check: SchemaCheck::default(),
         }
     }
 }
@@ -258,7 +268,7 @@ impl PostgresStorage {
             .connect(database_url)
             .await
             .map_err(store_sqlx_error)?;
-        let await_event_signing_secret = ensure_schema(&pool).await?;
+        let await_event_signing_secret = ensure_schema(&pool, schema_open_options(&config)).await?;
         Ok(Self {
             pool,
             await_event_signing_secret: await_event_signing_secret.into(),
@@ -267,19 +277,72 @@ impl PostgresStorage {
 
     /// Build storage over an already-constructed pool.
     ///
-    /// This runs the same [`ensure_schema`] gate `connect`/`connect_with` do, so
-    /// every public construction path enforces the component schema version: a
-    /// pre-cutover (e.g. version-10) database is rejected loudly with the same
-    /// mismatch error rather than silently used, which would resurrect the
-    /// cross-version hazards the version bump exists to prevent. The
-    /// `CREATE TABLE IF NOT EXISTS` statements are idempotent, so running the gate
-    /// against an already-provisioned pool is safe.
+    /// This runs the same schema gate `connect`/`connect_with` do, so every public
+    /// construction path enforces both the component schema version and the
+    /// structural shape: a pre-cutover (e.g. version-10) database is rejected
+    /// loudly with the same mismatch error rather than silently used, which would
+    /// resurrect the cross-version hazards the version bump exists to prevent. The
+    /// creation statements are idempotent, so running the gate against an
+    /// already-provisioned pool is safe.
+    ///
+    /// Use [`PostgresStorage::from_pool_with`] to open a host-provisioned database
+    /// without running any DDL.
     pub async fn from_pool(pool: PgPool) -> Result<Self, StoreError> {
-        let await_event_signing_secret = ensure_schema(&pool).await?;
+        Self::from_pool_with(pool, PostgresStoreConfig::default()).await
+    }
+
+    /// Build storage over an already-constructed pool, choosing who provisions
+    /// the schema and how a mismatch is handled.
+    ///
+    /// Only [`PostgresStoreConfig::schema_provisioning`] and
+    /// [`PostgresStoreConfig::schema_check`] are read: the pool already exists, so
+    /// its sizing and per-connection timeouts were fixed by whoever built it.
+    pub async fn from_pool_with(
+        pool: PgPool,
+        config: PostgresStoreConfig,
+    ) -> Result<Self, StoreError> {
+        let await_event_signing_secret = ensure_schema(&pool, schema_open_options(&config)).await?;
         Ok(Self {
             pool,
             await_event_signing_secret: await_event_signing_secret.into(),
         })
+    }
+
+    /// The exact DDL this build provisions, including the seed rows every open
+    /// mode requires.
+    ///
+    /// A host that owns its own migrations should vendor these bytes verbatim —
+    /// the same content is committed as `crates/lash-postgres-store/schema.sql` —
+    /// and never transcribe them: lash verifies the resulting structure at open
+    /// and rejects a mismatch with a per-object diff. Every statement is
+    /// creation-only and idempotent, and nothing is schema-qualified, so the DDL
+    /// provisions into whichever schema the session's `search_path` resolves.
+    pub fn schema_ddl() -> &'static str {
+        SCHEMA_DDL
+    }
+
+    /// The component schema version this build implements, as stamped in
+    /// `lash_schema_versions`.
+    ///
+    /// The component schema is a reject-and-recreate boundary: there is no
+    /// migration chain between versions, and a database stamped with any other
+    /// version is rejected at open.
+    pub fn schema_version() -> i32 {
+        SCHEMA_VERSION
+    }
+
+    /// Compares the live database against the schema this build expects and
+    /// returns the structured result.
+    ///
+    /// This is the same check every open runs, exposed so a host can gate its own
+    /// migration CI on it — the intent being that a production open is the
+    /// backstop that never fires rather than the place drift is discovered.
+    /// Unlike open, this never fails on drift: inspect
+    /// [`SchemaReport::is_conformant`] and [`SchemaReport::findings`], or render
+    /// the report for a sectioned expected-versus-found diff.
+    pub async fn verify_schema(&self) -> Result<SchemaReport, StoreError> {
+        let mut connection = self.pool.acquire().await.map_err(store_sqlx_error)?;
+        verify_schema_shape(&mut connection).await
     }
 
     pub fn pool(&self) -> &PgPool {
@@ -472,6 +535,8 @@ mod process_registry;
 mod runtime_persistence;
 #[path = "postgres/schema.rs"]
 mod schema;
+#[path = "postgres/schema_shape.rs"]
+mod schema_shape;
 #[path = "postgres/session_factory.rs"]
 mod session_factory;
 #[path = "postgres/support.rs"]
@@ -482,7 +547,20 @@ mod trigger_store;
 pub use effect_replay::{
     PostgresEffectHost, PostgresEffectReplayOptions, PostgresRuntimeEffectController,
 };
+use schema_shape::verify_schema_shape;
+pub use schema_shape::{
+    ColumnShape, ForeignKeyAction, ForeignKeyShape, SchemaCheck, SchemaFinding, SchemaProvisioning,
+    SchemaReport, SchemaShape, TableShape, UniqueGuard,
+};
 use {process_helpers::*, runtime_persistence::*, schema::*, session_factory::*, support::*};
+
+/// Extracts the schema-gate knobs one open should use from a store config.
+fn schema_open_options(config: &PostgresStoreConfig) -> SchemaOpenOptions {
+    SchemaOpenOptions {
+        provisioning: config.schema_provisioning,
+        check: config.schema_check,
+    }
+}
 
 #[cfg(test)]
 #[path = "../tests/support/mod.rs"]
