@@ -32,35 +32,68 @@ the single-endpoint workbench is green.
 
 `just push-gate`, the `just confidence*` batteries, and their container-backed
 E2E recipes are isolated by worktree. They derive a stable slug by lowercasing
-the basename of `git rev-parse --show-toplevel`, replacing non-alphanumeric
-runs with `-`, and trimming leading or trailing `-`. Container names, fixed
-Compose projects, persistent external network names, default evidence paths,
-and default host ports all include or derive from that slug.
+the basename of the script's physical worktree root, replacing non-alphanumeric
+runs with `-`, trimming leading or trailing `-`, and appending the first eight
+hex digits of a stable checksum of the absolute worktree path. Thus two
+checkouts with the same basename still have distinct identities. Container
+names, fixed Compose projects, persistent external network names, default
+evidence paths, and default host ports all include or derive from that slug.
 
-Each slug hashes with `cksum` into one of 64 disjoint 64-port blocks spanning
-61000–65095, above Linux's default ephemeral range. The lane offsets are stable:
+Each absolute worktree path hashes with `cksum` into one of 90 disjoint 50-port
+blocks spanning 61000–65499, above Linux's default ephemeral range. The lane
+offsets are stable:
 
 - `+10` push/confidence PostgreSQL, `+11` push MinIO, `+12` mutation PostgreSQL;
 - `+20..+23` agent-service Restate and endpoint;
 - `+30..+34` agent-workbench Restate, endpoint, and PostgreSQL;
-- `+40` distributed-worker MinIO; and
-- `+41..+46` process-operations MinIO, Restate, and PostgreSQL; and
-- `+47` version-bump recreation PostgreSQL.
+- `+40` distributed-worker MinIO;
+- `+41..+46` process-operations MinIO, Restate, and PostgreSQL;
+- `+47` version-bump recreation PostgreSQL; and
+- `+48` the attachment/usage workbench gate's PostgreSQL.
 
 Explicit existing environment overrides such as `LASH_PUSH_GATE_PORT_BASE`,
 `LASH_PUSH_GATE_POSTGRES_PORT`, `LASH_CONFIDENCE_OUT_DIR`, and each recipe's
 named port/container/artifact variables remain authoritative escape hatches.
+If two concurrently active worktrees select the same block, set
+`LASH_GATE_SLOT_OVERRIDE` to an unused integer from `0` through `89` for one
+gate; this changes its derived port base while preserving its path-qualified
+ownership identity. The refusal prints this override and the occupied lock
+path.
 The default confidence evidence root is
-`target/confidence/<worktree-slug>/`.
+`target/confidence/<worktree-slug>/` for local runs. CI explicitly pins
+`LASH_CONFIDENCE_OUT_DIR` to `target/confidence` so its established artifact
+upload and summary paths are unchanged.
 
 Every worktree uses a fixed external network named `lash-e2e-<worktree-slug>`.
 Scripts create it idempotently and never delete it, because host network
 watchers treat Docker network add/remove as interface churn. Compose projects
-are fixed per worktree rather than per run. A nonblocking worktree lock rejects
-a second same-worktree battery with exit 73, and labeled leftover containers
-produce a refusal that names the exact `docker rm -f` recovery command. A hash
-slot lock turns the unlikely case of two slugs selecting the same block into a
-clean refusal rather than a host-port race.
+are fixed per worktree rather than per run. Their repeated `postgres`, `minio`,
+and `restate` aliases are safe only because the worktree lock and labeled
+leftover check prevent two lane projects from sharing this network at once. A
+nonblocking worktree lock rejects a second same-worktree battery with exit 73.
+The refusal names the owner PID, lock path, and exact orphan remedy. Compose
+leftovers produce a project-qualified `docker compose ... down -v
+--remove-orphans` remedy; direct containers use `docker rm -fv`. Lock state is
+UID-scoped below `${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}`, and lock descriptors are
+not inherited by gate children. A slot lock turns a residual hash collision
+into a clean refusal rather than a host-port race.
+
+After upgrading from the older global-name gate layout, remove pre-change
+unlabeled state once, after confirming no old gate is running. In particular,
+remove the old distributed-worker project with the current Compose file's
+required values supplied only for configuration parsing:
+
+```sh
+LASH_GATE_WORKTREE_SLUG=legacy LASH_E2E_MINIO_PORT=1 \
+LASH_E2E_BIN_DIR=/tmp LASH_E2E_NETWORK=lash-e2e \
+  docker compose -p restate-postgres-workers \
+  -f runbooks/restate-postgres-workers/docker-compose.yml \
+  down -v --remove-orphans
+```
+
+Remove obsolete `lash-*-push-gate-*` containers explicitly, and remove the old
+`lash-e2e` network only when no container is attached. New gates never remove
+unlabeled legacy state for you.
 
 To prove the live contract against another checkout containing the same
 change, run:

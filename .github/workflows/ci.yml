@@ -27,6 +27,8 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   LASH_CI_FEATURES: ""
+  # Preserve the pre-worktree-isolation artifact tree consumed below.
+  LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence
 
 jobs:
   # Sole writer of the shared linux-debug cache and the doctest gate. It builds
@@ -83,6 +85,7 @@ jobs:
           python3 scripts/test_publish_workspace.py
           python3 scripts/test_confidence_gate_ci_contract.py
           python3 scripts/test_release_notes.py
+          bash scripts/test-worktree-gate-env.sh
 
       - name: Check public API example coverage
         run: python3 scripts/check_api_example_coverage.py

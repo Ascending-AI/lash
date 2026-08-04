@@ -199,6 +199,9 @@ gate-container-smoke:
 gate-worktree-concurrency-check peer:
   bash "{{repo}}/scripts/test-gate-worktree-concurrency.sh" "{{peer}}"
 
+gate-stale-trace-regression:
+  bash "{{repo}}/scripts/test-restate-workers-trace-scrub.sh"
+
 stack-budget:
   bash "{{repo}}/scripts/ci-stack-budget.sh"
 

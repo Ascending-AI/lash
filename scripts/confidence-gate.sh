@@ -292,7 +292,8 @@ Fast shards:
 Sim search shards:
   sim-search:<i>/<n> runs only the deterministic simulation search lane at
   full-lane budgets for one seed-index shard, writing artifacts under
-  target/confidence/sim-search/<i>-of-<n>/. The weekly Confidence workflow
+  target/confidence/<worktree-slug>/sim-search/<i>-of-<n>/ locally. CI pins
+  LASH_CONFIDENCE_OUT_DIR to target/confidence so the weekly Confidence workflow
   partitions the full search seed space as shard 1/<n> on the main full job
   plus matrix jobs for the remaining shards, so the union covers every seed
   exactly once.
@@ -410,8 +411,10 @@ if [ "$lane" = "fast" ] && [ "$area" != "all" ]; then
   esac
 fi
 
-if [ "$dry_run" -eq 0 ]; then
+if [ "$dry_run" -eq 0 ] && [ "$lane" != "fast" ]; then
   lash_gate_acquire "confidence-${requested_selector}"
+fi
+if [ "$dry_run" -eq 0 ]; then
   mkdir -p "$out_dir"
 fi
 
@@ -2533,6 +2536,7 @@ print_plan() {
   printf 'Area: %s\n' "$area"
   printf 'Mutation scope: %s\n' "$mutation_scope"
   printf 'Coverage scope: %s\n' "$coverage_scope"
+  printf 'Artifacts: %s\n' "$out_dir"
   printf 'Would run:\n'
 
   if [ -n "$sim_search_shard" ]; then

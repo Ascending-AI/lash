@@ -24,6 +24,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   LASH_CONFIDENCE_BOOTSTRAP: "1"
+  # Preserve the established workflow artifact paths; local runs remain
+  # worktree-qualified by default.
+  LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence
   LASH_CI_FEATURES: ""
 
 jobs:

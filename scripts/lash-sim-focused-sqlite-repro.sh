@@ -3,8 +3,10 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
+# shellcheck source=scripts/worktree-gate-env.sh
+source "$repo/scripts/worktree-gate-env.sh"
 
-out_dir="${1:-${LASH_FOCUSED_SQLITE_REPRO_OUT_DIR:-$repo/target/confidence/focused-sqlite-seed-tail}}"
+out_dir="${1:-${LASH_FOCUSED_SQLITE_REPRO_OUT_DIR:-$repo/target/confidence/$LASH_GATE_WORKTREE_SLUG/focused-sqlite-seed-tail}}"
 profile="${LASH_FOCUSED_SQLITE_REPRO_PROFILE:-full-random}"
 max_boundaries="${LASH_FOCUSED_SQLITE_REPRO_MAX_BOUNDARIES:-384}"
 

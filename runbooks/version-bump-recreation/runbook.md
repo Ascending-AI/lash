@@ -23,7 +23,8 @@ The companion owns one PostgreSQL service on the worktree's deterministic host-p
 **+47** under the fixed `lash-version-bump-<worktree-slug>` compose project on the external
 `lash-e2e-<worktree-slug>` network (created idempotently, never destroyed), and removes the
 project's services and volume on exit. `LASH_VERSION_BUMP_POSTGRES_PORT` remains an explicit
-port override. It never touches another worktree's assigned PostgreSQL service. It seeds the pre-bump deployment with a real turn
+port override. Its path-qualified project and ownership label prevent it from touching another
+worktree's PostgreSQL service. It seeds the pre-bump deployment with a real turn
 per session, a live background process holding a pending wake, and a fired trigger
 delivery, then rewinds the recorded component schema version by one. It emits
 `version-bump recreation e2e passed: scenarios=4` only after every phase assertion holds.
