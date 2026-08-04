@@ -353,6 +353,10 @@ async fn a_stored_generated_column_lash_writes_explicitly_is_rejected() {
 /// null-distinctness differs, which is why it has to be in the fingerprint.
 #[tokio::test]
 async fn a_nulls_not_distinct_rebuild_of_a_nullable_guard_is_rejected() {
+    if database_url().is_none() {
+        eprintln!("skipping NULLS NOT DISTINCT drift: database URL is not set");
+        return;
+    }
     if postgres_server_version_num().await < 150_000 {
         eprintln!("skipping NULLS NOT DISTINCT drift: needs PostgreSQL 15 or newer");
         return;
