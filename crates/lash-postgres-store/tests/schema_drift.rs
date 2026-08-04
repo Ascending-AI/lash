@@ -194,6 +194,31 @@ async fn assert_mutation_is_rejected(
     scratch.cleanup().await;
 }
 
+/// Append-request replay depends on one durable receipt per session and turn.
+/// Dropping the receipt table's primary key would silently admit conflicting
+/// identities for the same append operation.
+#[tokio::test]
+async fn a_dropped_append_receipt_unique_guard_is_rejected() {
+    assert_mutation_is_rejected(
+        "ALTER TABLE lash_runtime_turn_commits
+             DROP CONSTRAINT lash_runtime_turn_commits_pkey",
+        &[
+            "UNIQUE GUARD DRIFT",
+            "lash_runtime_turn_commits: missing primary key (session_id, turn_id)",
+        ],
+        |finding| {
+            matches!(
+                finding,
+                SchemaFinding::MissingUniqueGuard { table, expected }
+                    if table == "lash_runtime_turn_commits"
+                        && expected.primary_key
+                        && expected.columns == ["session_id", "turn_id"]
+            )
+        },
+    )
+    .await;
+}
+
 /// The motivating case. `idx_lash_process_events_key` is a partial unique
 /// *index*, so it has no `pg_constraint` row: a constraints-only check would
 /// never see it go missing, and exactly-once process-event dedup would degrade
@@ -1269,7 +1294,7 @@ async fn report_remedies_match_the_finding_class() {
 
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 35 WHERE component = 'lash-postgres-store';
+            "UPDATE lash_schema_versions SET version = 36 WHERE component = 'lash-postgres-store';
              DROP INDEX idx_lash_process_events_key",
         )
         .await;
@@ -1401,7 +1426,7 @@ async fn the_schema_gate_emits_its_decision_basis() {
         capture,
         &scratch.name,
         "allowed",
-        &["found_version=Some(35)", "finding_total=0"],
+        &["found_version=Some(36)", "finding_total=0"],
     );
 
     // (b) denied on shape.
@@ -1573,7 +1598,7 @@ fn assert_evidence_with_provisioning(
             )
         });
     let provisioning = format!("provisioning={provisioning}");
-    for field in ["component=lash-postgres-store", "expected_version=35"]
+    for field in ["component=lash-postgres-store", "expected_version=36"]
         .iter()
         .chain(std::iter::once(&provisioning.as_str()))
         .chain(extra)
