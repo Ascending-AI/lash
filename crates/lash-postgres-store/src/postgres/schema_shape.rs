@@ -380,24 +380,6 @@ impl fmt::Display for UniqueGuard {
     }
 }
 
-impl UniqueGuard {
-    /// Identity used to pair a missing guard with a found one, so a difference in
-    /// key order, predicate, or null-distinctness reports as one mismatch line
-    /// instead of an unrelated missing/unexpected pair.
-    ///
-    /// Pairing is by column *set* and kind — never by constraint or index name,
-    /// which PostgreSQL auto-generates and a host may legitimately choose. Note
-    /// that pairing is not equality: a guard whose key columns are in a different
-    /// order is still a mismatch, it is just diagnosed as one rather than as two
-    /// unrelated findings.
-    fn pairing_key(&self) -> (bool, BTreeSet<&str>) {
-        (
-            self.primary_key,
-            self.columns.iter().map(String::as_str).collect(),
-        )
-    }
-}
-
 /// A foreign key declared on a lash-owned table, with the on-delete action lash
 /// pruning depends on.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -422,18 +404,6 @@ impl fmt::Display for ForeignKeyShape {
             self.parent_table,
             self.parent_columns.join(", "),
             self.on_delete
-        )
-    }
-}
-
-impl ForeignKeyShape {
-    /// Identity used to pair a missing key with a found one so an on-delete
-    /// difference reports as a mismatch rather than as an unrelated pair.
-    fn pairing_key(&self) -> (&[String], &str, &[String]) {
-        (
-            self.columns.as_slice(),
-            self.parent_table.as_str(),
-            self.parent_columns.as_slice(),
         )
     }
 }
@@ -597,8 +567,18 @@ impl SchemaShape {
                 continue;
             };
             diff_columns(name, expected_table, found_table, &mut findings);
-            diff_unique_guards(name, expected_table, found_table, &mut findings);
-            diff_foreign_keys(name, expected_table, found_table, &mut findings);
+            diff_paired_objects(
+                name,
+                &expected_table.unique_guards,
+                &found_table.unique_guards,
+                &mut findings,
+            );
+            diff_paired_objects(
+                name,
+                &expected_table.foreign_keys,
+                &found_table.foreign_keys,
+                &mut findings,
+            );
         }
         findings
     }
@@ -739,94 +719,120 @@ fn diff_columns(
     }
 }
 
-fn diff_unique_guards(
-    table: &str,
-    expected: &TableShape,
-    found: &TableShape,
-    findings: &mut Vec<SchemaFinding>,
-) {
-    let mut missing: Vec<&UniqueGuard> = expected
-        .unique_guards
-        .difference(&found.unique_guards)
-        .collect();
-    let mut unexpected: Vec<&UniqueGuard> = found
-        .unique_guards
-        .difference(&expected.unique_guards)
-        .collect();
-    missing.retain(|expected_guard| {
-        let paired = unexpected
-            .iter()
-            .position(|found_guard| found_guard.pairing_key() == expected_guard.pairing_key());
-        match paired {
-            Some(index) => {
-                let found_guard = unexpected.remove(index);
-                findings.push(SchemaFinding::UniqueGuardMismatch {
-                    table: table.to_string(),
-                    expected: (*expected_guard).clone(),
-                    found: found_guard.clone(),
-                });
-                false
-            }
-            None => true,
-        }
-    });
-    for guard in missing {
-        findings.push(SchemaFinding::MissingUniqueGuard {
-            table: table.to_string(),
-            expected: guard.clone(),
-        });
+/// An object class compared as a set, where a near-match should read as one
+/// mismatch rather than as two unrelated findings.
+trait PairedObject: Ord + Clone {
+    /// What makes two objects the same object for diagnostic purposes. Never a
+    /// name: PostgreSQL generates those and a host may legitimately choose its
+    /// own. Deliberately coarser than equality, so a difference *within* the
+    /// identity is what gets reported.
+    type Identity: Eq;
+
+    fn identity(&self) -> Self::Identity;
+    fn missing(table: &str, expected: &Self) -> SchemaFinding;
+    fn mismatch(table: &str, expected: &Self, found: &Self) -> SchemaFinding;
+    fn unexpected(table: &str, found: &Self) -> SchemaFinding;
+}
+
+impl PairedObject for UniqueGuard {
+    type Identity = (bool, BTreeSet<String>);
+
+    fn identity(&self) -> Self::Identity {
+        (self.primary_key, self.columns.iter().cloned().collect())
     }
-    for guard in unexpected {
-        findings.push(SchemaFinding::UnexpectedUniqueGuard {
+
+    fn missing(table: &str, expected: &Self) -> SchemaFinding {
+        SchemaFinding::MissingUniqueGuard {
             table: table.to_string(),
-            found: guard.clone(),
-        });
+            expected: expected.clone(),
+        }
+    }
+
+    fn mismatch(table: &str, expected: &Self, found: &Self) -> SchemaFinding {
+        SchemaFinding::UniqueGuardMismatch {
+            table: table.to_string(),
+            expected: expected.clone(),
+            found: found.clone(),
+        }
+    }
+
+    fn unexpected(table: &str, found: &Self) -> SchemaFinding {
+        SchemaFinding::UnexpectedUniqueGuard {
+            table: table.to_string(),
+            found: found.clone(),
+        }
     }
 }
 
-fn diff_foreign_keys(
+impl PairedObject for ForeignKeyShape {
+    type Identity = (Vec<String>, String, Vec<String>);
+
+    fn identity(&self) -> Self::Identity {
+        (
+            self.columns.clone(),
+            self.parent_table.clone(),
+            self.parent_columns.clone(),
+        )
+    }
+
+    fn missing(table: &str, expected: &Self) -> SchemaFinding {
+        SchemaFinding::MissingForeignKey {
+            table: table.to_string(),
+            expected: expected.clone(),
+        }
+    }
+
+    fn mismatch(table: &str, expected: &Self, found: &Self) -> SchemaFinding {
+        SchemaFinding::ForeignKeyMismatch {
+            table: table.to_string(),
+            expected: expected.clone(),
+            found: found.clone(),
+        }
+    }
+
+    fn unexpected(table: &str, found: &Self) -> SchemaFinding {
+        SchemaFinding::UnexpectedForeignKey {
+            table: table.to_string(),
+            found: found.clone(),
+        }
+    }
+}
+
+/// Diffs two sets of the same object class, pairing near-matches first.
+///
+/// Unique guards and foreign keys want exactly this algorithm; having it once
+/// keeps the two from drifting apart as the finding vocabulary grows.
+fn diff_paired_objects<T: PairedObject>(
     table: &str,
-    expected: &TableShape,
-    found: &TableShape,
+    expected: &BTreeSet<T>,
+    found: &BTreeSet<T>,
     findings: &mut Vec<SchemaFinding>,
 ) {
-    let mut missing: Vec<&ForeignKeyShape> = expected
-        .foreign_keys
-        .difference(&found.foreign_keys)
-        .collect();
-    let mut unexpected: Vec<&ForeignKeyShape> = found
-        .foreign_keys
-        .difference(&expected.foreign_keys)
-        .collect();
-    missing.retain(|expected_key| {
+    let mut missing: Vec<&T> = expected.difference(found).collect();
+    let mut unexpected: Vec<&T> = found.difference(expected).collect();
+    missing.retain(|expected_object| {
         let paired = unexpected
             .iter()
-            .position(|found_key| found_key.pairing_key() == expected_key.pairing_key());
+            .position(|found_object| found_object.identity() == expected_object.identity());
         match paired {
             Some(index) => {
-                let found_key = unexpected.remove(index);
-                findings.push(SchemaFinding::ForeignKeyMismatch {
-                    table: table.to_string(),
-                    expected: (*expected_key).clone(),
-                    found: found_key.clone(),
-                });
+                let found_object = unexpected.remove(index);
+                findings.push(T::mismatch(table, expected_object, found_object));
                 false
             }
             None => true,
         }
     });
-    for key in missing {
-        findings.push(SchemaFinding::MissingForeignKey {
-            table: table.to_string(),
-            expected: key.clone(),
-        });
-    }
-    for key in unexpected {
-        findings.push(SchemaFinding::UnexpectedForeignKey {
-            table: table.to_string(),
-            found: key.clone(),
-        });
-    }
+    findings.extend(
+        missing
+            .into_iter()
+            .map(|object| T::missing(table, object))
+            .chain(
+                unexpected
+                    .into_iter()
+                    .map(|object| T::unexpected(table, object)),
+            ),
+    );
 }
 
 /// One drifted object, named. A [`SchemaReport`] carries a list of these rather
