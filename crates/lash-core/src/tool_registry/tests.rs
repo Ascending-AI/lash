@@ -49,6 +49,10 @@ mod tests {
     struct DynamicToolProvider {
         names: Arc<std::sync::Mutex<Vec<String>>>,
     }
+    struct BlockingLiveTool {
+        entered: Arc<tokio::sync::Semaphore>,
+        release: Arc<tokio::sync::Semaphore>,
+    }
 
     fn test_tool(
         name: &str,
@@ -356,6 +360,30 @@ mod tests {
         }
     }
 
+    #[async_trait::async_trait]
+    impl ToolProvider for BlockingLiveTool {
+        fn tool_manifests(&self) -> Vec<ToolManifest> {
+            manifests(vec![test_tool("blocking_live", "blocking live tool")])
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+            contract_from(
+                vec![test_tool("blocking_live", "blocking live tool")],
+                name,
+            )
+        }
+
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+            self.entered.add_permits(1);
+            self.release
+                .acquire()
+                .await
+                .expect("release blocking live tool")
+                .forget();
+            ToolResult::ok(json!("completed from captured registry"))
+        }
+    }
+
     #[test]
     fn registry_makes_advertised_tools_members_by_default() {
         let registry =
@@ -380,6 +408,61 @@ mod tests {
             .collect::<BTreeSet<_>>();
         assert!(members.contains("enabled_tool"));
         assert!(members.contains("disabled_tool"));
+    }
+
+    #[tokio::test]
+    async fn removal_hides_source_from_new_session_snapshots_without_revoking_in_flight_snapshot() {
+        let entered = Arc::new(tokio::sync::Semaphore::new(0));
+        let release = Arc::new(tokio::sync::Semaphore::new(0));
+        let root = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("root registry");
+        let handle = root
+            .add_tool_provider(Arc::new(BlockingLiveTool {
+                entered: Arc::clone(&entered),
+                release: Arc::clone(&release),
+            }))
+            .expect("register blocking live provider");
+        let captured = Arc::new(
+            root.compose_session_catalog(true, Vec::new())
+                .expect("compose pre-removal session snapshot"),
+        );
+        let executing = crate::task::spawn({
+            let captured = Arc::clone(&captured);
+            async move {
+                let args = json!({});
+                let context = test_tool_context();
+                captured
+                    .execute(ToolCall {
+                        name: "blocking_live",
+                        args: &args,
+                        context: &context,
+                        progress: None,
+                    })
+                    .await
+            }
+        });
+        entered
+            .acquire()
+            .await
+            .expect("in-flight execution enters removed provider")
+            .forget();
+
+        root.remove_source(&handle)
+            .expect("remove provider from root registry");
+        let refreshed = root
+            .compose_session_catalog(true, Vec::new())
+            .expect("compose post-removal session snapshot");
+        assert!(
+            refreshed.resolve_contract("blocking_live").is_none(),
+            "subsequent session composition must miss the removed provider"
+        );
+
+        release.add_permits(1);
+        let completed = executing.await.expect("join captured-registry execution");
+        assert!(completed.is_success());
+        assert_eq!(
+            completed.value_for_projection(),
+            json!("completed from captured registry")
+        );
     }
 
     #[test]

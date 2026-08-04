@@ -706,11 +706,11 @@ impl SessionAdmin {
 
     async fn remove_tool_source(&self, handle: &ToolSourceHandle) -> Result<u64> {
         let tool_registry = self.tool_registry().await?;
-        let generation = tool_registry
+        tool_registry
             .remove_source(handle)
             .map_err(|err| EmbedError::Session(SessionError::Protocol(err.to_string())))?;
         self.refresh_tool_catalog().await?;
-        Ok(generation)
+        Ok(self.tool_state().await?.generation())
     }
 
     async fn create_child_session(&self, request: SessionCreateRequest) -> Result<SessionHandle> {
@@ -901,10 +901,46 @@ impl ToolAdmin {
         crate::tool_catalog::resolve_catalog_contract(&registry, name)
     }
 
+    /// Add a live tool provider to this session's registry.
+    ///
+    /// Subsequent contract resolution and execution through this session see
+    /// the provider immediately. The core-altitude [`LashCore::tool_catalog`](crate::LashCore::tool_catalog)
+    /// view is unchanged: live provider mutation belongs to the session.
+    ///
+    /// This is the host-facing route for session hosts that discover tool
+    /// providers after opening a session, such as MCP or tenant-specific tool
+    /// hosts. It keeps the registry implementation behind the facade as
+    /// required by [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+    ///
+    /// The returned handle belongs only to this open session. It is not a
+    /// durable identifier, and using it with another session is unchecked.
     pub async fn add_provider(&self, provider: Arc<dyn ToolProvider>) -> Result<ToolSourceHandle> {
         self.control.add_tool_provider(provider).await
     }
 
+    /// Remove a live provider source from this session's registry.
+    ///
+    /// Contract resolution for turns composed after this method returns no
+    /// longer sees tools owned by `handle`. A turn already executing holds the
+    /// pre-removal registry snapshot and may continue resolving and executing
+    /// the removed provider to completion; removal is not revocation. The
+    /// core-altitude [`LashCore::tool_catalog`](crate::LashCore::tool_catalog)
+    /// view remains unchanged.
+    ///
+    /// Removal deletes the source's per-tool state, including membership
+    /// choices. Re-adding the provider later creates fresh default-member
+    /// entries rather than restoring the removed policy. The returned value is
+    /// the session [`ToolState`] generation after the removal refresh and is a
+    /// compare-and-swap baseline for [`AdvancedToolAdmin::apply_state`]. An
+    /// unknown or already-removed handle remains an error rather than becoming
+    /// a silent no-op.
+    ///
+    /// This is the host-facing route for session hosts that retire dynamically
+    /// discovered providers. It keeps the registry implementation behind the
+    /// facade as required by [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+    /// The handle must have been issued by this same open session; handles are
+    /// not durable across session rebuilds, and cross-session misuse is
+    /// unchecked.
     pub async fn remove_source(&self, handle: &ToolSourceHandle) -> Result<u64> {
         self.control.remove_tool_source(handle).await
     }

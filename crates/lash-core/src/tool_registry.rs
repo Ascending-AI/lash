@@ -57,7 +57,7 @@ pub(crate) mod facade_ops {
         }
 
         fn remove_source(&self, handle: &ToolSourceHandle) -> Result<u64, ReconfigureError> {
-            self.remove_source_id(handle.as_str())
+            self.remove_source_id(handle.id())
         }
     }
 

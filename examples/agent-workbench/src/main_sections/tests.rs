@@ -877,15 +877,7 @@ finish "gap source"
         ) as Arc<dyn lash::process::ProcessRegistry>;
         let mail_world = mail::MailWorld::new();
         mail_world.add_account("test").expect("add test");
-        let provider = lash::testing::TestProvider::builder()
-            .kind("workbench-test")
-            .complete(|_| async {
-                Ok(text_response(
-                    "<lashlang>\nresult = await inbox.test.send({ title: \"Hi\", text: \"Yo\" })?\nfinish result.id\n</lashlang>",
-                ))
-            })
-            .build()
-            .into_handle();
+        let provider = catalog_lifecycle_provider();
         let model =
             lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None).expect("model spec");
         let session_id = WorkbenchSessionIds::fresh().current();
@@ -914,15 +906,18 @@ finish "gap source"
             "inbox.test send tool should be active: {tool_names:?}"
         );
         assert_tool_catalog_contract(&core, &session).await;
-
-        let output = session
-            .turn(lash::TurnInput::text("send a message"))
-            .turn_id(format!("workbench-test-turn:{}", uuid::Uuid::new_v4()))
-            .run()
-            .await
-            .expect("turn should resolve inbox.test.send, not fail with unknown name");
-        assert_eq!(output.final_value(), Some(&serde_json::json!("test-1")));
-        assert_eq!(mail_world.inbox("test").expect("inbox").len(), 1);
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            assert_plugin_provider_execution(&session, &mail_world),
+        )
+        .await
+        .expect("plugin-provider turn should complete");
+        tokio::time::timeout(
+            Duration::from_secs(20),
+            assert_live_tool_provider_execution_and_removal(&core, &session),
+        )
+        .await
+        .expect("live-provider lifecycle should complete");
         let _ = std::fs::remove_dir_all(data_dir);
     }
 
