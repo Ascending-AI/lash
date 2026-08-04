@@ -764,6 +764,7 @@ finish "registered"
         };
         let registration = worker_registration(
             lash_core::ProcessInput::SessionTurn {
+                definition_key: "lash-testing-session-turn:v1".to_string(),
                 create_request: Box::new(lash_core::SessionCreateRequest::child(
                     SESSION_ID,
                     lash_core::SessionStartPoint::Empty,

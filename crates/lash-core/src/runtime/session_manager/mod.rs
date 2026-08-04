@@ -104,6 +104,8 @@ pub(super) struct RuntimeSessionServices {
     processes: ProcessCapability,
     usage: UsageCapability,
     direct: DirectCompletionCapability,
+    direct_replay_ordinals: Arc<std::sync::Mutex<std::collections::BTreeMap<String, u64>>>,
+    direct_unkeyed_in_flight: Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
 }
 
 #[derive(Clone)]
@@ -330,6 +332,12 @@ impl RuntimeSessionServices {
             processes: ProcessCapability::new(runtime),
             usage: UsageCapability::new(runtime, persist_usage_to_store, child_usage_event_relay),
             direct: DirectCompletionCapability,
+            direct_replay_ordinals: Arc::new(std::sync::Mutex::new(
+                std::collections::BTreeMap::new(),
+            )),
+            direct_unkeyed_in_flight: Arc::new(std::sync::Mutex::new(
+                std::collections::BTreeSet::new(),
+            )),
         })
     }
 }

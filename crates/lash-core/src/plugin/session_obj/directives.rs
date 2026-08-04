@@ -271,12 +271,15 @@ impl PluginSession {
             turn.state.replace_active_read_state(messages.as_slice());
         }
 
-        if self.has_runtime_event_hooks() {
-            self.emit_runtime_event_with_phase_probe(
-                PluginLifecycleEvent::TurnFinalized(Arc::new(turn.clone())),
-                phase_probe,
-            )
-            .await;
+        if self.has_runtime_event_hooks()
+            && let Err(error) = self
+                .emit_runtime_event_with_phase_probe(
+                    PluginLifecycleEvent::TurnFinalized(Arc::new(turn.clone())),
+                    phase_probe,
+                )
+                .await
+        {
+            turn.errors.push(super::plugin_lifecycle_hook_issue(error));
         }
 
         Ok(TurnFinalization { turn, events })

@@ -21,6 +21,10 @@ use mutation::{
 };
 pub use router::*;
 use router::{default_enabled, reserve_in_memory_for_occurrence};
+use router::{
+    project_trigger_actor, project_trigger_draft, project_trigger_owner,
+    project_trigger_payload_leaf,
+};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TriggerEvent {
@@ -495,6 +499,13 @@ impl TriggerSubscriptionDraft {
     /// process identity label before trigger-store implementors persist the draft.
     pub fn validate(&self) -> Result<(), PluginError> {
         validate_subscription_key(&self.subscription_key, false)?;
+        if let crate::ProcessInput::SessionTurn { definition_key, .. } = &self.target
+            && definition_key.trim().is_empty()
+        {
+            return Err(PluginError::Session(
+                "trigger session-turn definition_key must not be empty".to_string(),
+            ));
+        }
         validate_trigger_subscription_target_label(
             self.target_label.as_deref(),
             self.target_identity.label.as_deref(),
@@ -574,7 +585,7 @@ pub struct TriggerSubscriptionRecord {
     pub subscription_key: String,
     pub incarnation: String,
     pub revision: u64,
-    pub definition_hash: String,
+    pub definition_fingerprint: String,
     pub registrant: crate::ProcessOriginator,
     pub env_ref: crate::ProcessExecutionEnvRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -777,7 +788,7 @@ pub struct TriggerMutationReceipt {
     pub subscription_id: String,
     pub incarnation: String,
     pub revision: u64,
-    pub definition_hash: String,
+    pub definition_fingerprint: String,
     pub enabled: bool,
     pub disposition: TriggerMutationDisposition,
     pub record_snapshot: TriggerSubscriptionRecord,
@@ -794,7 +805,7 @@ impl TriggerMutationReceipt {
             subscription_id: record.subscription_id.clone(),
             incarnation: record.incarnation.clone(),
             revision: record.revision,
-            definition_hash: record.definition_hash.clone(),
+            definition_fingerprint: record.definition_fingerprint.clone(),
             enabled: record.enabled,
             disposition,
             record_snapshot: record,
@@ -1022,13 +1033,13 @@ pub enum TriggerCommandOutcome {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TriggerOperationError {
     #[error(
-        "trigger subscription conflict for `{subscription_key}`: {reason}; existing revision {existing_revision:?}, existing definition {existing_definition_hash:?}, requested definition {requested_definition_hash:?}"
+        "trigger subscription conflict for `{subscription_key}`: {reason}; existing revision {existing_revision:?}, existing definition {existing_definition_fingerprint:?}, requested definition {requested_definition_fingerprint:?}"
     )]
     Conflict {
         subscription_key: String,
         existing_revision: Option<u64>,
-        existing_definition_hash: Option<String>,
-        requested_definition_hash: Option<String>,
+        existing_definition_fingerprint: Option<String>,
+        requested_definition_fingerprint: Option<String>,
         reason: String,
     },
     #[error("trigger subscription request is invalid: {message}")]
@@ -1085,23 +1096,174 @@ pub fn evaluate_trigger_prune(
     Ok(TriggerCommandOutcome::Prune { receipts })
 }
 
-pub fn trigger_command_hash(command: &TriggerCommand) -> Result<String, PluginError> {
-    crate::stable_hash::stable_json_sha256_hex(command)
-        .map_err(|err| PluginError::Session(format!("failed to hash trigger command: {err}")))
+const TRIGGER_COMMAND_FAMILY_VERSION: u8 = 2;
+const TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION: u8 = 2;
+
+/// Fingerprint one trigger command independently of its caller-supplied
+/// operation-id lookup address.
+///
+/// Permanent command tags: 1 register, 2 list, 3 update, 4 enable, 5 disable,
+/// 6 delete, 7 revive, 8 prune. Retired tags remain burned. Nested owner,
+/// actor, draft, and JSON tags are registered beside the trigger-definition
+/// projection they share; nested projections carry no version of their own.
+fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
+    let mut fingerprint = crate::stable_identity::IdentityEncoder::new(
+        "lash.trigger-command",
+        TRIGGER_COMMAND_FAMILY_VERSION,
+    );
+    match command {
+        TriggerCommand::Register {
+            owner_scope,
+            actor,
+            draft,
+        } => {
+            fingerprint.tag(1);
+            project_trigger_owner(&mut fingerprint, owner_scope);
+            project_trigger_actor(&mut fingerprint, actor);
+            project_trigger_draft(&mut fingerprint, draft);
+        }
+        TriggerCommand::List {
+            owner_scope,
+            filter,
+        } => {
+            fingerprint.tag(2);
+            project_trigger_owner(&mut fingerprint, owner_scope);
+            let TriggerSubscriptionFilter {
+                registrant_scope_id,
+                session_id,
+                subscription_key,
+                name,
+                source_type,
+                source_key,
+                target,
+                enabled,
+            } = filter;
+            for value in [
+                registrant_scope_id.as_deref(),
+                session_id.as_deref(),
+                subscription_key.as_deref(),
+                name.as_deref(),
+                source_type.as_deref(),
+                source_key.as_deref(),
+            ] {
+                fingerprint.optional(value, |fingerprint, value| fingerprint.string(value));
+            }
+            fingerprint.optional(target.as_ref(), project_trigger_payload_leaf);
+            fingerprint.optional(*enabled, |fingerprint, enabled| {
+                fingerprint.tag(u8::from(enabled));
+            });
+        }
+        TriggerCommand::Update {
+            owner_scope,
+            actor,
+            subscription_key,
+            draft,
+            expected_revision,
+        } => {
+            fingerprint.tag(3);
+            project_trigger_owner(&mut fingerprint, owner_scope);
+            project_trigger_actor(&mut fingerprint, actor);
+            fingerprint.string(subscription_key);
+            project_trigger_draft(&mut fingerprint, draft);
+            fingerprint.u64(*expected_revision);
+        }
+        TriggerCommand::Enable {
+            owner_scope,
+            actor,
+            subscription_key,
+            expected_revision,
+        } => {
+            fingerprint.tag(4);
+            project_trigger_owner(&mut fingerprint, owner_scope);
+            project_trigger_actor(&mut fingerprint, actor);
+            fingerprint.string(subscription_key);
+            fingerprint.u64(*expected_revision);
+        }
+        TriggerCommand::Disable {
+            owner_scope,
+            actor,
+            subscription_key,
+            expected_revision,
+        } => {
+            fingerprint.tag(5);
+            project_trigger_owner(&mut fingerprint, owner_scope);
+            project_trigger_actor(&mut fingerprint, actor);
+            fingerprint.string(subscription_key);
+            fingerprint.u64(*expected_revision);
+        }
+        TriggerCommand::Delete {
+            owner_scope,
+            actor,
+            subscription_key,
+            expected_revision,
+        } => {
+            fingerprint.tag(6);
+            project_trigger_owner(&mut fingerprint, owner_scope);
+            project_trigger_actor(&mut fingerprint, actor);
+            fingerprint.string(subscription_key);
+            fingerprint.u64(*expected_revision);
+        }
+        TriggerCommand::Revive {
+            owner_scope,
+            actor,
+            subscription_key,
+            draft,
+            expected_revision,
+        } => {
+            fingerprint.tag(7);
+            project_trigger_owner(&mut fingerprint, owner_scope);
+            project_trigger_actor(&mut fingerprint, actor);
+            fingerprint.string(subscription_key);
+            project_trigger_draft(&mut fingerprint, draft);
+            fingerprint.u64(*expected_revision);
+        }
+        TriggerCommand::Prune {
+            owner_scope,
+            actor,
+            subscription_keys,
+        } => {
+            fingerprint.tag(8);
+            project_trigger_owner(&mut fingerprint, owner_scope);
+            project_trigger_actor(&mut fingerprint, actor);
+            fingerprint.sequence(subscription_keys.iter(), |fingerprint, key| {
+                fingerprint.string(key)
+            });
+        }
+    }
+    fingerprint.finish()
 }
 
-pub fn trigger_operation_receipt_id(
+pub fn trigger_command_fingerprint(command: &TriggerCommand) -> String {
+    let preimage = trigger_command_preimage(command);
+    crate::stable_identity::rendered_hash(
+        "trigger-command",
+        TRIGGER_COMMAND_FAMILY_VERSION,
+        &preimage,
+    )
+}
+
+pub fn trigger_operation_receipt_id(owner_scope: &TriggerOwnerScope, operation_id: &str) -> String {
+    // The fixed-size v2 caller-operation address is independent from the
+    // command fingerprint and safe for indexed store keys of any input size.
+    let preimage = trigger_operation_receipt_preimage(owner_scope, operation_id);
+    crate::stable_identity::rendered_hash(
+        "trigger-operation",
+        TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION,
+        &preimage,
+    )
+}
+
+fn trigger_operation_receipt_preimage(
     owner_scope: &TriggerOwnerScope,
     operation_id: &str,
-) -> Result<String, PluginError> {
-    let digest = crate::stable_hash::stable_json_sha256_hex(&(
-        "lash.trigger-operation-receipt",
-        1_u8,
-        owner_scope,
-        operation_id,
-    ))
-    .map_err(|err| PluginError::Session(format!("failed to hash trigger operation id: {err}")))?;
-    Ok(format!("trigger-operation:v1:sha256:{digest}"))
+) -> Vec<u8> {
+    let mut address = crate::stable_identity::IdentityEncoder::new(
+        "lash.trigger-operation-address",
+        TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION,
+    );
+    project_trigger_owner(&mut address, owner_scope);
+    address.string(operation_id);
+    address.finish()
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

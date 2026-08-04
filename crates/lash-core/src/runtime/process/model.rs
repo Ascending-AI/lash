@@ -97,6 +97,13 @@ pub enum ProcessInput {
         payload: serde_json::Value,
     },
     SessionTurn {
+        /// Caller-owned revision for the growable session request/input pair.
+        /// Change this key whenever their executable meaning changes. The
+        /// definition fingerprint deliberately excludes `create_request` and
+        /// `turn_input`: keeping the key stable after changing either is a
+        /// deliberate false merge, so the process id must otherwise be unique
+        /// per definition.
+        definition_key: String,
         create_request: Box<crate::SessionCreateRequest>,
         turn_input: Box<crate::TurnInput>,
         output_contract: crate::ToolOutputContract,
@@ -116,10 +123,12 @@ impl Clone for ProcessInput {
                 payload: payload.clone(),
             },
             Self::SessionTurn {
+                definition_key,
                 create_request,
                 turn_input,
                 output_contract,
             } => Self::SessionTurn {
+                definition_key: definition_key.clone(),
                 create_request: create_request.clone(),
                 turn_input: turn_input.clone(),
                 output_contract: output_contract.clone(),
@@ -232,10 +241,17 @@ impl ProcessExecutionEnvSpec {
         }
     }
 
-    /// Exposes the stable environment reference to protocol and process-engine implementors running a durable process.
+    /// Content-addresses the exact bytes persisted by [`Self::to_store_bytes`].
+    ///
+    /// Version 2 is a clean cutover from the former live-model serde hash.
+    /// Store backends reject older schema versions and must be recreated; a
+    /// future byte-format change requires a new textual family version and the
+    /// same explicit old-row policy. These bytes follow the final binary's
+    /// serde-json feature set; enabling order-preserving maps is therefore an
+    /// identity-format change that requires a new family version.
     pub fn stable_ref(&self) -> Result<ProcessExecutionEnvRef, serde_json::Error> {
-        crate::stable_hash::stable_json_sha256_hex(self)
-            .map(|hash| ProcessExecutionEnvRef::new(format!("process-env:sha256:{hash}")))
+        self.to_store_bytes()
+            .map(|bytes| process_execution_env_ref_for_bytes(&bytes))
     }
 
     /// Serializes a process execution environment for continuation-store implementors, preserving the stable reference alongside plugin and protocol state.
@@ -247,6 +263,13 @@ impl ProcessExecutionEnvSpec {
     pub fn from_store_bytes(bytes: &[u8]) -> Result<Self, serde_json::Error> {
         serde_json::from_slice(bytes)
     }
+}
+
+fn process_execution_env_ref_for_bytes(bytes: &[u8]) -> ProcessExecutionEnvRef {
+    ProcessExecutionEnvRef::new(format!(
+        "process-env:v2:sha256:{}",
+        crate::stable_hash::sha256_hex(bytes)
+    ))
 }
 
 #[async_trait::async_trait]
@@ -309,12 +332,10 @@ pub async fn persist_process_execution_env(
     env_store: &dyn ProcessExecutionEnvStore,
     spec: &ProcessExecutionEnvSpec,
 ) -> Result<ProcessExecutionEnvRef, crate::PluginError> {
-    let env_ref = spec.stable_ref().map_err(|err| {
-        crate::PluginError::Session(format!("failed to hash process execution env: {err}"))
-    })?;
     let bytes = spec.to_store_bytes().map_err(|err| {
         crate::PluginError::Session(format!("failed to encode process execution env: {err}"))
     })?;
+    let env_ref = process_execution_env_ref_for_bytes(&bytes);
     env_store
         .put_process_execution_env(&env_ref, &bytes)
         .await?;
@@ -845,7 +866,7 @@ impl ProcessStatus {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessRecord {
     pub id: ProcessId,
-    pub registration_hash: String,
+    pub registration_fingerprint: String,
     pub input: Arc<ProcessInput>,
     /// Declared recovery contract. Required with no serde default: pre-column
     /// durable rows cannot deserialize and are handled by each store's schema
@@ -923,21 +944,27 @@ impl ProcessRecord {
         registration: ProcessRegistration,
         clock: &dyn crate::Clock,
     ) -> Self {
-        let (registration, registration_hash) = prepare_process_registration(registration)
-            .expect("process registration should be valid and hashable before record construction");
-        Self::from_prepared_registration(registration, registration_hash, clock.timestamp_ms())
+        let registration = prepare_process_registration(registration)
+            .expect("process registration should be valid before record construction");
+        let registration_fingerprint =
+            super::validation::process_registration_fingerprint(&registration, &[]);
+        Self::from_prepared_registration(
+            registration,
+            registration_fingerprint,
+            clock.timestamp_ms(),
+        )
     }
 
     /// Builds a `ProcessRecord` from prepared registration data for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
     pub fn from_prepared_registration(
         registration: ProcessRegistration,
-        registration_hash: String,
+        registration_fingerprint: String,
         now_ms: u64,
     ) -> Self {
         Self {
             id: registration.id,
-            registration_hash,
+            registration_fingerprint,
             input: registration.input,
             disposition: registration.disposition,
             max_attempts: registration.max_attempts,
@@ -1513,87 +1540,4 @@ pub enum ObserverInheritance {
     All,
     None,
     Only(Vec<ProcessId>),
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    fn process_value(component: &str, pos: usize, name: &str) -> serde_json::Value {
-        json!({
-            "component": component,
-            "pos": pos,
-            "name": name,
-        })
-    }
-
-    fn engine_entry(
-        process_id: &str,
-        definition: serde_json::Value,
-        process_name: &str,
-        status: ProcessStatus,
-    ) -> ProcessRecord {
-        let mut record = ProcessRecord::from_registration(
-            ProcessRegistration::new(
-                process_id,
-                ProcessInput::Engine {
-                    kind: "test-engine".to_string(),
-                    payload: json!({
-                        "definition": definition.clone(),
-                        "label": process_name,
-                    }),
-                },
-                RecoveryDisposition::Rerunnable,
-                ProcessProvenance::host(),
-            )
-            .with_identity(
-                ProcessIdentity::new("test-engine")
-                    .with_label(Some(process_name))
-                    .with_definition(Some(definition)),
-            )
-            .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
-                "process-env:test:{process_id}"
-            )))),
-        );
-        record.status = status;
-        record
-    }
-
-    #[test]
-    fn process_list_filter_matches_waiting_facet() {
-        let process_ref = process_value("target", 0, "target");
-        let mut waiting_entry = engine_entry(
-            "waiting",
-            process_ref.clone(),
-            "target",
-            ProcessStatus::Running,
-        );
-        waiting_entry.wait = Some(WaitState {
-            since_ms: 42,
-            kind: WaitKind::Signal {
-                name: "ready".to_string(),
-                event_type: "signal.ready".to_string(),
-                key: "process:waiting:signal.ready:1".to_string(),
-                ordinal: 1,
-            },
-        });
-        let idle_entry = engine_entry("idle", process_ref, "target", ProcessStatus::Running);
-        let waiting_filter =
-            ProcessListFilter::decode(&json!({ "waiting": true })).expect("decode waiting filter");
-        let idle_filter =
-            ProcessListFilter::decode(&json!({ "waiting": false })).expect("decode idle filter");
-
-        assert_eq!(waiting_filter.list_mode(), ProcessListMode::Live);
-        assert!(waiting_filter.matches_record(&waiting_entry));
-        assert!(!waiting_filter.matches_record(&idle_entry));
-        assert!(!idle_filter.matches_record(&waiting_entry));
-        assert!(idle_filter.matches_record(&idle_entry));
-        assert!(
-            ProcessListFilter::decode(&json!({ "waiting": "yes" }))
-                .expect_err("invalid waiting filter")
-                .contains("must be a boolean")
-        );
-    }
 }

@@ -12,6 +12,20 @@ const source = html.match(
 )?.[1];
 assert.ok(source, "production projection state block is missing");
 
+const triggerIdentities = JSON.parse(
+  process.env.LASH_WORKBENCH_TRIGGER_IDENTITIES ?? "null",
+);
+assert.ok(
+  triggerIdentities,
+  "LASH_WORKBENCH_TRIGGER_IDENTITIES must come from the Rust projection gate",
+);
+
+function expectedSubscriptionIdDetail(value) {
+  const prefix = "trigger-subscription:v2:sha256:";
+  assert.match(value, /^trigger-subscription:v2:sha256:[0-9a-f]{64}$/);
+  return `sha256:${value.slice(prefix.length, prefix.length + 10)}…`;
+}
+
 const context = { Set };
 vm.runInNewContext(
   `${source}
@@ -436,10 +450,8 @@ test("trigger registration controls use the payload subscription key", () => {
 });
 
 test("trigger registration rows separate display name, identity, and trigger key", () => {
-  const subscriptionIdA =
-    "trigger-subscription:v1:sha256:1bab983f42000000000000000000000000000000000000000000000000000000";
-  const subscriptionIdB =
-    "trigger-subscription:v1:sha256:9c4d0a71ee000000000000000000000000000000000000000000000000000000";
+  const subscriptionIdA = triggerIdentities.session_a;
+  const subscriptionIdB = triggerIdentities.session_b;
   const rowContext = {};
   vm.runInNewContext(
     `${markedSource(
@@ -472,13 +484,13 @@ test("trigger registration rows separate display name, identity, and trigger key
     rowContext,
   );
 
-  assert.match(subscriptionIdA, /^trigger-subscription:v1:sha256:[0-9a-f]{64}$/);
-  assert.match(subscriptionIdB, /^trigger-subscription:v1:sha256:[0-9a-f]{64}$/);
+  assert.match(subscriptionIdA, /^trigger-subscription:v2:sha256:[0-9a-f]{64}$/);
+  assert.match(subscriptionIdB, /^trigger-subscription:v2:sha256:[0-9a-f]{64}$/);
   assert.equal(rowContext.rows[0].name, "mirror_job ← cron.Schedule (every 2s)");
   assert.equal(rowContext.rows[1].name, rowContext.rows[0].name);
   assert.equal(
     rowContext.rows[0].detail,
-    "id sha256:1bab983f42… · trigger key v1/content-ad… · scope session:session-a · incarnation incarnation-…",
+    `id ${expectedSubscriptionIdDetail(subscriptionIdA)} · trigger key v1/content-ad… · scope session:session-a · incarnation incarnation-…`,
   );
   assert.equal(
     rowContext.rows[0].title,
@@ -503,7 +515,7 @@ test("trigger detail truncation keeps the distinguishing suffix of namespaced va
      this.scopeB = truncateTriggerScope("session:workbench-0f3a9d2c-aaaa-bbbb-cccc-222222222222");
      this.hostScope = truncateTriggerScope("host");
      this.futureId = truncateSubscriptionId(
-       "trigger-subscription:v2:sha256:9c4d0a71ee000000000000000000000000000000000000000000000000feedbeef"
+       "trigger-subscription:v3:sha256:9c4d0a71ee000000000000000000000000000000000000000000000000feedbeef"
      );
      this.rawCronElsewhere = triggerRegistrationSourceSummary({
        source_type: "timer.Schedule",
@@ -612,7 +624,7 @@ test("renderTriggers wires the projected name and detail into the rail", () => {
        source_type: "cron.Schedule",
        source: { $lash_host_descriptor_value: { expr: "*/2 * * * * *" } },
        target: { label: "wired_job" },
-       subscription_id: "trigger-subscription:v1:sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+       subscription_id: ${JSON.stringify(triggerIdentities.wired)},
        subscription_key: "wired-key",
        registrant_scope: "session:wired-session",
        incarnation: "wired-incarnation"
@@ -623,7 +635,10 @@ test("renderTriggers wires the projected name and detail into the rail", () => {
   const row = triggerRegistrations.children[0];
   assert.equal(triggerCount.textContent, "1");
   assert.equal(row.children[0].textContent, "wired_job ← cron.Schedule (every 2s)");
-  assert.match(row.children[1].textContent, /^id sha256:1234567890…/);
+  assert.match(
+    row.children[1].textContent,
+    new RegExp(`^id ${expectedSubscriptionIdDetail(triggerIdentities.wired)}`),
+  );
   assert.match(row.children[1].title, /trigger key wired-key/);
 });
 

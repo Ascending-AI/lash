@@ -281,12 +281,14 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// canonical payload hash unique within a session. This unreleased schema was
 /// completed in place; operators still use the store family's reject-and-
 /// recreate flow rather than an in-place migration.
+/// Version 25 also rejects session and artifact rows carrying pre-FIG-886
+/// identities as part of the coordinated cutover.
 pub(crate) const SCHEMA_VERSION: i32 = 25;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
     process_id            TEXT PRIMARY KEY,
-    registration_hash     TEXT NOT NULL,
+    registration_fingerprint     TEXT NOT NULL,
     originator_id         TEXT NOT NULL,
     wake_session_id       TEXT,
     identity_kind         TEXT NOT NULL,
@@ -436,7 +438,9 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
 // leaves payload-free tombstones.
 /// Bumped to 19 for per-attempt wake-delivery claim tokens.
 /// Bumped to 18 for wake-delivery claims and raw session originator ids.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 19;
+// Version 20 stores separately versioned registration fingerprints and v2
+// process-environment content addresses.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 20;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -445,7 +449,7 @@ CREATE TABLE IF NOT EXISTS trigger_subscriptions (
     subscription_key     TEXT NOT NULL,
     incarnation          TEXT NOT NULL,
     revision             INTEGER NOT NULL,
-    definition_hash      TEXT NOT NULL,
+    definition_fingerprint      TEXT NOT NULL,
     source_type          TEXT NOT NULL,
     source_key           TEXT NOT NULL,
     enabled              INTEGER NOT NULL,
@@ -489,7 +493,7 @@ CREATE TABLE IF NOT EXISTS trigger_deliveries (
 
 CREATE TABLE IF NOT EXISTS trigger_mutation_receipts (
     operation_id    TEXT PRIMARY KEY,
-    request_hash    TEXT NOT NULL,
+    request_fingerprint    TEXT NOT NULL,
     result_json     TEXT NOT NULL,
     created_at_ms   INTEGER NOT NULL
 );
@@ -501,10 +505,10 @@ CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_subscription
     ON trigger_deliveries(subscription_id);
 ";
 
-// FIG-504 keyed subscriptions are an alpha reject-and-recreate cutover. Version
-// 2 has no keyless-row compatibility path and preserves revision snapshots in
-// delivery rows instead of cascading them away with a subscription.
-pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 2;
+// Version 3 rejects the live-serde subscription/command identities and stores
+// the FIG-886 v2 families. Occurrence request hashing is a separate family.
+// There is deliberately no compatibility read path.
+pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 3;
 
 pub(crate) const EFFECT_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS runtime_effect_replay (
@@ -565,7 +569,8 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 // Version 6 keys session-owned effects by the permanent session id and removes
 // the incarnation join column. Effect databases follow the crate's alpha
 // reject-and-recreate convention rather than carrying a migration chain.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 6;
+// Version 7 rejects live-serde await-event and direct replay identities.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 7;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

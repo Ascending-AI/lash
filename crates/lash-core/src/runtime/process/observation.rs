@@ -652,6 +652,7 @@ mod tests {
             (
                 "session",
                 ProcessInput::SessionTurn {
+                    definition_key: "observation-test-session-turn:v1".to_string(),
                     create_request: Box::new(child_request),
                     turn_input: Box::new(TurnInput::items([InputItem::text("run child")])),
                     output_contract: ToolOutputContract::Static,

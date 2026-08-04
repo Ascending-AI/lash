@@ -53,7 +53,10 @@ impl LashRuntime {
 
     /// Apply a mid-run configuration change; see [`SessionConfigPatch`] for
     /// what each field leaves alone and what it replaces.
-    pub async fn update_session_config(&mut self, patch: SessionConfigPatch) {
+    pub async fn update_session_config(
+        &mut self,
+        patch: SessionConfigPatch,
+    ) -> Result<(), SessionError> {
         let previous = self.session_policy();
         if let Some(provider) = patch.provider {
             self.set_provider(provider);
@@ -69,46 +72,54 @@ impl LashRuntime {
         }
         self.state.policy = self.policy.clone();
         self.apply_session_config_mutations(previous.clone()).await;
-        self.notify_session_config_changed(previous).await;
+        self.notify_session_config_changed(previous)
+            .await
+            .map_err(|error| SessionError::Protocol(error.to_string()))
     }
 
-    pub async fn set_prompt_template(&mut self, template: crate::PromptTemplate) {
+    pub async fn set_prompt_template(
+        &mut self,
+        template: crate::PromptTemplate,
+    ) -> Result<(), SessionError> {
         let mut prompt = self.policy.prompt.clone();
         prompt.template = Some(template);
         self.update_session_config(SessionConfigPatch::with_prompt(prompt))
-            .await;
+            .await
     }
 
-    pub async fn clear_prompt_template(&mut self) {
+    pub async fn clear_prompt_template(&mut self) -> Result<(), SessionError> {
         let mut prompt = self.policy.prompt.clone();
         prompt.template = None;
         self.update_session_config(SessionConfigPatch::with_prompt(prompt))
-            .await;
+            .await
     }
 
-    pub async fn add_prompt_contribution(&mut self, contribution: crate::PromptContribution) {
+    pub async fn add_prompt_contribution(
+        &mut self,
+        contribution: crate::PromptContribution,
+    ) -> Result<(), SessionError> {
         let mut prompt = self.policy.prompt.clone();
         prompt.add_contribution(contribution);
         self.update_session_config(SessionConfigPatch::with_prompt(prompt))
-            .await;
+            .await
     }
 
     pub async fn replace_prompt_slot(
         &mut self,
         slot: crate::PromptSlot,
         contributions: impl IntoIterator<Item = crate::PromptContribution>,
-    ) {
+    ) -> Result<(), SessionError> {
         let mut prompt = self.policy.prompt.clone();
         prompt.replace_slot(slot, contributions);
         self.update_session_config(SessionConfigPatch::with_prompt(prompt))
-            .await;
+            .await
     }
 
-    pub async fn clear_prompt_slot(&mut self, slot: crate::PromptSlot) {
+    pub async fn clear_prompt_slot(&mut self, slot: crate::PromptSlot) -> Result<(), SessionError> {
         let mut prompt = self.policy.prompt.clone();
         prompt.clear_slot(slot);
         self.update_session_config(SessionConfigPatch::with_prompt(prompt))
-            .await;
+            .await
     }
 
     /// Re-register the current tool catalog in the live protocol session.

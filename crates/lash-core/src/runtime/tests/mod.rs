@@ -19,6 +19,7 @@ mod child_sessions;
 mod core_contracts;
 mod effect;
 mod persistence;
+mod plugin_lifecycle;
 mod projection;
 mod runtime_scenarios;
 mod session_lease_observability;

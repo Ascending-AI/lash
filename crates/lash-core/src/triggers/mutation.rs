@@ -31,8 +31,7 @@ pub(super) fn mutate_enabled(
     enabled: bool,
     now: u64,
 ) -> TriggerEffectResult {
-    let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key)
-        .map_err(TriggerOperationError::from)?;
+    let subscription_id = deterministic_subscription_id(&owner_scope, &subscription_key);
     let Some(existing) = state.subscriptions.get_mut(&subscription_id) else {
         return Err(subscription_conflict(
             &subscription_key,
@@ -84,14 +83,15 @@ pub(super) fn ensure_live_revision(
 pub(super) fn subscription_conflict(
     subscription_key: &str,
     existing: Option<&TriggerSubscriptionRecord>,
-    requested_definition_hash: Option<String>,
+    requested_definition_fingerprint: Option<String>,
     reason: &str,
 ) -> TriggerOperationError {
     TriggerOperationError::Conflict {
         subscription_key: subscription_key.to_string(),
         existing_revision: existing.map(|record| record.revision),
-        existing_definition_hash: existing.map(|record| record.definition_hash.clone()),
-        requested_definition_hash,
+        existing_definition_fingerprint: existing
+            .map(|record| record.definition_fingerprint.clone()),
+        requested_definition_fingerprint,
         reason: reason.to_string(),
     }
 }
@@ -104,7 +104,7 @@ pub(super) fn subscription_record_from_draft(
     subscription_id: String,
     incarnation: String,
     revision: u64,
-    definition_hash: String,
+    definition_fingerprint: String,
     enabled: bool,
     created_at_ms: u64,
     updated_at_ms: u64,
@@ -115,7 +115,7 @@ pub(super) fn subscription_record_from_draft(
         subscription_key: draft.subscription_key,
         incarnation,
         revision,
-        definition_hash,
+        definition_fingerprint,
         registrant: actor,
         env_ref: draft.env_ref,
         wake_target: draft.wake_target,

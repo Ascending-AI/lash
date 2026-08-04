@@ -541,6 +541,7 @@ mod tests {
             .register_process(lash::process::ProcessRegistration::new(
                 "subagent-process",
                 RuntimeInput::SessionTurn {
+                    definition_key: "agent-workbench-subagent:v1".to_string(),
                     create_request: Box::new(create_request),
                     turn_input: Box::new(lash::TurnInput::text("run child")),
                     output_contract: lash::tools::ToolOutputContract::Static,
@@ -643,6 +644,7 @@ mod tests {
             .register_process(lash::process::ProcessRegistration::new(
                 "subagent-process",
                 RuntimeInput::SessionTurn {
+                    definition_key: "agent-workbench-subagent:v1".to_string(),
                     create_request: Box::new(create_request),
                     turn_input: Box::new(lash::TurnInput::text("run child")),
                     output_contract: lash::tools::ToolOutputContract::Static,

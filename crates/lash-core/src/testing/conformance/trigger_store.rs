@@ -185,8 +185,8 @@ fn trigger_source_key_and_subscription_identity_are_stable() {
     let second = crate::default_trigger_source_key("ui.button.pressed", &source).unwrap();
     assert_eq!(first, second);
     assert_ne!(
-        crate::deterministic_subscription_id(&owner("session-a"), "ab:c").unwrap(),
-        crate::deterministic_subscription_id(&owner("session-a"), "a:bc").unwrap()
+        crate::deterministic_subscription_id(&owner("session-a"), "ab:c"),
+        crate::deterministic_subscription_id(&owner("session-a"), "a:bc")
     );
 }
 
@@ -239,13 +239,16 @@ async fn changed_register_conflicts_and_update_is_cas(store: Arc<dyn crate::Trig
     match conflict {
         crate::TriggerOperationError::Conflict {
             existing_revision,
-            existing_definition_hash,
-            requested_definition_hash,
+            existing_definition_fingerprint,
+            requested_definition_fingerprint,
             ..
         } => {
             assert_eq!(existing_revision, Some(1));
-            assert_eq!(existing_definition_hash, Some(created.definition_hash));
-            assert!(requested_definition_hash.is_some());
+            assert_eq!(
+                existing_definition_fingerprint,
+                Some(created.definition_fingerprint)
+            );
+            assert!(requested_definition_fingerprint.is_some());
         }
         error => panic!("unexpected error: {error}"),
     }
@@ -671,7 +674,10 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     assert!(!reenabled.record_snapshot.tombstoned);
     assert_eq!(reenabled.subscription_id, registered.subscription_id);
     assert_eq!(reenabled.incarnation, registered.incarnation);
-    assert_eq!(reenabled.definition_hash, registered.definition_hash);
+    assert_eq!(
+        reenabled.definition_fingerprint,
+        registered.definition_fingerprint
+    );
 
     let live = store
         .list_subscriptions(crate::TriggerSubscriptionFilter::for_session("session-a"))
@@ -805,7 +811,7 @@ async fn owner_namespaces_are_exact_and_session_cleanup_is_scoped(
     .await;
     assert_ne!(
         host.subscription_id,
-        crate::deterministic_subscription_id(&owner("root"), "shared-key").unwrap()
+        crate::deterministic_subscription_id(&owner("root"), "shared-key")
     );
     let visible_to_session = execute(
         &store,
@@ -868,7 +874,7 @@ async fn first_ingress_and_replay_share_canonical_subscription_order(
     store: Arc<dyn crate::TriggerStore>,
 ) {
     let owner_scope = crate::TriggerOwnerScope::host("fig811").unwrap();
-    for key in ["beta", "alpha"] {
+    for key in ["gamma", "alpha"] {
         let mut draft = sample_draft("fig811", key, "canonical-order-source", key);
         draft.wake_target = None;
         mutate(
@@ -885,10 +891,10 @@ async fn first_ingress_and_replay_share_canonical_subscription_order(
     let request = button_occurrence("canonical-order-source", "canonical-order-occurrence");
     let first = store.ingest_occurrence(request.clone()).await.unwrap();
     let replay = store.ingest_occurrence(request).await.unwrap();
-    let alpha_id = crate::deterministic_subscription_id(&owner_scope, "alpha").unwrap();
-    let beta_id = crate::deterministic_subscription_id(&owner_scope, "beta").unwrap();
+    let alpha_id = crate::deterministic_subscription_id(&owner_scope, "alpha");
+    let gamma_id = crate::deterministic_subscription_id(&owner_scope, "gamma");
     assert!(
-        alpha_id > beta_id,
+        alpha_id > gamma_id,
         "fixture must oppose hash order so canonical-order coverage cannot pass accidentally"
     );
     let keys = |ingress: &crate::TriggerIngressResult| {
@@ -898,8 +904,11 @@ async fn first_ingress_and_replay_share_canonical_subscription_order(
             .map(|reservation| reservation.subscription.subscription_key.clone())
             .collect::<Vec<_>>()
     };
-    assert_eq!(keys(&first), vec!["alpha".to_string(), "beta".to_string()]);
-    assert_eq!(keys(&replay), vec!["alpha".to_string(), "beta".to_string()]);
+    assert_eq!(keys(&first), vec!["alpha".to_string(), "gamma".to_string()]);
+    assert_eq!(
+        keys(&replay),
+        vec!["alpha".to_string(), "gamma".to_string()]
+    );
 }
 
 async fn same_identity_and_receipt_survive_store_reopen(factory: ReopenableTriggerStore) {

@@ -27,42 +27,39 @@ impl ProcessRegistry for PostgresProcessRegistry {
         registration: ProcessRegistration,
         observers: &[String],
     ) -> Result<ProcessRecord, PluginError> {
-        let (registration, registration_hash) =
-            lash_core::runtime::prepare_process_registration(registration)?;
+        let registration = lash_core::runtime::prepare_process_registration(registration)?;
         let mut observers = observers.to_vec();
         observers.sort();
         observers.dedup();
-        let registration_hash = lash_core::runtime::process_registration_with_observers_hash(
-            registration_hash,
-            &observers,
-        )?;
+        let registration_fingerprint =
+            lash_core::runtime::process_registration_fingerprint(&registration, &observers);
         let wake_session_id = registration.wake_session_id.clone();
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         if let Some(existing) = load_process_tx(&mut tx, &registration.id).await? {
-            if existing.registration_hash == registration_hash {
+            if existing.registration_fingerprint == registration_fingerprint {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
                 return Ok(existing);
             }
             return Err(PluginError::Session(format!(
-                "process `{}` registration hash conflict: existing {}, new {}",
-                registration.id, existing.registration_hash, registration_hash
+                "process `{}` registration fingerprint conflict: existing {}, new {}",
+                registration.id, existing.registration_fingerprint, registration_fingerprint
             )));
         }
         let now = self.clock.timestamp_ms();
         let mut record =
-            ProcessRecord::from_prepared_registration(registration, registration_hash, now);
+            ProcessRecord::from_prepared_registration(registration, registration_fingerprint, now);
         let record_json = serde_json::to_string(&record).map_err(process_decode_error)?;
         let change_seq = next_process_change_seq_tx(&mut tx).await?;
         sqlx::query(
             "INSERT INTO lash_processes (
-                process_id, registration_hash, originator_id, wake_session_id,
+                process_id, registration_fingerprint, originator_id, wake_session_id,
                 identity_kind, identity_label, is_waiting,
                 created_at_ms, updated_at_ms, change_seq, status, record_json
              )
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
         )
         .bind(&record.id)
-        .bind(&record.registration_hash)
+        .bind(&record.registration_fingerprint)
         .bind(record.originator_id().as_str())
         .bind(wake_session_id)
         .bind(&record.identity.kind)

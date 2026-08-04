@@ -31,14 +31,12 @@ impl ProcessRegistry for SqliteProcessRegistry {
         registration: ProcessRegistration,
         observers: &[String],
     ) -> Result<ProcessRecord, lash_core::PluginError> {
-        let (registration, registration_hash) = prepare_process_registration(registration)?;
+        let registration = prepare_process_registration(registration)?;
         let mut observers = observers.to_vec();
         observers.sort();
         observers.dedup();
-        let registration_hash = lash_core::runtime::process_registration_with_observers_hash(
-            registration_hash,
-            &observers,
-        )?;
+        let registration_fingerprint =
+            lash_core::runtime::process_registration_fingerprint(&registration, &observers);
         let wake_session_id = registration.wake_session_id.clone();
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
@@ -47,31 +45,33 @@ impl ProcessRegistry for SqliteProcessRegistry {
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
                     if let Some(existing) = Self::load_process_conn(tx, &registration.id)? {
-                        if existing.registration_hash == registration_hash {
+                        if existing.registration_fingerprint == registration_fingerprint {
                             return Ok(existing);
                         }
                         return Err(lash_core::PluginError::Session(format!(
-                            "process `{}` registration hash conflict: existing {}, new {}",
-                            registration.id, existing.registration_hash, registration_hash
+                            "process `{}` registration fingerprint conflict: existing {}, new {}",
+                            registration.id,
+                            existing.registration_fingerprint,
+                            registration_fingerprint
                         )));
                     }
                     let record = ProcessRecord::from_prepared_registration(
                         registration,
-                        registration_hash,
+                        registration_fingerprint,
                         now,
                     );
                     let originator_id = record.originator_id();
                     let change_seq = Self::next_change_seq_conn(tx)?;
                     tx.execute(
                         "INSERT INTO processes (
-                            process_id, registration_hash, originator_id, wake_session_id,
+                            process_id, registration_fingerprint, originator_id, wake_session_id,
                             identity_kind, identity_label, is_waiting,
                             created_at_ms, updated_at_ms, change_seq, status, record_json
                          )
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                         params![
                             record.id.as_str(),
-                            record.registration_hash.as_str(),
+                            record.registration_fingerprint.as_str(),
                             originator_id.as_str(),
                             wake_session_id,
                             record.identity.kind.as_str(),

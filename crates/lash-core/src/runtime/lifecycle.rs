@@ -226,7 +226,8 @@ impl LashRuntime {
             .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(
                 crate::SessionReadView::from_persisted_state(&state),
             ))
-            .await;
+            .await
+            .map_err(|err| SessionError::Protocol(err.to_string()))?;
         let protocol_turn_options = state.protocol_turn_options.clone();
         let runtime_scope_id = uuid::Uuid::new_v4().to_string();
         let runtime_lease_owner = crate::LeaseOwnerIdentity::opaque(

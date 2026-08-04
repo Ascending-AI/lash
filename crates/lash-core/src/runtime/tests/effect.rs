@@ -11,13 +11,22 @@ struct EffectControllerRecord {
 }
 
 #[derive(Clone, Default)]
-struct RecordingEffectController {
+pub(super) struct RecordingEffectController {
     records: Arc<Mutex<Vec<EffectControllerRecord>>>,
     envelopes: Arc<Mutex<Vec<String>>>,
     llm_calls: Arc<Mutex<usize>>,
     inline: InlineRuntimeEffectController,
     cancel_after_llm: bool,
     controller_owned_replay: bool,
+    replay_by_key: bool,
+    replay_outcomes: Arc<Mutex<std::collections::BTreeMap<String, RuntimeEffectOutcome>>>,
+    direct_gate: Option<
+        Arc<(
+            tokio::sync::Notify,
+            tokio::sync::Notify,
+            std::sync::atomic::AtomicBool,
+        )>,
+    >,
 }
 
 impl RecordingEffectController {
@@ -28,6 +37,23 @@ impl RecordingEffectController {
 
     fn with_controller_owned_replay(mut self) -> Self {
         self.controller_owned_replay = true;
+        self
+    }
+
+    fn with_replay_by_key(mut self) -> Self {
+        self.replay_by_key = true;
+        self
+    }
+
+    pub(super) fn with_direct_gate(
+        mut self,
+        gate: Arc<(
+            tokio::sync::Notify,
+            tokio::sync::Notify,
+            std::sync::atomic::AtomicBool,
+        )>,
+    ) -> Self {
+        self.direct_gate = Some(gate);
         self
     }
 
@@ -66,7 +92,7 @@ fn runtime_host_config_with_inline_controller(
     config
 }
 
-fn scoped_test_turn<'a>(
+pub(super) fn scoped_test_turn<'a>(
     controller: &'a dyn RuntimeEffectController,
     turn_id: &str,
 ) -> ScopedEffectController<'a> {
@@ -145,12 +171,27 @@ impl RuntimeEffectController for RecordingEffectController {
         envelope: RuntimeEffectEnvelope,
         local_executor: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        let replay_key = envelope
+            .invocation
+            .replay_key()
+            .expect("replay key")
+            .to_string();
+        if self.replay_by_key
+            && let Some(outcome) = self
+                .replay_outcomes
+                .lock()
+                .expect("replay outcomes")
+                .get(&replay_key)
+                .cloned()
+        {
+            return Ok(outcome);
+        }
         self.envelopes
             .lock()
             .expect("effect envelopes")
             .push(serde_json::to_string(&envelope).expect("serialize effect envelope"));
         self.record(&envelope.invocation);
-        match envelope.command {
+        let outcome = match envelope.command {
             RuntimeEffectCommand::LlmCall { request } => {
                 let mut llm_calls = self.llm_calls.lock().expect("llm calls");
                 *llm_calls += 1;
@@ -295,6 +336,12 @@ impl RuntimeEffectController for RecordingEffectController {
                 Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution: None })
             }
             RuntimeEffectCommand::Direct { request, .. } => {
+                if let Some(gate) = &self.direct_gate
+                    && gate.2.swap(false, Ordering::SeqCst)
+                {
+                    gate.0.notify_one();
+                    gate.1.notified().await;
+                }
                 // Both the text-only (`direct_completion`) and full-response
                 // (`direct_llm_completion`) client methods now flow through the
                 // single `Direct` effect; they differ only in how the caller
@@ -344,7 +391,16 @@ impl RuntimeEffectController for RecordingEffectController {
                     }),
                 })
             }
+        };
+        if self.replay_by_key
+            && let Ok(outcome) = &outcome
+        {
+            self.replay_outcomes
+                .lock()
+                .expect("replay outcomes")
+                .insert(replay_key, outcome.clone());
         }
+        outcome
     }
 }
 
@@ -593,7 +649,9 @@ impl RuntimeEffectController for WrongOutcomeEffectController {
     }
 }
 
-fn host_with_effect_recorder(recorder: RecordingEffectController) -> EmbeddedRuntimeHost {
+pub(super) fn host_with_effect_recorder(
+    recorder: RecordingEffectController,
+) -> EmbeddedRuntimeHost {
     let mut config = runtime_host_config_with_inline_controller(Arc::new(recorder));
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         mock_provider(Vec::new()).into_handle(),
@@ -1801,10 +1859,11 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
         None,
     );
     let mut request = crate::DirectRequest::text("mock-model", "summarize");
-    request.caused_by = Some(CausalRef::ToolCall {
+    let caused_by = CausalRef::ToolCall {
         session_id: "root".to_string(),
         call_id: "originating-tool-call".to_string(),
-    });
+    };
+    request.caused_by = Some(caused_by.clone());
     let completion = direct
         .direct_completion(request, "direct-test")
         .await
@@ -1814,11 +1873,20 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
     assert_eq!(completion.usage.input_tokens, 7);
     assert_eq!(completion.llm_call.call_id.0, "direct-effect-test");
     assert_eq!(recorder.count_kind(RuntimeEffectKind::Direct), 1);
+    let discriminator =
+        crate::runtime::causal::direct_request_discriminator(None, Some(&caused_by), 1);
+    let expected_replay_key = crate::runtime::causal::direct_effect_invocation(
+        "root",
+        "direct-test",
+        discriminator,
+        None,
+        Some(caused_by),
+    )
+    .replay_key()
+    .expect("derived direct-effect replay key")
+    .to_string();
     assert!(recorder.records().iter().any(|record| {
-        record.kind == RuntimeEffectKind::Direct
-            && record
-                .replay_key
-                .contains("cause:tool_call:root:originating-tool-call")
+        record.kind == RuntimeEffectKind::Direct && record.replay_key == expected_replay_key
     }));
     let ledger = runtime.shared_token_ledger.lock().expect("token ledger");
     assert_eq!(ledger.len(), 1);
@@ -1898,6 +1966,141 @@ async fn in_turn_direct_completion_uses_effect_controller_without_out_of_band_co
 }
 
 #[tokio::test]
+async fn direct_clients_from_one_turn_share_sequential_replay_ordinals() {
+    let recorder = RecordingEffectController::default();
+    let response = || MockCall {
+        stream_events: Vec::new(),
+        response: Ok(LlmResponse {
+            full_text: "direct answer".to_string(),
+            ..LlmResponse::default()
+        }),
+    };
+    let host = EmbeddedRuntimeHost::new(runtime_host_config_with_inline_controller(Arc::new(
+        recorder.clone(),
+    )));
+    let runtime = runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(vec![response(), response()]),
+        host,
+    )
+    .await;
+    let manager = runtime.runtime_session_services().expect("session manager");
+    let first = manager.direct_completion_client(
+        RuntimeEffectControllerHandle::shared(Arc::new(recorder.clone())),
+        Some("turn-direct".to_string()),
+    );
+    let second = manager.direct_completion_client(
+        RuntimeEffectControllerHandle::shared(Arc::new(recorder.clone())),
+        Some("turn-direct".to_string()),
+    );
+
+    first
+        .direct_completion(
+            crate::DirectRequest::text("mock-model", "first"),
+            "direct-test",
+        )
+        .await
+        .expect("first direct completion");
+    second
+        .direct_completion(
+            crate::DirectRequest::text("mock-model", "second"),
+            "direct-test",
+        )
+        .await
+        .expect("second direct completion");
+
+    let replay_keys = recorder
+        .records()
+        .into_iter()
+        .filter(|record| record.kind == RuntimeEffectKind::Direct)
+        .map(|record| record.replay_key)
+        .collect::<Vec<_>>();
+    assert_eq!(replay_keys.len(), 2);
+    assert!(replay_keys[0].starts_with("direct:v2:sha256:"));
+    assert!(replay_keys[1].starts_with("direct:v2:sha256:"));
+    assert_ne!(replay_keys[0], replay_keys[1]);
+}
+
+#[tokio::test]
+async fn direct_concurrency_requires_keys_and_releases_unkeyed_guard() {
+    let gate = Arc::new((
+        tokio::sync::Notify::new(),
+        tokio::sync::Notify::new(),
+        std::sync::atomic::AtomicBool::new(true),
+    ));
+    let recorder = RecordingEffectController::default().with_direct_gate(Arc::clone(&gate));
+    let runtime = runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        EmbeddedRuntimeHost::new(runtime_host_config_with_inline_controller(Arc::new(
+            recorder.clone(),
+        ))),
+    )
+    .await;
+    let manager = runtime.runtime_session_services().expect("session manager");
+    let client = manager.direct_completion_client(
+        RuntimeEffectControllerHandle::shared(Arc::new(recorder)),
+        Some("turn-direct".to_string()),
+    );
+
+    let first_client = client.clone();
+    let mut first = crate::task::spawn(async move {
+        first_client
+            .direct_completion(
+                crate::DirectRequest::text("mock-model", "first"),
+                "direct-test",
+            )
+            .await
+    });
+    gate.0.notified().await;
+    client
+        .direct_completion(
+            crate::DirectRequest::text("mock-model", "other hook"),
+            "other-plugin-hook",
+        )
+        .await
+        .expect("a distinct usage source owns an independent ordinal lane");
+    let overlap = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        client.direct_completion(
+            crate::DirectRequest::text("mock-model", "overlap"),
+            "direct-test",
+        ),
+    )
+    .await
+    .expect("overlap rejected promptly")
+    .expect_err("overlapping unkeyed call must fail");
+    assert!(overlap.to_string().contains("explicit replay keys"));
+    gate.1.notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(5), &mut first)
+        .await
+        .expect("first completion returned")
+        .expect("first task")
+        .expect("first completion");
+
+    let keyed_a = client.direct_completion(
+        crate::DirectRequest::text("mock-model", "a").with_replay_key("a"),
+        "direct-test",
+    );
+    let keyed_b = client.direct_completion(
+        crate::DirectRequest::text("mock-model", "b").with_replay_key("b"),
+        "direct-test",
+    );
+    let (a, b) = tokio::join!(keyed_a, keyed_b);
+    a.expect("first keyed call");
+    b.expect("second keyed call");
+    client
+        .direct_completion(
+            crate::DirectRequest::text("mock-model", "after"),
+            "direct-test",
+        )
+        .await
+        .expect("guard released after completion");
+}
+
+#[tokio::test]
 async fn direct_effect_restores_required_streaming_for_provider_execution() {
     let saw_stream_events = Arc::new(AtomicBool::new(false));
     let captured = Arc::clone(&saw_stream_events);
@@ -1945,86 +2148,8 @@ async fn direct_effect_restores_required_streaming_for_provider_execution() {
     assert!(saw_stream_events.load(Ordering::SeqCst));
 }
 
-#[tokio::test]
-async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() {
-    let recorder = RecordingEffectController::default();
-    let trace_path = unique_trace_path("direct-llm-completion");
-    let transport = mock_provider(vec![MockCall {
-        stream_events: Vec::new(),
-        response: Ok(LlmResponse {
-            full_text: "raw direct answer".to_string(),
-            parts: vec![LlmOutputPart::Text {
-                text: "raw direct answer".to_string(),
-                response_meta: None,
-            }],
-            usage: LlmUsage {
-                input_tokens: 4,
-                output_tokens: 6,
-                cache_read_input_tokens: 0,
-                cache_write_input_tokens: 0,
-                reasoning_output_tokens: 1,
-            },
-            response_metadata: Default::default(),
-            ..LlmResponse::default()
-        }),
-    }]);
-    let host = EmbeddedRuntimeHost::new({
-        let mut config = runtime_host_config_with_inline_controller(Arc::new(recorder.clone()));
-        config.tracing.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(
-            trace_path.clone(),
-        )));
-        config
-    });
-    let runtime =
-        runtime_with_plugins_and_tools_and_host(Vec::new(), Arc::new(EmptyTools), transport, host)
-            .await;
-
-    let manager = runtime.runtime_session_services().expect("session manager");
-    let direct = manager.direct_completion_client(
-        RuntimeEffectControllerHandle::shared(Arc::new(recorder.clone())),
-        None,
-    );
-    let request = LlmRequest {
-        model: "mock-model".to_string(),
-        messages: vec![LlmMessage::new(
-            LlmRole::User,
-            vec![LlmContentBlock::Text {
-                text: Arc::from("raw prompt"),
-                response_meta: None,
-                cache_breakpoint: false,
-            }],
-        )],
-        attachments: Vec::new(),
-        resolved_stored: Default::default(),
-        tools: Arc::new(Vec::new()),
-        tool_choice: LlmToolChoice::None,
-        model_variant: Default::default(),
-        model_capability: crate::ModelCapability::default(),
-        scope: crate::LlmRequestScope::new(
-            "direct-llm-test",
-            "direct-llm-test:frame",
-            "direct-llm-test:request",
-        ),
-        output_spec: None,
-        stream_events: None,
-        generation: crate::GenerationOptions::default(),
-        provider_trace: None,
-    };
-    let completion = direct
-        .direct_llm_completion(request, "direct-llm-test")
-        .await
-        .expect("direct llm completion");
-
-    assert_eq!(completion.response.full_text, "raw direct answer");
-    assert_eq!(completion.usage.output_tokens, 6);
-    assert_eq!(completion.llm_call.call_id.0, "direct-effect-test");
-    assert_eq!(recorder.count_kind(RuntimeEffectKind::Direct), 1);
-    let ledger = runtime.shared_token_ledger.lock().expect("token ledger");
-    assert_eq!(ledger.len(), 1);
-    assert_eq!(ledger[0].source, "direct-llm-test");
-    assert_eq!(ledger[0].model, "mock-model");
-    assert_eq!(ledger[0].usage.input_tokens, 4);
-}
+#[path = "effect_direct_llm.rs"]
+mod direct_llm;
 
 #[tokio::test]
 async fn direct_llm_completion_envelope_stores_attachment_refs_not_bytes() {

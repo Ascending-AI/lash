@@ -739,9 +739,27 @@ fn every_terminalize_branch_makes_runtime_shaped_session_deletion_terminal() {
 fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors() {
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/browser_projection.mjs");
+    let trigger_identities = serde_json::json!({
+        "session_a": lash_core::triggers::deterministic_subscription_id(
+            &lash_core::TriggerOwnerScope::session("session-a"),
+            "derived/v1/content-address",
+        ),
+        "session_b": lash_core::triggers::deterministic_subscription_id(
+            &lash_core::TriggerOwnerScope::session("session-b"),
+            "derived/v1/content-address",
+        ),
+        "wired": lash_core::triggers::deterministic_subscription_id(
+            &lash_core::TriggerOwnerScope::session("wired-session"),
+            "wired-key",
+        ),
+    });
     let output = std::process::Command::new("node")
         .arg("--test")
         .arg(&script)
+        .env(
+            "LASH_WORKBENCH_TRIGGER_IDENTITIES",
+            trigger_identities.to_string(),
+        )
         .output()
         .expect("Node.js is required for the agent-workbench browser projection gate");
     assert!(

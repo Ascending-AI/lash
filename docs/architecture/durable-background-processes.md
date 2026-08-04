@@ -232,11 +232,11 @@ PostgreSQL tables. The operations runbook reset consequently clears
 `lash_wake_redelivery_fences`.
 
 Figments coordination is one Lash revision: SQLite durable-core schema 25
-carries the receiver-fence cutover plus nullable FIG-850 append-receipt identity
-columns, SQLite process-registry schema 19 includes the sender-floor table
-through additive DDL, and PostgreSQL schema 36 includes both the sender-floor
-table and those append-receipt columns. Development/test stores must be
-recreated.
+includes the receiver-fence and FIG-850 append-receipt identity changes,
+process-registry schema 20, effect schema 7, and trigger schema 3 carry the
+stable-identity cutover; PostgreSQL schema 37 includes the complete version-36
+append-receipt and usage schema plus the same stable-identity cutover.
+Development/test stores must be recreated.
 Process-event sequences remain small ordered values; downstream prompts,
 origins, and workflow projections do not receive timestamp-scale identifiers.
 

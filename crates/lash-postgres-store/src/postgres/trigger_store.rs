@@ -19,16 +19,16 @@ impl TriggerStore for PostgresTriggerStore {
                 .map(|records| Ok(lash_core::TriggerCommandOutcome::List { records }));
         }
 
-        let request_hash = lash_core::facade_support::trigger_command_hash(&command)?;
+        let request_fingerprint = lash_core::facade_support::trigger_command_fingerprint(&command);
         let receipt_id = lash_core::facade_support::trigger_operation_receipt_id(
             command.owner_scope(),
             operation_id,
-        )?;
+        );
         let subscription_key = command.subscription_key().unwrap_or_default().to_string();
         let subscription_id = lash_core::facade_support::deterministic_subscription_id(
             command.owner_scope(),
             &subscription_key,
-        )?;
+        );
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
             .bind(&subscription_id)
@@ -37,7 +37,7 @@ impl TriggerStore for PostgresTriggerStore {
             .map_err(plugin_sqlx_error)?;
 
         let stored = sqlx::query(
-            "SELECT request_hash, result_json FROM lash_trigger_mutation_receipts
+            "SELECT request_fingerprint, result_json FROM lash_trigger_mutation_receipts
              WHERE operation_id = $1",
         )
         .bind(&receipt_id)
@@ -48,12 +48,12 @@ impl TriggerStore for PostgresTriggerStore {
             let stored_hash: String = row.get(0);
             let result_json: String = row.get(1);
             tx.commit().await.map_err(plugin_sqlx_error)?;
-            if stored_hash != request_hash {
+            if stored_hash != request_fingerprint {
                 return Ok(Err(lash_core::TriggerOperationError::Conflict {
                     subscription_key,
                     existing_revision: None,
-                    existing_definition_hash: Some(stored_hash),
-                    requested_definition_hash: Some(request_hash),
+                    existing_definition_fingerprint: Some(stored_hash),
+                    requested_definition_fingerprint: Some(request_fingerprint),
                     reason: format!(
                         "operation id `{operation_id}` was reused with different content"
                     ),
@@ -119,7 +119,7 @@ impl TriggerStore for PostgresTriggerStore {
             sqlx::query(
                 "INSERT INTO lash_trigger_subscriptions (
                     subscription_id, owner_scope, subscription_key, incarnation, revision,
-                    definition_hash, source_type, source_key, enabled, tombstoned,
+                    definition_fingerprint, source_type, source_key, enabled, tombstoned,
                     created_at_ms, updated_at_ms, record_json
                  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                  ON CONFLICT (subscription_id) DO UPDATE SET
@@ -127,7 +127,7 @@ impl TriggerStore for PostgresTriggerStore {
                     subscription_key = EXCLUDED.subscription_key,
                     incarnation = EXCLUDED.incarnation,
                     revision = EXCLUDED.revision,
-                    definition_hash = EXCLUDED.definition_hash,
+                    definition_fingerprint = EXCLUDED.definition_fingerprint,
                     source_type = EXCLUDED.source_type,
                     source_key = EXCLUDED.source_key,
                     enabled = EXCLUDED.enabled,
@@ -140,7 +140,7 @@ impl TriggerStore for PostgresTriggerStore {
             .bind(&record.subscription_key)
             .bind(&record.incarnation)
             .bind(record.revision as i64)
-            .bind(&record.definition_hash)
+            .bind(&record.definition_fingerprint)
             .bind(&record.source_type)
             .bind(&record.source_key)
             .bind(record.enabled)
@@ -154,11 +154,11 @@ impl TriggerStore for PostgresTriggerStore {
         }
         sqlx::query(
             "INSERT INTO lash_trigger_mutation_receipts (
-                operation_id, request_hash, result_json, created_at_ms
+                operation_id, request_fingerprint, result_json, created_at_ms
              ) VALUES ($1, $2, $3, $4)",
         )
         .bind(&receipt_id)
-        .bind(&request_hash)
+        .bind(&request_fingerprint)
         .bind(serde_json::to_string(&result).map_err(process_decode_error)?)
         .bind(now as i64)
         .execute(&mut *tx)

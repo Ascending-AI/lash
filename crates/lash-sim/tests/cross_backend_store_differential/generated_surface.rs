@@ -415,16 +415,18 @@ fn trigger_rows_from_memory(store: &InMemoryTriggerStore) -> TriggerRows {
         mutation_receipts: raw
             .mutation_receipts
             .into_iter()
-            .map(|(operation_id, request_hash, result, _created_at_ms)| {
-                normalized_trigger_json(
-                    serde_json::json!({
-                        "operation_id": operation_id,
-                        "request_hash": request_hash,
-                        "result": result,
-                    }),
-                    &mut incarnations,
-                )
-            })
+            .map(
+                |(operation_id, request_fingerprint, result, _created_at_ms)| {
+                    normalized_trigger_json(
+                        serde_json::json!({
+                            "operation_id": operation_id,
+                            "request_fingerprint": request_fingerprint,
+                            "result": result,
+                        }),
+                        &mut incarnations,
+                    )
+                },
+            )
             .collect(),
         occurrences: raw
             .occurrences
@@ -800,9 +802,9 @@ fn read_sqlite_triggers(connection: &rusqlite::Connection) -> TriggerRows {
     .into_iter()
     .map(|row| normalized_trigger_json(row, &mut incarnations))
     .collect();
-    let mutation_receipts = sqlite_simple_json_rows(connection, "SELECT operation_id, request_hash, result_json FROM trigger_mutation_receipts ORDER BY operation_id", |row| {
+    let mutation_receipts = sqlite_simple_json_rows(connection, "SELECT operation_id, request_fingerprint, result_json FROM trigger_mutation_receipts ORDER BY operation_id", |row| {
         let result: String = row.get(2)?;
-        Ok(serde_json::json!({"operation_id": row.get::<_, String>(0)?, "request_hash": row.get::<_, String>(1)?, "result": serde_json::from_str::<serde_json::Value>(&result).unwrap()}))
+        Ok(serde_json::json!({"operation_id": row.get::<_, String>(0)?, "request_fingerprint": row.get::<_, String>(1)?, "result": serde_json::from_str::<serde_json::Value>(&result).unwrap()}))
     }).into_iter().map(|row| normalized_trigger_json(row, &mut incarnations)).collect();
     let occurrences = sqlite_simple_json_rows(connection, "SELECT request_hash, record_json FROM trigger_occurrences ORDER BY occurrence_id", |row| {
         let record: String = row.get(1)?;
@@ -996,8 +998,8 @@ async fn read_postgres_triggers(pool: &PgPool) -> TriggerRows {
         .into_iter()
         .map(|row| normalized_trigger_json(serde_json::from_str(&row).unwrap(), &mut incarnations))
         .collect();
-    let receipts: Vec<(String, String, String)> = sqlx::query_as("SELECT operation_id, request_hash, result_json FROM lash_trigger_mutation_receipts ORDER BY operation_id").fetch_all(pool).await.unwrap();
-    let mutation_receipts = receipts.into_iter().map(|(operation_id, request_hash, result)| normalized_trigger_json(serde_json::json!({"operation_id": operation_id, "request_hash": request_hash, "result": serde_json::from_str::<serde_json::Value>(&result).unwrap()}), &mut incarnations)).collect();
+    let receipts: Vec<(String, String, String)> = sqlx::query_as("SELECT operation_id, request_fingerprint, result_json FROM lash_trigger_mutation_receipts ORDER BY operation_id").fetch_all(pool).await.unwrap();
+    let mutation_receipts = receipts.into_iter().map(|(operation_id, request_fingerprint, result)| normalized_trigger_json(serde_json::json!({"operation_id": operation_id, "request_fingerprint": request_fingerprint, "result": serde_json::from_str::<serde_json::Value>(&result).unwrap()}), &mut incarnations)).collect();
     let occurrence_rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT request_hash, record_json FROM lash_trigger_occurrences ORDER BY occurrence_id",
     )
@@ -1302,6 +1304,12 @@ async fn generated_cross_backend_surface_differential_agrees() {
         .await
         .unwrap();
     let storage = PostgresStorage::connect(&database_url).await.unwrap();
+    // CI seed 852 minimized to occurrence ingestion with no subscription state.
+    if let Some(divergence) =
+        first_divergence(&storage, &[SurfaceOperation::TriggerOccurrence { key: 0 }]).await
+    {
+        panic!("seed-852 minimized trigger-occurrence regression diverged: {divergence:#?}");
+    }
     let cases = std::env::var("LASH_CROSS_BACKEND_CASES")
         .ok()
         .and_then(|value| value.parse().ok())

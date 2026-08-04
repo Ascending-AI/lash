@@ -707,7 +707,8 @@ async fn session_config_change_hook_receives_context_window_updates() {
             model: Some(alt_model.clone()),
             ..Default::default()
         })
-        .await;
+        .await
+        .expect("update session config");
 
     let changes = observed.lock().await;
     assert_eq!(changes.len(), 1);
@@ -5235,7 +5236,8 @@ async fn turn_driver_normalizes_alias_effort_into_outgoing_request() {
             model: Some(model),
             ..Default::default()
         })
-        .await;
+        .await
+        .expect("update session config");
 
     let turn = runtime
         .run_turn_assembled(
@@ -5314,7 +5316,8 @@ async fn turn_driver_rejects_unsupported_effort_before_provider_call() {
             model: Some(model),
             ..Default::default()
         })
-        .await;
+        .await
+        .expect("update session config");
 
     let turn = runtime
         .run_turn_assembled(
@@ -5388,7 +5391,8 @@ async fn session_generation_options_reach_every_provider_request() {
             provider: Some(provider),
             ..Default::default()
         })
-        .await;
+        .await
+        .expect("update session config");
 
     let run_turn = async |runtime: &mut LashRuntime, turn_id: &'static str| {
         runtime
@@ -5421,7 +5425,8 @@ async fn session_generation_options_reach_every_provider_request() {
             generation: Some(crate::GenerationOverlay::Replace(requested.clone())),
             ..Default::default()
         })
-        .await;
+        .await
+        .expect("update session config");
     run_turn(&mut runtime, "generation-requested-turn").await;
 
     let seen = captured.lock().expect("capture lock").clone();
@@ -5486,7 +5491,8 @@ async fn omitted_generation_options_are_reported_on_the_turn_llm_call_record() {
             )),
             ..Default::default()
         })
-        .await;
+        .await
+        .expect("update session config");
 
     let turn = runtime
         .run_turn_assembled(
@@ -5586,7 +5592,8 @@ async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
             )),
             ..Default::default()
         })
-        .await;
+        .await
+        .expect("update session config");
 
     let turn = runtime
         .run_turn_assembled(
@@ -5659,7 +5666,8 @@ async fn a_mid_run_generation_patch_merges_like_the_spec_overlay_does() {
             generation: Some(crate::GenerationOverlay::Replace(pinned.clone())),
             ..Default::default()
         })
-        .await;
+        .await
+        .expect("update session config");
 
     runtime
         .update_session_config(crate::SessionConfigPatch {
@@ -5669,7 +5677,8 @@ async fn a_mid_run_generation_patch_merges_like_the_spec_overlay_does() {
             })),
             ..Default::default()
         })
-        .await;
+        .await
+        .expect("update session config");
     assert_eq!(
         runtime.session_policy().generation,
         crate::GenerationOptions {
@@ -5687,7 +5696,8 @@ async fn a_mid_run_generation_patch_merges_like_the_spec_overlay_does() {
             )),
             ..Default::default()
         })
-        .await;
+        .await
+        .expect("update session config");
     assert_eq!(
         runtime.session_policy().generation,
         crate::GenerationOptions::default(),

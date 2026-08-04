@@ -985,6 +985,7 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
         .register_process(ProcessRegistration::new(
             outer_process_id,
             ProcessInput::SessionTurn {
+                definition_key: "nested-session-turn:v1".to_string(),
                 create_request: Box::new(child_request),
                 turn_input: Box::new(crate::TurnInput::text("await nested process")),
                 output_contract: crate::ToolOutputContract::Static,
