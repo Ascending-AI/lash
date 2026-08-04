@@ -341,8 +341,8 @@ for p in live {
         <h2>Triaging A Stuck Turn</h2>
         <p>A turn that stops producing output has three very different causes that look identical from outside: the provider is hanging, the session-execution lease moved to another worker, or two writers are livelocked on the same session head. lash exposes one surface per question, and they are meant to be consulted in order.</p>
       </div>
-      <p><strong>1. Read the lane.</strong> <code>core.session_lease_diagnostics(session_id)</code> returns a snapshot of the session's execution-lease row — holder identity, generation, claim time, expiry — plus a derived <code>SessionLeaseRenewal</code>. It never claims, renews, or releases, so it is free to run against a live session.</p>
-      <pre data-lang="rust" data-snippet="operations#stuck-turn"><code>// Step 1 — read the lane. Diagnostics only: this never claims, renews, or
+      <p><strong>1. Read the lane.</strong> <code>core.session_lease_diagnostics(session_id)</code> returns a snapshot of the session's execution-lease row (holder identity, generation, claim time, expiry) plus a derived <code>SessionLeaseRenewal</code>. It never claims, renews, or releases, so it is free to run against a live session.</p>
+      <pre data-lang="rust" data-snippet="operations#stuck-turn"><code>// Step 1: read the lane. Diagnostics only: this never claims, renews, or
 // releases anything, so it is free to run against a live session. `None`
 // means no durable session under this id at all.
 let Some(lease) = core.session_lease_diagnostics(session_id).await? else {
@@ -360,7 +360,7 @@ match lease.renewal() {
     SessionLeaseRenewal::Unheld =&gt; {}
 
     // Renewals were current: the lane is healthy, so the turn is blocked
-    // inside itself. Look at the provider call — not the lease — and cancel
+    // inside itself. Look at the provider call, not the lease, and cancel
     // the exact turn if it has to stop.
     SessionLeaseRenewal::Current { expires_in_ms } =&gt; {
         let _ = expires_in_ms;
@@ -375,7 +375,7 @@ match lease.renewal() {
     }
 }
 Ok(())</code></pre>
-      <p><strong>2. Read the lease timeline.</strong> Four <code>tracing</code> events cover the decisive transitions. Every one of them carries <code>session_id</code>, <code>generation</code> (the lane's fencing token — ADR 0029 calls it the generation), <code>owner_id</code>, and <code>incarnation_id</code>, so a log sorted by time reconstructs takeover order without correlation guesswork.</p>
+      <p><strong>2. Read the lease timeline.</strong> Four <code>tracing</code> events cover the decisive transitions. Every one of them carries <code>session_id</code>, <code>generation</code> (the lane's fencing token, which ADR 0029 calls the generation), <code>owner_id</code>, and <code>incarnation_id</code>, so a log sorted by time reconstructs takeover order without correlation guesswork.</p>
       <div class="table">
         <table>
           <thead><tr><th>Event</th><th>Level</th><th>Extra fields</th><th>What it establishes</th></tr></thead>
@@ -383,7 +383,7 @@ Ok(())</code></pre>
             <tr><td><code>session_execution_lease.claimed</code></td><td>info</td><td><code>expires_at_epoch_ms</code></td><td>this worker acquired the lane at this generation.</td></tr>
             <tr><td><code>session_execution_lease.renew_failed</code></td><td>warn</td><td><code>error</code></td><td>a renewal was rejected; this worker no longer holds the lane. Not a turn failure.</td></tr>
             <tr><td><code>session_execution_lease.taken_over</code></td><td>info</td><td><code>superseding_generation</code>, <code>superseding_owner_id</code>, <code>superseding_incarnation_id</code></td><td>a named successor holds the lane at a higher generation. Pairs with the preceding <code>renew_failed</code>.</td></tr>
-            <tr><td><code>session_execution_lease.commit_cas_rejected</code></td><td>warn</td><td><code>lease_lost</code>, <code>expected_head_revision</code>, <code>actual_head_revision</code></td><td>this worker's commit lost the head compare-and-set. This — and only this — proves a turn did not publish.</td></tr>
+            <tr><td><code>session_execution_lease.commit_cas_rejected</code></td><td>warn</td><td><code>lease_lost</code>, <code>expected_head_revision</code>, <code>actual_head_revision</code></td><td>this worker's commit lost the head compare-and-set. This, and only this, proves a turn did not publish.</td></tr>
           </tbody>
         </table>
       </div>
@@ -393,16 +393,16 @@ Ok(())</code></pre>
         <table>
           <thead><tr><th>Reading</th><th>Situation</th><th>Do this</th></tr></thead>
           <tbody>
-            <tr><td><code>Current</code>, no <code>renew_failed</code> in the log</td><td><strong>provider hang.</strong> The lane is healthy and renewals are landing, so the worker is alive and blocked inside its own turn — most often a provider call with no timeout, sometimes a tool or a durable wait.</td><td>Inspect the provider call and the turn's own activity. If it must stop, cancel the exact turn through <code>core.turn_work_driver()</code>. Do not touch the lease.</td></tr>
-            <tr><td><code>Lapsed</code>, or a different holder than you expected, with <code>renew_failed</code> → <code>taken_over</code> in the log</td><td><strong>lease loss / takeover.</strong> The original worker stopped renewing and a peer swept the lane with a higher generation.</td><td>Nothing, yet. The displaced worker may still be running and may still win the commit CAS — a lost lease is not a failed turn. Wait for the turn's committed outcome, or for <code>commit_cas_rejected</code> to prove it lost. Killing the worker here is how a successful turn gets destroyed.</td></tr>
-            <tr><td>Repeated <code>commit_cas_rejected</code> with <code>lease_lost = false</code></td><td><strong>livelock.</strong> Two writers are racing the same session head while both believe they hold a lane — usually a host that opened two concurrent writers under one explicit <code>session_execution_owner</code> identity, so each reenters the other's lease instead of seeing <code>session_execution_busy</code>.</td><td>Fix the identity or the routing, not the lease timings. See <a href="#worker-identity">worker identity</a>: the default per-open identity is what makes a second concurrent writer resolve at the lease boundary.</td></tr>
+            <tr><td><code>Current</code>, no <code>renew_failed</code> in the log</td><td><strong>provider hang.</strong> The lane is healthy and renewals are landing, so the worker is alive and blocked inside its own turn. Most often that is a provider call with no timeout, sometimes a tool or a durable wait.</td><td>Inspect the provider call and the turn's own activity. If it must stop, cancel the exact turn through <code>core.turn_work_driver()</code>. Do not touch the lease.</td></tr>
+            <tr><td><code>Lapsed</code>, or a different holder than you expected, with <code>renew_failed</code> → <code>taken_over</code> in the log</td><td><strong>lease loss / takeover.</strong> The original worker stopped renewing and a peer swept the lane with a higher generation.</td><td>Nothing, yet. The displaced worker may still be running and may still win the commit CAS: a lost lease is not a failed turn. Wait for the turn's committed outcome, or for <code>commit_cas_rejected</code> to prove it lost. Killing the worker here is how a successful turn gets destroyed.</td></tr>
+            <tr><td>Repeated <code>commit_cas_rejected</code> with <code>lease_lost = false</code></td><td><strong>livelock.</strong> Two writers are racing the same session head while both believe they hold a lane. Usually that is a host that opened two concurrent writers under one explicit <code>session_execution_owner</code> identity, so each reenters the other's lease instead of seeing <code>session_execution_busy</code>.</td><td>Fix the identity or the routing, not the lease timings. See <a href="#worker-identity">worker identity</a>: the default per-open identity is what makes a second concurrent writer resolve at the lease boundary.</td></tr>
             <tr><td><code>Unheld</code> while the host still shows a turn running</td><td><strong>stale host record.</strong> The lane is free, so nothing is executing under it.</td><td>Reconcile the host's in-flight record against the session's committed head; the turn either landed or never started.</td></tr>
           </tbody>
         </table>
       </div>
       <aside class="contract">
         <strong>Contract</strong>
-        <p>The diagnostic read is a snapshot, stale by design, and can be superseded the moment it is read. It is not a fencing primitive and hosts must never gate behavior on it — the commit compare-and-set is the only authority on who publishes (<code>docs/adr/0029-claims-are-generation-fenced-under-the-session-lease.md</code>). Lease churn is deliberately <em>not</em> durable session history either: these are trace events, because which worker attempted what is per-attempt telemetry, not part of the conversation.</p>
+        <p>The diagnostic read is a snapshot, stale by design, and can be superseded the moment it is read. It is not a fencing primitive and hosts must never gate behavior on it. The commit compare-and-set is the only authority on who publishes (<code>docs/adr/0029-claims-are-generation-fenced-under-the-session-lease.md</code>). Lease churn is deliberately <em>not</em> durable session history either: these are trace events, because which worker attempted what is per-attempt telemetry, not part of the conversation.</p>
       </aside>
       <p>The <a href="./example-agent-service.html">agent service</a> example wires this exactly: <code>GET /api/chats/{chat_id}/lease</code> returns the reading plus the host-owned classification, and its tests induce each situation.</p>
     </div>

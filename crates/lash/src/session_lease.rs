@@ -14,13 +14,13 @@ use crate::{EmbedError, LashCore, Result};
 ///
 /// **This is a snapshot and it is stale by design.** It can be superseded the
 /// moment it is read: a peer may claim, renew, or release the lane between the
-/// store read and the caller's next line. Hosts must never gate behavior on it —
+/// store read and the caller's next line. Hosts must never gate behavior on it:
 /// not admission, not retries, not cancellation, not "is it safe to write". The
 /// commit compare-and-set is the only authority on who may publish (ADR 0029);
 /// the lease is advisory and this read is advisory about the advisory thing.
 ///
 /// **A lost lease does not mean the turn failed.** A runner can be displaced
-/// from the lane and still commit successfully — the commit CAS decides, and it
+/// from the lane and still commit successfully. The commit CAS decides, and it
 /// is entirely legitimate for the losing lease-holder to be the winning writer.
 /// Reading [`SessionLeaseRenewal::Lapsed`] here, or seeing a different holder
 /// than the one you expected, is therefore never grounds to kill a turn, fail a
@@ -38,7 +38,7 @@ pub struct SessionLeaseDiagnostics {
     /// Host-clock reading taken alongside the row, so `renewal` classifies
     /// expiry against one consistent instant instead of a later "now".
     pub observed_at_epoch_ms: u64,
-    /// The row's holder facts, or `None` when no owner holds the lane — never
+    /// The row's holder facts, or `None` when no owner holds the lane: never
     /// claimed, or released by its last holder (typically at commit).
     pub holder: Option<SessionLeaseHolder>,
 }
@@ -62,7 +62,7 @@ pub struct SessionLeaseHolder {
 /// Whether the lane's renewals were current at
 /// [`observed_at_epoch_ms`](SessionLeaseDiagnostics::observed_at_epoch_ms).
 ///
-/// Derived from the row, not stored on it — the raw facts on
+/// Derived from the row, not stored on it: the raw facts on
 /// [`SessionLeaseHolder`] remain the evidence. Like everything else here it is a
 /// reading, not a verdict: `Lapsed` says renewals stopped, not that the turn
 /// failed or that the lane is safe to take.
@@ -73,7 +73,7 @@ pub enum SessionLeaseRenewal {
     Unheld,
     /// A holder's expiry is still ahead of the observation, so its renewal loop
     /// was alive. A turn that is not progressing under this reading is stuck
-    /// somewhere inside itself — a provider hang, a tool, a wait — not on the
+    /// somewhere inside itself (a provider hang, a tool, a wait), not on the
     /// lane.
     Current { expires_in_ms: u64 },
     /// A holder's expiry is already behind the observation: its renewals
@@ -122,8 +122,8 @@ impl LashCore {
     ///
     /// Answers the first question a stuck turn raises: is a runner holding this
     /// session's lane, which one, since when, and were its renewals current?
-    /// Returns `None` when the session has no durable store — never created, or
-    /// deleted — which is a different answer from a session whose lane is merely
+    /// Returns `None` when the session has no durable store, meaning never
+    /// created or already deleted. That is a different answer from a lane merely
     /// unheld ([`SessionLeaseRenewal::Unheld`](crate::persistence::SessionLeaseRenewal::Unheld)).
     ///
     /// **Diagnostics only.** The returned
@@ -131,8 +131,8 @@ impl LashCore {
     /// is a snapshot, stale by design, and can be superseded the moment it is
     /// read. The commit compare-and-set is the only authority on who may publish
     /// (ADR 0029); never gate host behavior on this read. In particular a lost or
-    /// lapsed lease does not mean the turn failed — the displaced holder may
-    /// still commit — so this is never grounds to kill a turn or fabricate a
+    /// lapsed lease does not mean the turn failed, because the displaced holder
+    /// may still commit, so this is never grounds to kill a turn or fabricate a
     /// terminal state. Read it alongside the `session_execution_lease.*` trace
     /// events, which are what order a takeover and report a rejected commit.
     ///

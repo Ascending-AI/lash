@@ -153,7 +153,7 @@ async fn run_turn_with_retry(session: &LashSession, text: &str) -> lash::Result<
 
 async fn triage_stuck_turn(core: &LashCore, session_id: &str) -> lash::Result<()> {
     // docs:start:stuck-turn
-    // Step 1 — read the lane. Diagnostics only: this never claims, renews, or
+    // Step 1: read the lane. Diagnostics only: this never claims, renews, or
     // releases anything, so it is free to run against a live session. `None`
     // means no durable session under this id at all.
     let Some(lease) = core.session_lease_diagnostics(session_id).await? else {
@@ -171,7 +171,7 @@ async fn triage_stuck_turn(core: &LashCore, session_id: &str) -> lash::Result<()
         SessionLeaseRenewal::Unheld => {}
 
         // Renewals were current: the lane is healthy, so the turn is blocked
-        // inside itself. Look at the provider call — not the lease — and cancel
+        // inside itself. Look at the provider call, not the lease, and cancel
         // the exact turn if it has to stop.
         SessionLeaseRenewal::Current { expires_in_ms } => {
             let _ = expires_in_ms;

@@ -201,7 +201,7 @@ pub mod direct {
 
 pub mod persistence {
     /// Diagnostic read over a session's execution lease: holder identity,
-    /// generation, expiry, and renewal state. Snapshot only — the commit CAS is
+    /// generation, expiry, and renewal state. Snapshot only: the commit CAS is
     /// the authority (ADR 0029). Entry point:
     /// [`LashCore::session_lease_diagnostics`](crate::LashCore::session_lease_diagnostics).
     pub use crate::session_lease::{

@@ -235,6 +235,10 @@ if let Some(process_report) = report.process {
           <div class="listing__body"><p><code>session.admin().state().export()</code> for the committed snapshot, plus the <code>RuntimePersistence</code> contract itself when a host owns a concrete store. Session mutation stays inside turns and <code>SessionCommand</code>s.</p></div>
         </div>
         <div class="listing__row">
+          <div class="listing__label">lease state</div>
+          <div class="listing__body"><p><code>core.session_lease_diagnostics(session_id)</code> for a session's execution lane (holder identity, generation, expiry, renewal state), and <code>core.processes()</code> for a process lease. Both are snapshot reads that never mutate the row; the commit compare-and-set stays the authority, so no host behavior may be gated on either. <a href="./operations.html#stuck-turn">Triaging a stuck turn</a> is the procedure they serve.</p></div>
+        </div>
+        <div class="listing__row">
           <div class="listing__label">process state</div>
           <div class="listing__body"><p><code>core.processes()</code> for observation, signalling, retention, and the deletion change feed. It is the whole process surface; the registry's rows are its implementation.</p></div>
         </div>

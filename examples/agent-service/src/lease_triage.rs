@@ -1,9 +1,9 @@
 //! The operator triage surface for a chat whose turn appears stuck.
 //!
 //! This is the host half of the procedure documented at
-//! `docs/operations.html#stuck-turn`. lash supplies one lever —
+//! `docs/operations.html#stuck-turn`. lash supplies one lever,
 //! [`LashCore::session_lease_diagnostics`], a snapshot read of the session's
-//! execution-lease row — and this example turns that raw reading into the
+//! execution-lease row, and this example turns that raw reading into the
 //! host-owned classification an operator actually wants, exactly the way the
 //! process rail turns `ObservedProcess`'s raw lease facts into a host verdict.
 //!
@@ -28,15 +28,15 @@ use crate::state::{AppResult, AppStateData};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum LeaseTriage {
-    /// No durable session exists under this id — never created, or deleted.
+    /// No durable session exists under this id: never created, or deleted.
     NoSession,
     /// The session exists and nobody holds its execution lane. A turn that is
     /// "running" from the host's point of view while the lane is unheld either
     /// already committed and released, or never claimed.
     Unheld,
     /// A holder's renewals were current at the observation. The lane is healthy,
-    /// so a turn that is not progressing is blocked inside itself — most often a
-    /// provider call with no timeout. Look at the provider, not the lease.
+    /// so a turn that is not progressing is blocked inside itself, most often in
+    /// a provider call with no timeout. Look at the provider, not the lease.
     ProviderHangShape,
     /// The holder's renewals stopped. A peer may take the lane over with a higher
     /// generation, and `session_execution_lease.renew_failed` →
@@ -85,7 +85,7 @@ impl LeaseTriage {
             }
             Self::LeaseLost => {
                 "renewals stopped; read session_execution_lease.renew_failed / .taken_over for the \
-                 handoff and do not kill the displaced runner — it may still commit"
+                 handoff and do not kill the displaced runner, which may still commit"
             }
         }
     }
@@ -150,7 +150,7 @@ impl LeaseTriageReport {
     }
 }
 
-/// `GET /api/chats/{chat_id}/lease` — the operator read. Diagnostics only: this
+/// `GET /api/chats/{chat_id}/lease`, the operator read. Diagnostics only: this
 /// endpoint deliberately exposes no lever that acts on the lease.
 pub(crate) async fn chat_lease_triage(
     State(state): State<AppStateData>,
@@ -309,7 +309,7 @@ mod tests {
         let (core, factory) = durable_core(dir.path()).await;
         let store = materialized_store(&factory, SESSION_ID).await;
         // TTL 0: the lane is held by a named owner whose renewals have already
-        // stopped — the ambiguous state the procedure must not resolve by force.
+        // stopped. This is the ambiguous state the procedure must not force.
         let stalled = store
             .try_claim_session_execution_lease(SESSION_ID, &owner("worker-a", "worker-a:boot-1"), 0)
             .await

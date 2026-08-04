@@ -1,6 +1,6 @@
 //! The four decisive session-execution-lease transitions must each emit one
 //! structured trace event carrying the session id, the lease generation, and the
-//! holder identity — enough for a log timeline to reconstruct takeover order.
+//! holder identity: enough for a log timeline to reconstruct takeover order.
 //!
 //! These are trace events, never durable session events (lease churn is
 //! per-attempt telemetry, not session history), so the oracle here is a capture
@@ -188,7 +188,7 @@ async fn a_takeover_traces_renew_failure_then_the_superseding_holder() {
         .expect("an unheld lane is acquirable");
         let held_generation = guard.fence().fencing_token;
 
-        // Move the durable row on behind the holder's back — the shape a stalled
+        // Move the durable row on behind the holder's back, the shape a stalled
         // holder sees when its TTL lapsed and a peer swept the lane. Releasing
         // through the store (not the guard) leaves the holder's renewal loop
         // running against a generation it no longer owns.
