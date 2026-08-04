@@ -807,7 +807,7 @@ impl TriggerMutationReceipt {
 ///
 /// A command paired with [`TriggerStore::execute_command`] is **the** supported
 /// route for a host to mutate trigger subscriptions. The durable tables behind
-/// a store — `lash_*` in the first-party SQL backends — are private to lash:
+/// a store (`lash_*` in the first-party SQL backends) are private to lash:
 /// their columns and the record JSON they hold are stable only within one
 /// schema version, and a hand-written `UPDATE` also bypasses the revision fence
 /// and the operation receipt the store writes in the same transaction. Trigger
@@ -819,16 +819,17 @@ impl TriggerMutationReceipt {
 ///   [`List`](Self::List) record or from an earlier receipt. A writer that lost
 ///   the race receives [`TriggerOperationError::Conflict`] instead of silently
 ///   overwriting the winner.
-/// - **Receipted.** `operation_id` journals the evaluated outcome — committed
-///   mutation or conflict — so replaying one operation returns its original
-///   [`TriggerMutationReceipt`] rather than re-evaluating against newer state.
+/// - **Receipted.** `operation_id` journals whatever the store evaluated, a
+///   committed mutation or a conflict, so replaying one operation returns its
+///   original [`TriggerMutationReceipt`] instead of re-evaluating against newer
+///   state.
 /// - **Keyed.** `subscription_key` is unique within a [`TriggerOwnerScope`], so
 ///   a command names its target directly and never needs a store-assigned
 ///   lookup handle.
 ///
 /// [`Enable`](Self::Enable) is a first-class verb, so re-enabling is fully
 /// supported: read the live revision, then `Enable` against it. Registering the
-/// same definition again is deliberately *not* a re-enable — it reports
+/// same definition again is deliberately *not* a re-enable: it reports
 /// [`TriggerMutationDisposition::Unchanged`] and leaves the row disabled.
 ///
 /// ```no_run
@@ -899,8 +900,8 @@ pub enum TriggerCommand {
         draft: TriggerSubscriptionDraft,
     },
     /// Read the owner scope's live subscription records. This is the supported
-    /// lookup — by key, name, source, or enablement — and the read that
-    /// supplies `expected_revision` to every mutation below.
+    /// lookup by key, name, source, or enablement, and the read that supplies
+    /// `expected_revision` to every mutation below.
     List {
         owner_scope: TriggerOwnerScope,
         filter: TriggerSubscriptionFilter,
@@ -1199,9 +1200,9 @@ pub trait TriggerStore: Send + Sync {
     /// opaque backend error.
     ///
     /// `operation_id` is the caller's idempotency key within the command's
-    /// [`TriggerOwnerScope`]. A mutation journals its evaluated outcome —
-    /// committed receipt or conflict — under that id, so replaying the same
-    /// operation returns the original outcome even after the row has moved on.
+    /// [`TriggerOwnerScope`]. A mutation journals what it evaluated, a committed
+    /// receipt or a conflict, under that id, so replaying the same operation
+    /// returns the original outcome even after the row has moved on.
     /// Reuse an id only for a retry of the same intent. [`TriggerCommand::List`]
     /// is never receipted and always reads current state.
     async fn execute_command(

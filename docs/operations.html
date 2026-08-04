@@ -99,7 +99,7 @@ let session = core
       </div>
       <aside class="gotcha">
         <strong>Fix it, do not re-point it</strong>
-        <p>The trigger subscription table changed shape, so old queries fail loudly — a lookup column that no longer exists, or record JSON that no longer deserializes. Repairing them against the new columns is the worse outcome: a raw <code>UPDATE</code> writes outside the revision fence and the operation receipt, which corrupts the subscription state machine silently instead. Replace the query with the command.</p>
+        <p>The trigger subscription table changed shape, so old queries fail loudly on a lookup column that no longer exists, or on record JSON that no longer deserializes. Repairing them against the new columns is the worse outcome: a raw <code>UPDATE</code> writes outside the revision fence and the operation receipt, which corrupts the subscription state machine silently instead. Replace the query with the command.</p>
       </aside>
       <p>Every trigger operation a host previously hand-wrote has a fenced, receipted replacement. All of them run through <code>TriggerStore::execute_command(operation_id, command)</code> on the trigger store the host installed, and every point mutation takes an <code>expected_revision</code> read from a <code>List</code> record or an earlier receipt.</p>
       <div class="table">

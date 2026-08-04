@@ -31,8 +31,8 @@ impl Completions {
 /// Host-scoped trigger surface: emit occurrences and read registrations across
 /// every owner scope.
 ///
-/// This is the read and ingress half. Changing a subscription — register,
-/// update, enable, disable, delete — goes through
+/// This is the read and ingress half. Changing a subscription (register,
+/// update, enable, disable, delete) goes through
 /// [`TriggerCommand`](crate::triggers::TriggerCommand) executed by
 /// [`TriggerStore::execute_command`](crate::triggers::TriggerStore::execute_command)
 /// on the trigger store the host installed, so the mutation keeps its revision

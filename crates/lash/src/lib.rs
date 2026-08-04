@@ -110,9 +110,9 @@ pub mod observe {
 /// Reads have a facade: [`CoreTriggerAdmin::subscriptions`](crate::admin::CoreTriggerAdmin::subscriptions)
 /// and [`SessionTriggerAdmin`](crate::admin::SessionTriggerAdmin) project
 /// registrations for host and session scopes. Mutations go through the store
-/// contract below — [`TriggerCommand`] executed by
-/// [`TriggerStore::execute_command`] — which is the only supported way to
-/// change a subscription. The tables a durable store keeps (`lash_*` in the
+/// contract below: [`TriggerCommand`] executed by
+/// [`TriggerStore::execute_command`], the only supported way to change a
+/// subscription. The tables a durable store keeps (`lash_*` in the
 /// first-party SQL backends) are private to lash; raw SQL against them is
 /// unsupported for reads and writes alike.
 pub mod triggers {
@@ -132,9 +132,9 @@ pub mod triggers {
         facade_support::TriggerEventType, facade_support::TriggerRegistration,
         facade_support::TriggerTargetSummary, facade_support::empty_trigger_source_key,
     };
-    /// The fenced, receipted verb vocabulary for subscription mutation —
-    /// including [`TriggerCommand::Enable`], the supported re-enable — executed
-    /// by [`TriggerStore::execute_command`] on the host's trigger store.
+    /// The fenced, receipted verb vocabulary for subscription mutation,
+    /// including [`TriggerCommand::Enable`] for re-enable, executed by
+    /// [`TriggerStore::execute_command`] on the host's trigger store.
     pub use lash_core::{TriggerCommand, TriggerStore};
 }
 
