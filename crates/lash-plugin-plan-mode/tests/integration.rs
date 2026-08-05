@@ -811,7 +811,6 @@ async fn plan_mode_tool_exit_disables_mode_after_user_approval() {
             name: "plan_exit",
             args: &plan_exit_args,
             context: &plan_exit_ctx,
-            progress: None,
         })
         .await;
     assert!(result.is_success(), "{:?}", result.value_for_projection());
@@ -928,7 +927,6 @@ async fn plan_mode_tool_exit_allows_exit_without_validation() {
             name: "plan_exit",
             args: &plan_exit_args,
             context: &plan_exit_ctx,
-            progress: None,
         })
         .await;
     assert!(result.is_success(), "{:?}", result.value_for_projection());
@@ -1024,7 +1022,6 @@ async fn plan_mode_tool_exit_can_execute_with_fresh_context() {
             name: "plan_exit",
             args: &plan_exit_args,
             context: &plan_exit_ctx,
-            progress: None,
         })
         .await;
     assert!(result.is_success(), "{:?}", result.value_for_projection());

@@ -8704,8 +8704,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:166#lash::durability::ensure_durable_effect_input(&plain)"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:177#.expect_err(\"live protocol extensions cannot cross a durable effect boundary\");"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:162#lash::durability::ensure_durable_effect_input(&plain)"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:173#.expect_err(\"live protocol extensions cannot cross a durable effect boundary\");"
 
 [[api]]
 symbol = "lash::message_role"
@@ -16974,7 +16974,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/plugins.rs:137#lash::plugins::PluginLifecycleEvent::SessionConfigChanged(ctx) => {"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:247#assert_eq!("
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:243#assert_eq!("
 
 [[api]]
 symbol = "lash::plugins::PluginLifecycleEvent::SessionConfigChanged::0"
@@ -16983,7 +16983,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/plugins.rs:137#lash::plugins::PluginLifecycleEvent::SessionConfigChanged(ctx) => {"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:247#assert_eq!("
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:243#assert_eq!("
 
 [[api]]
 symbol = "lash::plugins::PluginLifecycleEvent::SessionRestored"
@@ -18135,7 +18135,7 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/plugins.rs:195#input: lash::plugins::PreparedContext,"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:342#assert_eq!("
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:338#assert_eq!("
 
 [[api]]
 symbol = "lash::plugins::PreparedContext::include_base_tools"
@@ -18144,7 +18144,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/plugins.rs:170#include_base_tools: bool,"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:348#assert!(observation.include_base_tools);"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:344#assert!(observation.include_base_tools);"
 
 [[api]]
 symbol = "lash::plugins::PreparedContext::messages"
@@ -18153,7 +18153,7 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/plugins.rs:199#message_count: input.messages.len(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:346#assert_eq!(observation.message_count, 1);"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:342#assert_eq!(observation.message_count, 1);"
 
 [[api]]
 symbol = "lash::plugins::PreparedContext::prompt_contributions"
@@ -18170,7 +18170,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/plugins.rs:201#tool_provider_count: input.tool_providers.len(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:352#assert_eq!(observation.tool_provider_count, 0);"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:348#assert_eq!(observation.tool_provider_count, 0);"
 
 [[api]]
 symbol = "lash::plugins::PromptHookContext"
@@ -18317,7 +18317,7 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/plugins.rs:253#ctx: &lash::plugins::SessionConfigChangedContext,"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:247#assert_eq!("
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:243#assert_eq!("
 
 [[api]]
 symbol = "lash::plugins::SessionConfigChangedContext::current"
@@ -18326,7 +18326,7 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/plugins.rs:262#current_model_id: ctx.current.model_id().to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:247#assert_eq!("
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:243#assert_eq!("
 
 [[api]]
 symbol = "lash::plugins::SessionConfigChangedContext::previous"
@@ -18335,7 +18335,7 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/plugins.rs:261#previous_model_id: ctx.previous.model_id().to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:247#assert_eq!("
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:243#assert_eq!("
 
 [[api]]
 symbol = "lash::plugins::SessionConfigChangedContext::session_id"
@@ -18344,7 +18344,7 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/plugins.rs:244#session_id: String,"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:247#assert_eq!("
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:243#assert_eq!("
 
 [[api]]
 symbol = "lash::plugins::SessionConfigChangedContext::sessions"
@@ -18353,7 +18353,7 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/plugins.rs:255#let snapshot = ctx.sessions.snapshot_current().await?;"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:247#assert_eq!("
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:243#assert_eq!("
 
 [[api]]
 symbol = "lash::plugins::SessionGraphService"
@@ -18693,8 +18693,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:41#lash::plugins::ToolCatalog::default()"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:42#assert!(catalog.tools.is_empty())"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:37#lash::plugins::ToolCatalog::default()"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:38#assert!(catalog.tools.is_empty())"
 
 [[api]]
 symbol = "lash::plugins::ToolCatalog::callable_tools"
@@ -18766,8 +18766,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:42#catalog.tools"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:42#assert!(catalog.tools.is_empty())"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:38#catalog.tools"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:38#assert!(catalog.tools.is_empty())"
 
 [[api]]
 symbol = "lash::plugins::ToolCatalogContribution"
@@ -18960,7 +18960,7 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/plugins.rs:187#impl lash::plugins::TurnContextTransform for WorkbenchContextBudget {"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:342#assert_eq!("
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:338#assert_eq!("
 
 [[api]]
 symbol = "lash::plugins::TurnContextTransform::id"
@@ -19057,7 +19057,7 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/plugins.rs:194#ctx: &lash::plugins::TurnTransformContext<'_>,"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:342#assert_eq!("
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:338#assert_eq!("
 
 [[api]]
 symbol = "lash::plugins::TurnTransformContext::direct_completions"
@@ -19074,7 +19074,7 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/plugins.rs:172#max_context_tokens: Option<usize>,"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:356#assert_eq!(observation.max_context_tokens, Some(4_096));"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:352#assert_eq!(observation.max_context_tokens, Some(4_096));"
 
 [[api]]
 symbol = "lash::plugins::TurnTransformContext::prompt_usage"
@@ -19107,7 +19107,7 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/plugins.rs:166#session_id: String,"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:342#assert_eq!("
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:338#assert_eq!("
 
 [[api]]
 symbol = "lash::plugins::TurnTransformContext::session_lifecycle"
@@ -19132,7 +19132,7 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/plugins.rs:203#committed_message_count: ctx.state.messages().len(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:347#assert_eq!(observation.committed_message_count, 0);"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:343#assert_eq!(observation.committed_message_count, 0);"
 
 [[api]]
 symbol = "lash::plugins::tool_output_budget_stack"
@@ -23640,8 +23640,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:43#lash::process::CausalRef::Process"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:46#assert!(matches!("
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:39#lash::process::CausalRef::Process"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:42#assert!(matches!("
 
 [[api]]
 symbol = "lash::process::CausalRef::Effect"
@@ -23681,8 +23681,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:43#lash::process::CausalRef::Process"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:46#assert!(matches!("
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:39#lash::process::CausalRef::Process"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:42#assert!(matches!("
 
 [[api]]
 symbol = "lash::process::CausalRef::Process::process_id"
@@ -23690,8 +23690,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:44#process_id:"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:46#assert!(matches!("
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:40#process_id:"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:42#assert!(matches!("
 
 [[api]]
 symbol = "lash::process::CausalRef::ProcessEvent"
@@ -29700,8 +29700,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:52#lash::provider::DefaultProviderFailureClassifier.classify("
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:55#assert!(classified.retryable)"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:48#lash::provider::DefaultProviderFailureClassifier.classify("
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:51#assert!(classified.retryable)"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidence"
@@ -29757,8 +29757,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:58#lash::provider::LlmOutputSpec::JsonObject"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:57#assert!(matches!("
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:54#lash::provider::LlmOutputSpec::JsonObject"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:53#assert!(matches!("
 
 [[api]]
 symbol = "lash::provider::LlmOutputSpec::JsonObject"
@@ -29766,8 +29766,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:58#lash::provider::LlmOutputSpec::JsonObject"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:57#assert!(matches!("
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:54#lash::provider::LlmOutputSpec::JsonObject"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:53#assert!(matches!("
 
 [[api]]
 symbol = "lash::provider::LlmOutputSpec::JsonSchema"
@@ -30216,8 +30216,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:76#ModelEffortValidationCategory, ModelEffortValidationError, ReasoningCapability,"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:87#.expect_err(\"host capability must reject an unadvertised effort\");"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:72#ModelEffortValidationCategory, ModelEffortValidationError, ReasoningCapability,"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:83#.expect_err(\"host capability must reject an unadvertised effort\");"
 
 [[api]]
 symbol = "lash::provider::ModelEffortValidationCategory::EffortNotConfigurable"
@@ -30225,7 +30225,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:113#ModelEffortValidationCategory::EffortNotConfigurable"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:109#ModelEffortValidationCategory::EffortNotConfigurable"
 assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:28#assert_eq!("
 
 [[api]]
@@ -30234,8 +30234,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:130#assert_eq!(required.category, ModelEffortValidationCategory::EffortRequired);"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:130#assert_eq!(required.category, ModelEffortValidationCategory::EffortRequired);"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:126#assert_eq!(required.category, ModelEffortValidationCategory::EffortRequired);"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:126#assert_eq!(required.category, ModelEffortValidationCategory::EffortRequired);"
 
 [[api]]
 symbol = "lash::provider::ModelEffortValidationCategory::MalformedCapability"
@@ -30243,7 +30243,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:156#ModelEffortValidationCategory::MalformedCapability"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:152#ModelEffortValidationCategory::MalformedCapability"
 assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:28#assert_eq!("
 
 [[api]]
@@ -30252,7 +30252,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:90#ModelEffortValidationCategory::UnsupportedEffort"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:86#ModelEffortValidationCategory::UnsupportedEffort"
 assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:28#assert_eq!("
 
 [[api]]
@@ -30261,8 +30261,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:76#ModelEffortValidationCategory, ModelEffortValidationError, ReasoningCapability,"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:87#.expect_err(\"host capability must reject an unadvertised effort\");"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:72#ModelEffortValidationCategory, ModelEffortValidationError, ReasoningCapability,"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:83#.expect_err(\"host capability must reject an unadvertised effort\");"
 
 [[api]]
 symbol = "lash::provider::ModelEffortValidationError::category"
@@ -30270,7 +30270,7 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:89#unsupported.category,"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:85#unsupported.category,"
 assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:28#assert_eq!("
 
 [[api]]
@@ -30279,8 +30279,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:92#assert!(unsupported.message.contains(\"Unsupported effort `ultra`\"));"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:92#assert!(unsupported.message.contains(\"Unsupported effort `ultra`\"));"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:88#assert!(unsupported.message.contains(\"Unsupported effort `ultra`\"));"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:88#assert!(unsupported.message.contains(\"Unsupported effort `ultra`\"));"
 
 [[api]]
 symbol = "lash::provider::Provider"
@@ -30450,7 +30450,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:6#lash::provider::ProviderFailureClassifier"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:55#assert!(classified.retryable)"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:51#assert!(classified.retryable)"
 
 [[api]]
 symbol = "lash::provider::ProviderFailureClassifier::classify"
@@ -30458,8 +30458,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:52#.classify("
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:55#assert!(classified.retryable)"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:48#.classify("
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:51#assert!(classified.retryable)"
 
 [[api]]
 symbol = "lash::provider::ProviderFailureKind"
@@ -51506,15 +51506,6 @@ disposition = "unused-add"
 reason = "Add lash::tools::PreparedToolCall::tool_name to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::tools::ProgressSender"
-kind = "type_alias"
-availability = "default+all-features"
-area = "plugins"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:38#lash::tools::ProgressSender"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:39#assert!(!progress.is_closed())"
-
-[[api]]
 symbol = "lash::tools::RemoteToolGrantLashlangExt"
 kind = "trait"
 availability = "all-features"
@@ -51783,14 +51774,6 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "unused-add"
 reason = "Add lash::tools::ToolCall::name to the agent-workbench plugin/tool setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::tools::ToolCall::progress"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::tools::ToolCall::progress to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::tools::ToolCallOutput"
@@ -58172,8 +58155,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:69#lash::triggers::TriggerDeliveryRetentionCandidate"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:68#assert!("
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:65#lash::triggers::TriggerDeliveryRetentionCandidate"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:64#assert!("
 
 [[api]]
 symbol = "lash::triggers::TriggerDeliveryRetentionCandidate::occurrence_id"
@@ -58353,8 +58336,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:67#lash::triggers::TriggerIngressResult"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:67#assert!(std::mem::size_of"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:63#lash::triggers::TriggerIngressResult"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:63#assert!(std::mem::size_of"
 
 [[api]]
 symbol = "lash::triggers::TriggerIngressResult::occurrence"
@@ -58378,8 +58361,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:62#lash::triggers::TriggerInputBinding::Fixed"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:63#assert_eq!(serde_json::to_value(input)"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:58#lash::triggers::TriggerInputBinding::Fixed"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:59#assert_eq!(serde_json::to_value(input)"
 
 [[api]]
 symbol = "lash::triggers::TriggerInputBinding::Event"
@@ -58395,8 +58378,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:62#lash::triggers::TriggerInputBinding::Fixed"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:63#assert_eq!(serde_json::to_value(input)"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:58#lash::triggers::TriggerInputBinding::Fixed"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:59#assert_eq!(serde_json::to_value(input)"
 
 [[api]]
 symbol = "lash::triggers::TriggerInputBinding::Fixed::value"
@@ -58404,8 +58387,8 @@ kind = "field"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:62#value: json!(42)"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:63#assert_eq!(serde_json::to_value(input)"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:58#value: json!(42)"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:59#assert_eq!(serde_json::to_value(input)"
 
 [[api]]
 symbol = "lash::triggers::TriggerMutationDisposition"
@@ -71173,14 +71156,6 @@ disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
 
 [[api]]
-symbol = "lash_core::ProgressSender"
-kind = "type_alias"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::ProgressSender. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
 symbol = "lash_core::ProjectionMode"
 kind = "enum"
 availability = "default+all-features"
@@ -75350,30 +75325,6 @@ disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::SamplingCapability::is_default. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
-symbol = "lash_core::SandboxMessage"
-kind = "struct"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SandboxMessage. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::SandboxMessage::kind"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SandboxMessage::kind. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::SandboxMessage::text"
-kind = "field"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SandboxMessage::text. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
 symbol = "lash_core::SansIoTurnInput"
 kind = "type_alias"
 availability = "default+all-features"
@@ -79479,14 +79430,6 @@ reason = "Concrete host class: third-party plugin, provider, or tool-source impl
 
 [[api]]
 symbol = "lash_core::ToolCall::name"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
-
-[[api]]
-symbol = "lash_core::ToolCall::progress"
 kind = "field"
 availability = "default+all-features"
 area = "plugins"

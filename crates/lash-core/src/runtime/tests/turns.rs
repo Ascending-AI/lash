@@ -1186,7 +1186,6 @@ async fn continue_as_frame_rotation_reconciles_newly_advertised_tool() {
             &crate::ToolId::from("tool:hidden_after_rotation"),
             &json!({}),
             &crate::testing::mock_tool_context(),
-            None,
         )
         .await;
     assert!(

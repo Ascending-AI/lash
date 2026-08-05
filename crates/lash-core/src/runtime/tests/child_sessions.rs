@@ -567,12 +567,7 @@ async fn forked_child_session_keeps_hidden_live_tool_non_executable_across_rebui
         let tool_id = tool_id.clone();
         async move {
             registry
-                .execute_by_id(
-                    &tool_id,
-                    &json!({}),
-                    &crate::testing::mock_tool_context(),
-                    None,
-                )
+                .execute_by_id(&tool_id, &json!({}), &crate::testing::mock_tool_context())
                 .await
         }
     };

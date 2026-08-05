@@ -468,7 +468,6 @@ mod tests {
                 name: "llm_query",
                 args: &args,
                 context: &context,
-                progress: None,
             })
             .await;
 
@@ -529,7 +528,6 @@ mod tests {
                 name: "llm_query",
                 args: &args,
                 context: &context,
-                progress: None,
             })
             .await;
 
@@ -562,7 +560,6 @@ mod tests {
                 name: "llm_query",
                 args: &args,
                 context: &context,
-                progress: None,
             })
             .await;
 

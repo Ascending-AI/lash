@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
+#[cfg(test)]
+use crate::ToolContext;
 use crate::plugin::ToolCallHookContext;
 use crate::validate_tool_input;
-#[cfg(test)]
-use crate::{ProgressSender, ToolContext};
 use crate::{
     ToolExecutionGrant, ToolFailureClass, ToolManifest, ToolPrepareCall, ToolPrepareContext,
 };
@@ -22,14 +22,12 @@ pub(crate) async fn dispatch_tool_call(
     context: &ToolDispatchContext<'_>,
     tool_name: String,
     args: serde_json::Value,
-    progress: Option<&ProgressSender>,
 ) -> ToolDispatchOutcome {
     let tool_context = ToolContext::from_dispatch(Arc::new(context.clone())).build();
     Box::pin(dispatch_tool_call_with_execution_context(
         context,
         tool_name,
         args,
-        progress,
         tool_context,
     ))
     .await
@@ -40,7 +38,6 @@ pub(crate) async fn dispatch_tool_call_with_execution_context<'run>(
     context: &ToolDispatchContext<'run>,
     tool_name: String,
     args: serde_json::Value,
-    progress: Option<&ProgressSender>,
     tool_context: ToolContext<'run>,
 ) -> ToolDispatchOutcome {
     let pending = crate::sansio::PendingToolCall {
@@ -63,7 +60,6 @@ pub(crate) async fn dispatch_tool_call_with_execution_context<'run>(
             Box::pin(dispatch_prepared_tool_call_with_execution_context(
                 context,
                 prepared,
-                progress,
                 tool_context,
             ))
             .await

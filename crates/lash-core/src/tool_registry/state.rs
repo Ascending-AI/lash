@@ -212,18 +212,16 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
         tool: &str,
         args: &serde_json::Value,
         context: &ToolContext<'_>,
-        progress: Option<&ProgressSender>,
     ) -> ToolResult;
     async fn execute_by_id(
         &self,
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &ToolContext<'_>,
-        progress: Option<&ProgressSender>,
     ) -> ToolResult {
         let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
             return ToolResult::err_fmt(format_args!("Unknown tool id: {tool_id}"));
         };
-        self.execute(&manifest.name, args, context, progress).await
+        self.execute(&manifest.name, args, context).await
     }
 }

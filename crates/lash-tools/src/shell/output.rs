@@ -32,7 +32,6 @@ pub(crate) const OUTPUT_QUIET_PERIOD_MS: u64 = 75;
 #[derive(Clone)]
 pub(crate) struct ProcessState {
     pub(crate) buffer: Arc<StdMutex<Vec<u8>>>,
-    pub(crate) buffer_start: Arc<StdMutex<usize>>,
     pub(crate) exit_code: Arc<StdMutex<Option<i32>>>,
     pub(crate) exit_notify: Arc<Notify>,
     pub(crate) output_notify: Arc<Notify>,
@@ -114,29 +113,6 @@ pub(crate) fn terminate_pipe_process(_pid: Option<u32>) {}
 
 pub(crate) fn exit_status_code(status: std::process::ExitStatus) -> i32 {
     status.code().unwrap_or(-1)
-}
-
-pub(crate) fn progress_chunk(
-    buffer: &Arc<StdMutex<Vec<u8>>>,
-    buffer_start: &Arc<StdMutex<usize>>,
-    sent_len: &mut usize,
-) -> Option<String> {
-    let buf = buffer.lock().unwrap();
-    let start_offset = *buffer_start.lock().unwrap();
-    let buffer_end = start_offset + buf.len();
-    if buffer_end <= *sent_len {
-        return None;
-    }
-    let start = (*sent_len).max(start_offset);
-    let mut chunk = String::from_utf8_lossy(&buf[start.saturating_sub(start_offset)..]).to_string();
-    if *sent_len < start_offset && !chunk.is_empty() {
-        if !chunk.ends_with('\n') {
-            chunk.push('\n');
-        }
-        chunk.push_str("[truncated]");
-    }
-    *sent_len = buffer_end;
-    Some(clean_terminal_output(&chunk))
 }
 
 pub(crate) async fn wait_for_child_exit(state: &ProcessState, timeout: Duration) {

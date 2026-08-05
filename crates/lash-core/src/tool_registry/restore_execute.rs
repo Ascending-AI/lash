@@ -293,7 +293,7 @@ impl ToolProvider for ToolRegistry {
         let Some(manifest) = self.resolve_manifest(call.name) else {
             return ToolResult::err_fmt(format_args!("Unknown tool: {}", call.name));
         };
-        self.execute_by_id(&manifest.id, call.args, call.context, call.progress)
+        self.execute_by_id(&manifest.id, call.args, call.context)
             .await
     }
 
@@ -302,7 +302,6 @@ impl ToolProvider for ToolRegistry {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &ToolContext<'_>,
-        progress: Option<&ProgressSender>,
     ) -> ToolResult {
         let (source, manifest) = match self.resolve_execution_source(tool_id) {
             Ok(resolved) => resolved,
@@ -310,7 +309,7 @@ impl ToolProvider for ToolRegistry {
         };
         let _ = manifest;
         source
-            .execute_by_id(tool_id, args, context, progress)
+            .execute_by_id(tool_id, args, context)
             .await
     }
 
@@ -319,14 +318,13 @@ impl ToolProvider for ToolRegistry {
         grant: &ToolExecutionGrant,
         args: &serde_json::Value,
         context: &ToolContext<'_>,
-        progress: Option<&ProgressSender>,
     ) -> ToolResult {
         let source = match self.resolve_granted_execution_source(grant) {
             Ok(source) => source,
             Err(result) => return result,
         };
         source
-            .execute_by_id(&grant.manifest.id, args, context, progress)
+            .execute_by_id(&grant.manifest.id, args, context)
             .await
     }
 }

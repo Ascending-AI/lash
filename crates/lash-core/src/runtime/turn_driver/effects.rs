@@ -445,7 +445,7 @@ impl RuntimeTurnDriver<'_> {
         reason = "foreground code execution carries explicit turn and replay context"
     )]
     pub(in crate::runtime) async fn run_exec_code(
-        &mut self,
+        &self,
         language: String,
         code: &str,
         messages: crate::MessageSequence,
@@ -456,30 +456,13 @@ impl RuntimeTurnDriver<'_> {
     ) -> Result<Result<crate::ExecResponse, String>, crate::RuntimeEffectControllerError> {
         let (session_event_tx, mut session_event_rx) = mpsc::channel::<SessionStreamEvent>(100);
         let (turn_event_tx, mut turn_event_rx) = mpsc::channel::<TurnActivity>(100);
-        let (msg_tx, mut msg_rx) = tokio::sync::mpsc::unbounded_channel::<SandboxMessage>();
-        self.session.set_message_sender(msg_tx);
         let relay_tx = event_tx.clone();
         let relay_handle = crate::task::spawn(async move {
-            let mut sandbox_closed = false;
             let mut session_closed = false;
             let mut turn_closed = false;
-            while !(sandbox_closed && session_closed && turn_closed) {
+            while !(session_closed && turn_closed) {
                 tokio::select! {
                     biased;
-                    maybe_sandbox = msg_rx.recv(), if !sandbox_closed => {
-                        let Some(sandbox_msg) = maybe_sandbox else {
-                            sandbox_closed = true;
-                            continue;
-                        };
-                        if sandbox_msg.kind != "code" && !relay_tx.is_closed() {
-                            let _ = relay_tx
-                                .send(RuntimeStreamEvent::Session(SessionStreamEvent::Message {
-                                    text: sandbox_msg.text,
-                                    kind: sandbox_msg.kind,
-                                }))
-                                .await;
-                        }
-                    }
                     maybe_event = session_event_rx.recv(), if !session_closed => {
                         let Some(event) = maybe_event else {
                             session_closed = true;
@@ -527,7 +510,6 @@ impl RuntimeTurnDriver<'_> {
         drop(context);
         drop(session_event_tx);
         drop(turn_event_tx);
-        self.session.clear_message_sender();
         let _ = relay_handle.await;
         match nested_effect_error {
             Some(error) => Err(error),

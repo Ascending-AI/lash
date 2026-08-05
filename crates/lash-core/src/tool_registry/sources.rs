@@ -165,7 +165,6 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
         tool: &str,
         args: &serde_json::Value,
         context: &ToolContext<'_>,
-        progress: Option<&ProgressSender>,
     ) -> ToolResult {
         let Some(provider_idx) = self.provider_index_for(tool) else {
             return ToolResult::err_fmt(format_args!("Unknown tool: {tool}"));
@@ -175,7 +174,6 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
                 name: tool,
                 args,
                 context,
-                progress,
             })
             .await
     }
@@ -185,13 +183,12 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &ToolContext<'_>,
-        progress: Option<&ProgressSender>,
     ) -> ToolResult {
         let Some(provider_idx) = self.provider_index_for_id(tool_id) else {
             return ToolResult::err_fmt(format_args!("Unknown tool id: {tool_id}"));
         };
         self.providers[provider_idx]
-            .execute_by_id(tool_id, args, context, progress)
+            .execute_by_id(tool_id, args, context)
             .await
     }
 }
@@ -234,14 +231,12 @@ impl ToolSourceExecutor for ToolProviderSource {
         tool: &str,
         args: &serde_json::Value,
         context: &ToolContext<'_>,
-        progress: Option<&ProgressSender>,
     ) -> ToolResult {
         self.provider
             .execute(ToolCall {
                 name: tool,
                 args,
                 context,
-                progress,
             })
             .await
     }
@@ -251,10 +246,9 @@ impl ToolSourceExecutor for ToolProviderSource {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &ToolContext<'_>,
-        progress: Option<&ProgressSender>,
     ) -> ToolResult {
         self.provider
-            .execute_by_id(tool_id, args, context, progress)
+            .execute_by_id(tool_id, args, context)
             .await
     }
 }

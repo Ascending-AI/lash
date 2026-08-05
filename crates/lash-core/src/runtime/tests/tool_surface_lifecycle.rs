@@ -743,7 +743,6 @@ async fn assert_executes_by_id(runtime: &LashRuntime, id: &str) {
             &crate::ToolId::from(id),
             &json!({}),
             &crate::testing::mock_tool_context(),
-            None,
         )
         .await;
     assert!(
@@ -758,7 +757,6 @@ async fn assert_rejected_by_id(runtime: &LashRuntime, id: &str) {
             &crate::ToolId::from(id),
             &json!({}),
             &crate::testing::mock_tool_context(),
-            None,
         )
         .await;
     assert!(

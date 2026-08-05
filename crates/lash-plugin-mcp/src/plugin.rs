@@ -9,8 +9,7 @@ use lash_core::plugin::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin,
 };
 use lash_core::{
-    ProgressSender, ToolCall, ToolContext, ToolContract, ToolId, ToolManifest, ToolProvider,
-    ToolResult,
+    ToolCall, ToolContext, ToolContract, ToolId, ToolManifest, ToolProvider, ToolResult,
 };
 
 use crate::config::McpServerConfig;
@@ -214,7 +213,6 @@ impl ToolProvider for McpDeferredToolProvider {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &ToolContext<'_>,
-        _progress: Option<&ProgressSender>,
     ) -> ToolResult {
         if let Err(result) =
             Self::validate_execution_binding(tool_id, context.tool_execution_binding())
@@ -409,12 +407,7 @@ mod tests {
         let tool_id = defs[0].manifest.id.clone();
         let args = json!({ "query": "lash" });
         let missing_binding = deferred
-            .execute_by_id(
-                &tool_id,
-                &args,
-                &lash_core::testing::mock_tool_context(),
-                None,
-            )
+            .execute_by_id(&tool_id, &args, &lash_core::testing::mock_tool_context())
             .await;
         assert!(!missing_binding.is_success());
         assert!(
@@ -430,7 +423,7 @@ mod tests {
             json!({ "kind": "mcp", "server": "docs", "tool_id": "mcp:docs/other" }),
         );
         let wrong_binding = deferred
-            .execute_by_id(&tool_id, &args, &wrong_binding_context, None)
+            .execute_by_id(&tool_id, &args, &wrong_binding_context)
             .await;
         assert!(!wrong_binding.is_success());
 
@@ -438,7 +431,7 @@ mod tests {
             json!({ "kind": "mcp", "server": "docs", "tool_id": tool_id.to_string() }),
         );
         let deferred_result = deferred
-            .execute_by_id(&tool_id, &args, &valid_binding_context, None)
+            .execute_by_id(&tool_id, &args, &valid_binding_context)
             .await;
         assert!(deferred_result.is_success(), "{deferred_result:?}");
         assert_eq!(
