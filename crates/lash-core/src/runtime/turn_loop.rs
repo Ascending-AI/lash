@@ -1183,13 +1183,7 @@ impl LashRuntime {
             ..
         } = driver;
         self.session = Some(session);
-        let outcome_event = SessionStreamEvent::TurnOutcome {
-            outcome: TurnOutcome::Stopped(TurnStop::Cancelled),
-        };
-        assembler.push(&outcome_event);
-        emit_session_event_to_sink(events, outcome_event).await;
-        assembler.push(&SessionStreamEvent::Done);
-        emit_session_event_to_sink(events, SessionStreamEvent::Done).await;
+        emit_terminal_sequence(&mut assembler, events, None, TurnStop::Cancelled).await;
         let claims = LogicalTurnClaims::new(pending_queue_claims, pending_turn_input_claims);
         Box::pin(self.finish_turn(
             TurnFinishInput {
@@ -1261,35 +1255,22 @@ impl LashRuntime {
             .await?,
         );
         let mut assembler = TurnAssembler::default();
-        let error_event = SessionStreamEvent::Error {
-            message: message.clone(),
-            envelope: Some(crate::session_model::ErrorEnvelope {
-                kind: "runtime".to_string(),
+        emit_terminal_sequence(
+            &mut assembler,
+            events,
+            Some(TerminalDiagnostic {
+                kind: TerminalDiagnosticKind::Runtime,
                 code: Some("agent_frame_switch_limit".to_string()),
-                terminal_reason: None,
-                user_message: message.clone(),
-                raw: None,
+                message,
                 retryable: Some(false),
-                provider_failure_kind: None,
+                activity: TerminalActivityTarget::UnscopedSink {
+                    sink: turn_events,
+                    turn_id: &trace_turn_id,
+                },
             }),
-        };
-        assembler.push(&error_event);
-        emit_turn_activity_to_sink_for_turn(
-            turn_events,
-            &trace_turn_id,
-            TurnActivity::independent(TurnEvent::Error {
-                message: message.clone(),
-            }),
+            TurnStop::RuntimeError,
         )
         .await;
-        emit_session_event_to_sink(events, error_event).await;
-        let outcome_event = SessionStreamEvent::TurnOutcome {
-            outcome: TurnOutcome::Stopped(TurnStop::RuntimeError),
-        };
-        assembler.push(&outcome_event);
-        emit_session_event_to_sink(events, outcome_event).await;
-        assembler.push(&SessionStreamEvent::Done);
-        emit_session_event_to_sink(events, SessionStreamEvent::Done).await;
 
         let messages = crate::MessageSequence::from_base(self.state.read_model().messages);
         let mut turn_pipeline = TurnBoundary::from_state_with_clock(
@@ -1839,37 +1820,26 @@ impl LashRuntime {
             Err(e) => {
                 self.state.last_prompt_usage = None;
                 let mut assembler = TurnAssembler::default();
-                let error_event = SessionStreamEvent::Error {
-                    message: e.clone(),
-                    envelope: Some(crate::session_model::ErrorEnvelope {
-                        kind: "input_validation".to_string(),
-                        code: Some("invalid_turn_input".to_string()),
-                        terminal_reason: None,
-                        user_message: e.clone(),
-                        raw: None,
-                        retryable: Some(false),
-                        provider_failure_kind: None,
-                    }),
-                };
-                assembler.push(&error_event);
                 let trace_turn_id = input
                     .trace_turn_id
                     .clone()
                     .expect("turn id is bound from the execution scope before validation");
-                emit_turn_activity_to_sink_for_turn(
-                    turn_events,
-                    &trace_turn_id,
-                    TurnActivity::independent(TurnEvent::Error { message: e }),
+                emit_terminal_sequence(
+                    &mut assembler,
+                    events,
+                    Some(TerminalDiagnostic {
+                        kind: TerminalDiagnosticKind::InputValidation,
+                        code: Some("invalid_turn_input".to_string()),
+                        message: e,
+                        retryable: Some(false),
+                        activity: TerminalActivityTarget::UnscopedSink {
+                            sink: turn_events,
+                            turn_id: &trace_turn_id,
+                        },
+                    }),
+                    TurnStop::InvalidInput,
                 )
                 .await;
-                emit_session_event_to_sink(events, error_event).await;
-                let outcome_event = SessionStreamEvent::TurnOutcome {
-                    outcome: TurnOutcome::Stopped(TurnStop::InvalidInput),
-                };
-                assembler.push(&outcome_event);
-                emit_session_event_to_sink(events, outcome_event).await;
-                assembler.push(&SessionStreamEvent::Done);
-                emit_session_event_to_sink(events, SessionStreamEvent::Done).await;
                 // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
                 let turn_index = self.state.turn_index + 1;
                 let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
@@ -2279,43 +2249,19 @@ impl LashRuntime {
             self.state.turn_scope(&trace_turn_id),
         );
         turn_pipeline.apply_prepared_messages(&prepared.messages);
-        let issue = TurnIssue {
-            kind: "plugin".to_string(),
-            code: Some(abort.code),
-            terminal_reason: None,
-            message: abort.message.clone(),
-            raw: None,
-            retryable: None,
-            provider_failure_kind: None,
-        };
-        let error_event = SessionStreamEvent::Error {
-            message: abort.message,
-            envelope: Some(crate::session_model::ErrorEnvelope {
-                kind: "plugin".to_string(),
-                code: issue.code.clone(),
-                terminal_reason: None,
-                user_message: issue.message.clone(),
-                raw: None,
+        emit_terminal_sequence(
+            &mut assembler,
+            events,
+            Some(TerminalDiagnostic {
+                kind: TerminalDiagnosticKind::Plugin,
+                code: Some(abort.code),
+                message: abort.message,
                 retryable: None,
-                provider_failure_kind: None,
+                activity: TerminalActivityTarget::TurnScopedSink(turn_events),
             }),
-        };
-        assembler.push(&error_event);
-        emit_turn_activity_to_sink(
-            turn_events,
-            TurnActivity::independent(TurnEvent::Error {
-                message: issue.message.clone(),
-            }),
+            TurnStop::PluginAbort,
         )
         .await;
-        emit_session_event_to_sink(events, error_event).await;
-        let outcome_event = SessionStreamEvent::TurnOutcome {
-            outcome: TurnOutcome::Stopped(TurnStop::PluginAbort),
-        };
-        assembler.push(&outcome_event);
-        emit_session_event_to_sink(events, outcome_event).await;
-        assembler.push(&SessionStreamEvent::Done);
-        emit_session_event_to_sink(events, SessionStreamEvent::Done).await;
         Box::pin(self.finish_turn(
             TurnFinishInput {
                 turn_pipeline,
@@ -2693,6 +2639,96 @@ async fn emit_turn_activity_to_sink_for_turn(
     if !events.is_noop() {
         events.emit_for_turn(turn_id, activity).await;
     }
+}
+
+/// Kind tag carried by a terminal diagnostic's error envelope.
+#[derive(Clone, Copy)]
+enum TerminalDiagnosticKind {
+    /// The runtime itself refused to continue the turn.
+    Runtime,
+    /// Turn input failed normalization before any provider work.
+    InputValidation,
+    /// A plugin aborted the prepared turn.
+    Plugin,
+}
+
+impl TerminalDiagnosticKind {
+    fn as_envelope_kind(self) -> &'static str {
+        match self {
+            Self::Runtime => "runtime",
+            Self::InputValidation => "input_validation",
+            Self::Plugin => "plugin",
+        }
+    }
+}
+
+/// How a terminal diagnostic's turn activity is addressed to its sink.
+enum TerminalActivityTarget<'a> {
+    /// The sink is already turn-scoped, so the activity is emitted directly.
+    TurnScopedSink(&'a dyn TurnActivitySink),
+    /// The sink is unscoped, so the activity is addressed to `turn_id`.
+    UnscopedSink {
+        sink: &'a dyn TurnActivitySink,
+        turn_id: &'a str,
+    },
+}
+
+/// Typed diagnostic emitted immediately ahead of a terminal `TurnOutcome`.
+struct TerminalDiagnostic<'a> {
+    kind: TerminalDiagnosticKind,
+    code: Option<String>,
+    message: String,
+    retryable: Option<bool>,
+    activity: TerminalActivityTarget<'a>,
+}
+
+/// Emit the canonical terminal sequence for a stopped turn.
+///
+/// The order is fixed and load-bearing for host transcripts: the optional
+/// diagnostic's session `Error` event (with its turn activity emitted in
+/// between), then `TurnOutcome::Stopped(stop)`, then `Done`. Every session
+/// event is recorded on `assembler` in emission order so the assembled turn
+/// matches what the host streamed.
+async fn emit_terminal_sequence(
+    assembler: &mut TurnAssembler,
+    events: &dyn EventSink,
+    diagnostic: Option<TerminalDiagnostic<'_>>,
+    stop: TurnStop,
+) {
+    if let Some(diagnostic) = diagnostic {
+        let error_event = SessionStreamEvent::Error {
+            message: diagnostic.message.clone(),
+            envelope: Some(crate::session_model::ErrorEnvelope {
+                kind: diagnostic.kind.as_envelope_kind().to_string(),
+                code: diagnostic.code,
+                terminal_reason: None,
+                user_message: diagnostic.message.clone(),
+                raw: None,
+                retryable: diagnostic.retryable,
+                provider_failure_kind: None,
+            }),
+        };
+        assembler.push(&error_event);
+        let activity = TurnActivity::independent(TurnEvent::Error {
+            message: diagnostic.message,
+        });
+        match diagnostic.activity {
+            TerminalActivityTarget::TurnScopedSink(sink) => {
+                emit_turn_activity_to_sink(sink, activity).await;
+            }
+            TerminalActivityTarget::UnscopedSink { sink, turn_id } => {
+                emit_turn_activity_to_sink_for_turn(sink, turn_id, activity).await;
+            }
+        }
+        emit_session_event_to_sink(events, error_event).await;
+    }
+    let outcome_event = SessionStreamEvent::TurnOutcome {
+        outcome: TurnOutcome::Stopped(stop),
+    };
+    assembler.push(&outcome_event);
+    emit_session_event_to_sink(events, outcome_event).await;
+    assembler.push(&SessionStreamEvent::Done);
+    emit_session_event_to_sink(events, SessionStreamEvent::Done).await;
 }
 
 struct TurnScopedActivitySink<'a> {
