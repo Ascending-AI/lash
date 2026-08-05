@@ -9,7 +9,7 @@ use lash::direct::{
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
-    CheckpointKind, GcReport, GraphAppend, LeaseOwnerIdentity, OperationId,
+    CheckpointKind, GcReport, GraphAppend, LeaseClaimNonce, LeaseOwnerIdentity, OperationId,
     PersistedSessionRead, PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft,
     QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkStore, RealizedNodeTimestamp, RuntimeCommit,
     RuntimeCommitResult, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
@@ -104,17 +104,18 @@ impl SessionCommitStore for FacadeStore {
 
 #[async_trait]
 impl SessionExecutionLeaseStore for FacadeStore {
-    async fn try_claim_session_execution_lease(
+    async fn try_claim_session_execution_lease_with_token(
         &self,
         session_id: &str,
         owner: &LeaseOwnerIdentity,
+        claim_nonce: &LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
         Ok(SessionExecutionLeaseClaimOutcome::Acquired(
             SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
                 session_id: session_id.to_string(),
                 owner: owner.clone(),
-                lease_token: "facade-token".to_string(),
+                lease_token: claim_nonce.as_str().to_string(),
                 fencing_token: 1,
                 claimed_at_epoch_ms: 0,
                 expires_at_epoch_ms: lease_ttl_ms,

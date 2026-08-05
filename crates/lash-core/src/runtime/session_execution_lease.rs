@@ -13,6 +13,8 @@
 //! | `session_execution_lease.acquired` | INFO | the claimant | this runner acquired the lane |
 //! | `session_execution_lease.taken_over` | INFO | the *winner* | this claim displaced a named lapsed holder |
 //! | `session_execution_lease.lost` | WARN | the loser | a renewal was fence-rejected; this runner no longer holds the lane |
+//! | `session_execution_lease.renewal_refused` | WARN | the store | durable owner/token decision evidence for a refused renewal |
+//! | `session_execution_lease.release_refused` | WARN | the store | durable owner/token decision evidence for a refused release |
 //! | `session_execution_lease.renewal_failed` | WARN | the holder | renewal stopped on a transient error; the lease is still ours to release |
 //! | `session_execution_lease.commit_cas_rejected` | WARN | the losing writer | the commit's head CAS lost to a concurrent writer |
 //!
@@ -33,6 +35,10 @@
 //! per-attempt telemetry about which runner tried what, not session history. A
 //! lost lease is not a turn failure: the turn may still commit, and the
 //! `commit_cas_rejected` event is what proves it did not.
+//! Same-incarnation overlap is benign by design: rotating the lock-lifecycle
+//! token refuses stale release and renewal, but either holder may still win the
+//! session-head generation CAS and commit. Forced displacement must advance the
+//! generation; it never overloads the lease-token nonce.
 //!
 //! `acquired` and `taken_over` are INFO rather than DEBUG because reconstructing
 //! takeover order is an ordinary production question; requiring debug logging to
@@ -56,9 +62,9 @@ static NEXT_LEASE_GUARD_ID: AtomicU64 = AtomicU64::new(1);
 /// Release completion is recorded only on backend acknowledgement, never on
 /// intent. A cancelled or failed release therefore stays in `Releasing` with its
 /// completion token retained, so the owner can retry the same release in band
-/// instead of reporting a durable release that never happened. Only the guard
-/// itself may retry: see the `Drop` impl for why an out-of-band release is
-/// unsafe, and what a dropped `Releasing` guard costs instead.
+/// instead of reporting a durable release that never happened. If the guard is
+/// dropped, that same token is safe for a best-effort out-of-band release:
+/// every successor claim rotates it, so a late release is refused by name.
 mod release_state {
     /// The lease is held and renewed; no release has been attempted.
     pub(super) const LIVE: u8 = 0;
@@ -116,8 +122,14 @@ impl SessionExecutionLeaseGuard {
         timings: LeaseTimings,
         clock: Arc<dyn Clock>,
     ) -> Result<Option<Self>, StoreError> {
+        let claim_nonce = crate::LeaseClaimNonce::new();
         let acquisition = match store
-            .try_claim_session_execution_lease(session_id, owner, timings.ttl_ms())
+            .try_claim_session_execution_lease_with_token(
+                session_id,
+                owner,
+                &claim_nonce,
+                timings.ttl_ms(),
+            )
             .await?
         {
             SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => acquisition,
@@ -295,9 +307,18 @@ impl SessionExecutionLeaseGuard {
             return Ok(());
         }
         let completion = self.completion();
-        self.store
+        let outcome = match self
+            .store
             .release_session_execution_lease(&completion)
-            .await?;
+            .await
+        {
+            Ok(()) => "released",
+            // Rotation or TTL failover can make an in-band release stale after
+            // the turn has already committed. That is terminal cleanup, not a
+            // store-commit failure and never a reason to duplicate host work.
+            Err(StoreError::SessionExecutionLeaseReleaseRefused { .. }) => "stale_refused",
+            Err(error) => return Err(error),
+        };
         self.release_state
             .store(release_state::RELEASED, Ordering::Release);
         tracing::debug!(
@@ -305,8 +326,9 @@ impl SessionExecutionLeaseGuard {
             owner_id = %completion.owner.owner_id,
             incarnation_id = %completion.owner.incarnation_id,
             fencing_token = completion.fencing_token,
-            event = "session_execution_lease.released",
-            "released session execution lease"
+            outcome,
+            event = "session_execution_lease.release",
+            "finished in-band session execution lease release"
         );
         Ok(())
     }
@@ -358,57 +380,68 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
 impl Drop for SessionExecutionLeaseGuard {
     fn drop(&mut self) {
         self.renew_task.abort();
-        // A dropped guard never releases out of band, in either state, and the
-        // lease is left to expire by TTL. This is deliberate and load-bearing:
-        // a retained completion does **not** identify one grant. A
-        // same-incarnation re-claim is a refresh in place that returns the
-        // identical owner, lease token and fencing token on every backend
-        // (pinned by `session_execution_lease_contract` in the store conformance
-        // suite), so releasing a completion this guard has stopped tracking
-        // would clear a *successor's live* lease — the successor's next fenced
-        // call would then fail as `SessionExecutionLeaseLost` while the row sits
-        // free for a peer to claim. No backend predicate can distinguish the
-        // two, so the only safe owner of a release is a guard that still tracks
-        // the lease, in band, via `release_if_live`.
-        //
-        // Cost of the choice: a guard dropped in `Releasing` (a cancelled
-        // release await) or in `Live` (a turn torn down without asking to
-        // release) leaves the lease held until its TTL elapses, delaying queued
-        // work for that session by up to `LeaseTimings::ttl`. That is the
-        // pre-existing behavior for `Live` and no worse than before this fix for
-        // `Releasing`; making a cancelled release land promptly needs claim-time
-        // token rotation (so a stale completion is distinguishable), which is a
-        // durable-contract change for a separate ticket.
         let state = self.release_state.load(Ordering::Acquire);
-        if state == release_state::RELEASED {
+        if state == release_state::RELEASED || self.is_lost() {
             return;
         }
-        let completion = self.completion();
-        let expires_at_epoch_ms = self
+        let lease = self
             .lease
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .expires_at_epoch_ms;
+            .clone();
+        let completion = lease.completion();
         let observed_at_epoch_ms = self.clock.timestamp_ms();
+        let store = Arc::clone(&self.store);
         tracing::debug!(
             session_id = %completion.session_id,
             owner_id = %completion.owner.owner_id,
             incarnation_id = %completion.owner.incarnation_id,
             fencing_token = completion.fencing_token,
+            lease_lost = false,
+            expires_at_epoch_ms = lease.expires_at_epoch_ms,
+            observed_at_epoch_ms,
+            remaining_ttl_ms = lease.expires_at_epoch_ms.saturating_sub(observed_at_epoch_ms),
             consulted = if state == release_state::RELEASING {
                 "release_unacknowledged"
             } else {
                 "release_not_requested"
             },
-            lease_lost = self.is_lost(),
-            expires_at_epoch_ms,
-            observed_at_epoch_ms,
-            remaining_ttl_ms = expires_at_epoch_ms.saturating_sub(observed_at_epoch_ms),
-            outcome = "left_to_ttl",
+            outcome = "best_effort_release_spawned",
             event = "session_execution_lease.release",
-            "dropped session execution lease guard without an acknowledged \
-             release; the lease expires by TTL"
+            "dropped session execution lease guard; spawned token-scoped best-effort release"
         );
+        crate::task::spawn(async move {
+            match store.release_session_execution_lease(&completion).await {
+                Ok(()) => tracing::debug!(
+                    session_id = %completion.session_id,
+                    owner_id = %completion.owner.owner_id,
+                    incarnation_id = %completion.owner.incarnation_id,
+                    fencing_token = completion.fencing_token,
+                    outcome = "released",
+                    event = "session_execution_lease.release",
+                    "best-effort drop release completed"
+                ),
+                Err(StoreError::SessionExecutionLeaseReleaseRefused { .. }) => tracing::debug!(
+                    session_id = %completion.session_id,
+                    owner_id = %completion.owner.owner_id,
+                    incarnation_id = %completion.owner.incarnation_id,
+                    fencing_token = completion.fencing_token,
+                    outcome = "stale_refused",
+                    event = "session_execution_lease.release",
+                    "best-effort drop release was stale and left the successor lease untouched"
+                ),
+                Err(error) => tracing::warn!(
+                    error = %error,
+                    session_id = %completion.session_id,
+                    owner_id = %completion.owner.owner_id,
+                    incarnation_id = %completion.owner.incarnation_id,
+                    fencing_token = completion.fencing_token,
+                    outcome = "failed_ttl_fallback",
+                    event = "session_execution_lease.release",
+                    "best-effort drop release failed; lease expiry remains the fallback"
+                ),
+            }
+        });
     }
 }
 
@@ -455,7 +488,11 @@ fn spawn_renewal_task(
                     // not mark the lease lost: `release_if_live` would then
                     // record completion without ever asking the backend to
                     // release, blocking a successor until TTL.
-                    let fence_lost = matches!(err, StoreError::SessionExecutionLeaseExpired { .. });
+                    let fence_lost = matches!(
+                        err,
+                        StoreError::SessionExecutionLeaseExpired { .. }
+                            | StoreError::SessionExecutionLeaseRenewalRefused { .. }
+                    );
                     if fence_lost {
                         lost.store(true, Ordering::Release);
                         tracing::warn!(
@@ -625,7 +662,7 @@ mod tests {
         drop(release);
 
         assert_eq!(
-            store.session_execution_lease_release_count(),
+            store.session_execution_lease_release_attempt_count(),
             0,
             "the cancelled release never reached the backend"
         );
@@ -640,7 +677,7 @@ mod tests {
             .await
             .expect("cancelled release stays retryable");
 
-        assert_eq!(store.session_execution_lease_release_count(), 1);
+        assert_eq!(store.session_execution_lease_release_attempt_count(), 1);
         // The peer claim above holds the lease now; assert against the guard's
         // own state instead: a released guard short-circuits further releases.
         gate.admit_one();
@@ -649,26 +686,17 @@ mod tests {
             .await
             .expect("acknowledged release is terminal");
         assert_eq!(
-            store.session_execution_lease_release_count(),
+            store.session_execution_lease_release_attempt_count(),
             1,
             "an acknowledged release must not be repeated"
         );
     }
 
-    /// A dropped guard must never release out of band. A retained completion
-    /// does not identify one grant — a same-incarnation re-claim refreshes in
-    /// place with the identical token and fence — so an out-of-band release
-    /// would clear a successor's live lease. The successor here is the one that
-    /// releases; the stale guard's drop must be inert.
-    ///
-    /// This test is the enforcement half of a pair: the backend fact it rests on
-    /// (that releasing a completion retained across a same-incarnation re-claim
-    /// really does free the refreshed lease, on every backend) is pinned by
-    /// `session_execution_lease_contract` in the store conformance suite. That
-    /// law cannot host this prohibition — it never constructs a guard — so the
-    /// two must be changed together.
+    /// A dropped guard releases out of band with the token of its own claim.
+    /// When a same-incarnation successor has already rotated the token, the
+    /// backend refuses the stale release and leaves the successor untouched.
     #[tokio::test]
-    async fn guard_dropped_mid_release_never_releases_a_successors_lease() {
+    async fn guard_dropped_mid_release_cannot_release_a_successors_lease() {
         let (store, guard, gate) = acquire_gated_guard().await;
         let owner = crate::LeaseOwnerIdentity::opaque("owner", "incarnation");
 
@@ -679,40 +707,35 @@ mod tests {
         }
         drop(release);
 
-        // The same runtime drives again and re-claims the still-live lease: the
-        // successor's identity is byte-identical to the completion the dropped
-        // guard retained, so nothing on the backend could tell them apart.
+        // The same runtime drives again and re-claims the still-live lease.
         let successor = store
             .try_claim_session_execution_lease(SESSION_ID, &owner, LeaseTimings::default().ttl_ms())
             .await
             .expect("same-incarnation re-claim")
             .acquired()
             .expect("re-claim refreshes the live lease");
-        assert_eq!(
-            (
-                successor.lease_token.clone(),
-                successor.fencing_token,
-                successor.owner.clone()
-            ),
-            (
-                guard.completion().lease_token,
-                guard.completion().fencing_token,
-                guard.completion().owner
-            ),
-            "a same-incarnation re-claim must be indistinguishable from the retained completion"
+        assert_ne!(
+            successor.lease_token,
+            guard.completion().lease_token,
+            "the successor must rotate the lock-lifecycle token"
         );
+        assert_eq!(successor.fencing_token, guard.completion().fencing_token);
+        assert_eq!(successor.owner, guard.completion().owner);
 
         gate.admit_one();
         drop(guard);
 
-        // Give any (forbidden) detached release time to land.
-        for _ in 0..64 {
-            tokio::task::yield_now().await;
-        }
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while store.session_execution_lease_release_attempt_count() == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("best-effort drop release attempted");
         assert_eq!(
-            store.session_execution_lease_release_count(),
-            0,
-            "a dropped guard must not release the lease out of band"
+            store.session_execution_lease_release_attempt_count(),
+            1,
+            "drop must make one best-effort release attempt"
         );
         assert!(
             lease_is_held(&store).await,
@@ -720,11 +743,172 @@ mod tests {
         );
 
         // The successor still owns the release.
+        gate.admit_one();
         store
             .release_session_execution_lease(&successor.completion())
             .await
             .expect("successor releases its own lease");
         assert!(!lease_is_held(&store).await);
+    }
+
+    /// A claim rotation or TTL failover may race the successful turn's in-band
+    /// cleanup. The named refusal proves cleanup is already terminal; surfacing
+    /// it as `StoreCommitFailed` would falsely report a committed turn as failed.
+    #[tokio::test]
+    async fn stale_in_band_release_refusal_is_terminal_and_benign() {
+        let store = Arc::new(InMemorySessionStore::new());
+        let owner = crate::LeaseOwnerIdentity::opaque("owner", "incarnation");
+        let guard = SessionExecutionLeaseGuard::try_acquire(
+            Arc::clone(&store) as Arc<dyn RuntimePersistence>,
+            SESSION_ID,
+            &owner,
+            LeaseTimings::default(),
+            Arc::new(crate::runtime::SystemClock),
+        )
+        .await
+        .expect("claim predecessor guard")
+        .expect("predecessor guard acquired");
+        let successor = store
+            .try_claim_session_execution_lease(SESSION_ID, &owner, LeaseTimings::default().ttl_ms())
+            .await
+            .expect("rotate same-incarnation claim")
+            .acquired()
+            .expect("same-incarnation successor acquired");
+        assert_ne!(successor.lease_token, guard.completion().lease_token);
+
+        guard
+            .release_if_live()
+            .await
+            .expect("stale named refusal is terminal and benign");
+        assert_eq!(store.session_execution_lease_release_attempt_count(), 1);
+        guard
+            .release_if_live()
+            .await
+            .expect("terminal benign refusal is not retried");
+        assert_eq!(
+            store.session_execution_lease_release_attempt_count(),
+            1,
+            "a terminal named refusal must be acknowledged exactly once"
+        );
+        assert!(lease_is_held(&store).await);
+        store
+            .release_session_execution_lease(&successor.completion())
+            .await
+            .expect("successor releases its own lease");
+    }
+
+    #[tokio::test]
+    async fn clean_guard_drop_releases_before_ttl_for_immediate_peer_reclaim() {
+        let store = Arc::new(InMemorySessionStore::new());
+        let guard = SessionExecutionLeaseGuard::try_acquire(
+            Arc::clone(&store) as Arc<dyn RuntimePersistence>,
+            SESSION_ID,
+            &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+            LeaseTimings::default(),
+            Arc::new(crate::runtime::SystemClock),
+        )
+        .await
+        .expect("claim lease")
+        .expect("lease acquired");
+
+        drop(guard);
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while store.session_execution_lease_release_attempt_count() == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("best-effort release completed");
+
+        let peer = store
+            .try_claim_session_execution_lease(
+                SESSION_ID,
+                &crate::LeaseOwnerIdentity::opaque("peer", "peer-incarnation"),
+                LeaseTimings::default().ttl_ms(),
+            )
+            .await
+            .expect("peer claim")
+            .acquired()
+            .expect("clean drop must make the lane immediately reclaimable");
+        store
+            .release_session_execution_lease(&peer.completion())
+            .await
+            .expect("peer release");
+    }
+
+    #[tokio::test]
+    async fn stalled_drop_release_falls_back_to_ttl_without_freeing_the_reclaimer() {
+        let clock = Arc::new(crate::testing::TestClock::new(1_000));
+        let store_clock: Arc<dyn crate::Clock> = clock.clone();
+        let store = Arc::new(InMemorySessionStore::with_clock(store_clock));
+        let guard_clock: Arc<dyn crate::Clock> = clock.clone();
+        let guard = SessionExecutionLeaseGuard::try_acquire(
+            Arc::clone(&store) as Arc<dyn RuntimePersistence>,
+            SESSION_ID,
+            &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+            LeaseTimings::default(),
+            guard_clock,
+        )
+        .await
+        .expect("claim lease")
+        .expect("lease acquired");
+        let gate = store.gate_session_execution_lease_release();
+
+        drop(guard);
+        gate.wait_entered().await;
+        let peer_owner = crate::LeaseOwnerIdentity::opaque("peer", "peer-incarnation");
+        assert!(matches!(
+            store
+                .try_claim_session_execution_lease(
+                    SESSION_ID,
+                    &peer_owner,
+                    LeaseTimings::default().ttl_ms(),
+                )
+                .await
+                .expect("peer before expiry"),
+            SessionExecutionLeaseClaimOutcome::Busy { .. }
+        ));
+
+        clock.advance(LeaseTimings::default().ttl_ms() + 1);
+        let peer = store
+            .try_claim_session_execution_lease(
+                SESSION_ID,
+                &peer_owner,
+                LeaseTimings::default().ttl_ms(),
+            )
+            .await
+            .expect("peer after expiry")
+            .acquired()
+            .expect("TTL remains the fallback when drop release cannot complete");
+
+        gate.admit_one();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while store.session_execution_lease_release_attempt_count() == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("late predecessor release was attempted");
+        assert!(
+            matches!(
+                store
+                    .try_claim_session_execution_lease(
+                        SESSION_ID,
+                        &crate::LeaseOwnerIdentity::opaque("observer", "observer-incarnation"),
+                        LeaseTimings::default().ttl_ms(),
+                    )
+                    .await
+                    .expect("observer claim after stale release"),
+                SessionExecutionLeaseClaimOutcome::Busy { .. }
+            ),
+            "the late predecessor release must not free the TTL reclaimer"
+        );
+
+        gate.admit_one();
+        store
+            .release_session_execution_lease(&peer.completion())
+            .await
+            .expect("peer release");
     }
 
     /// A transient renewal failure does not prove the lease stopped being ours,
@@ -766,7 +950,7 @@ mod tests {
         guard.release_if_live().await.expect("release");
 
         assert_eq!(
-            store.session_execution_lease_release_count(),
+            store.session_execution_lease_release_attempt_count(),
             1,
             "the owner must still ask the backend to release the lease"
         );
@@ -813,9 +997,210 @@ mod tests {
         guard.release_if_live().await.expect("release");
 
         assert_eq!(
-            store.session_execution_lease_release_count(),
+            store.session_execution_lease_release_attempt_count(),
             0,
             "a definitively lost lease has no owner-side release to perform"
         );
+    }
+
+    #[tokio::test]
+    async fn named_refusals_trace_typed_redacted_decision_evidence() {
+        use crate::runtime::tests::trace_capture::CapturedFieldKind;
+
+        fn assert_refusal_event(
+            event: &crate::runtime::tests::trace_capture::CapturedEvent,
+            operation: &str,
+            decision_basis: &str,
+            presented: &SessionExecutionLeaseAuthority,
+            current: &SessionExecutionLease,
+        ) {
+            assert_eq!(event.target, "lash_core::session_execution_lease");
+            assert_eq!(event.level, "WARN");
+            assert_eq!(event.field_count(), 15);
+            for field in [
+                "event",
+                "operation",
+                "decision_basis",
+                "session_id",
+                "presented_owner_id",
+                "presented_incarnation_id",
+                "current_owner_id",
+                "current_incarnation_id",
+                "current_token_identity",
+                "presented_token_identity",
+                "consulted_state",
+                "observation_freshness",
+                "outcome",
+            ] {
+                assert_eq!(event.field_kind(field), CapturedFieldKind::Str, "{field}");
+            }
+            for field in ["owner_matched", "token_matched"] {
+                assert_eq!(event.field_kind(field), CapturedFieldKind::Bool, "{field}");
+            }
+            assert_eq!(event.field("operation"), operation);
+            assert_eq!(event.field("decision_basis"), decision_basis);
+            assert_eq!(event.field("session_id"), presented.session_id);
+            assert_eq!(event.field("presented_owner_id"), presented.owner.owner_id);
+            assert_eq!(
+                event.field("presented_incarnation_id"),
+                presented.owner.incarnation_id
+            );
+            assert_eq!(event.field("current_owner_id"), current.owner.owner_id);
+            assert_eq!(
+                event.field("current_incarnation_id"),
+                current.owner.incarnation_id
+            );
+            assert_eq!(event.field("owner_matched"), "false");
+            assert_eq!(event.field("token_matched"), "false");
+            assert_eq!(
+                event.field("consulted_state"),
+                "session_execution_lease_row"
+            );
+            assert_eq!(
+                event.field("observation_freshness"),
+                "in_memory_write_transaction"
+            );
+            assert_eq!(event.field("outcome"), "refused");
+
+            let current_identity = format!(
+                "sha256:{}",
+                crate::stable_hash::sha256_hex(current.lease_token.as_bytes())
+            );
+            let presented_identity = format!(
+                "sha256:{}",
+                crate::stable_hash::sha256_hex(presented.lease_token.as_bytes())
+            );
+            assert_eq!(event.field("current_token_identity"), current_identity);
+            assert_eq!(event.field("presented_token_identity"), presented_identity);
+            assert_ne!(event.field("current_token_identity"), current.lease_token);
+            assert_ne!(
+                event.field("presented_token_identity"),
+                presented.lease_token
+            );
+        }
+
+        let store = Arc::new(InMemorySessionStore::new());
+        let owner = crate::LeaseOwnerIdentity::opaque("current-owner", "current-incarnation");
+        let current = store
+            .try_claim_session_execution_lease(SESSION_ID, &owner, 60_000)
+            .await
+            .expect("claim current lease")
+            .acquired()
+            .expect("current lease acquired");
+        let presented = SessionExecutionLeaseAuthority {
+            session_id: SESSION_ID.to_string(),
+            owner: crate::LeaseOwnerIdentity::opaque("presented-owner", "presented-incarnation"),
+            lease_token: "presented-stale-token".to_string(),
+            fencing_token: current.fencing_token,
+        };
+
+        let (renewal_error, renewal_capture) =
+            crate::runtime::tests::trace_capture::capturing(|| async {
+                store
+                    .renew_session_execution_lease(&presented, 60_000)
+                    .await
+                    .expect_err("stale renewal refused")
+            })
+            .await;
+        assert!(matches!(
+            renewal_error,
+            StoreError::SessionExecutionLeaseRenewalRefused { .. }
+        ));
+        assert_refusal_event(
+            &renewal_capture.exactly_one("session_execution_lease.renewal_refused"),
+            "renewal",
+            "owner_or_token_mismatch",
+            &presented,
+            &current,
+        );
+
+        let (release_error, release_capture) =
+            crate::runtime::tests::trace_capture::capturing(|| async {
+                store
+                    .release_session_execution_lease(&presented)
+                    .await
+                    .expect_err("stale release refused")
+            })
+            .await;
+        assert!(matches!(
+            release_error,
+            StoreError::SessionExecutionLeaseReleaseRefused { .. }
+        ));
+        let release_event = release_capture.exactly_one("session_execution_lease.release_refused");
+        assert_refusal_event(
+            &release_event,
+            "release",
+            "token_scoped_release_did_not_match",
+            &presented,
+            &current,
+        );
+
+        store
+            .release_session_execution_lease(&current.completion())
+            .await
+            .expect("release current lease");
+    }
+
+    /// Exercise the real FIG-924-shaped classification path: a same-owner claim
+    /// rotates durable identity, the old renewal loop receives the new named
+    /// refusal, marks itself lost, and Drop does not make a doomed release call.
+    #[tokio::test]
+    async fn rotated_token_refusal_marks_the_old_renewal_loop_lost() {
+        let store = Arc::new(InMemorySessionStore::new());
+        let owner = crate::LeaseOwnerIdentity::opaque("owner", "incarnation");
+        let timings = LeaseTimings::new(
+            std::time::Duration::from_millis(60),
+            std::time::Duration::from_millis(10),
+        )
+        .expect("test lease timings");
+        let guard = SessionExecutionLeaseGuard::try_acquire(
+            Arc::clone(&store) as Arc<dyn RuntimePersistence>,
+            SESSION_ID,
+            &owner,
+            timings,
+            Arc::new(crate::runtime::SystemClock),
+        )
+        .await
+        .expect("claim predecessor guard")
+        .expect("predecessor guard acquired");
+        let predecessor_token = guard.completion().lease_token;
+        let successor = store
+            .try_claim_session_execution_lease(SESSION_ID, &owner, 60_000)
+            .await
+            .expect("rotate durable lease token")
+            .acquired()
+            .expect("same-incarnation successor acquired");
+        assert_ne!(successor.lease_token, predecessor_token);
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !guard.is_lost() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("old renewal loop observes named refusal");
+        assert!(store.session_execution_lease_renewal_count() >= 1);
+        let release_gate = store.gate_session_execution_lease_release();
+        drop(guard);
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                release_gate.wait_entered()
+            )
+            .await
+            .is_err(),
+            "Drop must not even start a release for a definitively lost guard"
+        );
+        assert_eq!(
+            store.session_execution_lease_release_attempt_count(),
+            0,
+            "Drop must skip a release for a definitively lost guard"
+        );
+        assert!(lease_is_held(&store).await);
+        release_gate.admit_one();
+        store
+            .release_session_execution_lease(&successor.completion())
+            .await
+            .expect("successor releases its own lease");
     }
 }

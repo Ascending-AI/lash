@@ -239,14 +239,14 @@ pub mod persistence {
         facade_support::reclaim_unreferenced_attachments,
     };
     pub use lash_core::{
-        BlobRef, GcReport, LeaseOwnerIdentity, PersistedSessionConfig, PersistedTurnState,
-        ProtocolEvent, QueuedWorkStore, RuntimePersistence, SessionAdmission, SessionBinding,
-        SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
-        SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
-        SessionExecutionLeaseDisplacement, SessionExecutionLeaseStore, SessionGraph,
-        SessionHistoryRecord, SessionMeta, SessionNodeRecord, SessionReadView, SessionRelation,
-        StoreError, StoreMaintenance, TurnId, TurnInputStore, VacuumReport, WorkClaim,
-        WorkCompletion,
+        BlobRef, GcReport, LeaseClaimNonce, LeaseOwnerIdentity, PersistedSessionConfig,
+        PersistedTurnState, ProtocolEvent, QueuedWorkStore, RuntimePersistence, SessionAdmission,
+        SessionBinding, SessionCommitStore, SessionExecutionLease,
+        SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
+        SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
+        SessionExecutionLeaseStore, SessionGraph, SessionHistoryRecord, SessionMeta,
+        SessionNodeRecord, SessionReadView, SessionRelation, StoreError, StoreMaintenance, TurnId,
+        TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
     };
     /// Committed session history flattened into presentation order, as returned
     /// by [`SessionReadView::chronological_projection`].

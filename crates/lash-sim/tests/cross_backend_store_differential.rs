@@ -2077,26 +2077,22 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::AppendReceiptRequestedNodeCountCorrupt { .. } => {
             "AppendReceiptRequestedNodeCountCorrupt".to_string()
         }
-        StoreError::TokenUsageAccountingOverflow { .. } => {
-            "TokenUsageAccountingOverflow".to_string()
-        }
-        StoreError::CheckpointTurnIndexOutOfRange { .. } => {
-            "CheckpointTurnIndexOutOfRange".to_string()
-        }
+        error @ StoreError::TokenUsageAccountingOverflow { .. } => error.variant_name().to_string(),
+        error @ StoreError::CheckpointTurnIndexOutOfRange { .. } => error.variant_name().into(),
         StoreError::AppendAncestorNotActive { .. } => "AppendAncestorNotActive".to_string(),
         StoreError::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded".to_string(),
         StoreError::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded".to_string(),
         StoreError::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim".to_string(),
         StoreError::UnsettledTurnInputClaim { .. } => "UnsettledTurnInputClaim".to_string(),
-        StoreError::PendingTurnInputSourceKeyConflict { .. } => {
-            "PendingTurnInputSourceKeyConflict".to_string()
+        error @ StoreError::PendingTurnInputSourceKeyConflict { .. } => error.variant_name().into(),
+        StoreError::SessionExecutionLeaseExpired { .. } => "SessionExecutionLeaseExpired".into(),
+        StoreError::SessionExecutionLeaseRenewalRefused { .. } => {
+            "SessionExecutionLeaseRenewalRefused".into()
         }
-        StoreError::SessionExecutionLeaseExpired { .. } => {
-            "SessionExecutionLeaseExpired".to_string()
+        StoreError::SessionExecutionLeaseReleaseRefused { .. } => {
+            "SessionExecutionLeaseReleaseRefused".into()
         }
-        StoreError::UnsupportedRecordSchemaVersion { .. } => {
-            "UnsupportedRecordSchemaVersion".to_string()
-        }
+        error @ StoreError::UnsupportedRecordSchemaVersion { .. } => error.variant_name().into(),
         StoreError::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion".to_string(),
         StoreError::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion".to_string(),
         StoreError::CheckpointComponentMissing { .. } => "CheckpointComponentMissing".to_string(),

@@ -1,6 +1,123 @@
 //! Session-execution-lease vocabulary: holder identity, the durable row, the
 //! fences derived from it, and what a claim reports about the holder it displaced.
 
+/// Unforgeable proposal that identifies one logical lease-claim attempt.
+///
+/// Construct a fresh nonce for every distinct claim and borrow that same nonce
+/// when retrying an ambiguous outcome from that claim. The inner value is
+/// intentionally readable by store implementors but cannot be supplied by a
+/// host, formatted through `Display`, or reconstructed from durable text.
+#[derive(PartialEq, Eq)]
+pub struct LeaseClaimNonce(String);
+
+impl LeaseClaimNonce {
+    /// Mints a globally unique nonce for one logical claim attempt.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(uuid::Uuid::new_v4().to_string())
+    }
+
+    /// Returns the opaque bytes a backend persists and compares on retry.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for LeaseClaimNonce {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for LeaseClaimNonce {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_tuple("LeaseClaimNonce")
+            .field(&"opaque")
+            .finish()
+    }
+}
+
+/// The token-scoped lease operation that refused stale authority.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionExecutionLeaseRefusalOperation {
+    Renewal,
+    Release,
+}
+
+impl SessionExecutionLeaseRefusalOperation {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Renewal => "renewal",
+            Self::Release => "release",
+        }
+    }
+
+    fn event(self) -> &'static str {
+        match self {
+            Self::Renewal => "session_execution_lease.renewal_refused",
+            Self::Release => "session_execution_lease.release_refused",
+        }
+    }
+}
+
+/// Emit the decision evidence required whenever a store returns a named
+/// session-execution-lease refusal.
+///
+/// Token values remain opaque: the event carries only SHA-256 identities so an
+/// operator can compare the presented and durable tokens without learning
+/// either nonce.
+#[doc(hidden)]
+pub fn trace_session_execution_lease_refusal(
+    operation: SessionExecutionLeaseRefusalOperation,
+    decision_basis: &'static str,
+    observation_freshness: &'static str,
+    presented: &SessionExecutionLeaseAuthority,
+    current_owner: Option<&LeaseOwnerIdentity>,
+    current_token: Option<&str>,
+) {
+    let current_owner_id = current_owner
+        .map(|owner| owner.owner_id.as_str())
+        .unwrap_or("none");
+    let current_incarnation_id = current_owner
+        .map(|owner| owner.incarnation_id.as_str())
+        .unwrap_or("none");
+    let owner_matched = current_owner.is_some_and(|owner| owner.same_incarnation(&presented.owner));
+    let token_matched = current_token == Some(presented.lease_token.as_str());
+    let current_token_identity = current_token
+        .map(|token| {
+            format!(
+                "sha256:{}",
+                crate::stable_hash::sha256_hex(token.as_bytes())
+            )
+        })
+        .unwrap_or_else(|| "none".to_string());
+    let presented_token_identity = format!(
+        "sha256:{}",
+        crate::stable_hash::sha256_hex(presented.lease_token.as_bytes())
+    );
+
+    tracing::warn!(
+        target: "lash_core::session_execution_lease",
+        event = operation.event(),
+        operation = operation.label(),
+        decision_basis,
+        session_id = presented.session_id.as_str(),
+        presented_owner_id = presented.owner.owner_id.as_str(),
+        presented_incarnation_id = presented.owner.incarnation_id.as_str(),
+        current_owner_id,
+        current_incarnation_id,
+        owner_matched,
+        token_matched,
+        current_token_identity = current_token_identity.as_str(),
+        presented_token_identity = presented_token_identity.as_str(),
+        consulted_state = "session_execution_lease_row",
+        observation_freshness,
+        outcome = "refused",
+    );
+}
+
 /// Stable identity for a lease holder.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LeaseOwnerIdentity {
@@ -57,12 +174,14 @@ pub struct SessionExecutionLease {
     pub expires_at_epoch_ms: u64,
 }
 
-/// Shared authority presented at every session-execution-lease fence and
-/// completion seam.
+/// Shared evidence presented at every session-execution-lease seam.
 ///
 /// Fence checks and release used to accept field-identical record types. That
 /// allowed one role to gain an authority field without making the other role a
-/// compile error. A single record keeps both paths structurally identical.
+/// compile error. A single record keeps both paths structurally identical while
+/// each operation consults only its authority fields: execution claims validate
+/// owner plus fencing generation; renewal and release validate owner plus lease
+/// token. The lease token never becomes commit authority.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SessionExecutionLeaseAuthority {
     pub session_id: String,
@@ -72,8 +191,8 @@ pub struct SessionExecutionLeaseAuthority {
 }
 
 impl SessionExecutionLease {
-    /// Captures session, owner, lease token, and fencing generation that store implementors must
-    /// verify before accepting execution writes.
+    /// Captures session, owner, lease token, and fencing generation so each
+    /// operation can consult its contracted subset.
     pub fn authority(&self) -> SessionExecutionLeaseAuthority {
         SessionExecutionLeaseAuthority {
             session_id: self.session_id.clone(),

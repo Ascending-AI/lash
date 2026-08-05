@@ -12,7 +12,7 @@ mod load;
 pub mod queued_work;
 mod realization;
 mod runtime_commit;
-mod session_execution_lease;
+pub(crate) mod session_execution_lease;
 mod turn_id;
 mod usage;
 mod work_claim;
@@ -35,7 +35,7 @@ pub use runtime_commit::{
     RuntimeUsageDeltaIdentity,
 };
 pub use session_execution_lease::{
-    LeaseOwnerIdentity, SessionExecutionLease, SessionExecutionLeaseAcquisition,
+    LeaseClaimNonce, LeaseOwnerIdentity, SessionExecutionLease, SessionExecutionLeaseAcquisition,
     SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
     SessionExecutionLeaseDisplacement,
 };
@@ -1280,11 +1280,11 @@ pub trait TurnInputStore: Send + Sync {
 #[async_trait::async_trait]
 pub trait SessionExecutionLeaseStore: Send + Sync {
     /// Try to claim the durable single-writer execution lane for `session_id`.
-    ///
     /// Returns [`SessionExecutionLeaseClaimOutcome::Busy`] when another owner
     /// holds an unexpired lease. Expired or released leases may be reclaimed
-    /// and receive a higher fencing token. An unexpired lease held by the same
-    /// owner id but a different incarnation is busy.
+    /// and receive a higher fencing token. A live same-incarnation claim rotates the
+    /// lease token but preserves the fencing generation; renewal never rotates either
+    /// token. An unexpired lease held by the same owner id but a different incarnation is busy.
     ///
     /// A granted claim must carry
     /// [`SessionExecutionLeaseAcquisition::displaced`] naming the lapsed holder
@@ -1298,21 +1298,49 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
         session_id: &str,
         owner: &LeaseOwnerIdentity,
         lease_ttl_ms: u64,
+    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
+        let claim_nonce = LeaseClaimNonce::new();
+        self.try_claim_session_execution_lease_with_token(
+            session_id,
+            owner,
+            &claim_nonce,
+            lease_ttl_ms,
+        )
+        .await
+    }
+
+    /// Try one retry-safe claim attempt using an opaque claim nonce.
+    ///
+    /// The caller mints [`LeaseClaimNonce::new`] once for the logical claim and
+    /// borrows it again only for an ambiguous-outcome retry. With no value-taking
+    /// constructor, stable host identity cannot accidentally be
+    /// reused as claim identity. Backends persist the nonce bytes as the lease
+    /// token so a retry observes one settled rotation instead of rotating again.
+    async fn try_claim_session_execution_lease_with_token(
+        &self,
+        session_id: &str,
+        owner: &LeaseOwnerIdentity,
+        claim_nonce: &LeaseClaimNonce,
+        lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError>;
 
     /// Extend a live session execution lease owned by the caller.
     ///
-    /// Backends must reject stale, released, superseded, or expired fences with
-    /// [`StoreError::SessionExecutionLeaseExpired`].
+    /// Backends reject expired authority with [`StoreError::SessionExecutionLeaseExpired`];
+    /// stale, released, or superseded owner/token authority uses
+    /// [`StoreError::SessionExecutionLeaseRenewalRefused`] with structured decision evidence.
     async fn renew_session_execution_lease(
         &self,
         fence: &SessionExecutionLeaseAuthority,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLease, StoreError>;
 
-    /// Release a session execution lease fenced by its completion token.
+    /// Release a session execution lease predicated on its owner and lease token.
     ///
-    /// This operation is idempotent and must not clear a newer owner's lease.
+    /// A stale, repeated, released, or superseded completion is refused with
+    /// [`StoreError::SessionExecutionLeaseReleaseRefused`] and must not clear a
+    /// successor lease. The fencing token remains generation evidence; lock
+    /// lifecycle uses owner plus lease token. Named refusals record structured evidence.
     async fn release_session_execution_lease(
         &self,
         completion: &SessionExecutionLeaseAuthority,

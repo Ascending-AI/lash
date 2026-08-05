@@ -302,10 +302,21 @@ async fn stale_completion_is_fenced(
     )?;
     let mut stale_completion = lease.completion();
     stale_completion.lease_token.push_str(":stale");
-    store
+    let stale_release_error = match store
         .release_session_execution_lease(&stale_completion)
         .await
-        .map_err(|err| format!("release stale completion: {err}"))?;
+    {
+        Err(error) => error,
+        Ok(()) => return Err("stale completion was silently accepted".to_string()),
+    };
+    if !matches!(
+        stale_release_error,
+        lash_core::StoreError::SessionExecutionLeaseReleaseRefused { .. }
+    ) {
+        return Err(format!(
+            "stale completion returned the wrong refusal: {stale_release_error}"
+        ));
+    }
     let after_stale_release = store
         .try_claim_session_execution_lease(session_id, &owner_b, LEASE_TTL_MS)
         .await
@@ -324,7 +335,7 @@ async fn stale_completion_is_fenced(
         operation_id: "runtime-persistence.stale-completion-fenced",
         status: "passed",
         production_api: "SessionExecutionLeaseStore::release_session_execution_lease",
-        assertion: "a stale completion token is idempotent and cannot clear a newer or live lease",
+        assertion: "a stale completion token is refused by name and cannot clear a newer or live lease",
         evidence: json!({
             "live_lease": lease_summary(&lease),
             "stale_completion": {
@@ -333,6 +344,7 @@ async fn stale_completion_is_fenced(
                 "lease_token_was_mutated": true,
             },
             "claim_after_stale_release": claim_outcome_summary(&after_stale_release),
+            "stale_release_refusal": "SessionExecutionLeaseReleaseRefused",
         }),
     })
 }
@@ -460,10 +472,21 @@ async fn stale_owner_ttl_preserves_live_successor(
             }
         }
     };
-    store
+    let stale_release_error = match store
         .release_session_execution_lease(&stale_lease.completion())
         .await
-        .map_err(|err| format!("release stale completion after reclaim: {err}"))?;
+    {
+        Err(error) => error,
+        Ok(()) => return Err("stale predecessor completion was silently accepted".to_string()),
+    };
+    if !matches!(
+        stale_release_error,
+        StoreError::SessionExecutionLeaseReleaseRefused { .. }
+    ) {
+        return Err(format!(
+            "stale predecessor completion returned the wrong refusal: {stale_release_error}"
+        ));
+    }
     let renewed_live = store
         .renew_session_execution_lease(&live_lease.fence(), LEASE_TTL_MS)
         .await
@@ -485,6 +508,7 @@ async fn stale_owner_ttl_preserves_live_successor(
             "observed_elapsed_ms": observed_elapsed_ms,
             "stale_ttl_ms": LEASE_SEMANTIC_TTL_MS,
             "stale_completion_left_live_lease_renewable": true,
+            "stale_completion_refusal": "SessionExecutionLeaseReleaseRefused",
             "fencing_token_advanced": live_lease.fencing_token > stale_lease.fencing_token,
             "scope": "session_execution_lease_only",
             "worker_process_terminal_oracle": "evaluated by RuntimeBoundaryHarness against ProcessRegistry::complete_process_with_lease",

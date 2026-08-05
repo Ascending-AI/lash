@@ -7,7 +7,7 @@ use lash_core::testing::conformance::{
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
     ProcessExecutionEnvStore, ProcessRegistry, QueuedWorkStore, Resolution, ResolveOutcome,
-    RuntimePersistence, SessionStoreFactory, TriggerStore,
+    RuntimePersistence, SessionExecutionLeaseStore, SessionStoreFactory, StoreError, TriggerStore,
 };
 use lash_postgres_store::{
     PostgresEffectReplayOptions, PostgresRuntimeEffectController, PostgresStorage,
@@ -77,6 +77,29 @@ async fn reset(storage: &PostgresStorage) {
     .expect("reset postgres process change clock");
 }
 
+async fn wait_for_session_lease_advisory_waiters(pool: &sqlx::PgPool, at_least: i64) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let waiters: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*)
+                 FROM pg_stat_activity
+                 WHERE wait_event_type = 'Lock'
+                   AND wait_event = 'advisory'
+                   AND query LIKE '%pg_advisory_xact_lock(hashtextextended($1, 0::bigint))%'",
+            )
+            .fetch_one(pool)
+            .await
+            .expect("inspect session-lease advisory-lock waiters");
+            if waiters >= at_least {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("expected at least {at_least} session-lease advisory-lock waiters"));
+}
+
 fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<String>) -> ExecutionScope {
     let session_id = session_id.into();
     ExecutionScope::turn(&session_id, turn_id)
@@ -130,6 +153,92 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
         lash_core::testing::conformance::RuntimePersistenceLeaseTiming::Realtime,
     )
     .await;
+}
+
+/// Pins the PostgreSQL-local hardening rule that claims and renewals join the
+/// same per-session advisory-lock queue before taking the lease-row lock. The
+/// claim is queued first, so it legally rotates token A to token B before the
+/// predecessor renewal runs and receives the named refusal.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_claim_and_renewal_share_session_advisory_lock_ordering() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres concurrent renewal regression: database is not configured");
+        return;
+    };
+    reset(&storage).await;
+    let store = Arc::new(storage.unbound_session_store());
+    let session_id = "postgres-concurrent-renewal-rotation";
+    let owner = lash_core::LeaseOwnerIdentity::opaque("renewal-owner", "renewal-incarnation");
+    let predecessor = store
+        .try_claim_session_execution_lease(session_id, &owner, 120_000)
+        .await
+        .expect("claim renewal predecessor")
+        .acquired()
+        .expect("renewal predecessor acquired");
+
+    let mut blocker = storage
+        .pool()
+        .begin()
+        .await
+        .expect("begin advisory blocker");
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0::bigint))")
+        .bind(session_id)
+        .execute(&mut *blocker)
+        .await
+        .expect("hold session-lease advisory lock");
+
+    let claim_store = Arc::clone(&store);
+    let claim_owner = owner.clone();
+    let claim = tokio::spawn(async move {
+        claim_store
+            .try_claim_session_execution_lease(session_id, &claim_owner, 120_000)
+            .await
+    });
+    wait_for_session_lease_advisory_waiters(storage.pool(), 1).await;
+
+    let renew_store = Arc::clone(&store);
+    let predecessor_fence = predecessor.fence();
+    let mut renewal = tokio::spawn(async move {
+        renew_store
+            .renew_session_execution_lease(&predecessor_fence, 120_000)
+            .await
+    });
+    tokio::select! {
+        result = &mut renewal => {
+            panic!("renewal did not wait on the shared session advisory lock: {result:?}")
+        }
+        () = wait_for_session_lease_advisory_waiters(storage.pool(), 2) => {}
+    }
+
+    blocker
+        .rollback()
+        .await
+        .expect("release session-lease advisory blocker");
+    let successor = claim
+        .await
+        .expect("join rotating claim")
+        .expect("rotating claim")
+        .acquired()
+        .expect("same-incarnation rotating claim acquired");
+    assert_ne!(successor.lease_token, predecessor.lease_token);
+    let renewal_error = renewal
+        .await
+        .expect("join stale renewal")
+        .expect_err("renewal queued after rotation must be refused");
+    assert!(matches!(
+        renewal_error,
+        StoreError::SessionExecutionLeaseRenewalRefused { .. }
+    ));
+    let durable = store
+        .get_session_execution_lease(session_id)
+        .await
+        .expect("read successor lease")
+        .expect("successor lease remains live");
+    assert_eq!(durable.lease_token, successor.lease_token);
+    store
+        .release_session_execution_lease(&successor.completion())
+        .await
+        .expect("release successor lease");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

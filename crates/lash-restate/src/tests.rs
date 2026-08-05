@@ -3252,15 +3252,21 @@ impl lash_core::SessionCommitStore for CommitRetryStore {
 
 #[async_trait::async_trait]
 impl lash_core::SessionExecutionLeaseStore for CommitRetryStore {
-    async fn try_claim_session_execution_lease(
+    async fn try_claim_session_execution_lease_with_token(
         &self,
         session_id: &str,
         owner: &lash_core::LeaseOwnerIdentity,
+        claim_nonce: &lash_core::LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> Result<lash_core::SessionExecutionLeaseClaimOutcome, lash_core::StoreError> {
         self.lease_claim_count.fetch_add(1, Ordering::SeqCst);
         self.inner
-            .try_claim_session_execution_lease(session_id, owner, lease_ttl_ms)
+            .try_claim_session_execution_lease_with_token(
+                session_id,
+                owner,
+                claim_nonce,
+                lease_ttl_ms,
+            )
             .await
     }
 

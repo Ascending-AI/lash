@@ -256,6 +256,7 @@ where
     commit_rejects_leaf_without_frame_open_ancestor(make()).await;
     // [`SessionExecutionLeaseStore`]: single-writer lane fencing.
     session_execution_lease_contract(make()).await;
+    concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable(make()).await;
     session_execution_lease_expires_by_ttl_contract(&make, lease_timing).await;
     session_execution_lease_diagnostic_read_contract(make()).await;
     session_execution_lease_displacement_contract(make()).await;
@@ -1900,21 +1901,112 @@ async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePersistence>) 
 }
 
 async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
+    let fresh_retry_owner = lease_owner("fresh-retry-owner");
+    let fresh_retry_nonce = crate::LeaseClaimNonce::new();
+    let fresh_retry = store
+        .try_claim_session_execution_lease_with_token(
+            "fresh-retry",
+            &fresh_retry_owner,
+            &fresh_retry_nonce,
+            120_000,
+        )
+        .await
+        .expect("fresh claim with retry nonce")
+        .acquired()
+        .expect("fresh retry claim acquired");
+    assert_eq!(fresh_retry.lease_token, fresh_retry_nonce.as_str());
+    let fresh_retried = store
+        .try_claim_session_execution_lease_with_token(
+            "fresh-retry",
+            &fresh_retry_owner,
+            &fresh_retry_nonce,
+            120_000,
+        )
+        .await
+        .expect("retry fresh claim")
+        .acquired()
+        .expect("fresh claim retry remains acquired");
+    assert_eq!(fresh_retried.lease_token, fresh_retry.lease_token);
+    assert_eq!(fresh_retried.fencing_token, fresh_retry.fencing_token);
+    assert_eq!(
+        fresh_retried.claimed_at_epoch_ms, fresh_retry.claimed_at_epoch_ms,
+        "a retry after an ambiguous fresh acquire must not double-bump generation or claimed-at"
+    );
+    release_session_execution_lease_for_test(&store, &fresh_retried).await;
+
+    let takeover_predecessor = store
+        .try_claim_session_execution_lease("takeover-retry", &lease_owner("takeover-old"), 0)
+        .await
+        .expect("claim immediately-expiring takeover predecessor")
+        .acquired()
+        .expect("takeover predecessor acquired");
+    let takeover_owner = lease_owner("takeover-new");
+    let takeover_nonce = crate::LeaseClaimNonce::new();
+    let takeover = store
+        .try_claim_session_execution_lease_with_token(
+            "takeover-retry",
+            &takeover_owner,
+            &takeover_nonce,
+            120_000,
+        )
+        .await
+        .expect("take over expired lease")
+        .acquired()
+        .expect("takeover acquired");
+    assert!(takeover.fencing_token > takeover_predecessor.fencing_token);
+    assert_eq!(takeover.lease_token, takeover_nonce.as_str());
+    let takeover_retried = store
+        .try_claim_session_execution_lease_with_token(
+            "takeover-retry",
+            &takeover_owner,
+            &takeover_nonce,
+            120_000,
+        )
+        .await
+        .expect("retry takeover")
+        .acquired()
+        .expect("takeover retry remains acquired");
+    assert_eq!(takeover_retried.lease_token, takeover.lease_token);
+    assert_eq!(takeover_retried.fencing_token, takeover.fencing_token);
+    assert_eq!(
+        takeover_retried.claimed_at_epoch_ms, takeover.claimed_at_epoch_ms,
+        "a retry after an ambiguous takeover must not double-bump generation or claimed-at"
+    );
+    release_session_execution_lease_for_test(&store, &takeover_retried).await;
+
     let first = claim_session_execution_lease_for_test(&store, "root", "owner-a").await;
     let owner_a = lease_owner("owner-a");
     let owner_a_next = crate::LeaseOwnerIdentity::opaque("owner-a", "owner-a:next-incarnation");
     let owner_b = lease_owner("owner-b");
     let owner_c = lease_owner("owner-c");
     let owner_expired = lease_owner("owner-expired");
+    let reentry_nonce = crate::LeaseClaimNonce::new();
     let reentered = store
-        .try_claim_session_execution_lease("root", &owner_a, 120_000)
+        .try_claim_session_execution_lease_with_token("root", &owner_a, &reentry_nonce, 120_000)
         .await
         .expect("same incarnation may re-enter live session lease")
         .acquired()
         .expect("same incarnation receives existing session lease");
-    assert_eq!(reentered.lease_token, first.lease_token);
+    assert_ne!(
+        reentered.lease_token, first.lease_token,
+        "every same-incarnation claim must rotate the lock-lifecycle token"
+    );
     assert_eq!(reentered.fencing_token, first.fencing_token);
+    assert_eq!(reentered.lease_token, reentry_nonce.as_str());
+    assert_eq!(
+        reentered.claimed_at_epoch_ms, first.claimed_at_epoch_ms,
+        "same-incarnation rotation preserves when the lane was first acquired"
+    );
     assert!(reentered.expires_at_epoch_ms >= first.expires_at_epoch_ms);
+    let retried = store
+        .try_claim_session_execution_lease_with_token("root", &owner_a, &reentry_nonce, 120_000)
+        .await
+        .expect("retry same claim attempt")
+        .acquired()
+        .expect("retry observes the claim it already rotated");
+    assert_eq!(retried.lease_token, reentered.lease_token);
+    assert_eq!(retried.fencing_token, reentered.fencing_token);
+    assert_eq!(retried.claimed_at_epoch_ms, reentered.claimed_at_epoch_ms);
     assert!(
         matches!(
             store
@@ -1939,8 +2031,40 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         .renew_session_execution_lease(&reentered.fence(), 120_000)
         .await
         .expect("renew live session lease");
-    assert_eq!(renewed.lease_token, first.lease_token);
+    assert_eq!(renewed.lease_token, reentered.lease_token);
+    assert_eq!(renewed.fencing_token, reentered.fencing_token);
     assert!(renewed.expires_at_epoch_ms >= reentered.expires_at_epoch_ms);
+    let mut lock_lifecycle_authority = reentered.fence();
+    lock_lifecycle_authority.fencing_token = lock_lifecycle_authority
+        .fencing_token
+        .saturating_add(10_000);
+    let renewed_by_owner_and_token = store
+        .renew_session_execution_lease(&lock_lifecycle_authority, 120_000)
+        .await
+        .expect("renewal lock lifecycle is predicated only on owner and lease token");
+    assert_eq!(
+        renewed_by_owner_and_token.fencing_token, reentered.fencing_token,
+        "renewal returns the durable generation rather than trusting caller input"
+    );
+
+    let mut wrong_owner_current_token = reentered.fence();
+    wrong_owner_current_token.owner = owner_b.clone();
+    let err = store
+        .renew_session_execution_lease(&wrong_owner_current_token, 120_000)
+        .await
+        .expect_err("the current token alone must not authorize a wrong owner renewal");
+    assert!(matches!(
+        err,
+        StoreError::SessionExecutionLeaseRenewalRefused { .. }
+    ));
+    let err = store
+        .release_session_execution_lease(&wrong_owner_current_token)
+        .await
+        .expect_err("the current token alone must not authorize a wrong owner release");
+    assert!(matches!(
+        err,
+        StoreError::SessionExecutionLeaseReleaseRefused { .. }
+    ));
 
     let mut stale_fence = reentered.fence();
     stale_fence.lease_token.push_str(":stale");
@@ -1950,9 +2074,9 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         .expect_err("stale session lease renew must fail");
     assert!(matches!(
         err,
-        StoreError::SessionExecutionLeaseExpired { .. }
+        StoreError::SessionExecutionLeaseRenewalRefused { .. }
     ));
-    store
+    let err = store
         .release_session_execution_lease(&crate::SessionExecutionLeaseAuthority {
             session_id: first.session_id.clone(),
             owner: first.owner.clone(),
@@ -1960,7 +2084,11 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
             fencing_token: first.fencing_token,
         })
         .await
-        .expect("stale release is fenced and idempotent");
+        .expect_err("stale release must be refused by name");
+    assert!(matches!(
+        err,
+        StoreError::SessionExecutionLeaseReleaseRefused { .. }
+    ));
     assert!(
         matches!(
             store
@@ -1971,54 +2099,56 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         ),
         "stale release must not clear the live lease"
     );
-    // A completion identifies the lease *slot*, not one grant: the
-    // same-incarnation re-entry above returned the identical owner, token and
-    // fence, so releasing a completion retained from before that re-entry
-    // clears the *successor's* live lease and no backend predicate can tell the
-    // two apart. lash-core relies on this: a `SessionExecutionLeaseGuard` never
-    // releases out of band (a dropped guard leaves the lease to TTL), because
-    // only a guard that still tracks the lease knows the release is its own.
-    // Rotating the lease token on every claim would make stale completions
-    // distinguishable and is the change to make here if that behavior is ever
-    // wanted — it must be a deliberate, suite-wide decision.
-    //
-    // Paired enforcement: this law pins the backend *fact* (a retained
-    // completion frees the refreshed lease). The *prohibition* it implies —
-    // that a `SessionExecutionLeaseGuard` must never release out of band — is
-    // enforced by
-    // `runtime::session_execution_lease::tests::guard_dropped_mid_release_never_releases_a_successors_lease`,
-    // which fails if a dropped guard performs any release. Changing either side
-    // requires revisiting the other.
+    // The token scopes the lock lifecycle: a completion retained by the prior
+    // holder no longer identifies the successor claim, even though the owner
+    // incarnation and fencing generation are unchanged.
     let retained_stale_completion = first.completion();
-    store
+    let err = store
         .release_session_execution_lease(&retained_stale_completion)
         .await
-        .expect("release with a completion retained across a same-incarnation re-claim");
-    let stolen = store
-        .try_claim_session_execution_lease("root", &owner_b, 60_000)
-        .await
-        .expect("claim after releasing a retained completion")
-        .acquired()
-        .expect(
-            "releasing a completion retained across a same-incarnation re-claim frees the \
-             successor's live lease; owners must never release a completion they stopped tracking",
-        );
-    assert!(stolen.fencing_token > first.fencing_token);
-    release_session_execution_lease_for_test(&store, &stolen).await;
-    // Restore the pre-law state for the assertions below: `owner-a` holds a
-    // live lease again, as it did before this block ran.
-    let owner_a_relaid = claim_session_execution_lease_for_test(&store, "root", "owner-a").await;
+        .expect_err("a retained predecessor completion must be refused by name");
+    assert!(matches!(
+        err,
+        StoreError::SessionExecutionLeaseReleaseRefused { .. }
+    ));
+    assert!(
+        matches!(
+            store
+                .try_claim_session_execution_lease("root", &owner_b, 60_000)
+                .await
+                .expect("claim after stale retained release"),
+            crate::SessionExecutionLeaseClaimOutcome::Busy { .. }
+        ),
+        "a retained predecessor completion must not free the successor claim"
+    );
 
-    release_session_execution_lease_for_test(&store, &owner_a_relaid).await;
+    let mut current_completion = reentered.completion();
+    current_completion.fencing_token = current_completion.fencing_token.saturating_add(10_000);
+    store
+        .release_session_execution_lease(&current_completion)
+        .await
+        .expect("release lock lifecycle is predicated only on owner and lease token");
+    let err = store
+        .release_session_execution_lease(&current_completion)
+        .await
+        .expect_err("repeating an acknowledged release must be refused by name");
+    assert!(matches!(
+        err,
+        StoreError::SessionExecutionLeaseReleaseRefused { .. }
+    ));
     let second = claim_session_execution_lease_for_test(&store, "root", "owner-b").await;
     assert!(
         second.fencing_token > first.fencing_token,
         "reclaimed session leases must advance the fencing token"
     );
-    store
+    let err = store
         .release_session_execution_lease(&first.completion())
         .await
-        .expect("old release is idempotent");
+        .expect_err("old release must be refused by name");
+    assert!(matches!(
+        err,
+        StoreError::SessionExecutionLeaseReleaseRefused { .. }
+    ));
     assert!(
         matches!(
             store
@@ -2045,6 +2175,71 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         session_id: "root".to_string(),
         ..RuntimeSessionState::default()
     };
+    let overlap_owner = lease_owner("same-incarnation-overlap");
+    let overlap_predecessor_nonce = crate::LeaseClaimNonce::new();
+    let overlap_predecessor = store
+        .try_claim_session_execution_lease_with_token(
+            "root",
+            &overlap_owner,
+            &overlap_predecessor_nonce,
+            60_000,
+        )
+        .await
+        .expect("claim overlap predecessor")
+        .acquired()
+        .expect("overlap predecessor acquired");
+    let overlap_successor_nonce = crate::LeaseClaimNonce::new();
+    let overlap_successor = store
+        .try_claim_session_execution_lease_with_token(
+            "root",
+            &overlap_owner,
+            &overlap_successor_nonce,
+            60_000,
+        )
+        .await
+        .expect("claim overlap successor")
+        .acquired()
+        .expect("same incarnation overlap successor acquired");
+    assert_eq!(
+        overlap_successor.fencing_token, overlap_predecessor.fencing_token,
+        "same-incarnation overlap must preserve the claim generation"
+    );
+
+    let overlap_win = store
+        .commit_runtime_state(
+            RuntimeCommit::persisted_state_for_test(&state, &[])
+                .releasing_session_execution_lease(overlap_predecessor.completion()),
+        )
+        .await
+        .expect("predecessor may win purely by the current-head CAS");
+    state.head_revision = overlap_win.head_revision;
+    let live_after_win = store
+        .get_session_execution_lease("root")
+        .await
+        .expect("read overlap successor after predecessor win")
+        .expect("stale predecessor release must leave successor live");
+    assert_eq!(live_after_win.lease_token, overlap_successor.lease_token);
+
+    let stale_state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        ..RuntimeSessionState::default()
+    };
+    let err = store
+        .commit_runtime_state(
+            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
+                .releasing_session_execution_lease(overlap_predecessor.completion()),
+        )
+        .await
+        .expect_err("predecessor may lose only because the head CAS is stale");
+    assert!(matches!(err, StoreError::HeadRevisionConflict { .. }));
+    let live_after_loss = store
+        .get_session_execution_lease("root")
+        .await
+        .expect("read overlap successor after predecessor loss")
+        .expect("CAS-losing predecessor must leave successor live");
+    assert_eq!(live_after_loss.lease_token, overlap_successor.lease_token);
+    release_session_execution_lease_for_test(&store, &overlap_successor).await;
+
     let lease_free_commit = store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
@@ -2128,6 +2323,75 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         .expect("queue work claim");
     assert_eq!(claim.batches[0].batch_id, batch.batch_id);
     release_session_execution_lease_for_test(&store, &queue_lease).await;
+}
+
+/// Probe the claim/renew race through the public API on every backend. Embedded
+/// stores serialize the operations under one writer lock; PostgreSQL uses the
+/// same per-session advisory lock. Either linearization is legal, but a renewal
+/// that runs after rotation must return the named refusal rather than fabricate
+/// success for the stale token.
+async fn concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session_id = "concurrent-rotation-renewal";
+    let owner = lease_owner("concurrent-rotation-owner");
+    let predecessor = store
+        .try_claim_session_execution_lease(session_id, &owner, 120_000)
+        .await
+        .expect("claim concurrent predecessor")
+        .acquired()
+        .expect("concurrent predecessor acquired");
+    let successor_nonce = crate::LeaseClaimNonce::new();
+    let successor_token = successor_nonce.as_str().to_string();
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(3));
+
+    let claim_store = Arc::clone(&store);
+    let claim_owner = owner.clone();
+    let claim_barrier = Arc::clone(&barrier);
+    let claim = crate::task::spawn(async move {
+        claim_barrier.wait().await;
+        claim_store
+            .try_claim_session_execution_lease_with_token(
+                session_id,
+                &claim_owner,
+                &successor_nonce,
+                120_000,
+            )
+            .await
+    });
+    let renew_store = Arc::clone(&store);
+    let predecessor_fence = predecessor.fence();
+    let renew_barrier = Arc::clone(&barrier);
+    let renewal = crate::task::spawn(async move {
+        renew_barrier.wait().await;
+        renew_store
+            .renew_session_execution_lease(&predecessor_fence, 120_000)
+            .await
+    });
+    barrier.wait().await;
+
+    let successor = claim
+        .await
+        .expect("join concurrent rotating claim")
+        .expect("concurrent rotating claim")
+        .acquired()
+        .expect("same-incarnation rotating claim acquired");
+    assert_eq!(successor.lease_token, successor_token);
+    match renewal.await.expect("join concurrent stale renewal") {
+        Ok(renewed) => assert_eq!(
+            renewed.lease_token, predecessor.lease_token,
+            "a successful renewal must have linearized before token rotation"
+        ),
+        Err(StoreError::SessionExecutionLeaseRenewalRefused { .. }) => {}
+        Err(error) => panic!("concurrent stale renewal returned the wrong error: {error}"),
+    }
+    let durable = store
+        .get_session_execution_lease(session_id)
+        .await
+        .expect("read durable lease after concurrent probe")
+        .expect("successor remains live after concurrent probe");
+    assert_eq!(durable.lease_token, successor.lease_token);
+    release_session_execution_lease_for_test(&store, &successor).await;
 }
 
 async fn session_execution_lease_expires_by_ttl_contract<F>(

@@ -13,7 +13,7 @@ use lash_core::{
     RuntimeCommit, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectEnvelope,
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
     RuntimePersistence, RuntimeSessionState, SessionExecutionLeaseClaimOutcome, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory, ToolAttemptLaunch, ToolCallOutput,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreError, ToolAttemptLaunch, ToolCallOutput,
     ToolCallRecord, ToolId, facade_support::MergeKey,
 };
 use serde_json::{Value, json};
@@ -731,12 +731,25 @@ impl RuntimeBoundaryHarness {
         let expired_owner_commit_rejected = failover.stale_work_completion_rejected;
 
         let stale_completion = stale_lease.completion();
-        store
+        let stale_release_error = match store
             .release_session_execution_lease(&stale_completion)
             .await
-            .map_err(|err| {
-                RuntimeBoundaryError::new(format!("stale worker completion failed: {err}"))
-            })?;
+        {
+            Err(error) => error,
+            Ok(()) => {
+                return Err(RuntimeBoundaryError::new(
+                    "stale worker completion was silently accepted",
+                ));
+            }
+        };
+        if !matches!(
+            stale_release_error,
+            StoreError::SessionExecutionLeaseReleaseRefused { .. }
+        ) {
+            return Err(RuntimeBoundaryError::new(format!(
+                "stale worker completion returned the wrong refusal: {stale_release_error}"
+            )));
+        }
         let renewed_live = store
             .renew_session_execution_lease(&live_lease.fence(), LEASE_TTL_MS)
             .await
@@ -758,6 +771,7 @@ impl RuntimeBoundaryHarness {
             "active_owner": owner_json(&live_owner),
             "active_fencing_token": renewed_live.fencing_token,
             "stale_completion_rejected": true,
+            "stale_completion_refusal": "SessionExecutionLeaseReleaseRefused",
             "expired_owner_commit_rejected": expired_owner_commit_rejected,
             "process_stale_completion_rejected": process_completion.stale_rejected,
             "process_stale_output_absent": process_completion.stale_output_absent,

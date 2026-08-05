@@ -386,7 +386,10 @@ impl SessionCommitStore for Store {
                                     if let Some(completion) =
                                         commit.release_session_execution_lease.as_ref()
                                     {
-                                        release_session_execution_lease_conn(tx, completion)?;
+                                        let _release_was_current =
+                                            release_session_execution_lease_conn(tx, completion)?;
+                                        // FIG-884: ancillary stale release must
+                                        // never veto a replayed commit.
                                     }
                                     return Ok(result);
                                 }
@@ -903,7 +906,9 @@ impl SessionCommitStore for Store {
                         .map_err(sqlite_error)?;
                     }
                     if let Some(completion) = commit.release_session_execution_lease.as_ref() {
-                        release_session_execution_lease_conn(tx, completion)?;
+                        let _release_was_current =
+                            release_session_execution_lease_conn(tx, completion)?;
+                        // FIG-884: head CAS is commit authority; release is ancillary.
                     }
                     Ok(result)
                 })();
@@ -972,14 +977,16 @@ impl SessionCommitStore for Store {
 
 #[async_trait::async_trait]
 impl SessionExecutionLeaseStore for Store {
-    async fn try_claim_session_execution_lease(
+    async fn try_claim_session_execution_lease_with_token(
         &self,
         session_id: &str,
         owner: &LeaseOwnerIdentity,
+        claim_nonce: &lash_core::LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
         let session_id = session_id.to_string();
         let owner = owner.clone();
+        let lease_token = claim_nonce.as_str().to_string();
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
@@ -996,11 +1003,19 @@ impl SessionExecutionLeaseStore for Store {
                             .is_some_and(|current_owner| current_owner.same_incarnation(&owner))
                         {
                             let expires_at = now.saturating_add(lease_ttl_ms);
+                            let claimed_at = current.claimed_at_ms;
                             tx.execute(
                                 "UPDATE session_execution_leases
-                                 SET lease_expires_at_ms = ?2
+                                 SET lease_token = ?2,
+                                     lease_claimed_at_ms = ?3,
+                                     lease_expires_at_ms = ?4
                                  WHERE session_id = ?1",
-                                params![session_id, expires_at as i64],
+                                params![
+                                    session_id,
+                                    lease_token,
+                                    claimed_at as i64,
+                                    expires_at as i64
+                                ],
                             )
                             .map_err(sqlite_error)?;
                             // Reentry advances no generation: nobody is displaced.
@@ -1008,9 +1023,9 @@ impl SessionExecutionLeaseStore for Store {
                                 SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
                                     session_id,
                                     owner,
-                                    lease_token: current.lease_token.expect("live lease token set"),
+                                    lease_token,
                                     fencing_token: current.fencing_token,
-                                    claimed_at_epoch_ms: current.claimed_at_ms,
+                                    claimed_at_epoch_ms: claimed_at,
                                     expires_at_epoch_ms: expires_at,
                                 }),
                             ));
@@ -1033,6 +1048,7 @@ impl SessionExecutionLeaseStore for Store {
                         tx,
                         &session_id,
                         &owner,
+                        &lease_token,
                         current.as_ref().map_or(0, |lease| lease.fencing_token),
                         now,
                         lease_ttl_ms,
@@ -1082,9 +1098,20 @@ impl SessionExecutionLeaseStore for Store {
                         .as_ref()
                         .is_some_and(|owner| owner.same_incarnation(&fence.owner))
                         || current.lease_token.as_deref() != Some(fence.lease_token.as_str())
-                        || current.fencing_token != fence.fencing_token
-                        || current.expires_at_ms <= now
                     {
+                        lash_core::store_backend_support::trace_session_execution_lease_refusal(
+                            lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,
+                            "owner_or_token_mismatch",
+                            "sqlite_write_transaction",
+                            &fence,
+                            current.owner.as_ref(),
+                            current.lease_token.as_deref(),
+                        );
+                        return Err(StoreError::SessionExecutionLeaseRenewalRefused {
+                            session_id: fence.session_id.clone(),
+                        });
+                    }
+                    if current.expires_at_ms <= now {
                         return Err(StoreError::SessionExecutionLeaseExpired {
                             session_id: fence.session_id.clone(),
                         });
@@ -1096,15 +1123,13 @@ impl SessionExecutionLeaseStore for Store {
                          WHERE session_id = ?1
                            AND lease_owner_id = ?2
                            AND lease_owner_incarnation_id = ?3
-                           AND lease_token = ?4
-                           AND lease_fencing_token = ?6",
+                           AND lease_token = ?4",
                         params![
                             fence.session_id,
                             fence.owner.owner_id,
                             fence.owner.incarnation_id,
                             fence.lease_token,
-                            expires_at as i64,
-                            fence.fencing_token as i64
+                            expires_at as i64
                         ],
                     )
                     .map_err(sqlite_error)?;
@@ -1112,7 +1137,7 @@ impl SessionExecutionLeaseStore for Store {
                         session_id: fence.session_id,
                         owner: fence.owner,
                         lease_token: fence.lease_token,
-                        fencing_token: fence.fencing_token,
+                        fencing_token: current.fencing_token,
                         claimed_at_epoch_ms: current.claimed_at_ms,
                         expires_at_epoch_ms: expires_at,
                     })
@@ -1133,7 +1158,26 @@ impl SessionExecutionLeaseStore for Store {
         let completion = completion.clone();
         self.conn
             .write_flow(move |tx| {
-                let outcome = release_session_execution_lease_conn(tx, &completion);
+                let outcome = (|| {
+                    let current =
+                        load_session_execution_lease_row_conn(tx, &completion.session_id)?;
+                    if !release_session_execution_lease_conn(tx, &completion)? {
+                        lash_core::store_backend_support::trace_session_execution_lease_refusal(
+                            lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Release,
+                            "token_scoped_release_did_not_match",
+                            "sqlite_write_transaction",
+                            &completion,
+                            current.as_ref().and_then(|lease| lease.owner.as_ref()),
+                            current
+                                .as_ref()
+                                .and_then(|lease| lease.lease_token.as_deref()),
+                        );
+                        return Err(StoreError::SessionExecutionLeaseReleaseRefused {
+                            session_id: completion.session_id.clone(),
+                        });
+                    }
+                    Ok(())
+                })();
                 match outcome {
                     Ok(()) => Ok(TxOutcome::Commit(Ok(()))),
                     Err(err) => Ok(TxOutcome::Rollback(Err(err))),
@@ -3095,15 +3139,12 @@ fn acquire_session_execution_lease_conn(
     conn: &Connection,
     session_id: &str,
     owner: &LeaseOwnerIdentity,
+    lease_token: &str,
     previous_fencing_token: u64,
     now: u64,
     lease_ttl_ms: u64,
 ) -> Result<SessionExecutionLease, StoreError> {
     let fencing_token = previous_fencing_token.saturating_add(1);
-    let lease_token = format!(
-        "{}:{}:{}:{now}:{fencing_token}",
-        session_id, owner.owner_id, owner.incarnation_id
-    );
     let expires_at = now.saturating_add(lease_ttl_ms);
     conn.execute(
         "INSERT INTO session_execution_leases (
@@ -3134,7 +3175,7 @@ fn acquire_session_execution_lease_conn(
     Ok(SessionExecutionLease {
         session_id: session_id.to_string(),
         owner: owner.clone(),
-        lease_token,
+        lease_token: lease_token.to_string(),
         fencing_token,
         claimed_at_epoch_ms: now,
         expires_at_epoch_ms: expires_at,
@@ -3162,7 +3203,6 @@ fn ensure_session_execution_lease_conn(
         .owner
         .as_ref()
         .is_some_and(|owner| owner.same_incarnation(&fence.owner))
-        && current.lease_token.as_deref() == Some(fence.lease_token.as_str())
         && current.fencing_token == fence.fencing_token
         && current.expires_at_ms > now
     {
@@ -3177,9 +3217,10 @@ fn ensure_session_execution_lease_conn(
 fn release_session_execution_lease_conn(
     conn: &Connection,
     completion: &SessionExecutionLeaseAuthority,
-) -> Result<(), StoreError> {
-    conn.execute(
-        "UPDATE session_execution_leases
+) -> Result<bool, StoreError> {
+    let released = conn
+        .execute(
+            "UPDATE session_execution_leases
          SET lease_owner_id = NULL,
              lease_owner_incarnation_id = NULL,
              lease_owner_liveness_json = NULL,
@@ -3189,16 +3230,14 @@ fn release_session_execution_lease_conn(
          WHERE session_id = ?1
            AND lease_owner_id = ?2
            AND lease_owner_incarnation_id = ?3
-           AND lease_token = ?4
-           AND lease_fencing_token = ?5",
-        params![
-            completion.session_id,
-            completion.owner.owner_id,
-            completion.owner.incarnation_id,
-            completion.lease_token,
-            completion.fencing_token as i64
-        ],
-    )
-    .map_err(sqlite_error)?;
-    Ok(())
+           AND lease_token = ?4",
+            params![
+                completion.session_id,
+                completion.owner.owner_id,
+                completion.owner.incarnation_id,
+                completion.lease_token
+            ],
+        )
+        .map_err(sqlite_error)?;
+    Ok(released == 1)
 }
