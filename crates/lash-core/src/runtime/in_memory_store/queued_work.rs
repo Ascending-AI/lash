@@ -378,6 +378,13 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             .map(|entry| entry.batch.clone())
             .collect::<Vec<_>>();
         batches.sort_by_key(|batch| batch.enqueue_seq);
+        #[cfg(test)]
+        if self
+            .drop_next_list_queued_work_batch
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            batches.pop();
+        }
         Ok(batches)
     }
 
@@ -404,6 +411,13 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             .map(|entry| entry.batch.clone())
             .collect::<Vec<_>>();
         batches.sort_by_key(|batch| batch.enqueue_seq);
+        #[cfg(test)]
+        if self
+            .drop_next_list_pending_queued_work_batch
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            batches.pop();
+        }
         Ok(batches)
     }
 }

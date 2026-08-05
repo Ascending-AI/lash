@@ -64,6 +64,16 @@ impl InMemorySessionStore {
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
+    pub(crate) fn drop_next_list_queued_work_batch(&self) {
+        self.drop_next_list_queued_work_batch
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub(crate) fn drop_next_list_pending_queued_work_batch(&self) {
+        self.drop_next_list_pending_queued_work_batch
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
     pub(crate) fn fail_next_runtime_commit(&self, error: crate::StoreError) {
         *self
             .fail_next_runtime_commit

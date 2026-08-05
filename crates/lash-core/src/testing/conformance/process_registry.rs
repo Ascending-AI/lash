@@ -2,9 +2,17 @@
 
 use super::process_change_feed::process_change_feed_never_misses_concurrent_terminal_writers;
 use super::process_filters::list_processes_filters_by_enriched_fields;
-use super::process_references::live_reference_summary_tracks_non_terminal_reference_counts;
+use super::process_references::{
+    ProcessCountConservation, assert_process_count_conservation,
+    live_reference_summary_tracks_non_terminal_reference_counts,
+};
 use super::*;
 use crate::{ProcessRecord, TestProcessRegistryWriteExt};
+
+// The shared registry fixture performs 32 successful registrations and one
+// prune; the cold refold fixture below adds the 33rd registration.
+const REOPEN_BASELINE_SPAWNS: usize = 33;
+const REOPEN_BASELINE_PRUNED: usize = 1;
 
 /// Run the process-registry contract against a fresh backend.
 pub async fn process_registry<F>(make: F)
@@ -1431,6 +1439,13 @@ async fn reopen_conformance(handles: ReopenableProcessRegistry) {
         "process-refold-cold",
     )
     .await;
+    let mut conservation = ProcessCountConservation::from_modeled_totals(
+        REOPEN_BASELINE_SPAWNS,
+        REOPEN_BASELINE_PRUNED,
+    );
+    assert_process_count_conservation(&handles.open, conservation)
+        .await
+        .expect("known refold registration conserves before reopen assertion");
     let process_id = "observer-reopen";
     handles
         .open
@@ -1440,6 +1455,10 @@ async fn reopen_conformance(handles: ReopenableProcessRegistry) {
         )
         .await
         .expect("register before reopen");
+    conservation.record_spawn();
+    assert_process_count_conservation(&handles.open, conservation)
+        .await
+        .expect("process counts conserve before reopen");
     assert!(
         handles
             .reopen
@@ -1455,4 +1474,7 @@ async fn reopen_conformance(handles: ReopenableProcessRegistry) {
             .expect("record survives reopen")
             .is_some()
     );
+    assert_process_count_conservation(&handles.reopen, conservation)
+        .await
+        .expect("process counts conserve after reopen");
 }

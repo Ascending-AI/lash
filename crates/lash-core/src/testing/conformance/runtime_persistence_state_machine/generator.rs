@@ -1,5 +1,7 @@
 use super::*;
 
+const GENERATED_PREFIX_OPS: usize = 60;
+
 pub(super) fn generated_case() -> impl Strategy<Value = GeneratedCase> {
     (
         any::<u64>(),
