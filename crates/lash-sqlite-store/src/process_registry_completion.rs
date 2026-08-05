@@ -88,21 +88,19 @@ pub(super) async fn complete_process(
                     }
                     lash_core::facade_support::ProcessEventAppendPlan::Insert {
                         event,
-                        payload_hash,
                         projected_record,
                         occurred_at_ms,
                         wake_delivery,
                     } => {
                         tx.execute(
                             "INSERT INTO process_events (
-                                process_id, sequence, event_type, payload_hash, idempotency_key,
+                                process_id, sequence, event_type, idempotency_key,
                                 occurred_at_ms, event_json
-                             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                             params![
                                 process_id,
                                 sequence as i64,
                                 event.event_type.as_str(),
-                                payload_hash.as_str(),
                                 event.invocation.replay_key(),
                                 occurred_at_ms as i64,
                                 process_encode_json(&event)?,
@@ -217,7 +215,6 @@ pub(super) async fn complete_process_with_lease(
 
                 let lash_core::facade_support::ProcessEventAppendPlan::Insert {
                     event,
-                    payload_hash,
                     projected_record,
                     occurred_at_ms,
                     wake_delivery,
@@ -227,14 +224,13 @@ pub(super) async fn complete_process_with_lease(
                 };
                 tx.execute(
                     "INSERT INTO process_events (
-                        process_id, sequence, event_type, payload_hash, idempotency_key,
+                        process_id, sequence, event_type, idempotency_key,
                         occurred_at_ms, event_json
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     params![
                         process_id,
                         sequence as i64,
                         event.event_type.as_str(),
-                        payload_hash.as_str(),
                         event.invocation.replay_key(),
                         occurred_at_ms as i64,
                         process_encode_json(&event)?,

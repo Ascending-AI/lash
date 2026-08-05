@@ -363,7 +363,7 @@ fn measure_hardening_identity_phases(
             for _ in 0..HARDENING_OCCURRENCE_ITERATIONS {
                 std::hint::black_box(lash_core::facade_support::deterministic_occurrence_id(
                     &occurrence,
-                )?);
+                ));
             }
             Ok(())
         })?;

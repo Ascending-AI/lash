@@ -214,24 +214,15 @@ fn replayed_terminal_event_repairs_non_terminal_status_projection() {
     let first = prepare_process_event_append(&record, request.clone(), 1, None, None, 42, None)
         .expect("prepare first terminal event");
     let ProcessEventAppendPlan::Insert {
-        event: first_event,
-        payload_hash: first_payload_hash,
-        ..
+        event: first_event, ..
     } = first
     else {
         panic!("first terminal event should insert");
     };
 
-    let replayed = prepare_process_event_append(
-        &record,
-        request,
-        99,
-        Some(1),
-        Some((first_payload_hash, first_event)),
-        100,
-        None,
-    )
-    .expect("prepare replayed terminal event");
+    let replayed =
+        prepare_process_event_append(&record, request, 99, Some(1), Some(first_event), 100, None)
+            .expect("prepare replayed terminal event");
 
     let ProcessEventAppendPlan::Replay {
         event,
@@ -270,12 +261,7 @@ fn replayed_generic_tail_repairs_projection_across_sender_floor_gap() {
     let first =
         prepare_process_event_append(&stale_record, request.clone(), 7, None, None, 42, None)
             .expect("prepare generic event at a sender-floor boundary");
-    let ProcessEventAppendPlan::Insert {
-        event,
-        payload_hash,
-        ..
-    } = first
-    else {
+    let ProcessEventAppendPlan::Insert { event, .. } = first else {
         panic!("first generic event should insert")
     };
 
@@ -284,7 +270,7 @@ fn replayed_generic_tail_repairs_projection_across_sender_floor_gap() {
         request,
         100,
         Some(event.sequence),
-        Some((payload_hash, event)),
+        Some(event),
         100,
         None,
     )

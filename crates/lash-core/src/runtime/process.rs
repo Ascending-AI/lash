@@ -76,8 +76,7 @@ pub use validation::{
     ProcessEventAppendPlan, ProcessStartPlan, allocate_process_event_sequence,
     apply_process_event_projection, apply_process_status_projection, fold_process_record,
     prepare_process_event_append, prepare_process_registration, prepare_process_start,
-    process_event_payload_hash, process_registration_fingerprint, require_event_replay,
-    validate_generic_process_event_append,
+    process_registration_fingerprint, require_event_replay, validate_generic_process_event_append,
 };
 pub use wake::{
     ProcessWakeDeliveryRequest, process_wake_delivery, process_wake_input_from_event_payload,

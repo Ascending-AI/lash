@@ -25,6 +25,7 @@ where
     owner_namespaces_are_exact_and_session_cleanup_is_scoped(make()).await;
     explicit_prune_is_journaled_and_owner_scoped(make()).await;
     occurrence_and_reservations_are_atomic_and_idempotent(make()).await;
+    null_source_occurrence_replay_is_idempotent(make()).await;
     first_ingress_and_replay_share_canonical_subscription_order(make()).await;
 }
 
@@ -181,8 +182,8 @@ fn button_occurrence(
 
 fn trigger_source_key_and_subscription_identity_are_stable() {
     let source = serde_json::json!({ "button": "Blue" });
-    let first = crate::default_trigger_source_key("ui.button.pressed", &source).unwrap();
-    let second = crate::default_trigger_source_key("ui.button.pressed", &source).unwrap();
+    let first = crate::default_trigger_source_key("ui.button.pressed", &source);
+    let second = crate::default_trigger_source_key("ui.button.pressed", &source);
     assert_eq!(first, second);
     assert_ne!(
         crate::deterministic_subscription_id(&owner("session-a"), "ab:c"),
@@ -867,6 +868,28 @@ async fn occurrence_and_reservations_are_atomic_and_idempotent(
     assert_eq!(
         replay.reservations[0].reservation_status,
         crate::TriggerDeliveryReservationStatus::AlreadyReserved
+    );
+}
+
+async fn null_source_occurrence_replay_is_idempotent(store: Arc<dyn crate::TriggerStore>) {
+    let request = crate::TriggerOccurrenceRequest::new(
+        "ui.button.pressed",
+        "null-source",
+        serde_json::json!({"button": "Blue"}),
+        "null-source-occurrence",
+    )
+    .with_source(serde_json::Value::Null);
+    let first = store
+        .ingest_occurrence(request.clone())
+        .await
+        .expect("ingest null-source occurrence");
+    let replay = store
+        .ingest_occurrence(request)
+        .await
+        .expect("an exact null-source retry must be idempotent");
+    assert_eq!(
+        replay.occurrence.occurrence_id, first.occurrence.occurrence_id,
+        "a null-source retry must return the original occurrence"
     );
 }
 

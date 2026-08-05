@@ -297,6 +297,7 @@ pub mod facade_support {
     pub use crate::triggers::TriggerRouter;
     pub use crate::triggers::TriggerTargetSummary;
     pub use crate::triggers::default_trigger_source_key;
+    pub use crate::triggers::derived_trigger_subscription_key;
     pub use crate::triggers::deterministic_delivery_process_id;
     pub use crate::triggers::deterministic_occurrence_id;
     pub use crate::triggers::deterministic_subscription_id;
@@ -305,7 +306,7 @@ pub mod facade_support {
     pub use crate::triggers::evaluate_trigger_prune;
     pub use crate::triggers::sort_trigger_delivery_reservations;
     pub use crate::triggers::trigger_command_fingerprint;
-    pub use crate::triggers::trigger_occurrence_request_hash;
+    pub use crate::triggers::trigger_occurrence_request_matches_record;
     pub use crate::triggers::trigger_operation_receipt_id;
     pub use crate::triggers::validate_trigger_occurrence_request;
     pub use lash_sansio::AcceptedInjectedTurnInput;
@@ -797,10 +798,9 @@ pub(crate) use runtime::{
     QueuedWorkItem, QueuedWorkPayload, RuntimeReplay, RuntimeSubject, load_process_execution_env,
     materialize_process_event_semantics, persist_process_execution_env,
     prepare_process_event_append, prepare_process_registration, prepare_process_start,
-    process_event_invocation, process_event_payload_hash, process_registration_fingerprint,
-    process_wake_batch_draft, process_wake_batch_draft_with_policy,
-    process_wake_input_from_event_payload, process_wake_turn_cause, process_wake_turn_text,
-    require_event_replay,
+    process_event_invocation, process_registration_fingerprint, process_wake_batch_draft,
+    process_wake_batch_draft_with_policy, process_wake_input_from_event_payload,
+    process_wake_turn_cause, process_wake_turn_text, require_event_replay,
 };
 pub(crate) use runtime::{
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, QueuedWorkEnqueueOutcome,

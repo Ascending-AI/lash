@@ -505,8 +505,7 @@ impl HostBridge<'_> {
         let source_key = lash_core::facade_support::default_trigger_source_key(
             &request.source.source_type,
             &request.source.value,
-        )
-        .map_err(|err| ExecutionHostError::new(err.to_string()))?;
+        );
         let target = trigger_target_process_input(&request.target).map_err(|err| {
             ExecutionHostError::new(format!("failed to encode trigger target: {err}"))
         })?;

@@ -72,4 +72,6 @@ pub enum PluginError {
     },
     #[error("process event type `{event_type}` is reserved for its dedicated registry mutation")]
     ReservedProcessEvent { event_type: String },
+    #[error("process wake delivery carries an invalid wake identity `{wake_id}`")]
+    InvalidProcessWakeIdentity { wake_id: String },
 }

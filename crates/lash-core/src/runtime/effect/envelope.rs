@@ -17,6 +17,31 @@ use crate::{
 
 use super::executor::RuntimeEffectControllerError;
 
+const PROCESS_TRANSFER_FAMILY_VERSION: u8 = 1;
+
+/// Permanent tag registry for process-transfer set identities.
+///
+/// Version 1 has no sum variants: it preserves the caller's ordered process
+/// id sequence. Retired tags remain burned when variants are introduced.
+fn process_transfer_set_preimage(process_ids: &[String]) -> Vec<u8> {
+    let mut identity = crate::stable_identity::IdentityEncoder::new(
+        "lash.process-transfer-set",
+        PROCESS_TRANSFER_FAMILY_VERSION,
+    );
+    identity.sequence(process_ids, |identity, process_id| {
+        identity.string(process_id);
+    });
+    identity.finish()
+}
+
+fn process_transfer_set_identity(process_ids: &[String]) -> String {
+    crate::stable_identity::rendered_hash(
+        "process-transfer-set",
+        PROCESS_TRANSFER_FAMILY_VERSION,
+        &process_transfer_set_preimage(process_ids),
+    )
+}
+
 /// Durable category for a runtime effect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -528,8 +553,7 @@ impl ProcessCommand {
                 to_scope,
                 process_ids,
             } => {
-                let digest = crate::stable_hash::stable_json_sha256_hex(process_ids)
-                    .unwrap_or_else(|_| "unhashable".to_string());
+                let digest = process_transfer_set_identity(process_ids);
                 format!(
                     "process:transfer:{}:{}:{digest}",
                     from_scope.id(),
@@ -1000,6 +1024,27 @@ mod rejection_tests {
 
     fn invocation(kind: RuntimeEffectKind) -> RuntimeInvocation {
         RuntimeInvocation::effect(RuntimeScope::new("session"), "effect", kind, "replay")
+    }
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    #[test]
+    fn process_transfer_v1_identity_golden() {
+        let process_ids = vec![
+            "process:a:b".to_string(),
+            "process\0b".to_string(),
+            "λ".to_string(),
+        ];
+        assert_eq!(
+            hex(&process_transfer_set_preimage(&process_ids)),
+            "6c6173682d737461626c652d6964656e74697479010100000000000000196c6173682e70726f636573732d7472616e736665722d7365740000000000000003000000000000000b70726f636573733a613a62000000000000000970726f6365737300620000000000000002cebb"
+        );
+        assert_eq!(
+            process_transfer_set_identity(&process_ids),
+            "process-transfer-set:v1:sha256:cbbb28ff8d8ab022f3f9f625ebaeb7413f1e4da075f32010892e60200db64781"
+        );
     }
 
     fn prepared_call(call_id: &str) -> crate::PreparedToolCall {

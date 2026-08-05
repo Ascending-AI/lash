@@ -86930,3 +86930,35 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+
+[[api]]
+symbol = "lash::plugins::PluginError::InvalidProcessWakeIdentity"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an invalid adopted wake-identity rejection to the agent-workbench durable process flow example and assert the typed error."
+
+[[api]]
+symbol = "lash::plugins::PluginError::InvalidProcessWakeIdentity::wake_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an invalid adopted wake-identity rejection example and assert the offending wake id it names."
+
+[[api]]
+symbol = "lash_core::PluginError::InvalidProcessWakeIdentity"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class: process-registry adopters distinguish a malformed adopted wake identity from backend failure without string matching."
+
+[[api]]
+symbol = "lash_core::PluginError::InvalidProcessWakeIdentity::wake_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class: process-registry adopters report the offending wake id when rejecting a malformed adoption."

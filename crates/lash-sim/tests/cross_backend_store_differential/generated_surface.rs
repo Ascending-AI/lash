@@ -50,6 +50,8 @@ const ALL_SURFACE_OPERATION_KINDS: &[&str] = &[
     "trigger_register",
     "trigger_disable",
     "trigger_occurrence",
+    "trigger_occurrence_null_source",
+    "process_signal_zero",
     "effect_record",
     "await_resolve",
     "await_revoke_session",
@@ -62,6 +64,8 @@ enum SurfaceOperation {
     TriggerRegister { key: u8 },
     TriggerDisable { key: u8 },
     TriggerOccurrence { key: u8 },
+    TriggerOccurrenceNullSource { key: u8 },
+    ProcessSignalZero { negative: bool },
     EffectRecord { key: u8, duration_ms: u8 },
     AwaitResolve { key: u8 },
     AwaitRevokeSession,
@@ -96,6 +100,8 @@ impl SurfaceOperation {
             Self::TriggerRegister { .. } => "trigger_register",
             Self::TriggerDisable { .. } => "trigger_disable",
             Self::TriggerOccurrence { .. } => "trigger_occurrence",
+            Self::TriggerOccurrenceNullSource { .. } => "trigger_occurrence_null_source",
+            Self::ProcessSignalZero { .. } => "process_signal_zero",
             Self::EffectRecord { .. } => "effect_record",
             Self::AwaitResolve { .. } => "await_resolve",
             Self::AwaitRevokeSession => "await_revoke_session",
@@ -161,6 +167,7 @@ enum SurfaceReader {
 struct SurfaceRunner {
     name: &'static str,
     scenario: StoreContractScenario,
+    process_registry: Arc<dyn lash_core::ProcessRegistry>,
     trigger_store: Arc<dyn TriggerStore>,
     effect_host: Arc<dyn EffectHost>,
     reader: SurfaceReader,
@@ -258,6 +265,38 @@ impl SurfaceRunner {
                         )
                         .with_source(serde_json::json!({"source": key}))
                         .for_session(SURFACE_SESSION),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                Ok(())
+            }
+            SurfaceOperation::TriggerOccurrenceNullSource { key } => {
+                self.trigger_store
+                    .ingest_occurrence(
+                        TriggerOccurrenceRequest::new(
+                            "surface.event",
+                            format!("null-source-{key}"),
+                            serde_json::json!({"event": key}),
+                            format!("surface-null-source-occurrence-{key}"),
+                        )
+                        .with_source(serde_json::Value::Null)
+                        .for_session(SURFACE_SESSION),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                Ok(())
+            }
+            SurfaceOperation::ProcessSignalZero { negative } => {
+                let payload = if *negative {
+                    serde_json::json!({"value": -0.0})
+                } else {
+                    serde_json::json!({"value": 0.0})
+                };
+                self.process_registry
+                    .append_event(
+                        "prop-process-0",
+                        lash_core::ProcessEventAppendRequest::new("property.signal", payload)
+                            .with_replay_key("surface-zero-replay"),
                     )
                     .await
                     .map_err(|error| error.to_string())?;
@@ -431,11 +470,8 @@ fn trigger_rows_from_memory(store: &InMemoryTriggerStore) -> TriggerRows {
         occurrences: raw
             .occurrences
             .into_iter()
-            .map(|(record, request_hash)| {
-                normalized_trigger_json(
-                    serde_json::json!({"request_hash": request_hash, "record": record}),
-                    &mut incarnations,
-                )
+            .map(|record| {
+                normalized_trigger_json(serde_json::json!({"record": record}), &mut incarnations)
             })
             .collect(),
         deliveries: raw
@@ -806,9 +842,9 @@ fn read_sqlite_triggers(connection: &rusqlite::Connection) -> TriggerRows {
         let result: String = row.get(2)?;
         Ok(serde_json::json!({"operation_id": row.get::<_, String>(0)?, "request_fingerprint": row.get::<_, String>(1)?, "result": serde_json::from_str::<serde_json::Value>(&result).unwrap()}))
     }).into_iter().map(|row| normalized_trigger_json(row, &mut incarnations)).collect();
-    let occurrences = sqlite_simple_json_rows(connection, "SELECT request_hash, record_json FROM trigger_occurrences ORDER BY occurrence_id", |row| {
-        let record: String = row.get(1)?;
-        Ok(serde_json::json!({"request_hash": row.get::<_, String>(0)?, "record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}))
+    let occurrences = sqlite_simple_json_rows(connection, "SELECT record_json FROM trigger_occurrences ORDER BY occurrence_id", |row| {
+        let record: String = row.get(0)?;
+        Ok(serde_json::json!({"record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}))
     }).into_iter().map(|row| normalized_trigger_json(row, &mut incarnations)).collect();
     let deliveries = sqlite_simple_json_rows(connection, "SELECT occurrence_id, subscription_id, process_id, subscription_snapshot_json FROM trigger_deliveries ORDER BY occurrence_id, subscription_id", |row| {
         let snapshot: String = row.get(3)?;
@@ -1000,13 +1036,13 @@ async fn read_postgres_triggers(pool: &PgPool) -> TriggerRows {
         .collect();
     let receipts: Vec<(String, String, String)> = sqlx::query_as("SELECT operation_id, request_fingerprint, result_json FROM lash_trigger_mutation_receipts ORDER BY operation_id").fetch_all(pool).await.unwrap();
     let mutation_receipts = receipts.into_iter().map(|(operation_id, request_fingerprint, result)| normalized_trigger_json(serde_json::json!({"operation_id": operation_id, "request_fingerprint": request_fingerprint, "result": serde_json::from_str::<serde_json::Value>(&result).unwrap()}), &mut incarnations)).collect();
-    let occurrence_rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT request_hash, record_json FROM lash_trigger_occurrences ORDER BY occurrence_id",
+    let occurrence_rows: Vec<String> = sqlx::query_scalar(
+        "SELECT record_json FROM lash_trigger_occurrences ORDER BY occurrence_id",
     )
     .fetch_all(pool)
     .await
     .unwrap();
-    let occurrences = occurrence_rows.into_iter().map(|(request_hash, record)| normalized_trigger_json(serde_json::json!({"request_hash": request_hash, "record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}), &mut incarnations)).collect();
+    let occurrences = occurrence_rows.into_iter().map(|record| normalized_trigger_json(serde_json::json!({"record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}), &mut incarnations)).collect();
     let delivery_rows: Vec<(String, String, String, String)> = sqlx::query_as("SELECT occurrence_id, subscription_id, process_id, subscription_snapshot_json FROM lash_trigger_deliveries ORDER BY occurrence_id, subscription_id").fetch_all(pool).await.unwrap();
     let deliveries = delivery_rows.into_iter().map(|(occurrence_id, subscription_id, process_id, snapshot)| normalized_trigger_delivery_json(serde_json::json!({"occurrence_id": occurrence_id, "subscription_id": subscription_id, "process_id": process_id, "subscription_snapshot": serde_json::from_str::<serde_json::Value>(&snapshot).unwrap()}), &mut incarnations)).collect();
     TriggerRows {
@@ -1120,6 +1156,7 @@ async fn surface_runners(
                 registry: memory_registry.clone(),
                 runtime: memory_runtime.clone(),
             }),
+            process_registry: memory_registry.clone(),
             trigger_store: memory_triggers.clone(),
             effect_host: memory_effect,
             reader: SurfaceReader::InMemory {
@@ -1131,9 +1168,10 @@ async fn surface_runners(
         SurfaceRunner {
             name: "sqlite",
             scenario: StoreContractScenario::new(StoreContractHandles {
-                registry: sqlite_registry,
+                registry: sqlite_registry.clone(),
                 runtime: sqlite_runtime,
             }),
+            process_registry: sqlite_registry,
             trigger_store: sqlite_triggers,
             effect_host: sqlite_effect,
             reader: SurfaceReader::Sqlite {
@@ -1146,9 +1184,10 @@ async fn surface_runners(
         SurfaceRunner {
             name: "postgres",
             scenario: StoreContractScenario::new(StoreContractHandles {
-                registry: postgres_registry,
+                registry: postgres_registry.clone(),
                 runtime: postgres_runtime,
             }),
+            process_registry: postgres_registry,
             trigger_store: postgres_triggers,
             effect_host: postgres_effect,
             reader: SurfaceReader::Postgres {
@@ -1309,6 +1348,21 @@ async fn generated_cross_backend_surface_differential_agrees() {
         first_divergence(&storage, &[SurfaceOperation::TriggerOccurrence { key: 0 }]).await
     {
         panic!("seed-852 minimized trigger-occurrence regression diverged: {divergence:#?}");
+    }
+    let canonical_conflict_material = [
+        SurfaceOperation::TriggerOccurrenceNullSource { key: 0 },
+        SurfaceOperation::TriggerOccurrenceNullSource { key: 0 },
+        SurfaceOperation::StoreContract(StoreContractOp::Register {
+            process: 0,
+            disposition: 0,
+            max_attempts: 1,
+            wake_target: None,
+        }),
+        SurfaceOperation::ProcessSignalZero { negative: true },
+        SurfaceOperation::ProcessSignalZero { negative: false },
+    ];
+    if let Some(divergence) = first_divergence(&storage, &canonical_conflict_material).await {
+        panic!("canonical conflict-material differential diverged: {divergence:#?}");
     }
     let cases = std::env::var("LASH_CROSS_BACKEND_CASES")
         .ok()

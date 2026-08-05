@@ -742,11 +742,11 @@ fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session_curso
     let trigger_identities = serde_json::json!({
         "session_a": lash_core::triggers::deterministic_subscription_id(
             &lash_core::TriggerOwnerScope::session("session-a"),
-            "derived/v1/content-address",
+            "derived/v2/content-address",
         ),
         "session_b": lash_core::triggers::deterministic_subscription_id(
             &lash_core::TriggerOwnerScope::session("session-b"),
-            "derived/v1/content-address",
+            "derived/v2/content-address",
         ),
         "wired": lash_core::triggers::deterministic_subscription_id(
             &lash_core::TriggerOwnerScope::session("wired-session"),

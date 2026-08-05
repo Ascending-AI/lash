@@ -287,8 +287,7 @@ async fn fire_trigger(storage: &PostgresStorage, tag: &str) -> Result<FiredTrigg
 
     let source = json!({"button": "Blue"});
     let source_key =
-        lash_core::facade_support::default_trigger_source_key(TRIGGER_SOURCE_TYPE, &source)
-            .context("derive trigger source key")?;
+        lash_core::facade_support::default_trigger_source_key(TRIGGER_SOURCE_TYPE, &source);
     let draft = TriggerSubscriptionDraft::for_process(
         format!("version-bump-{tag}-subscription"),
         env_ref,

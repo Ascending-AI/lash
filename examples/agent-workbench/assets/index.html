@@ -3791,7 +3791,7 @@
     }
 
     // Tail truncation keeps the distinguishing suffix of namespaced values
-    // (session:<id>, derived/v1/<digest>, vN:<digest>); head truncation of
+    // (session:<id>, derived/v2/<digest>, vN:<digest>); head truncation of
     // those renders the constant prefix and makes every row look identical.
     function truncateTriggerDetailTail(value, length) {
       if (!value) return "unknown";
@@ -3808,10 +3808,10 @@
     }
 
     function truncateSubscriptionKey(value) {
-      const derivedPrefix = "derived/v1/";
+      const derivedPrefix = "derived/v2/";
       if (!value) return "unknown";
       if (value.startsWith(derivedPrefix)) {
-        return "v1/" + truncateTriggerDetail(value.slice(derivedPrefix.length), 10);
+        return "v2/" + truncateTriggerDetail(value.slice(derivedPrefix.length), 10);
       }
       // Author-supplied keys are human names whose head is the distinct part.
       return truncateTriggerDetail(value, 12);

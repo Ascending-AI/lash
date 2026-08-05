@@ -168,20 +168,15 @@ impl WakeDelivery {
         wake: ProcessWakeDelivery,
         config: WakeDeliveryConfig,
     ) -> Result<Self, PluginError> {
+        if !super::wake::is_process_wake_id(&wake.wake_id) {
+            return Err(PluginError::InvalidProcessWakeIdentity {
+                wake_id: wake.wake_id,
+            });
+        }
         let next_attempt_at_ms = wake.created_at_ms;
-        let hash = crate::stable_hash::stable_json_sha256_hex(&(
-            wake.target_session_id.as_str(),
-            wake.process_id.as_str(),
-            wake.sequence,
-        ))
-        .map_err(|error| {
-            PluginError::Session(format!(
-                "failed to derive wake delivery id for process `{}`: {error}",
-                wake.process_id
-            ))
-        })?;
+        let delivery_id = wake.wake_id.clone();
         Ok(Self {
-            delivery_id: format!("wake-delivery:{hash}"),
+            delivery_id,
             expires_at_ms: wake.created_at_ms.saturating_add(config.delivery_expiry_ms),
             wake,
             state: WakeDeliveryState::Pending,
@@ -202,6 +197,63 @@ impl WakeDelivery {
                 self.delivery_id
             ))
         })
+    }
+}
+
+#[cfg(test)]
+mod wake_delivery_identity_tests {
+    use super::*;
+
+    #[test]
+    fn delivery_row_reuses_structural_wake_id() {
+        let wake = ProcessWakeDelivery {
+            wake_id: format!("wake:v1:sha256:{}", "a".repeat(64)),
+            target_session_id: "session".to_string(),
+            process_id: "process".to_string(),
+            sequence: 1,
+            event_type: "process.wake".to_string(),
+            event_invocation: crate::RuntimeInvocation::effect(
+                crate::RuntimeScope::new("session"),
+                "effect",
+                crate::RuntimeEffectKind::Process,
+                "replay",
+            ),
+            process_caused_by: None,
+            input: "wake".to_string(),
+            created_at_ms: 10,
+        };
+        let delivery = WakeDelivery::pending(wake, WakeDeliveryConfig::default()).unwrap();
+        assert_eq!(
+            delivery.delivery_id,
+            format!("wake:v1:sha256:{}", "a".repeat(64))
+        );
+    }
+
+    #[test]
+    fn delivery_row_rejects_untrusted_wake_identity() {
+        for wake_id in ["", "wake:v1:sha256:abc", "wake:vx:sha256:0000"] {
+            let wake = ProcessWakeDelivery {
+                wake_id: wake_id.to_string(),
+                target_session_id: "session".to_string(),
+                process_id: "process".to_string(),
+                sequence: 1,
+                event_type: "process.wake".to_string(),
+                event_invocation: crate::RuntimeInvocation::effect(
+                    crate::RuntimeScope::new("session"),
+                    "effect",
+                    crate::RuntimeEffectKind::Process,
+                    "replay",
+                ),
+                process_caused_by: None,
+                input: "wake".to_string(),
+                created_at_ms: 10,
+            };
+            assert!(matches!(
+                WakeDelivery::pending(wake, WakeDeliveryConfig::default()),
+                Err(PluginError::InvalidProcessWakeIdentity { wake_id: rejected })
+                    if rejected == wake_id
+            ));
+        }
     }
 }
 

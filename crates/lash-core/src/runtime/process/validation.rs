@@ -32,7 +32,6 @@ use super::wake::{ProcessWakeDeliveryRequest, process_wake_delivery};
 pub enum ProcessEventAppendPlan {
     Insert {
         event: ProcessEvent,
-        payload_hash: String,
         projected_record: ProcessRecord,
         wake_delivery: Option<ProcessWakeDelivery>,
         occurred_at_ms: u64,
@@ -344,16 +343,17 @@ pub fn prepare_process_event_append(
     request: ProcessEventAppendRequest,
     sequence: u64,
     last_event_sequence: Option<u64>,
-    replay_lookup: Option<(String, ProcessEvent)>,
+    replay_lookup: Option<ProcessEvent>,
     occurred_at_ms: u64,
     wake_session_id: Option<&str>,
 ) -> Result<ProcessEventAppendPlan, PluginError> {
     let process_id = record.id.as_str();
-    let payload_hash = process_event_payload_hash(&request.event_type, &request.payload)?;
     if let Some(replay_key) = request.replay.as_ref().map(|replay| replay.key.as_str())
-        && let Some((existing_hash, existing)) = replay_lookup
+        && let Some(existing) = replay_lookup
     {
-        if existing_hash == payload_hash {
+        if existing.event_type == request.event_type
+            && crate::identity_json::payloads_equal(&existing.payload, &request.payload)
+        {
             let occurred_at_ms = epoch_ms_from_system_time(existing.occurred_at);
             let repair_record = if last_event_sequence == Some(existing.sequence) {
                 let mut projected = record.clone();
@@ -478,7 +478,6 @@ pub fn prepare_process_event_append(
     )?;
     Ok(ProcessEventAppendPlan::Insert {
         event,
-        payload_hash,
         projected_record,
         wake_delivery,
         occurred_at_ms,
@@ -859,17 +858,6 @@ pub fn process_registration_fingerprint(
         PROCESS_REGISTRATION_FAMILY_VERSION,
         &preimage,
     )
-}
-
-pub fn process_event_payload_hash(
-    event_type: &str,
-    payload: &serde_json::Value,
-) -> Result<String, PluginError> {
-    crate::stable_hash::stable_json_sha256_hex(&(event_type, payload)).map_err(|err| {
-        PluginError::Session(format!(
-            "failed to hash `{event_type}` process event: {err}"
-        ))
-    })
 }
 
 pub fn require_event_replay(

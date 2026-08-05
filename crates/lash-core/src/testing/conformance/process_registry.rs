@@ -151,6 +151,8 @@ async fn process_registry_conformance(registry: Arc<dyn ProcessRegistry>) {
     registration_and_observers_are_atomic(Arc::clone(&registry)).await;
     observer_events_are_auditable_and_transfer_is_atomic(Arc::clone(&registry)).await;
     generic_append_rejects_reserved_edge_audit_events(Arc::clone(&registry)).await;
+    canonical_process_event_payload_replay(Arc::clone(&registry)).await;
+    long_cancellation_reason_replay_is_backend_safe(Arc::clone(&registry)).await;
     wake_subscription_is_indexed_and_retargetable(Arc::clone(&registry)).await;
     lifecycle_status_and_outcome_fold(Arc::clone(&registry)).await;
     producer_terminal_status_must_match_materialized_outcome(Arc::clone(&registry)).await;
@@ -169,6 +171,61 @@ async fn process_registry_conformance(registry: Arc<dyn ProcessRegistry>) {
     .await;
     process_attempt_budget_is_typed(Arc::clone(&registry)).await;
     tombstones_make_pruned_processes_distinguishable(registry).await;
+}
+
+async fn canonical_process_event_payload_replay(registry: Arc<dyn ProcessRegistry>) {
+    let process_id = "canonical-process-event-payload-replay";
+    registry
+        .register_process(
+            registration(process_id).with_extra_event_types([plain_event_type("signal.zero")]),
+        )
+        .await
+        .expect("register canonical-payload process");
+    let replay_key = format!("process:{process_id}:signal.zero:1");
+    let first = registry
+        .append_event(
+            process_id,
+            ProcessEventAppendRequest::new("signal.zero", serde_json::json!({"value": -0.0}))
+                .with_replay_key(&replay_key),
+        )
+        .await
+        .expect("append negative-zero payload");
+    let replay = registry
+        .append_event(
+            process_id,
+            ProcessEventAppendRequest::new("signal.zero", serde_json::json!({"value": 0.0}))
+                .with_replay_key(replay_key),
+        )
+        .await
+        .expect("canonical positive-zero retry must be idempotent");
+    assert_eq!(
+        replay.event.sequence, first.event.sequence,
+        "canonically equal zero payloads must share the replayed event"
+    );
+}
+
+async fn long_cancellation_reason_replay_is_backend_safe(registry: Arc<dyn ProcessRegistry>) {
+    let process_id = "long-cancellation-reason-replay";
+    registry
+        .register_process(registration(process_id))
+        .await
+        .expect("register long-cancellation process");
+    let reason = (0..800)
+        .map(|index| format!("{index:08x}"))
+        .collect::<String>();
+    let request = ProcessEventAppendRequest::cancel_requested(process_id, Some(reason));
+    let first = registry
+        .append_event(process_id, request.clone())
+        .await
+        .expect("append cancellation with long reason");
+    let replay = registry
+        .append_event(process_id, request)
+        .await
+        .expect("replay cancellation with long reason");
+    assert_eq!(
+        replay.event.sequence, first.event.sequence,
+        "long cancellation reason retries must remain idempotent on every backend"
+    );
 }
 
 async fn refolded_process_record_matches_stored_projection(

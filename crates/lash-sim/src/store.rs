@@ -882,8 +882,7 @@ impl ModelStore {
                 )
                 .with_source(json!({"sim": true}));
                 let occurrence_id =
-                    lash_core::facade_support::deterministic_occurrence_id(&request)
-                        .unwrap_or_else(|_| format!("trigger:{}", event.boundary_id));
+                    lash_core::facade_support::deterministic_occurrence_id(&request);
                 let mut observed = json!({
                     "session": session,
                     "trigger_delivered": true,

@@ -43,12 +43,10 @@ fn append_plugin_messages(
         .filter(|message| matches!(message.role, MessageRole::User | MessageRole::System))
         .enumerate()
         .map(|(ordinal, message)| {
-            let digest = crate::stable_hash::stable_json_sha256_hex(message)
-                .unwrap_or_else(|_| crate::stable_hash::sha256_hex(message.content.as_bytes()));
-            plugin_message_to_message(
-                message,
-                &format!("m_plugin_{digest}_{}", messages.len() + ordinal),
-            )
+            // This fallback is a frame-local presentation coordinate, not a
+            // session-lifetime identity: opening or replacing a frame can
+            // legitimately reuse the same `m_plugin_{ordinal}` value.
+            plugin_message_to_message(message, &format!("m_plugin_{}", messages.len() + ordinal))
         })
         .collect::<Vec<_>>();
     if !new_messages.is_empty() {
@@ -283,5 +281,24 @@ impl PluginSession {
         }
 
         Ok(TurnFinalization { turn, events })
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+
+    #[test]
+    fn plugin_fallback_message_id_uses_append_position() {
+        let mut messages = crate::MessageSequence::default();
+        append_plugin_messages(
+            &mut messages,
+            &[
+                PluginMessage::text(MessageRole::User, "same"),
+                PluginMessage::text(MessageRole::System, "same"),
+            ],
+        );
+        assert_eq!(messages[0].id, "m_plugin_0");
+        assert_eq!(messages[1].id, "m_plugin_1");
     }
 }

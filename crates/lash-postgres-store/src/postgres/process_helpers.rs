@@ -138,9 +138,9 @@ pub(crate) async fn load_event_by_key_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &str,
     replay_key: &str,
-) -> Result<Option<(String, ProcessEvent)>, PluginError> {
+) -> Result<Option<ProcessEvent>, PluginError> {
     let row = sqlx::query(
-        "SELECT payload_hash, event_json
+        "SELECT event_json
          FROM lash_process_events
          WHERE process_id = $1 AND idempotency_key = $2",
     )
@@ -150,11 +150,8 @@ pub(crate) async fn load_event_by_key_tx(
     .await
     .map_err(plugin_sqlx_error)?;
     row.map(|row| {
-        let hash: String = row.get(0);
-        let json: String = row.get(1);
-        serde_json::from_str(&json)
-            .map(|event| (hash, event))
-            .map_err(process_decode_error)
+        let json: String = row.get(0);
+        serde_json::from_str(&json).map_err(process_decode_error)
     })
     .transpose()
 }
@@ -238,22 +235,20 @@ pub(crate) async fn append_process_event_tx(
         }
         lash_core::facade_support::ProcessEventAppendPlan::Insert {
             event,
-            payload_hash,
             projected_record,
             wake_delivery,
             occurred_at_ms,
         } => {
             sqlx::query(
                 "INSERT INTO lash_process_events (
-                    process_id, sequence, event_type, payload_hash, idempotency_key,
+                    process_id, sequence, event_type, idempotency_key,
                     occurred_at_ms, event_json
                  )
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                 VALUES ($1, $2, $3, $4, $5, $6)",
             )
             .bind(&process_id)
             .bind(sequence as i64)
             .bind(event.event_type.as_str())
-            .bind(&payload_hash)
             .bind(event.invocation.replay_key())
             .bind(occurred_at_ms as i64)
             .bind(serde_json::to_string(&event).map_err(process_decode_error)?)

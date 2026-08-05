@@ -448,30 +448,32 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         request: lash_core::TriggerOccurrenceRequest,
     ) -> Result<lash_core::TriggerIngressResult, lash_core::PluginError> {
         lash_core::facade_support::validate_trigger_occurrence_request(&request)?;
-        let request_hash = lash_core::facade_support::trigger_occurrence_request_hash(&request)?;
-        let occurrence_id = lash_core::facade_support::deterministic_occurrence_id(&request)?;
+        let occurrence_id = lash_core::facade_support::deterministic_occurrence_id(&request);
         let occurred_at_ms = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
                 Ok(trigger_tx_outcome((|| {
-                    let existing: Option<(String, String)> = tx
+                    let existing: Option<String> = tx
                         .query_row(
-                            "SELECT request_hash, record_json
+                            "SELECT record_json
                              FROM trigger_occurrences
                              WHERE idempotency_key = ?1",
                             params![request.idempotency_key.as_str()],
-                            |row| Ok((row.get(0)?, row.get(1)?)),
+                            |row| row.get(0),
                         )
                         .optional()
                         .map_err(process_sqlite_error)?;
-                    let (record, is_new) = if let Some((existing_hash, existing_json)) = existing {
-                        if existing_hash != request_hash {
+                    let (record, is_new) = if let Some(existing_json) = existing {
+                        let record = Self::decode_occurrence(existing_json)?;
+                        if !lash_core::facade_support::trigger_occurrence_request_matches_record(
+                            &request, &record,
+                        ) {
                             return Err(lash_core::PluginError::Session(format!(
                                 "trigger occurrence idempotency conflict for `{}`",
                                 request.idempotency_key
                             )));
                         }
-                        (Self::decode_occurrence(existing_json)?, false)
+                        (record, false)
                     } else {
                         let record = lash_core::TriggerOccurrenceRecord {
                             occurrence_id: occurrence_id.clone(),
@@ -485,14 +487,13 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         };
                         tx.execute(
                             "INSERT INTO trigger_occurrences (
-                                occurrence_id, idempotency_key, request_hash, source_type,
+                                occurrence_id, idempotency_key, source_type,
                                 source_key, occurred_at_ms, record_json
                              )
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                             params![
                                 record.occurrence_id.as_str(),
                                 record.idempotency_key.as_str(),
-                                request_hash.as_str(),
                                 record.source_type.as_str(),
                                 record.source_key.as_str(),
                                 record.occurred_at_ms as i64,

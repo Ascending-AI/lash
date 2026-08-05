@@ -466,7 +466,7 @@ test("trigger registration rows separate display name, identity, and trigger key
          $lash_host_descriptor_value: { expr: "*/2 * * * * *", tz: "UTC" }
        },
        target: { label: "mirror_job", identity: { label: "ignored-fallback" } },
-       subscription_key: "derived/v1/content-address",
+       subscription_key: "derived/v2/content-address",
        incarnation: "incarnation-a"
      };
      this.rows = [
@@ -490,11 +490,11 @@ test("trigger registration rows separate display name, identity, and trigger key
   assert.equal(rowContext.rows[1].name, rowContext.rows[0].name);
   assert.equal(
     rowContext.rows[0].detail,
-    `id ${expectedSubscriptionIdDetail(subscriptionIdA)} · trigger key v1/content-ad… · scope session:session-a · incarnation incarnation-…`,
+    `id ${expectedSubscriptionIdDetail(subscriptionIdA)} · trigger key v2/content-ad… · scope session:session-a · incarnation incarnation-…`,
   );
   assert.equal(
     rowContext.rows[0].title,
-    `id ${subscriptionIdA} · trigger key derived/v1/content-address · scope session:session-a · alias shared-blue-watch · incarnation incarnation-a`,
+    `id ${subscriptionIdA} · trigger key derived/v2/content-address · scope session:session-a · alias shared-blue-watch · incarnation incarnation-a`,
   );
   assert.doesNotMatch(rowContext.rows[0].name, /shared-blue-watch/);
   assert.notEqual(

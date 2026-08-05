@@ -1142,12 +1142,7 @@ fn static_trigger_source(
 }
 
 fn semantic_trigger_source_key(source_type: &str, source: &serde_json::Value) -> String {
-    let encoded = serde_json::to_vec(&(source_type, source))
-        .expect("static trigger source values always encode as JSON");
-    format!(
-        "source:{source_type}:sha256:{:x}",
-        Sha256::digest(encoded)
-    )
+    lash_core::facade_support::default_trigger_source_key(source_type, source)
 }
 
 fn semantic_trigger_subscription_key(
@@ -1155,18 +1150,11 @@ fn semantic_trigger_subscription_key(
     source_type: &str,
     source_key: &str,
 ) -> String {
-    let mut hasher = Sha256::new();
-    for part in [
-        "lash.trigger-subscription-key",
-        "1",
+    lash_core::facade_support::derived_trigger_subscription_key(
         process_name,
         source_type,
         source_key,
-    ] {
-        hasher.update((part.len() as u64).to_be_bytes());
-        hasher.update(part.as_bytes());
-    }
-    format!("derived/v1/{:x}", hasher.finalize())
+    )
 }
 
 fn static_trigger_target(

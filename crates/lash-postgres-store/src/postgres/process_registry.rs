@@ -602,22 +602,20 @@ impl ProcessRegistry for PostgresProcessRegistry {
             }
             facade_support::ProcessEventAppendPlan::Insert {
                 event,
-                payload_hash,
                 projected_record,
                 occurred_at_ms,
                 wake_delivery,
             } => {
                 sqlx::query(
                     "INSERT INTO lash_process_events (
-                        process_id, sequence, event_type, payload_hash, idempotency_key,
+                        process_id, sequence, event_type, idempotency_key,
                         occurred_at_ms, event_json
                      )
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                     VALUES ($1, $2, $3, $4, $5, $6)",
                 )
                 .bind(process_id)
                 .bind(sequence as i64)
                 .bind(event.event_type.as_str())
-                .bind(&payload_hash)
                 .bind(event.invocation.replay_key())
                 .bind(occurred_at_ms as i64)
                 .bind(serde_json::to_string(&event).map_err(process_decode_error)?)
@@ -701,7 +699,6 @@ impl ProcessRegistry for PostgresProcessRegistry {
 
         let facade_support::ProcessEventAppendPlan::Insert {
             event,
-            payload_hash,
             projected_record,
             occurred_at_ms,
             wake_delivery,
@@ -711,14 +708,13 @@ impl ProcessRegistry for PostgresProcessRegistry {
         };
         sqlx::query(
             "INSERT INTO lash_process_events (
-                process_id, sequence, event_type, payload_hash, idempotency_key,
+                process_id, sequence, event_type, idempotency_key,
                 occurred_at_ms, event_json
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+             ) VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(process_id)
         .bind(sequence as i64)
         .bind(event.event_type.as_str())
-        .bind(&payload_hash)
         .bind(event.invocation.replay_key())
         .bind(occurred_at_ms as i64)
         .bind(serde_json::to_string(&event).map_err(process_decode_error)?)

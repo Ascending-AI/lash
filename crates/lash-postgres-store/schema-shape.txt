@@ -17,7 +17,7 @@
 # in this file records how the DDL declares it and is documentation, not a
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
-version 37
+version 38
 table lash_attachment_manifest
   column attachment_id text not-null
   column canonical_uri text not-null
@@ -98,7 +98,6 @@ table lash_process_events
   column event_type text not-null
   column idempotency_key text nullable
   column occurred_at_ms bigint not-null
-  column payload_hash text not-null
   column process_id text not-null
   column sequence bigint not-null
   unique (process_id, idempotency_key) where idempotency_key is not null
@@ -261,7 +260,6 @@ table lash_trigger_occurrences
   column occurred_at_ms bigint not-null
   column occurrence_id text not-null
   column record_json text not-null
-  column request_hash text not-null
   column source_key text not-null
   column source_type text not-null
   unique (idempotency_key)

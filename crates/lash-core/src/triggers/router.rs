@@ -2,6 +2,9 @@ use super::*;
 
 const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 2;
 const TRIGGER_LOOKUP_FAMILY_VERSION: u8 = 2;
+const TRIGGER_SOURCE_FAMILY_VERSION: u8 = 1;
+const TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION: u8 = 1;
+const DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION: u8 = 2;
 
 pub fn deterministic_subscription_id(
     owner_scope: &TriggerOwnerScope,
@@ -357,29 +360,59 @@ pub(super) fn default_enabled() -> bool {
     true
 }
 
-pub fn default_trigger_source_key(
-    source_type: &str,
-    source: &serde_json::Value,
-) -> Result<String, PluginError> {
-    let digest = crate::stable_hash::stable_json_sha256_hex(&(source_type, source))
-        .map_err(|err| PluginError::Session(format!("failed to hash trigger source key: {err}")))?;
-    Ok(format!("source:{source_type}:sha256:{digest}"))
+pub fn default_trigger_source_key(source_type: &str, source: &serde_json::Value) -> String {
+    let preimage = trigger_source_preimage(source_type, source);
+    crate::stable_identity::rendered_hash(
+        "trigger-source",
+        TRIGGER_SOURCE_FAMILY_VERSION,
+        &preimage,
+    )
+}
+
+/// Permanent tag registry for residual trigger identity families.
+///
+/// Source and delivery-process v1 have no sum variants. Their complete field
+/// sequences are encoded below; retired tags remain burned when variants are
+/// introduced in later family versions.
+fn trigger_source_preimage(source_type: &str, source: &serde_json::Value) -> Vec<u8> {
+    let mut identity = crate::stable_identity::IdentityEncoder::new(
+        "lash.trigger-source",
+        TRIGGER_SOURCE_FAMILY_VERSION,
+    );
+    identity.string(source_type);
+    project_trigger_payload_leaf(&mut identity, source);
+    identity.finish()
 }
 
 pub fn empty_trigger_source_key(source_type: &str) -> Result<String, PluginError> {
-    default_trigger_source_key(source_type, &serde_json::json!({}))
+    Ok(default_trigger_source_key(
+        source_type,
+        &serde_json::json!({}),
+    ))
 }
 
-pub fn deterministic_occurrence_id(
-    request: &TriggerOccurrenceRequest,
-) -> Result<String, PluginError> {
-    let digest = crate::stable_hash::stable_json_sha256_hex(&(
-        request.source_type.as_str(),
-        request.source_key.as_str(),
-        request.idempotency_key.as_str(),
-    ))
-    .map_err(|err| PluginError::Session(format!("failed to hash trigger occurrence: {err}")))?;
-    Ok(format!("trigger:{digest}"))
+pub fn deterministic_occurrence_id(request: &TriggerOccurrenceRequest) -> String {
+    format!("trigger:{}", request.idempotency_key)
+}
+
+/// Derives the compiler-owned subscription key through the shared identity
+/// framing used by every other durable trigger projection.
+pub fn derived_trigger_subscription_key(
+    process_name: &str,
+    source_type: &str,
+    source_key: &str,
+) -> String {
+    let mut identity = crate::stable_identity::IdentityEncoder::new(
+        "lash.trigger-subscription-key",
+        DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION,
+    );
+    identity.string(process_name);
+    identity.string(source_type);
+    identity.string(source_key);
+    format!(
+        "derived/v{DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION}/{}",
+        crate::stable_hash::sha256_hex(&identity.finish())
+    )
 }
 
 pub fn deterministic_delivery_process_id(
@@ -388,16 +421,30 @@ pub fn deterministic_delivery_process_id(
     incarnation: &str,
     revision: u64,
 ) -> Result<String, PluginError> {
-    let digest = crate::stable_hash::stable_json_sha256_hex(&(
-        "lash.trigger-delivery",
-        1_u8,
-        occurrence_id,
-        subscription_id,
-        incarnation,
-        revision,
+    let preimage =
+        trigger_delivery_process_preimage(occurrence_id, subscription_id, incarnation, revision);
+    Ok(crate::stable_identity::rendered_hash(
+        "process:trigger-delivery",
+        TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION,
+        &preimage,
     ))
-    .map_err(|err| PluginError::Session(format!("failed to hash trigger delivery: {err}")))?;
-    Ok(format!("process:trigger:{digest}"))
+}
+
+fn trigger_delivery_process_preimage(
+    occurrence_id: &str,
+    subscription_id: &str,
+    incarnation: &str,
+    revision: u64,
+) -> Vec<u8> {
+    let mut identity = crate::stable_identity::IdentityEncoder::new(
+        "lash.trigger-delivery-process",
+        TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION,
+    );
+    identity.string(occurrence_id);
+    identity.string(subscription_id);
+    identity.string(incarnation);
+    identity.u64(revision);
+    identity.finish()
 }
 
 #[derive(Clone)]
@@ -643,16 +690,32 @@ pub fn validate_trigger_occurrence_request(
     Ok(())
 }
 
-pub fn trigger_occurrence_request_hash(
+pub fn trigger_occurrence_request_matches_record(
     request: &TriggerOccurrenceRequest,
-) -> Result<String, PluginError> {
-    crate::stable_hash::stable_json_sha256_hex(&(
-        request.source_type.as_str(),
-        request.source_key.as_str(),
-        &request.payload,
-        &request.source,
-    ))
-    .map_err(|err| PluginError::Session(format!("failed to hash trigger occurrence: {err}")))
+    record: &TriggerOccurrenceRecord,
+) -> bool {
+    let TriggerOccurrenceRequest {
+        source_type,
+        source_key,
+        payload,
+        idempotency_key: _,
+        source,
+        session_id: _,
+    } = request;
+    let TriggerOccurrenceRecord {
+        occurrence_id: _,
+        source_type: stored_source_type,
+        source_key: stored_source_key,
+        payload: stored_payload,
+        idempotency_key: _,
+        source: stored_source,
+        session_id: _,
+        occurred_at_ms: _,
+    } = record;
+    source_type == stored_source_type
+        && source_key == stored_source_key
+        && crate::identity_json::payloads_equal(payload, stored_payload)
+        && crate::identity_json::optional_payloads_equal(source.as_ref(), stored_source.as_ref())
 }
 
 #[cfg(test)]
@@ -661,6 +724,76 @@ mod tests {
 
     fn hex(bytes: &[u8]) -> String {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    #[test]
+    fn residual_trigger_projection_identity_goldens() {
+        let source = serde_json::json!({"b": [1, true], "a": "λ"});
+        assert_eq!(
+            hex(&trigger_source_preimage("webhook\0type", &source)),
+            "6c6173682d737461626c652d6964656e74697479010100000000000000136c6173682e747269676765722d736f75726365000000000000000c776562686f6f6b007479706500000000000000177b2261223a22cebb222c2262223a5b312c747275655d7d"
+        );
+        assert_eq!(
+            default_trigger_source_key("webhook\0type", &source),
+            "trigger-source:v1:sha256:c68dfd26dd24fb2ce6b2e6355a63a78d52c782fa1367b0a648f3c314d84feb54"
+        );
+
+        assert_eq!(
+            hex(&trigger_delivery_process_preimage(
+                "trigger:key:a:b",
+                "subscription\0x",
+                "inc:λ",
+                42,
+            )),
+            "6c6173682d737461626c652d6964656e746974790101000000000000001d6c6173682e747269676765722d64656c69766572792d70726f63657373000000000000000f747269676765723a6b65793a613a62000000000000000e737562736372697074696f6e00780000000000000006696e633acebb000000000000002a"
+        );
+        assert_eq!(
+            deterministic_delivery_process_id("trigger:key:a:b", "subscription\0x", "inc:λ", 42,)
+                .unwrap(),
+            "process:trigger-delivery:v1:sha256:b52fcf7890e68f0b99580630b889fbd3073e1b36e848441afef5f7c666ad92a2"
+        );
+        assert_eq!(
+            derived_trigger_subscription_key("worker\0name", "source:λ", "key\0route"),
+            "derived/v2/9e3563c46d2ce110fa93779dd167feef4b8eaf6515899975efce8a29ac6483a3"
+        );
+    }
+
+    #[test]
+    fn occurrence_uses_idempotency_key_and_structural_conflict_material() {
+        let request = TriggerOccurrenceRequest::new(
+            "source",
+            "key",
+            serde_json::json!({"value": 1}),
+            "caller:key",
+        )
+        .with_source(serde_json::json!({"origin": true}));
+        assert_eq!(deterministic_occurrence_id(&request), "trigger:caller:key");
+        let record = TriggerOccurrenceRecord {
+            occurrence_id: "trigger:caller:key".to_string(),
+            source_type: request.source_type.clone(),
+            source_key: request.source_key.clone(),
+            payload: request.payload.clone(),
+            idempotency_key: request.idempotency_key.clone(),
+            source: request.source.clone(),
+            session_id: None,
+            occurred_at_ms: 42,
+        };
+        assert!(trigger_occurrence_request_matches_record(&request, &record));
+        let mut normalized = request.clone();
+        normalized.payload = serde_json::json!({"value": -0.0});
+        let mut normalized_record = record.clone();
+        normalized_record.payload = serde_json::json!({"value": 0.0});
+        normalized.source = Some(serde_json::Value::Null);
+        normalized_record.source = None;
+        assert!(trigger_occurrence_request_matches_record(
+            &normalized,
+            &normalized_record
+        ));
+        let mut changed = request;
+        changed.payload = serde_json::json!({"value": 2});
+        assert!(!trigger_occurrence_request_matches_record(
+            &changed, &record
+        ));
     }
 
     fn minimal_identity_corpus_draft(input: crate::ProcessInput) -> TriggerSubscriptionDraft {

@@ -296,23 +296,19 @@ impl SqliteProcessRegistry {
         conn: &Connection,
         process_id: &str,
         replay_key: &str,
-    ) -> Result<Option<(String, ProcessEvent)>, lash_core::PluginError> {
-        let row: Option<(String, String)> = conn
+    ) -> Result<Option<ProcessEvent>, lash_core::PluginError> {
+        let row: Option<String> = conn
             .query_row(
-                "SELECT payload_hash, event_json
+                "SELECT event_json
                  FROM process_events
                  WHERE process_id = ?1 AND idempotency_key = ?2",
                 params![process_id, replay_key],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )
             .optional()
             .map_err(process_sqlite_error)?;
-        row.map(|(hash, json)| {
-            serde_json::from_str(&json)
-                .map(|event| (hash, event))
-                .map_err(process_decode_error)
-        })
-        .transpose()
+        row.map(|json| serde_json::from_str(&json).map_err(process_decode_error))
+            .transpose()
     }
 
     pub(crate) fn append_event_conn(
@@ -370,22 +366,20 @@ impl SqliteProcessRegistry {
             }
             lash_core::facade_support::ProcessEventAppendPlan::Insert {
                 event,
-                payload_hash,
                 projected_record,
                 wake_delivery,
                 occurred_at_ms,
             } => {
                 conn.execute(
                     "INSERT INTO process_events (
-                        process_id, sequence, event_type, payload_hash, idempotency_key,
+                        process_id, sequence, event_type, idempotency_key,
                         occurred_at_ms, event_json
                      )
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     params![
                         process_id,
                         sequence as i64,
                         event.event_type.as_str(),
-                        payload_hash.as_str(),
                         event.invocation.replay_key(),
                         occurred_at_ms as i64,
                         process_encode_json(&event)?,

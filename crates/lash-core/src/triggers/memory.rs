@@ -11,8 +11,7 @@ pub struct InMemoryTriggerStore {
 pub struct RawTriggerStateForTesting {
     pub subscriptions: Vec<TriggerSubscriptionRecord>,
     pub mutation_receipts: Vec<(String, String, TriggerEffectResult, u64)>,
-    /// Occurrence record paired with its legacy request hash.
-    pub occurrences: Vec<(TriggerOccurrenceRecord, String)>,
+    pub occurrences: Vec<TriggerOccurrenceRecord>,
     pub deliveries: Vec<(String, String, String, u64, TriggerSubscriptionRecord)>,
 }
 
@@ -47,19 +46,7 @@ impl InMemoryTriggerStore {
                 },
             )
             .collect();
-        let occurrences = state
-            .occurrences
-            .values()
-            .cloned()
-            .map(|occurrence| {
-                let request_hash = state
-                    .occurrence_hashes
-                    .get(&occurrence.occurrence_id)
-                    .cloned()
-                    .unwrap_or_default();
-                (occurrence, request_hash)
-            })
-            .collect();
+        let occurrences = state.occurrences.values().cloned().collect();
         let deliveries = state
             .deliveries
             .values()
@@ -131,7 +118,6 @@ pub(super) struct InMemoryTriggerEventState {
     pub(super) mutation_receipts: BTreeMap<String, (String, TriggerEffectResult, u64)>,
     pub(super) occurrences: BTreeMap<String, TriggerOccurrenceRecord>,
     pub(super) occurrence_id_by_idempotency_key: BTreeMap<String, String>,
-    pub(super) occurrence_hashes: BTreeMap<String, String>,
     pub(super) deliveries: BTreeMap<(String, String), InMemoryTriggerDeliveryRecord>,
 }
 
@@ -244,29 +230,23 @@ impl TriggerStore for InMemoryTriggerStore {
             .state
             .lock()
             .map_err(|_| PluginError::Session("trigger store lock poisoned".to_string()))?;
-        let request_hash = trigger_occurrence_request_hash(&request)?;
         if let Some(existing_id) = state
             .occurrence_id_by_idempotency_key
             .get(&request.idempotency_key)
             .cloned()
         {
-            let existing_hash = state
-                .occurrence_hashes
-                .get(&existing_id)
-                .cloned()
-                .unwrap_or_default();
-            if existing_hash != request_hash {
-                return Err(PluginError::Session(format!(
-                    "trigger occurrence idempotency conflict for `{}`",
-                    request.idempotency_key
-                )));
-            }
             let occurrence = state.occurrences.get(&existing_id).cloned().ok_or_else(|| {
                 PluginError::Session(format!(
                     "missing trigger occurrence `{existing_id}` for idempotency key"
                 ))
             });
             let occurrence = occurrence?;
+            if !trigger_occurrence_request_matches_record(&request, &occurrence) {
+                return Err(PluginError::Session(format!(
+                    "trigger occurrence idempotency conflict for `{}`",
+                    request.idempotency_key
+                )));
+            }
             let mut reservations = state
                 .deliveries
                 .values()
@@ -285,7 +265,7 @@ impl TriggerStore for InMemoryTriggerStore {
                 reservations,
             });
         }
-        let occurrence_id = deterministic_occurrence_id(&request)?;
+        let occurrence_id = deterministic_occurrence_id(&request);
         let record = TriggerOccurrenceRecord {
             occurrence_id: occurrence_id.clone(),
             source_type: request.source_type,
@@ -299,9 +279,6 @@ impl TriggerStore for InMemoryTriggerStore {
         state
             .occurrence_id_by_idempotency_key
             .insert(request.idempotency_key, occurrence_id.clone());
-        state
-            .occurrence_hashes
-            .insert(occurrence_id.clone(), request_hash);
         state.occurrences.insert(occurrence_id, record.clone());
         let reservations =
             reserve_in_memory_for_occurrence(&mut state, &record, self.clock.as_ref())?;

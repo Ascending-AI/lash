@@ -2071,7 +2071,7 @@
         "started_process": true
       },
       "observed": {
-        "occurrence_id": "trigger:d299189f6eeeea492c6447f94c65d7aaff4d4128d22b77010b8976c56406aa08",
+        "occurrence_id": "trigger:sim-trigger:session-004:trigger:001",
         "reservation_count": 1,
         "session": "session-004",
         "source_key": "trigger/button/session-004/001",
@@ -5756,7 +5756,7 @@
           "process_id": "sim-process-session-004-001",
           "sequence": 1,
           "target_session_id": "session-004",
-          "wake_id": "wake:53c7d667c825d42d52bf7ed2086931bacd63ef9ef71cbd8fb643488caf755cc7"
+          "wake_id": "wake:v1:sha256:46bbf0287b6783a014a55cb7e4944da2a8a9326ae6036890f2ea7e21f2b801a9"
         },
         "runtime_queued_work": {
           "batch_id_present": true,
@@ -5771,7 +5771,7 @@
         },
         "sequence": 1,
         "session": "session-004",
-        "wake_id": "wake:53c7d667c825d42d52bf7ed2086931bacd63ef9ef71cbd8fb643488caf755cc7"
+        "wake_id": "wake:v1:sha256:46bbf0287b6783a014a55cb7e4944da2a8a9326ae6036890f2ea7e21f2b801a9"
       }
     },
     {
@@ -5896,7 +5896,7 @@
           "process_id": "sim-process-session-004-001",
           "sequence": 1,
           "target_session_id": "session-004",
-          "wake_id": "wake:53c7d667c825d42d52bf7ed2086931bacd63ef9ef71cbd8fb643488caf755cc7"
+          "wake_id": "wake:v1:sha256:46bbf0287b6783a014a55cb7e4944da2a8a9326ae6036890f2ea7e21f2b801a9"
         },
         "runtime_queued_work": {
           "batch_id_present": true,
@@ -5911,7 +5911,7 @@
         },
         "sequence": 1,
         "session": "session-004",
-        "wake_id": "wake:53c7d667c825d42d52bf7ed2086931bacd63ef9ef71cbd8fb643488caf755cc7"
+        "wake_id": "wake:v1:sha256:46bbf0287b6783a014a55cb7e4944da2a8a9326ae6036890f2ea7e21f2b801a9"
       }
     },
     {
@@ -6845,7 +6845,7 @@
             "source_hash": "1899959000faf9a1b7eca6d2da2a038fd3ace91b33a5ab129e58c0ac94b8fe24"
           }
         },
-        "occurrence_id": "trigger:ca1846c87dab962010c72441de01617a5f68c22ee39f87f8ca2eaa3866f603ad",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:standard-initial-request-projection",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/standard-initial-request-projection",
@@ -6973,7 +6973,7 @@
             "source_hash": "b334acdf39d0668f6b2cc6db0461e9f8227ddbe2ded6f8197d6168eb41544deb"
           }
         },
-        "occurrence_id": "trigger:d0dfacba4c26ab92dd5b7125f3f7d02a79c05f39138d046d509b191deceb9394",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:standard-empty-provider-response-error",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/standard-empty-provider-response-error",
@@ -7093,7 +7093,7 @@
             "source_hash": "6edb2d5ede8e3c51ce3c2397c4cedca430fc28f804258e76d26afa421607fd3e"
           }
         },
-        "occurrence_id": "trigger:257fff3f05fc803446fbb74732d765f95107128746abf5e2dd5a675921912e89",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:standard-provider-error-without-checkpoint",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/standard-provider-error-without-checkpoint",
@@ -7269,7 +7269,7 @@
             "source_hash": "9d8ded7ad28f82c0dda83c54f107537776506bdb2e64668a5c85dd4e1abaf6ba"
           }
         },
-        "occurrence_id": "trigger:3656ab5ff5d548e4777f67a63c4d0815d4dc018194d945693afd59080b44cc35",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:standard-native-tool-loop-reenters-model",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/standard-native-tool-loop-reenters-model",
@@ -7473,7 +7473,7 @@
             "source_hash": "57d940b0a383c89db77c5894d65523e1ff3b192bacb4e227d9569826e3ed81cb"
           }
         },
-        "occurrence_id": "trigger:9937323fe78e07e2a7d54dca5e71061f99bcde4ed1425415893949bf6f446638",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:standard-parallel-tool-results-checkpoint-once",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/standard-parallel-tool-results-checkpoint-once",
@@ -7637,7 +7637,7 @@
             "source_hash": "a9a7385c88721132ecb4aeb5799b8151376829237ffd94311846faa072632b88"
           }
         },
-        "occurrence_id": "trigger:c5cfb6e5da04013b91aa15e98628eb254ddc1b00d38522e2fa372b3a1a5c956b",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:standard-tool-failure-feedback-reenters-model",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/standard-tool-failure-feedback-reenters-model",
@@ -7769,7 +7769,7 @@
             "source_hash": "ef3309983fc27c73ef6de21a681f38963bd56a14c4c97a58d0e65977259b23ad"
           }
         },
-        "occurrence_id": "trigger:8d18a2cce0289fdb9fef9a59142a14ff36a15e9e122189bb2737ab0f6866473f",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:standard-streamed-text-finalizes-once",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/standard-streamed-text-finalizes-once",
@@ -7935,7 +7935,7 @@
             "source_hash": "128bbdf49b3a4e209b681a7e5c5bb098f06556583330b7d675156f608e8c1569"
           }
         },
-        "occurrence_id": "trigger:b910867db9c915b2becd48d43f2e177207823215ff15eb369d3ba2a93b51ba25",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:standard-max-turns-after-tool-result",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/standard-max-turns-after-tool-result",
@@ -8103,7 +8103,7 @@
             "source_hash": "474b6c47375cb6db0306adb11f41ef8d0db8b58784757d3009c237b7d38d02e9"
           }
         },
-        "occurrence_id": "trigger:6dcb55171a5d53178bac4fe5ef4d84a8d3b353566a6b2d00729e2108736dafb4",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-natural-prose-finalizes",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-natural-prose-finalizes",
@@ -8267,7 +8267,7 @@
             "source_hash": "2452f3f34228d93174a6e2f78d45bb7fa6014f80260df2c36a61af4cf50e4c38"
           }
         },
-        "occurrence_id": "trigger:b01b23792290e0d700c1c7e9efd3365b7e46ad09bc2a03633c1fe1423e0951e5",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-typed-prose-requires-finish",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-typed-prose-requires-finish",
@@ -8433,7 +8433,7 @@
             "source_hash": "a24a6991a681e004efbb099dfebeae3a841d901a2bbce0d95dcad5e6619dec62"
           }
         },
-        "occurrence_id": "trigger:bed231f3b1a9cd04cdd37b3500c32bc707098bb59786dc98cf773b7e48758da5",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-finish-required-max-turn-stop",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-finish-required-max-turn-stop",
@@ -8619,7 +8619,7 @@
             "source_hash": "5e559fd70e9607f2a28252d130c8f9dc61ff43f641fb4e4e0ab233c197f95c9b"
           }
         },
-        "occurrence_id": "trigger:0ed7d9b1671b0e1164f3a725da03b0dd27496b6fb1da3c6b732c696e6b15afcb",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-exec-error-max-turn-stop",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-exec-error-max-turn-stop",
@@ -8839,7 +8839,7 @@
             "source_hash": "74091a1a7e3059f13cb7a5f7f3d4400387fcf4f7be24d16357321f8c48cab654"
           }
         },
-        "occurrence_id": "trigger:aeac763b03e610e204169a2d4d7bced7c833afe206419e732b6e4adde9c756d0",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-typed-finish-emits-outcome-and-done",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-typed-finish-emits-outcome-and-done",
@@ -9003,7 +9003,7 @@
             "source_hash": "27f2b21cdc3d19ce8246a513cf7cec363a4e3f97c554a67114fe43a26751607a"
           }
         },
-        "occurrence_id": "trigger:4e2138bd389c76fa6d4e0b18c61c98c1b9347346ea43ce9f6609fdf103697b5f",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-finish-required-diagnostic-counts",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-finish-required-diagnostic-counts",
@@ -9161,7 +9161,7 @@
             "source_hash": "60f7463f85dbc449051937076da054c744eb5074dd56f477d5537d40a9ba77b2"
           }
         },
-        "occurrence_id": "trigger:24accb875dbf3fef99e3af1093c3307b2c05edfb390ff69182e11231e974fc81",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-natural-diagnostic-counts",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-natural-diagnostic-counts",
@@ -9349,7 +9349,7 @@
             "source_hash": "b086a3feca08d8332a9abac930abd5905798ce228d3d41a65ff887e7670fe5cc"
           }
         },
-        "occurrence_id": "trigger:52c570304ce5d8921e99a56d6d36d824c791b1b6ea59a25e23ab077455841069",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-cell-diagnostic-counts",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-cell-diagnostic-counts",
@@ -9507,7 +9507,7 @@
             "source_hash": "7fde998771379e75b284abf457358217070a61f9f6d563705d94290408417b2a"
           }
         },
-        "occurrence_id": "trigger:fd2730a5ae0487d96f6b2d8596f61759574b36fc894e82d37980cbd86baf08cf",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-retired-marker-plain-lashlang-text",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-retired-marker-plain-lashlang-text",
@@ -9687,7 +9687,7 @@
             "source_hash": "3be808772f6fe064bb267dfa688ada32fcfe3bb7bf135d1b5747e0835f812ef5"
           }
         },
-        "occurrence_id": "trigger:643be00bf10af30bf9f66daf21e9a787a85c33cce3a8f78b5eee61b4995c5c03",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-lashlang-cell-exec-continues",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-lashlang-cell-exec-continues",
@@ -9867,7 +9867,7 @@
             "source_hash": "7a3c58a8084944c96a36cae593dbbc2060df7f102fe97e603f2197a7da4439dc"
           }
         },
-        "occurrence_id": "trigger:cfb73384b53c0af26a44cbd031d0d8d33bcfa471cbf7dff2d01ad2659e3e6bbc",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-streamed-lashlang-cell-exec-persists-trajectory",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-streamed-lashlang-cell-exec-persists-trajectory",
@@ -10055,7 +10055,7 @@
             "source_hash": "96c76780f96fd5b246d5d8f80b318bd0a87bc559284e99a77098860425536142"
           }
         },
-        "occurrence_id": "trigger:26b860e9276df79726721a072d55befb4e6b447b8c014eb1ed3bfc3a81a45093",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-empty-options-natural-default",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-empty-options-natural-default",
@@ -10231,7 +10231,7 @@
             "source_hash": "6aadc8bfaa2a57cdc7b3844bf3882ef5eb302941168069970f2611763f355993"
           }
         },
-        "occurrence_id": "trigger:75624be4831debeef9ff3383650fc15a61f94deaa25d656f4ebd1515da6c1067",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-exec-result-no-tool-call-replay",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-exec-result-no-tool-call-replay",
@@ -10437,7 +10437,7 @@
             "source_hash": "1b247782b9c278382e30fa517bdc3d5b1879513aad2181bc6e95536b05f60d6f"
           }
         },
-        "occurrence_id": "trigger:3aac9cc4e34f31ad65bf8b38951c2855a67b72017c344f002dd09d8f75c4e8e0",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-exec-tool-control-frame-switch-terminal",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-exec-tool-control-frame-switch-terminal",
@@ -10623,7 +10623,7 @@
             "source_hash": "73741e75d74c3aa70c2f21bfe1b8a02aa2b3a0bbd9122f3e67295d74a85b3268"
           }
         },
-        "occurrence_id": "trigger:44c1dcc4b75f49011df166f81bd7004b9078253e54da3e2256cf89ac583c434f",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-exec-tool-control-fail-terminal",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-exec-tool-control-fail-terminal",
@@ -10819,7 +10819,7 @@
             "source_hash": "e7556d2ded19d2e603109876e074c456e11c120959b81a8fd7d8e6f7863d27fa"
           }
         },
-        "occurrence_id": "trigger:935e41581700f0197d94120655ba576f02a85f20798e26bd43857e952904a4d8",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-natural-allows-finish-value",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-natural-allows-finish-value",
@@ -11023,7 +11023,7 @@
             "source_hash": "43fd79fb7d2d6ff5ce37b188c14c5058a326644db692fb75d181a5941eaee929"
           }
         },
-        "occurrence_id": "trigger:4ca7486e4cadc5fd33ccb4e754de1f853ed99fe9dc90832381ac45b58ff82fd3",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-typed-schema-mismatch-repair-loop",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-typed-schema-mismatch-repair-loop",
@@ -11225,7 +11225,7 @@
             "source_hash": "2585e0333070c07799c41b70a2e01e9799e0fdc9f2d4da62db1e86098832d5b6"
           }
         },
-        "occurrence_id": "trigger:2f01babb67d89f8bedebf302cdc076c9cc1b5e2588574d34448eb1ebdb6e67e7",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:rlm-typed-schema-any-of-mismatch",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/rlm-typed-schema-any-of-mismatch",
@@ -11351,7 +11351,7 @@
             "source_hash": "b52065123956dd048afad3ed33a2e04a4672183b1298ad351a4c48177ea77a62"
           }
         },
-        "occurrence_id": "trigger:55f916ddb1b777e99467bd43ef9714bd0c2b88719875bd0d6c227977dc18c4c2",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-foreground-tool-call-round-trip",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/agent-foreground-tool-call-round-trip",
@@ -11565,7 +11565,7 @@
             "source_hash": "aa2b119f2f2cdbbb1ef01eee9863f1a84775718eb5826630a706648ad8a58220"
           }
         },
-        "occurrence_id": "trigger:707f2ca36960534a374f312ae81bce94408d376320cb939d20c88c7974cafac3",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-started-process-tool-call-graph",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/agent-started-process-tool-call-graph",
@@ -11863,7 +11863,7 @@
             "source_hash": "bbfdb253e2a76a2dae1c941a747bda1bdbd25aef780017015685d90db2df185a"
           }
         },
-        "occurrence_id": "trigger:7d66782cd45874ab62ec9304c0171a5693f550e07ff00da839dfcb01f58cbc0b",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-durable-input-suspension-resolution",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/agent-durable-input-suspension-resolution",
@@ -12029,7 +12029,7 @@
             "source_hash": "b426e748c43e5a2447e34393787bb3646005c1e20111c2443190d1431206a19b"
           }
         },
-        "occurrence_id": "trigger:75be974a212950be5401070d00b1bfbc991a17fe620b17914abc831882ef6ec1",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-shell-results-are-data",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/agent-shell-results-are-data",
@@ -12171,7 +12171,7 @@
             "source_hash": "8c61baa5b6a5739a270ec9dc31d8ad022852afa78beb82cf8298d51a759ed6b3"
           }
         },
-        "occurrence_id": "trigger:ab501be2cb9f51f4428870969e7263278286e4f6226ab6ca391edb598f5f5d5f",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-shell-output-print-projection-survives",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/agent-shell-output-print-projection-survives",
@@ -12409,7 +12409,7 @@
             "source_hash": "a998a25ead45cdcf1a6b0050a13d87ad0ec4f240fa19f28209796acd5e021fec"
           }
         },
-        "occurrence_id": "trigger:fa230d64a2624d1949415ef3f70bb3c3906b6e56bbb2f50359faf26e152d4acd",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-started-process-subagent-spawn",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/agent-started-process-subagent-spawn",
@@ -12645,7 +12645,7 @@
             "source_hash": "f5ac038114d553561053f1b6053ecda69e8a044b1735b1cee8cc7e3c438431c4"
           }
         },
-        "occurrence_id": "trigger:427ccb535960a3df54e77ea13699aec78cff6fd7360d042a0683bfd9366e72cc",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-nested-process-start-await",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/agent-nested-process-start-await",
@@ -12757,7 +12757,7 @@
             "source_hash": "3edf91a1b88bc7315d3e9cc477f860702d87f8dc73a35df0ced6682158e5906e"
           }
         },
-        "occurrence_id": "trigger:ff2740357d4ecf8f39898aa1d73083b182abfdcc550f2429efdbc63c8e489f8d",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-session-turn-process-child",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/agent-session-turn-process-child",
@@ -12947,7 +12947,7 @@
             "source_hash": "01d764ae3e095030122405429b133d5d92af611f17333f1a2f7a3cffdc54b80d"
           }
         },
-        "occurrence_id": "trigger:635e654791c73300d9dbe2c446d3a5c9786e3f1cad8114d69a69ae83145a48f9",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-failed-child-preserves-failure-graph",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/agent-failed-child-preserves-failure-graph",
@@ -13071,7 +13071,7 @@
             "source_hash": "8646930d6a6651e9493359e8288c921015952cd4cfb221f9a6988cd817e3fe5a"
           }
         },
-        "occurrence_id": "trigger:efc8f6727693c4772b94edcc49db9299e080940f0b901a965b06efda5caf07d8",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-parallel-spawn-and-join",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/agent-parallel-spawn-and-join",
@@ -13251,7 +13251,7 @@
             "source_hash": "9508124a213e59a09b5d5d751d1702efc1b03dc9be727a4d39d4cf6a6ababd37"
           }
         },
-        "occurrence_id": "trigger:9deedde982b739601dc2dd265324d1910a030fb16874322ef747bac47ff30aac",
+        "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-tuple-values-finish-as-json-arrays",
         "reservation_count": 1,
         "session": "session-001",
         "source_key": "contract-execution/session-001/agent-tuple-values-finish-as-json-arrays",

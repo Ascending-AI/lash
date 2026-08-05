@@ -1,12 +1,15 @@
+#[cfg(test)]
 use std::io::{self, Write};
 
 use serde::Serialize;
 use sha2::Digest;
 
+#[cfg(test)]
 struct Sha256Writer {
     hasher: sha2::Sha256,
 }
 
+#[cfg(test)]
 impl Write for Sha256Writer {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.hasher.update(buf);
@@ -29,6 +32,7 @@ pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", sha2::Sha256::digest(bytes))
 }
 
+#[cfg(test)]
 pub(crate) fn stable_json_sha256_hex<T>(value: &T) -> Result<String, serde_json::Error>
 where
     T: Serialize + ?Sized,
