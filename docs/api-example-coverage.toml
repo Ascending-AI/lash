@@ -5360,7 +5360,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:197#let elapsed = output.result.duration(); // claim -> commit + post-persist hooks"
+usage = "examples/docs-snippets/src/operations.rs:197#let elapsed = output.result.duration(); // claim -> Committed Turn + Post-Commit Delivery"
 
 [[api]]
 symbol = "lash::TurnResult::errors"
@@ -23278,7 +23278,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:197#let elapsed = output.result.duration(); // claim -> commit + post-persist hooks"
+usage = "examples/docs-snippets/src/operations.rs:197#let elapsed = output.result.duration(); // claim -> Committed Turn + Post-Commit Delivery"
 
 [[api]]
 symbol = "lash::prelude::TurnResult::errors"
@@ -60377,7 +60377,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:197#let elapsed = output.result.duration(); // claim -> commit + post-persist hooks"
+usage = "examples/docs-snippets/src/operations.rs:197#let elapsed = output.result.duration(); // claim -> Committed Turn + Post-Commit Delivery"
 
 [[api]]
 symbol = "lash::turn::TurnResult::errors"
