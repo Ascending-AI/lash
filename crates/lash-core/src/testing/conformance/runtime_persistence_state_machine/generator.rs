@@ -70,6 +70,11 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             attachment_slot: 7,
             value: 255,
         },
+        PutAttachmentIntent {
+            owner_kind: 0,
+            attachment_slot: 5,
+            value: 253,
+        },
         ReclaimAttachmentSession { selection: 0 },
         ProbeAttachmentGc,
         EnqueueWork {

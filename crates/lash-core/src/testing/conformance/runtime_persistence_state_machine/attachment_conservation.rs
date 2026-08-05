@@ -219,19 +219,22 @@ async fn commit_with_attachment_refs(
         return Err("turn commit did not stamp its owner-bound attachment intent".to_string());
     }
 
-    model.known_attachment_ids.insert(attachment.id.clone());
+    let was_live = expected_live_refs(model).contains(&attachment.id);
     if let Some(index) = session_index {
         let session = &mut model.attachment_sessions[index];
         session.head_revision = result.head_revision;
-        session.committed_refs.insert(attachment.id);
+        session.committed_refs.insert(attachment.id.clone());
         session.last_commit = commit;
     } else {
         model.attachment_sessions.push(ModeledAttachmentSession {
             session_id,
             head_revision: result.head_revision,
-            committed_refs: BTreeSet::from([attachment.id]),
+            committed_refs: BTreeSet::from([attachment.id.clone()]),
             last_commit: commit,
         });
+    }
+    if !was_live {
+        model.attachment_ids_to_reprobe.insert(attachment.id);
     }
     shape.attachment_commits += 1;
     Ok(())
@@ -240,7 +243,7 @@ async fn commit_with_attachment_refs(
 async fn put_attachment_intent(
     handles: &RuntimePersistenceStateMachineHandles,
     model: &mut ReferenceModel,
-    _shape: &mut RunShape,
+    shape: &mut RunShape,
     seed: u64,
     owner_kind: u8,
     attachment_slot: u8,
@@ -277,15 +280,21 @@ async fn put_attachment_intent(
         )
         .await
         .map_err(|error| error.to_string())?;
-    model.known_attachment_ids.insert(attachment.id.clone());
+    let was_live = expected_live_refs(model).contains(&attachment.id);
     let remains_live = match owner_kind % 3 {
         1 => true,
         2 => !handles.process_owner_liveness_wired,
         _ => false,
     };
     if remains_live {
-        model.live_uncommitted_attachment_refs.insert(attachment.id);
+        model
+            .live_uncommitted_attachment_refs
+            .insert(attachment.id.clone());
+        if !was_live {
+            model.attachment_ids_to_reprobe.insert(attachment.id);
+        }
     }
+    shape.attachment_intent_puts += 1;
     Ok(())
 }
 
@@ -339,6 +348,10 @@ async fn reclaim_attachment_session(
     }
     let index = usize::from(selection) % model.attachment_sessions.len();
     let session = model.attachment_sessions.remove(index);
+    let still_live = expected_live_refs(model);
+    model
+        .attachment_ids_to_reprobe
+        .extend(session.committed_refs.difference(&still_live).cloned());
     handles
         .session_factory
         .delete_session(&session.session_id)
@@ -401,7 +414,7 @@ async fn probe_attachment_gc(
 
 pub(super) async fn assert_attachment_conservation(
     handles: &RuntimePersistenceStateMachineHandles,
-    model: &ReferenceModel,
+    model: &mut ReferenceModel,
 ) -> Result<(), String> {
     let expected = expected_live_refs(model);
     let actual = handles
@@ -420,11 +433,11 @@ pub(super) async fn assert_attachment_conservation(
         ));
     }
 
-    for attachment_id in &model.known_attachment_ids {
-        let expected_live = expected.contains(attachment_id);
+    for attachment_id in std::mem::take(&mut model.attachment_ids_to_reprobe) {
+        let expected_live = expected.contains(&attachment_id);
         let targeted = handles
             .session_factory
-            .has_live_attachment_ref(attachment_id, RECONCILE_SQL_SAFE_MAX)
+            .has_live_attachment_ref(&attachment_id, RECONCILE_SQL_SAFE_MAX)
             .await
             .map_err(|error| error.to_string())?;
         if targeted != expected_live {
@@ -435,7 +448,7 @@ pub(super) async fn assert_attachment_conservation(
         if expected_live {
             handles
                 .attachment_backend
-                .get(attachment_id)
+                .get(&attachment_id)
                 .await
                 .map_err(|error| {
                     format!(

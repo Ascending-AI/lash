@@ -24,7 +24,6 @@ mod attachment_conservation;
 mod claim_honesty;
 mod generator;
 mod usage_conservation;
-
 pub use attachment_conservation::RuntimePersistenceStateMachineHandles;
 use attachment_conservation::{apply_attachment_operation, assert_attachment_conservation};
 use generator::generated_case;
@@ -38,7 +37,7 @@ const DEFAULT_CASES: u32 = 32;
 const DEFAULT_RUNNER_SEED: u64 = 857;
 const DEDICATED_LAW_SEED: u64 = 0x0ded_1ca7_e857;
 const MAX_OPS: usize = 96;
-const GENERATED_PREFIX_OPS: usize = 59;
+const GENERATED_PREFIX_OPS: usize = 60;
 
 /// The generated operation alphabet shared by every runtime-persistence backend.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -116,13 +115,11 @@ pub enum RuntimePersistenceOp {
     SettleStaleWork,
     SettleStaleTurnInputs,
 }
-
 #[derive(Clone, Debug, serde::Deserialize)]
 struct GeneratedCase {
     seed: u64,
     operations: Vec<RuntimePersistenceOp>,
 }
-
 #[derive(Clone)]
 struct ModeledWork {
     batch: QueuedWorkBatch,
@@ -168,7 +165,7 @@ struct ReferenceModel {
     recorded_usage: crate::TokenUsage,
     last_usage_commit: Option<RuntimeCommit>,
     attachment_sessions: Vec<attachment_conservation::ModeledAttachmentSession>,
-    known_attachment_ids: BTreeSet<crate::AttachmentId>,
+    attachment_ids_to_reprobe: BTreeSet<crate::AttachmentId>,
     live_uncommitted_attachment_refs: BTreeSet<crate::AttachmentId>,
     attachment_session_sequence: u64,
     operation_sequence: u64,
@@ -178,7 +175,6 @@ struct PendingUsageConfirmation {
     staged: crate::runtime::StagedTokenLedger,
     identities: Vec<RuntimeUsageDeltaIdentity>,
 }
-
 #[derive(Clone, Copy, Debug, Default)]
 struct RunShape {
     lease_acquisitions: u64,
@@ -201,6 +197,7 @@ struct RunShape {
     usage_confirmations: u64,
     usage_receipt_replays: u64,
     attachment_commits: u64,
+    attachment_intent_puts: u64,
     attachment_receipt_replays: u64,
     attachment_session_reclaims: u64,
     attachment_gc_probes: u64,
@@ -234,6 +231,7 @@ struct RunShapeTotals {
     usage_confirmations: AtomicU64,
     usage_receipt_replays: AtomicU64,
     attachment_commits: AtomicU64,
+    attachment_intent_puts: AtomicU64,
     attachment_receipt_replays: AtomicU64,
     attachment_session_reclaims: AtomicU64,
     attachment_gc_probes: AtomicU64,
@@ -272,6 +270,7 @@ impl RunShapeTotals {
         add!(usage_confirmations);
         add!(usage_receipt_replays);
         add!(attachment_commits);
+        add!(attachment_intent_puts);
         add!(attachment_receipt_replays);
         add!(attachment_session_reclaims);
         add!(attachment_gc_probes);
@@ -352,7 +351,7 @@ where
     }
 
     eprintln!(
-        "runtime-persistence run shape ({backend}, cases={cases}): lease_acquisitions={} lease_fence_rejections={} queue_enqueues={} queue_claims={} selected_batch_claims={} queue_completions={} claim_supersession_rejections={} stale_claim_settlements={} out_of_order_settlements={} coalesced_claims={} queue_cancellations={} input_enqueues={} input_claims={} input_applications={} input_cancellations={} usage_records={} usage_stages={} usage_confirmations={} usage_receipt_replays={} attachment_commits={} attachment_receipt_replays={} attachment_session_reclaims={} attachment_gc_probes={} accepted_commits={} stale_head_rejections={} checkpoint_stores={} checkpoint_ref_reuses={} crash_points={} crash_reclaims={}",
+        "runtime-persistence run shape ({backend}, cases={cases}): lease_acquisitions={} lease_fence_rejections={} queue_enqueues={} queue_claims={} selected_batch_claims={} queue_completions={} claim_supersession_rejections={} stale_claim_settlements={} out_of_order_settlements={} coalesced_claims={} queue_cancellations={} input_enqueues={} input_claims={} input_applications={} input_cancellations={} usage_records={} usage_stages={} usage_confirmations={} usage_receipt_replays={} attachment_commits={} attachment_intent_puts={} attachment_receipt_replays={} attachment_session_reclaims={} attachment_gc_probes={} accepted_commits={} stale_head_rejections={} checkpoint_stores={} checkpoint_ref_reuses={} crash_points={} crash_reclaims={}",
         totals.lease_acquisitions.load(Ordering::Relaxed),
         totals.lease_fence_rejections.load(Ordering::Relaxed),
         totals.queue_enqueues.load(Ordering::Relaxed),
@@ -373,6 +372,7 @@ where
         totals.usage_confirmations.load(Ordering::Relaxed),
         totals.usage_receipt_replays.load(Ordering::Relaxed),
         totals.attachment_commits.load(Ordering::Relaxed),
+        totals.attachment_intent_puts.load(Ordering::Relaxed),
         totals.attachment_receipt_replays.load(Ordering::Relaxed),
         totals.attachment_session_reclaims.load(Ordering::Relaxed),
         totals.attachment_gc_probes.load(Ordering::Relaxed),
@@ -413,6 +413,7 @@ fn assert_required_shape(shape: RunShape) -> Result<(), TestCaseError> {
         (shape.usage_confirmations, "usage confirmations"),
         (shape.usage_receipt_replays, "usage receipt replays"),
         (shape.attachment_commits, "attachment commits"),
+        (shape.attachment_intent_puts, "attachment intent puts"),
         (
             shape.attachment_receipt_replays,
             "attachment receipt replays",
@@ -463,7 +464,7 @@ async fn replay_case(
             .map_err(|reason| {
                 TestCaseError::fail(format!("usage conservation at step {step}: {reason}"))
             })?;
-        assert_attachment_conservation(&handles, &model)
+        assert_attachment_conservation(&handles, &mut model)
             .await
             .map_err(|reason| {
                 TestCaseError::fail(format!("attachment conservation at step {step}: {reason}"))
