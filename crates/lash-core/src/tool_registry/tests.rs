@@ -207,7 +207,6 @@ mod tests {
             tool: &str,
             args: &serde_json::Value,
             _context: &ToolContext<'_>,
-            _progress: Option<&ProgressSender>,
         ) -> ToolResult {
             ToolResult::ok(json!({
                 "tool": tool,
@@ -277,7 +276,6 @@ mod tests {
             tool: &str,
             _args: &serde_json::Value,
             context: &ToolContext<'_>,
-            _progress: Option<&ProgressSender>,
         ) -> ToolResult {
             self.executions.fetch_add(1, Ordering::SeqCst);
             if let Some(bindings) = &self.observed_execution_bindings {
@@ -329,7 +327,6 @@ mod tests {
             tool: &str,
             _args: &serde_json::Value,
             _context: &ToolContext<'_>,
-            _progress: Option<&ProgressSender>,
         ) -> ToolResult {
             ToolResult::ok(json!(tool))
         }
@@ -435,7 +432,6 @@ mod tests {
                         name: "blocking_live",
                         args: &args,
                         context: &context,
-                        progress: None,
                     })
                     .await
             }
@@ -658,7 +654,6 @@ mod tests {
                 &tool_id("dynamic_two"),
                 &json!({}),
                 &test_tool_context(),
-                None,
             )
             .await;
         assert!(result.is_success(), "new live tool executes: {result:?}");
@@ -688,7 +683,6 @@ mod tests {
                 &tool_id("dynamic_two"),
                 &json!({}),
                 &test_tool_context(),
-                None,
             )
             .await;
         assert!(result.is_success(), "forked live tool executes: {result:?}");
@@ -720,7 +714,6 @@ mod tests {
                 &tool_id("dynamic_two"),
                 &json!({}),
                 &test_tool_context(),
-                None,
             )
             .await;
         assert!(
@@ -764,7 +757,6 @@ mod tests {
                 name: "host_only",
                 args: &args,
                 context: &context,
-                progress: None,
             })
             .await;
         assert!(result.is_success());
@@ -829,7 +821,7 @@ mod tests {
 
         let context = test_tool_context().with_tool_execution_binding(grant.execution_binding.clone());
         let args = json!({});
-        let result = registry.execute_granted(&grant, &args, &context, None).await;
+        let result = registry.execute_granted(&grant, &args, &context).await;
         assert!(result.is_success());
         assert_eq!(result.value_for_projection(), json!("host_only"));
 
@@ -868,7 +860,7 @@ mod tests {
         ));
         let context = test_tool_context();
         let args = json!({});
-        let result = registry.execute_granted(&grant, &args, &context, None).await;
+        let result = registry.execute_granted(&grant, &args, &context).await;
 
         assert!(!result.is_success());
         assert_eq!(
@@ -942,7 +934,7 @@ mod tests {
 
         let context = test_tool_context();
         let args = json!({});
-        let result = registry.execute_granted(&grant, &args, &context, None).await;
+        let result = registry.execute_granted(&grant, &args, &context).await;
 
         assert!(result.is_success());
         assert_eq!(result.value_for_projection(), json!("right-provider"));
@@ -977,7 +969,6 @@ mod tests {
                 name: "mcp__demo__search",
                 args: &args,
                 context: &context,
-                progress: None,
             })
             .await;
         assert!(result.is_success());
@@ -1113,7 +1104,6 @@ mod tests {
                 name: "mcp__demo__search",
                 args: &args,
                 context: &context,
-                progress: None,
             })
             .await;
         assert!(!result.is_success());
@@ -1159,7 +1149,6 @@ mod tests {
                 name: "mcp__demo__search",
                 args: &args,
                 context: &context,
-                progress: None,
             })
             .await;
         assert!(result.is_success(), "rebound tool executes: {result:?}");
@@ -1265,7 +1254,6 @@ mod tests {
                 &tool_id("host_only"),
                 &json!({}),
                 &test_tool_context(),
-                None,
             )
             .await;
 

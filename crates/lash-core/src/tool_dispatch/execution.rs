@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::plugin::ToolResultHookContext;
-use crate::{PreparedToolCall, ProgressSender, ToolContext, ToolFailureClass, ToolResult};
+use crate::{PreparedToolCall, ToolContext, ToolFailureClass, ToolResult};
 
 #[cfg(test)]
 use super::context::ToolDispatchOutcome;
@@ -16,7 +16,6 @@ use super::retry::{execute_granted_tool_attempt, execute_tool_attempt};
 pub(crate) async fn dispatch_prepared_tool_call_with_execution_context<'run>(
     context: &ToolDispatchContext<'run>,
     prepared: PreparedToolCall,
-    _progress: Option<&ProgressSender>,
     tool_context: ToolContext<'run>,
 ) -> ToolDispatchOutcome {
     coordinate_prepared_tool_call_launch_with_execution_context(
@@ -71,7 +70,6 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
     prepared: PreparedToolCall,
     attempt: u32,
     max_attempts: u32,
-    progress: Option<&ProgressSender>,
     tool_context: ToolContext<'run>,
 ) -> ToolCallLaunch {
     let prepared_tool_name = prepared.tool_name.clone();
@@ -99,7 +97,6 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
         context,
         &manifest,
         &prepared,
-        progress,
         tool_context,
         attempt,
         max_attempts,
@@ -164,7 +161,6 @@ pub(super) async fn dispatch_granted_prepared_tool_attempt_launch_with_execution
     prepared: PreparedToolCall,
     attempt: u32,
     max_attempts: u32,
-    progress: Option<&ProgressSender>,
     tool_context: ToolContext<'run>,
 ) -> ToolCallLaunch {
     let tool_name = grant.manifest.name.clone();
@@ -194,7 +190,6 @@ pub(super) async fn dispatch_granted_prepared_tool_attempt_launch_with_execution
         context,
         grant,
         &prepared,
-        progress,
         tool_context,
         attempt,
         max_attempts,
@@ -270,7 +265,6 @@ pub(crate) async fn execute_prepared_tool_attempt_effect<'run>(
                 prepared,
                 attempt,
                 max_attempts,
-                None,
                 tool_context,
             ),
         )
@@ -282,7 +276,6 @@ pub(crate) async fn execute_prepared_tool_attempt_effect<'run>(
                 prepared,
                 attempt,
                 max_attempts,
-                None,
                 tool_context,
             ),
         )

@@ -879,10 +879,8 @@ mod tests {
             grant: &lash_core::ToolExecutionGrant,
             args: &serde_json::Value,
             context: &lash_core::ToolContext<'_>,
-            progress: Option<&lash_core::ProgressSender>,
         ) -> lash_core::ToolResult {
-            self.execute_by_id(&grant.manifest.id, args, context, progress)
-                .await
+            self.execute_by_id(&grant.manifest.id, args, context).await
         }
     }
 

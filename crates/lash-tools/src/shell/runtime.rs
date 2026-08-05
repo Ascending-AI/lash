@@ -19,14 +19,11 @@ use tokio::process::Command as TokioCommand;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
-use lash_core::{ProgressSender, SandboxMessage};
-
 use crate::shell::output::{
     OUTPUT_QUIET_PERIOD_MS, PollOutcome, ProcessState, ShellOutputSpill, activate_spill,
     clean_terminal_output, exit_status_code, kill_child, kill_process_group_and_reap,
-    progress_chunk, render_buffer_output, spawn_async_reader, spawn_reader_thread,
-    spawn_wait_thread, terminate_pipe_process, truncate_exec_output, wait_for_buffer_settle,
-    wait_for_child_exit,
+    render_buffer_output, spawn_async_reader, spawn_reader_thread, spawn_wait_thread,
+    terminate_pipe_process, truncate_exec_output, wait_for_buffer_settle, wait_for_child_exit,
 };
 
 pub(crate) const DEFAULT_EXEC_COMMAND_TIMEOUT_MS: u64 = 10 * 60 * 1000;
@@ -59,7 +56,6 @@ pub(crate) struct PipeExecProcessRequest<'a> {
     pub(crate) login: bool,
     pub(crate) shell_path: &'a str,
     pub(crate) timeout: Option<Duration>,
-    pub(crate) progress: Option<&'a ProgressSender>,
     pub(crate) max_output_tokens: Option<usize>,
     pub(crate) cancel: Option<CancellationToken>,
 }
@@ -146,11 +142,6 @@ pub(crate) struct ShellRuntime {
     cwd: PathBuf,
     table: Arc<ShellProcessTable>,
     next_session_id: Arc<AtomicI32>,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct WaitBehavior {
-    pub(crate) baseline_len: usize,
 }
 
 impl ShellRuntime {
@@ -391,7 +382,6 @@ impl ShellRuntime {
             .ok_or_else(|| format!("No process with id: {id}"))?;
         Ok(ProcessState {
             buffer: Arc::clone(&proc.buffer),
-            buffer_start: Arc::clone(&proc.buffer_start),
             exit_code: Arc::clone(&proc.exit_code),
             exit_notify: Arc::clone(&proc.exit_notify),
             output_notify: Arc::clone(&proc.output_notify),
@@ -451,15 +441,11 @@ impl ShellRuntime {
         &self,
         id: &str,
         timeout: Option<Duration>,
-        progress: Option<&ProgressSender>,
         max_output_tokens: Option<usize>,
-        behavior: WaitBehavior,
         cancel: Option<CancellationToken>,
     ) -> Result<PollOutcome, String> {
         let state = self.process_state(id)?;
         let deadline = timeout.map(|value| tokio::time::Instant::now() + value);
-        let mut sent_len = behavior.baseline_len;
-
         loop {
             if let Some(token) = cancel.as_ref()
                 && token.is_cancelled()
@@ -467,38 +453,6 @@ impl ShellRuntime {
                 kill_child(&state);
                 wait_for_child_exit(&state, Duration::from_millis(500)).await;
                 return Ok(PollOutcome::Cancelled);
-            }
-
-            if let Some(tx) = progress {
-                let new_chunk = {
-                    let buf = state.buffer.lock().unwrap();
-                    let buffer_start = *state.buffer_start.lock().unwrap();
-                    let buffer_end = buffer_start + buf.len();
-                    if buffer_end > sent_len {
-                        let start = sent_len.max(buffer_start);
-                        let mut chunk =
-                            String::from_utf8_lossy(&buf[start.saturating_sub(buffer_start)..])
-                                .to_string();
-                        if sent_len < buffer_start && !chunk.is_empty() {
-                            if !chunk.ends_with('\n') {
-                                chunk.push('\n');
-                            }
-                            chunk.push_str("[truncated]");
-                        }
-                        sent_len = buffer_end;
-                        Some(clean_terminal_output(&chunk))
-                    } else {
-                        None
-                    }
-                };
-                if let Some(chunk) = new_chunk
-                    && !chunk.is_empty()
-                {
-                    let _ = tx.send(SandboxMessage {
-                        text: chunk,
-                        kind: "tool_output".into(),
-                    });
-                }
             }
 
             let exited = state.exit_code.lock().unwrap().is_some();
@@ -550,14 +504,12 @@ impl ShellRuntime {
             if let Some(wake_at) = deadline {
                 tokio::select! {
                     _ = state.exit_notify.notified() => {}
-                    _ = state.output_notify.notified() => {}
                     _ = tokio::time::sleep_until(wake_at) => {}
                     _ = cancel_future => {}
                 }
             } else {
                 tokio::select! {
                     _ = state.exit_notify.notified() => {}
-                    _ = state.output_notify.notified() => {}
                     _ = cancel_future => {}
                 }
             }
@@ -628,7 +580,6 @@ impl ShellRuntime {
             login,
             shell_path,
             timeout,
-            progress,
             max_output_tokens,
             cancel,
         } = request;
@@ -695,8 +646,6 @@ impl ShellRuntime {
         let deadline = timeout.map(|value| tokio::time::Instant::now() + value);
         let wait_handle = tokio::spawn(async move { child.wait().await });
         tokio::pin!(wait_handle);
-        let mut sent_len = 0usize;
-
         loop {
             if let Some(token) = cancel.as_ref()
                 && token.is_cancelled()
@@ -705,16 +654,6 @@ impl ShellRuntime {
                 let _ = tokio::time::timeout(Duration::from_millis(500), &mut wait_handle).await;
                 wait_for_pipe_readers(&mut reader_handles).await;
                 return Ok(PollOutcome::Cancelled);
-            }
-
-            if let Some(tx) = progress
-                && let Some(chunk) = progress_chunk(&buffer, &buffer_start, &mut sent_len)
-                && !chunk.is_empty()
-            {
-                let _ = tx.send(SandboxMessage {
-                    text: chunk,
-                    kind: "tool_output".into(),
-                });
             }
 
             if let Some(dl) = deadline
@@ -768,7 +707,6 @@ impl ShellRuntime {
                             full_output_path,
                         });
                     }
-                    _ = output_notify.notified() => {}
                     _ = tokio::time::sleep_until(wake_at) => {}
                     _ = cancel_future => {}
                 }
@@ -795,7 +733,6 @@ impl ShellRuntime {
                             full_output_path,
                         });
                     }
-                    _ = output_notify.notified() => {}
                     _ = cancel_future => {}
                 }
             }

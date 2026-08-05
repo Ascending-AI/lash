@@ -515,7 +515,6 @@ where
         name,
         args,
         context: &context,
-        progress: None,
     })
     .await
 }

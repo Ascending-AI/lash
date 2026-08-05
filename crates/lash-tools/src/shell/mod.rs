@@ -21,8 +21,8 @@ use lash_core::plugin::{
 };
 use lash_core::runtime::ProcessEventSemanticsSpec;
 use lash_core::{
-    PreparedToolCall, ProcessEventType, ProcessInput, ProcessStartRequest, ProgressSender,
-    PromptContribution, SessionToolAccess, ToolCall, ToolDefinition, ToolProvider, ToolResult,
+    PreparedToolCall, ProcessEventType, ProcessInput, ProcessStartRequest, PromptContribution,
+    SessionToolAccess, ToolCall, ToolDefinition, ToolProvider, ToolResult,
 };
 
 use lash_tool_support::{
@@ -33,7 +33,7 @@ use lash_tool_support::{
 use crate::shell::output::{PollOutcome, shell_io_result, timed_out_shell_io_result};
 use crate::shell::runtime::{
     CommonCommandParams, DEFAULT_EXEC_COMMAND_TIMEOUT_MS, ExecCommandParams,
-    PipeExecProcessRequest, ShellRuntime, StartCommandParams, WaitBehavior,
+    PipeExecProcessRequest, ShellRuntime, StartCommandParams,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -158,7 +158,6 @@ impl StandardShell {
     async fn exec_command(
         &self,
         params: &ExecCommandParams,
-        progress: Option<&ProgressSender>,
         cancel: Option<CancellationToken>,
     ) -> ToolResult {
         let started = Instant::now();
@@ -173,7 +172,6 @@ impl StandardShell {
                 login: params.login,
                 shell_path: &params.shell_path,
                 timeout: Some(Duration::from_millis(params.timeout_ms)),
-                progress,
                 max_output_tokens: params.max_output_tokens,
                 cancel,
             })
@@ -214,7 +212,6 @@ impl StandardShell {
         &self,
         params: &StartCommandParams,
         context: &lash_core::ToolContext<'_>,
-        progress: Option<&ProgressSender>,
         cancel: Option<CancellationToken>,
     ) -> ToolResult {
         if params.detach {
@@ -225,7 +222,7 @@ impl StandardShell {
         }
         if let Some(process_id) = context.async_process_id() {
             return self
-                .run_start_command_process(process_id, params, context, progress, cancel)
+                .run_start_command_process(process_id, params, context, cancel)
                 .await;
         }
         self.register_start_command_process(params, context).await
@@ -360,7 +357,6 @@ impl StandardShell {
         process_id: &str,
         params: &StartCommandParams,
         context: &lash_core::ToolContext<'_>,
-        progress: Option<&ProgressSender>,
         cancel: Option<CancellationToken>,
     ) -> ToolResult {
         let started = Instant::now();
@@ -381,14 +377,7 @@ impl StandardShell {
             self.spawn_stdin_signal_forwarder(handle_id.clone(), context, signal_done.clone());
         match self
             .runtime
-            .wait_until_exit_or_timeout(
-                &handle_id,
-                None,
-                progress,
-                params.max_output_tokens,
-                WaitBehavior { baseline_len: 0 },
-                cancel,
-            )
+            .wait_until_exit_or_timeout(&handle_id, None, params.max_output_tokens, cancel)
             .await
         {
             Ok(PollOutcome::Running { .. }) => {
@@ -542,14 +531,8 @@ pub fn shell_provider(shell: StandardShell) -> StaticToolProvider<StandardShell>
 impl StaticToolExecute for StandardShell {
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
         let cancellation_token = call.context.cancellation_token().cloned();
-        self.dispatch(
-            call.name,
-            call.args,
-            call.context,
-            call.progress,
-            cancellation_token,
-        )
-        .await
+        self.dispatch(call.name, call.args, call.context, cancellation_token)
+            .await
     }
 }
 
@@ -676,7 +659,6 @@ finish probe.exit_code == 0"#.into(),
         name: &str,
         args: &serde_json::Value,
         context: &lash_core::ToolContext<'_>,
-        progress: Option<&ProgressSender>,
         cancel: Option<CancellationToken>,
     ) -> ToolResult {
         match name {
@@ -685,14 +667,14 @@ finish probe.exit_code == 0"#.into(),
                     Ok(params) => params,
                     Err(err) => return err,
                 };
-                self.exec_command(&params, progress, cancel).await
+                self.exec_command(&params, cancel).await
             }
             "start_command" => {
                 let params = match self.parse_start_command_params(args) {
                     Ok(params) => params,
                     Err(err) => return err,
                 };
-                self.start_command(&params, context, progress, cancel).await
+                self.start_command(&params, context, cancel).await
             }
             "write_stdin" => self.write_stdin_call(args, context).await,
             _ => ToolResult::err_fmt(format_args!("Unknown tool: {name}")),

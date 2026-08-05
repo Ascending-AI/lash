@@ -1,12 +1,8 @@
 use std::sync::{Arc, OnceLock};
 
-use tokio::sync::mpsc::UnboundedSender;
-
 use crate::PluginMessage;
 use crate::tool_dispatch::ToolDispatchContext;
-use crate::{
-    PromptContribution, RuntimeServices, SandboxMessage, SessionStreamEvent, ToolProvider,
-};
+use crate::{PromptContribution, RuntimeServices, SessionStreamEvent, ToolProvider};
 
 mod execution_context;
 #[cfg(test)]
@@ -114,7 +110,6 @@ pub struct Session {
     context_tools: Vec<Arc<dyn ToolProvider>>,
     tool_registry: Arc<crate::ToolRegistry>,
     context_prompt_contributions: Vec<PromptContribution>,
-    message_tx: Option<UnboundedSender<SandboxMessage>>,
     tool_catalog_cache: Arc<std::sync::Mutex<Vec<(ToolCatalogCacheKey, ToolCatalogHandle)>>>,
     /// Memoizes the rendered system prompt across turns. Most consecutive
     /// turns reuse the same template + context overlay, so the cache hits
@@ -134,7 +129,6 @@ impl Session {
             context_tools: Vec::new(),
             tool_registry,
             context_prompt_contributions: Vec::new(),
-            message_tx: None,
             tool_catalog_cache: Arc::new(std::sync::Mutex::new(Vec::new())),
             prompt_cache: Arc::new(lash_sansio::PromptCache::new()),
         };
@@ -159,7 +153,6 @@ impl Session {
             context_tools: self.context_tools.clone(),
             tool_registry: Arc::clone(&self.tool_registry),
             context_prompt_contributions: self.context_prompt_contributions.clone(),
-            message_tx: self.message_tx.clone(),
             tool_catalog_cache: Arc::clone(&self.tool_catalog_cache),
             prompt_cache: Arc::clone(&self.prompt_cache),
         }
@@ -378,16 +371,6 @@ impl Session {
             turn_context,
         ))
         .map(|context| context.with_execution_env_spec(execution_env_spec))
-    }
-
-    /// Set the message sender for streaming messages during execution.
-    pub fn set_message_sender(&mut self, tx: UnboundedSender<SandboxMessage>) {
-        self.message_tx = Some(tx);
-    }
-
-    /// Clear the message sender (drops the sender, causing receivers to terminate).
-    pub fn clear_message_sender(&mut self) {
-        self.message_tx = None;
     }
 
     pub fn invalidate_runtime_caches(&self) {

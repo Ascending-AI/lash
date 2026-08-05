@@ -75,8 +75,8 @@ use crate::session_model::{
 };
 use crate::{
     CheckpointKind, PersistentRuntimeServices, PluginOperationInvokeError, PromptHookContext,
-    RuntimeServices, SandboxMessage, Session, SessionCreateRequest, SessionError, SessionHandle,
-    SessionSnapshot, SessionStartPoint, ToolCallRecord, TurnFinish, TurnOutcome, TurnStop,
+    RuntimeServices, Session, SessionCreateRequest, SessionError, SessionHandle, SessionSnapshot,
+    SessionStartPoint, ToolCallRecord, TurnFinish, TurnOutcome, TurnStop,
 };
 use crate::{Effect, TurnMachine};
 

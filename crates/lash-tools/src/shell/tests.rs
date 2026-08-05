@@ -31,7 +31,6 @@ mod tests {
                 name,
                 args,
                 context,
-                progress: None,
             })
             .await
     }
@@ -814,7 +813,6 @@ mod tests {
                         name: "start_command",
                         args: &args,
                         context: &ctx,
-                        progress: None,
                     })
                     .await
             })
@@ -869,7 +867,6 @@ mod tests {
                         name: "start_command",
                         args: &args,
                         context: &ctx,
-                        progress: None,
                     })
                     .await
             })
@@ -964,7 +961,6 @@ mod tests {
                         name: "start_command",
                         args: &args,
                         context: &ctx,
-                        progress: None,
                     })
                     .await
             })
@@ -1275,7 +1271,6 @@ mod tests {
                 name: "exec_command",
                 args: &args,
                 context: &ctx,
-                progress: None,
             })
             .await;
         let elapsed = started.elapsed();

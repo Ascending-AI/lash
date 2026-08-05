@@ -34,10 +34,6 @@
             lash::tools::ToolValue::String("ready".to_string()).to_json_value(),
             json!("ready")
         );
-        let (progress, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
-        let progress: lash::tools::ProgressSender = progress;
-        assert!(!progress.is_closed());
-
         let catalog = lash::plugins::ToolCatalog::default();
         assert!(catalog.tools.is_empty());
         let cause = lash::process::CausalRef::Process {

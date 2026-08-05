@@ -349,7 +349,6 @@ mod tests {
                 name: "continue_as",
                 args,
                 context: &context,
-                progress: None,
             })
             .await
     }

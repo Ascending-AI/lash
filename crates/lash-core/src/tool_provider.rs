@@ -25,17 +25,6 @@ pub use process_events::ToolProcessEventClient;
 pub use session::ToolSessionAdmin;
 pub use triggers::ToolTriggerClient;
 
-/// A message sent from the sandbox to the host during execution.
-#[derive(Clone, Debug)]
-pub struct SandboxMessage {
-    pub text: String,
-    /// "tool_output" or another host-rendered progress event kind.
-    pub kind: String,
-}
-
-/// Sender for streaming progress messages from tools (e.g. live bash output).
-pub type ProgressSender = tokio::sync::mpsc::UnboundedSender<SandboxMessage>;
-
 #[derive(Clone, Default)]
 pub(crate) struct ToolCompletionState {
     key: Arc<Mutex<Option<crate::AwaitEventKey>>>,
@@ -997,7 +986,6 @@ pub struct ToolCall<'a> {
     pub name: &'a str,
     pub args: &'a serde_json::Value,
     pub context: &'a ToolContext<'a>,
-    pub progress: Option<&'a ProgressSender>,
 }
 
 /// Trait for providing tools to the sandbox. Implement this per-project.
@@ -1005,8 +993,7 @@ pub struct ToolCall<'a> {
 /// Implementations supply cheap [`ToolManifest`]s, lazily resolved
 /// [`ToolContract`]s, and a single
 /// [`execute`](Self::execute) method that handles every call. Tools that
-/// need session state read it from `call.context`; tools that stream
-/// progress send through `call.progress`.
+/// need session state read it from `call.context`.
 #[async_trait::async_trait]
 pub trait ToolProvider: Send + Sync + 'static {
     fn tool_manifests(&self) -> Vec<ToolManifest>;
@@ -1048,9 +1035,8 @@ pub trait ToolProvider: Send + Sync + 'static {
         grant: &ToolExecutionGrant,
         args: &serde_json::Value,
         context: &ToolContext<'_>,
-        progress: Option<&ProgressSender>,
     ) -> ToolResult {
-        let _ = (args, context, progress);
+        let _ = (args, context);
         ToolResult::err_fmt(format_args!(
             "Granted execution is unsupported for tool id `{}`",
             grant.manifest.id
@@ -1061,7 +1047,6 @@ pub trait ToolProvider: Send + Sync + 'static {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &ToolContext<'_>,
-        progress: Option<&ProgressSender>,
     ) -> ToolResult {
         let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
             return ToolResult::err_fmt(format!("Unknown tool id: {tool_id}"));
@@ -1070,7 +1055,6 @@ pub trait ToolProvider: Send + Sync + 'static {
             name: &manifest.name,
             args,
             context,
-            progress,
         })
         .await
     }

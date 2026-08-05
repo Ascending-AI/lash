@@ -882,7 +882,6 @@ mod tests {
                 name: "read_file",
                 args: &json!({"path": path.to_str().unwrap()}),
                 context: &context,
-                progress: None,
             })
             .await;
 

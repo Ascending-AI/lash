@@ -558,10 +558,8 @@ impl ToolProvider for ExactDispatchTools {
         grant: &crate::ToolExecutionGrant,
         args: &serde_json::Value,
         context: &crate::ToolContext<'_>,
-        progress: Option<&crate::ProgressSender>,
     ) -> ToolResult {
-        self.execute_by_id(&grant.manifest.id, args, context, progress)
-            .await
+        self.execute_by_id(&grant.manifest.id, args, context).await
     }
 }
 
@@ -958,8 +956,7 @@ fn parallel_dispatch_context(
 
 #[tokio::test]
 async fn dispatch_rejects_invalid_args_before_provider_execution() {
-    let outcome =
-        dispatch_tool_call(&dispatch_context(), "beta".to_string(), json!({}), None).await;
+    let outcome = dispatch_tool_call(&dispatch_context(), "beta".to_string(), json!({})).await;
 
     assert!(!outcome.record.output.is_success());
     assert_eq!(
@@ -976,7 +973,6 @@ async fn dispatch_resolves_contract_only_for_called_tool_before_execution() {
         &lazy_contract_dispatch_context(Arc::clone(&contracts_resolved), Arc::clone(&executed)),
         "beta".to_string(),
         json!({ "value": "ok" }),
-        None,
     )
     .await;
 
@@ -1103,7 +1099,6 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
         &projection_policy_dispatch_context(Arc::clone(&captured)),
         "seedy".to_string(),
         json!({}),
-        None,
     )
     .await;
 
@@ -1128,7 +1123,6 @@ async fn dispatch_rejects_non_catalog_tool_before_provider_resolution() {
         &exact_dispatch_context(provider),
         "host_only".to_string(),
         json!({ "value": "ok" }),
-        None,
     )
     .await;
 
@@ -1155,7 +1149,6 @@ async fn non_catalog_tool_is_rejected_before_contract_resolution() {
         &exact_dispatch_context(provider),
         "host_only".to_string(),
         json!({ "value": "ok" }),
-        None,
     )
     .await;
 
@@ -1241,7 +1234,6 @@ async fn dispatch_rejects_hidden_tool_before_contract_resolution() {
         &hidden_member_dispatch_context(provider),
         "hidden".to_string(),
         json!({ "value": "ok" }),
-        None,
     )
     .await;
 
@@ -1264,7 +1256,6 @@ async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
             "min_datetime": "2024-01-01T00:00:00Z",
             "limit": 20
         }),
-        None,
     )
     .await;
 
@@ -1286,7 +1277,6 @@ async fn default_retry_policy_never_retries_safe_failures() {
         ),
         "retry_probe".to_string(),
         json!({ "value": "ok" }),
-        None,
     )
     .await;
 
@@ -1309,7 +1299,6 @@ async fn safe_retry_policy_retries_safe_failure_and_stops_on_success() {
         ),
         "retry_probe".to_string(),
         json!({ "value": "ok" }),
-        None,
     )
     .await;
 
@@ -1339,7 +1328,6 @@ async fn scalar_after_tool_hook_runs_once_per_retry_attempt_before_exhaustion() 
         ),
         "retry_probe".to_string(),
         json!({ "value": "ok" }),
-        None,
     )
     .await;
 
@@ -1431,7 +1419,6 @@ async fn retry_delay_crosses_effect_controller_as_sleep_effect() {
         &context,
         "retry_probe".to_string(),
         json!({ "value": "ok" }),
-        None,
         tool_context,
     )
     .await;
@@ -1471,7 +1458,6 @@ async fn retry_sleep_controller_rejection_returns_explicit_tool_failure() {
         &context,
         "retry_probe".to_string(),
         json!({ "value": "ok" }),
-        None,
         tool_context,
     )
     .await;
@@ -1497,7 +1483,6 @@ async fn safe_retry_policy_marks_exhausted_after_final_attempt() {
         ),
         "retry_probe".to_string(),
         json!({ "value": "ok" }),
-        None,
     )
     .await;
 
@@ -1526,7 +1511,6 @@ async fn cancellation_stops_retry_immediately() {
         ),
         "retry_probe".to_string(),
         json!({ "value": "ok" }),
-        None,
     )
     .await;
 
@@ -1556,7 +1540,6 @@ async fn retry_context_has_stable_replay_key_across_attempts() {
         &context,
         "retry_probe".to_string(),
         json!({ "value": "ok" }),
-        None,
         tool_context,
     )
     .await;
@@ -1596,7 +1579,6 @@ async fn idempotent_retry_policy_uses_journaled_attempts_without_provider_replay
         ),
         "retry_probe".to_string(),
         json!({ "value": "ok" }),
-        None,
     )
     .await;
 
@@ -1622,7 +1604,6 @@ async fn batch_returns_explicit_errors_without_runtime_execution_context() {
                 {"tool": "beta", "parameters": {"value": "fail"}}
             ]
         }),
-        None,
     )
     .await;
 
@@ -1661,7 +1642,6 @@ async fn batch_rejects_nested_batch_as_partial_failure() {
                 {"tool": "batch", "parameters": {"tool_calls": []}}
             ]
         }),
-        None,
     )
     .await;
 
@@ -1688,7 +1668,6 @@ async fn batch_marks_overflow_calls_as_failures() {
         &dispatch_context(),
         "batch".to_string(),
         json!({ "tool_calls": tool_calls }),
-        None,
     )
     .await;
 
@@ -1717,7 +1696,6 @@ async fn batch_does_not_run_child_tools_without_runtime_execution_context() {
                 {"tool": "probe_b", "parameters": {}}
             ]
         }),
-        None,
     )
     .await;
 

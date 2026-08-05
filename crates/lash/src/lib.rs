@@ -140,7 +140,6 @@ pub mod triggers {
 }
 
 pub mod tools {
-    pub use lash_core::ProgressSender;
     /// Typed cancellation evidence constructed by tool implementors; pass it to
     /// [`ToolCallOutput::cancelled`] when a tool stops without completing.
     pub use lash_core::ToolCancellation;
