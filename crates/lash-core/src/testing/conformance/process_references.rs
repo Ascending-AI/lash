@@ -2,9 +2,70 @@ use std::collections::BTreeMap;
 
 use super::*;
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct ProcessCountConservation {
+    spawned: usize,
+    pruned: usize,
+}
+
+impl ProcessCountConservation {
+    pub(super) fn from_modeled_totals(spawned: usize, pruned: usize) -> Self {
+        Self { spawned, pruned }
+    }
+
+    pub(super) fn record_spawn(&mut self) {
+        self.spawned += 1;
+    }
+
+    pub(super) fn record_pruned(&mut self, count: usize) {
+        self.pruned += count;
+    }
+}
+
+pub(super) async fn assert_process_count_conservation(
+    registry: &Arc<dyn ProcessRegistry>,
+    conservation: ProcessCountConservation,
+) -> Result<(), String> {
+    let summaries = registry
+        .live_reference_summary()
+        .await
+        .map_err(|error| error.to_string())?;
+    let retained = registry
+        .list_processes(&ProcessListFilter {
+            status: ProcessStatusFilter::Any,
+            ..ProcessListFilter::default()
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    let canonical = ProcessLiveReferenceSummary::from_records(&retained);
+    if summaries != canonical {
+        return Err(format!(
+            "process live-reference summary diverged from ProcessLiveReferenceSummary::from_records: actual={summaries:?} canonical={canonical:?}"
+        ));
+    }
+
+    let spawned_count = conservation.spawned;
+    let live_count = summaries
+        .iter()
+        .map(|summary| summary.process_count)
+        .sum::<usize>();
+    let terminal_count = retained
+        .iter()
+        .filter(|record| record.is_terminal())
+        .count();
+    let pruned_count = conservation.pruned;
+    if spawned_count != live_count + terminal_count + pruned_count {
+        return Err(format!(
+            "process-count conservation violated: spawned={spawned_count} live={live_count} terminal={terminal_count} pruned={pruned_count}"
+        ));
+    }
+    Ok(())
+}
+
 pub(super) async fn live_reference_summary_tracks_non_terminal_reference_counts(
     registry: Arc<dyn ProcessRegistry>,
 ) {
+    let mut conservation = ProcessCountConservation::default();
     assert!(
         registry
             .live_reference_summary()
@@ -41,6 +102,10 @@ pub(super) async fn live_reference_summary_tracks_non_terminal_reference_counts(
             )
             .await
             .expect("register reference process");
+        conservation.record_spawn();
+        assert_process_count_conservation(&registry, conservation)
+            .await
+            .expect("process counts conserve after registration");
     }
 
     let counts = reference_counts(registry.live_reference_summary().await.expect("summary"));
@@ -64,6 +129,9 @@ pub(super) async fn live_reference_summary_tracks_non_terminal_reference_counts(
         )
         .await
         .expect("complete one alpha process");
+    assert_process_count_conservation(&registry, conservation)
+        .await
+        .expect("process counts conserve after one terminal transition");
     let counts = reference_counts(registry.live_reference_summary().await.expect("summary"));
     assert_eq!(
         counts.get(&(key(&definition_a), env_a.to_string())),
@@ -86,6 +154,9 @@ pub(super) async fn live_reference_summary_tracks_non_terminal_reference_counts(
             )
             .await
             .expect("complete remaining process");
+        assert_process_count_conservation(&registry, conservation)
+            .await
+            .expect("process counts conserve after terminal transition");
     }
     assert!(
         registry

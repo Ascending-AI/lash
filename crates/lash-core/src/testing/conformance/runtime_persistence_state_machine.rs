@@ -3,12 +3,11 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::future::Future;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use proptest::prelude::*;
-use proptest::test_runner::{Config, RngSeed, TestError, TestRunner};
+use proptest::test_runner::{Config, RngSeed, TestRunner};
 
 use super::*;
 use crate::{
@@ -22,10 +21,14 @@ use crate::{
 
 mod attachment_conservation;
 mod claim_honesty;
+mod counterexample;
 mod generator;
+#[cfg(test)]
+mod tests;
 mod usage_conservation;
 pub use attachment_conservation::RuntimePersistenceStateMachineHandles;
 use attachment_conservation::{apply_attachment_operation, assert_attachment_conservation};
+use counterexample::persist_counterexample;
 use generator::generated_case;
 use usage_conservation::{
     assert_usage_conservation, confirm_usage, record_usage, register_committed_usage,
@@ -37,7 +40,6 @@ const DEFAULT_CASES: u32 = 32;
 const DEFAULT_RUNNER_SEED: u64 = 857;
 const DEDICATED_LAW_SEED: u64 = 0x0ded_1ca7_e857;
 const MAX_OPS: usize = 96;
-const GENERATED_PREFIX_OPS: usize = 60;
 
 /// The generated operation alphabet shared by every runtime-persistence backend.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -1546,6 +1548,10 @@ fn validate_input_claim(
     Ok(())
 }
 
+/// Enforce queue-depth conservation through stronger element-wise agreement on
+/// both queue read seams. Exact equality for total and pending queued work
+/// subsumes a separate cardinality law, while the model's active claims define
+/// the claimed remainder.
 async fn assert_model_agreement(
     store: &dyn RuntimePersistence,
     model: &ReferenceModel,
@@ -2449,51 +2455,4 @@ async fn law_checkpoint_refs_track_content(
     assert_model_agreement(store.as_ref(), &model)
         .await
         .map_err(TestCaseError::fail)
-}
-
-fn counterexample_path(backend: &str) -> PathBuf {
-    let root = std::env::var_os("LASH_RUNTIME_PERSISTENCE_COUNTEREXAMPLE_DIR")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("LASH_CONFIDENCE_OUT_DIR")
-                .map(PathBuf::from)
-                .map(|path| path.join("runtime-persistence-counterexamples"))
-        })
-        .or_else(|| {
-            std::env::var_os("CARGO_TARGET_DIR")
-                .map(PathBuf::from)
-                .map(|path| path.join("runtime-persistence-counterexamples"))
-        })
-        .unwrap_or_else(|| std::env::temp_dir().join("lash-runtime-persistence-counterexamples"));
-    root.join(format!("{backend}.txt"))
-}
-
-fn persist_counterexample(backend: &str, runner_seed: u64, error: &TestError<GeneratedCase>) {
-    let path = counterexample_path(backend);
-    if let Some(parent) = path.parent()
-        && let Err(write_error) = std::fs::create_dir_all(parent)
-    {
-        eprintln!(
-            "could not create runtime-persistence counterexample directory {}: {write_error}",
-            parent.display()
-        );
-        return;
-    }
-    let (case_seed, operations) = match error {
-        TestError::Fail(_, case) => (Some(case.seed), Some(&case.operations)),
-        TestError::Abort(_) => (None, None),
-    };
-    let body = format!(
-        "backend: {backend}\nproptest_runner_seed: {runner_seed}\ncase_seed: {case_seed:?}\nminimal_operations: {operations:#?}\nfailure: {error}\n"
-    );
-    match std::fs::write(&path, body) {
-        Ok(()) => eprintln!(
-            "persisted minimized runtime-persistence counterexample to {}",
-            path.display()
-        ),
-        Err(write_error) => eprintln!(
-            "could not persist runtime-persistence counterexample to {}: {write_error}",
-            path.display()
-        ),
-    }
 }

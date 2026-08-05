@@ -8,12 +8,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 
 use proptest::prelude::*;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::{Config, RngSeed, TestError, TestRunner};
 
+use super::process_references::{ProcessCountConservation, assert_process_count_conservation};
 use super::*;
 use crate::{
     LeaseOwnerIdentity, ProcessCompletionOutcome, ProcessExecutionWriteAuthority,
@@ -22,14 +23,19 @@ use crate::{
     WakeDeliveryState, WakeDiscardReason, apply_process_event_projection, fold_process_record,
     process_wake_batch_draft,
 };
+use generated_prefix::generated_prefix;
+use run_shape::{RunShape, RunShapeTotals};
 
 const PROCESS_COUNT: u8 = 3;
 const SESSION_COUNT: u8 = 2;
 const DEFAULT_CASES: u32 = 32;
 const DEFAULT_RUNNER_SEED: u64 = 830;
 const MAX_OPS: usize = 48;
-const GENERATED_PREFIX_OPS: usize = 8;
+const GENERATED_PREFIX_OPS: usize = 11;
 const DEDICATED_LAW_SEED: u64 = 0xded1_ca7e;
+
+mod generated_prefix;
+mod run_shape;
 
 /// Fresh process-registry and runtime-persistence handles for one generated case.
 pub struct StoreContractHandles {
@@ -185,31 +191,7 @@ struct ReferenceModel {
     live_wakes: BTreeMap<(String, String), BTreeMap<u64, ExpectedQueuedWake>>,
     next_wake_sequence: BTreeMap<(String, String), u64>,
     projection_cursor: ProcessChangeCursor,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-struct RunShape {
-    enqueues_committed: u64,
-    consumes_committed: u64,
-    out_of_order_states: u64,
-}
-
-#[derive(Debug, Default)]
-struct RunShapeTotals {
-    enqueues_committed: AtomicU64,
-    consumes_committed: AtomicU64,
-    out_of_order_states: AtomicU64,
-}
-
-impl RunShapeTotals {
-    fn add(&self, shape: RunShape) {
-        self.enqueues_committed
-            .fetch_add(shape.enqueues_committed, Ordering::Relaxed);
-        self.consumes_committed
-            .fetch_add(shape.consumes_committed, Ordering::Relaxed);
-        self.out_of_order_states
-            .fetch_add(shape.out_of_order_states, Ordering::Relaxed);
-    }
+    process_counts: ProcessCountConservation,
 }
 
 impl ReferenceModel {
@@ -310,10 +292,20 @@ where
         );
     }
     eprintln!(
-        "store-contract run shape ({backend}, cases={cases}): enqueues_committed={} consumes_committed={} out_of_order_states={}",
+        "store-contract run shape ({backend}, cases={cases}): enqueues_committed={} consumes_committed={} out_of_order_states={} spawns={} terminal_transitions={} tail_terminal_transitions={} tail_prune_ops={} prune_ops_with_effect={} tail_prune_ops_with_effect={}",
         shape_totals.enqueues_committed.load(Ordering::Relaxed),
         shape_totals.consumes_committed.load(Ordering::Relaxed),
         shape_totals.out_of_order_states.load(Ordering::Relaxed),
+        shape_totals.spawns.load(Ordering::Relaxed),
+        shape_totals.terminal_transitions.load(Ordering::Relaxed),
+        shape_totals
+            .tail_terminal_transitions
+            .load(Ordering::Relaxed),
+        shape_totals.tail_prune_ops.load(Ordering::Relaxed),
+        shape_totals.prune_ops_with_effect.load(Ordering::Relaxed),
+        shape_totals
+            .tail_prune_ops_with_effect
+            .load(Ordering::Relaxed),
     );
 }
 
@@ -358,39 +350,6 @@ pub fn sample_store_contract_operations(runner_seed: u64, max_ops: usize) -> Vec
     operations
 }
 
-fn generated_prefix() -> Vec<StoreContractOp> {
-    vec![
-        StoreContractOp::Register {
-            process: 0,
-            disposition: 0,
-            max_attempts: 3,
-            wake_target: Some(0),
-        },
-        StoreContractOp::FirstStart {
-            process: 0,
-            owner: 0,
-            attempt: 1,
-        },
-        StoreContractOp::FirstStart {
-            process: 0,
-            owner: 1,
-            attempt: 2,
-        },
-        StoreContractOp::EnterWait {
-            process: 0,
-            stale: true,
-        },
-        StoreContractOp::EnqueueWake { process: 0 },
-        StoreContractOp::EnqueueWake { process: 0 },
-        StoreContractOp::ConsumeWake {
-            selection: 0,
-            highest_in_group: true,
-            stale: false,
-        },
-        StoreContractOp::Prune { watermark: false },
-    ]
-}
-
 fn operation() -> impl Strategy<Value = StoreContractOp> {
     prop_oneof![
         4 => (0..PROCESS_COUNT, 0_u8..3, 1_u8..4, prop::option::of(0..SESSION_COUNT))
@@ -409,6 +368,8 @@ fn operation() -> impl Strategy<Value = StoreContractOp> {
             .prop_map(|(process, replay, value, wake, stale)| StoreContractOp::Signal { process, replay, value, wake, stale }),
         2 => (0..PROCESS_COUNT, any::<u8>())
             .prop_map(|(process, reason)| StoreContractOp::CancelRequest { process, reason }),
+        // Keep the baseline weight: increasing it exposed the latent in-memory
+        // lease-guard drift tracked by FIG-953 at differential seed 852.
         2 => (0..PROCESS_COUNT, 0_u8..4)
             .prop_map(|(process, disposition)| StoreContractOp::Terminal { process, disposition }),
         2 => (0..PROCESS_COUNT, 0..SESSION_COUNT)
@@ -429,6 +390,8 @@ fn operation() -> impl Strategy<Value = StoreContractOp> {
             .prop_map(|process| StoreContractOp::EnqueueWake { process }),
         3 => (any::<u8>(), any::<bool>(), any::<bool>())
             .prop_map(|(selection, highest_in_group, stale)| StoreContractOp::ConsumeWake { selection, highest_in_group, stale }),
+        // Keep the baseline weight: increasing it exposed the latent in-memory
+        // lease-guard drift tracked by FIG-953 at differential seed 852.
         2 => any::<bool>().prop_map(|watermark| StoreContractOp::Prune { watermark }),
         2 => any::<bool>().prop_map(|caught_up| StoreContractOp::CompactTombstones { caught_up }),
     ]
@@ -440,12 +403,39 @@ async fn replay_case(
 ) -> Result<RunShape, TestCaseError> {
     let mut scenario = StoreContractScenario::new(handles);
     for (step, operation) in operations.iter().enumerate() {
+        let terminal_transitions_before = scenario.shape.terminal_transitions;
+        let prune_ops_with_effect_before = scenario.shape.prune_ops_with_effect;
         scenario.apply(operation).await.map_err(|reason| {
             TestCaseError::fail(format!("step {step} {operation:?}: {reason}"))
         })?;
+        if step >= GENERATED_PREFIX_OPS {
+            scenario.shape.tail_terminal_transitions =
+                scenario.shape.tail_terminal_transitions.saturating_add(
+                    scenario
+                        .shape
+                        .terminal_transitions
+                        .saturating_sub(terminal_transitions_before),
+                );
+            if matches!(operation, StoreContractOp::Prune { .. }) {
+                scenario.shape.tail_prune_ops = scenario.shape.tail_prune_ops.saturating_add(1);
+                scenario.shape.tail_prune_ops_with_effect =
+                    scenario.shape.tail_prune_ops_with_effect.saturating_add(
+                        scenario
+                            .shape
+                            .prune_ops_with_effect
+                            .saturating_sub(prune_ops_with_effect_before),
+                    );
+            }
+        }
         assert_fold_law(&scenario.handles.registry, &scenario.model)
             .await
             .map_err(|reason| TestCaseError::fail(format!("Fold at step {step}: {reason}")))?;
+        assert_process_count_conservation(
+            &scenario.handles.registry,
+            scenario.model.process_counts,
+        )
+        .await
+        .map_err(TestCaseError::fail)?;
         assert_model_agreement(&scenario.handles, &scenario.model)
             .await
             .map_err(|reason| {
@@ -641,6 +631,8 @@ async fn apply_operation(
                 // Keep this generated registry lifecycle to pin the narrower store behavior.
                 if entry.base.is_none() || entry.tombstoned {
                     entry.install_fresh(record);
+                    model.process_counts.record_spawn();
+                    shape.spawns = shape.spawns.saturating_add(1);
                 } else {
                     entry.base.get_or_insert(record);
                 }
@@ -836,13 +828,15 @@ async fn apply_operation(
                     .registry
                     .complete_process(&id, output.clone(), authority)
                     .await
-                    && let Some(expected) = model.process_mut(&id).expected_record.as_mut()
                 {
-                    expected.wait = None;
-                    expected.status = output
-                        .terminal_status()
-                        .expect("generated output is terminal");
-                    expected.outcome = Some(output);
+                    shape.terminal_transitions = shape.terminal_transitions.saturating_add(1);
+                    if let Some(expected) = model.process_mut(&id).expected_record.as_mut() {
+                        expected.wait = None;
+                        expected.status = output
+                            .terminal_status()
+                            .expect("generated output is terminal");
+                        expected.outcome = Some(output);
+                    }
                 }
             }
         }
@@ -1036,11 +1030,17 @@ async fn apply_operation(
             } else {
                 ProjectionWatermark::NoProjector
             };
-            handles
+            let report = handles
                 .registry
+                // SQL stores saturate this u64 cutoff with
+                // i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX).
                 .prune_terminal_processes(u64::MAX, None, watermark)
                 .await
                 .map_err(|error| error.to_string())?;
+            model.process_counts.record_pruned(report.pruned_processes);
+            if report.pruned_processes > 0 {
+                shape.prune_ops_with_effect = shape.prune_ops_with_effect.saturating_add(1);
+            }
             for (id, process) in &mut model.processes {
                 let pruned = matches!(
                     handles.registry.get_process(id).await,

@@ -139,6 +139,10 @@ pub struct InMemorySessionStore {
     #[cfg(test)]
     fail_next_exact_queue_claim: std::sync::atomic::AtomicBool,
     #[cfg(test)]
+    drop_next_list_queued_work_batch: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    drop_next_list_pending_queued_work_batch: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
     load_session_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     fail_load_session_on_call: Mutex<Option<usize>>,
@@ -235,6 +239,10 @@ impl InMemorySessionStore {
             claim_after_lease_validation_hook: Mutex::new(None),
             #[cfg(test)]
             fail_next_exact_queue_claim: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            drop_next_list_queued_work_batch: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            drop_next_list_pending_queued_work_batch: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             load_session_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
