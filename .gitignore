@@ -2,8 +2,6 @@
 *.perf
 *.old
 /dist/
-target-bookworm/
-target-bullseye/
 *.pdb
 .envrc
 .direnv/
@@ -44,7 +42,6 @@ Thumbs.db
 /.agents/lash/
 /.example-runs/
 /.lash/
-/.openrouter-chat-ui/
 /.agent-service/
 /.agent-workbench/
 /.agent-service.schema*-backup-*/
@@ -52,7 +49,6 @@ Thumbs.db
 /.claude/
 /CLAUDE.md
 /AGENTS.md
-/skills/harness-opt/
 /.tmp/
 /tmp/
 npm-debug.log*

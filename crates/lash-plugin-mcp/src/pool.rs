@@ -510,17 +510,6 @@ async fn connect_service(
                 McpError::Protocol(format!("MCP handshake with `{server_name}`: {err}"))
             })
         }
-        // The legacy HTTP+SSE client transport (deprecated in the MCP spec in
-        // favour of streamable HTTP) is not provided by the `rmcp` SDK we
-        // depend on, so there is nothing to wire up here. Fail with a clear,
-        // actionable error rather than panicking, and point operators at the
-        // supported transport — modern SSE-capable servers are reachable via
-        // `streamable_http`, which itself negotiates SSE responses.
-        McpServerConfig::Sse { .. } => Err(McpError::Config(format!(
-            "MCP server `{server_name}` uses the legacy `sse` transport, which is not supported \
-             by this build. Use the `streamable_http` transport instead (it speaks the current \
-             MCP HTTP transport and handles SSE responses)."
-        ))),
     }
 }
 
@@ -814,25 +803,6 @@ mod tests {
             matches!(err, McpError::Config(_)),
             "expected a config error, got {err:?}"
         );
-    }
-
-    /// The legacy `sse` transport is unsupported by the rmcp build we depend
-    /// on. It must surface a clear, non-panicking config error (not a `todo!()`
-    /// or silent success) so operators know to switch to `streamable_http`.
-    #[tokio::test]
-    async fn sse_transport_reports_clear_unsupported_error() {
-        let err = connect_service("legacy", &McpServerConfig::sse("http://localhost:9/sse"))
-            .await
-            .expect_err("sse transport must error, not connect");
-        match err {
-            McpError::Config(msg) => {
-                assert!(
-                    msg.contains("streamable_http"),
-                    "error should point operators at the supported transport: {msg}"
-                );
-            }
-            other => panic!("expected a config error for sse, got {other:?}"),
-        }
     }
 
     /// A server that is down at startup must not fail pool construction: the

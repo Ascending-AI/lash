@@ -2210,14 +2210,6 @@ disposition = "unused-add"
 reason = "Add lash::PendingTurnInput::source_key to the docs-snippets embedding/turns example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::PendingTurnInput::source_or_id"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::PendingTurnInput::source_or_id to the docs-snippets embedding/turns example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::PendingTurnInput::state"
 kind = "field"
 availability = "default+all-features"
@@ -46674,14 +46666,6 @@ usage = "examples/agent-workbench/src/main_sections/app_state.rs:716#return erro
 assertion = "examples/agent-workbench/src/main_sections/app_state.rs:781#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
-symbol = "lash::runtime::RuntimeError::is_code"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeError::is_code to the docs-snippets embedding/turns example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::runtime::RuntimeError::message"
 kind = "field"
 availability = "default+all-features"
@@ -58879,14 +58863,6 @@ disposition = "unused-add"
 reason = "Add lash::triggers::TriggerOccurrenceFilter to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::triggers::TriggerOccurrenceFilter::for_source"
-kind = "function"
-availability = "default+all-features"
-area = "triggers"
-disposition = "unused-add"
-reason = "Add lash::triggers::TriggerOccurrenceFilter::for_source to the agent-service trigger flow example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::triggers::TriggerOccurrenceFilter::matches"
 kind = "function"
 availability = "default+all-features"
@@ -66025,14 +66001,6 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::PendingTurnInput::source_key. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::PendingTurnInput::source_or_id"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::PendingTurnInput::source_or_id. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
 symbol = "lash_core::PendingTurnInput::state"
@@ -74506,14 +74474,6 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
 usage = "examples/agent-workbench/src/main_sections/app_state.rs:716#return error.deleted_session_id().map(|session_id| (session_id, None));"
-
-[[api]]
-symbol = "lash_core::RuntimeError::is_code"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeError::is_code. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
 symbol = "lash_core::RuntimeError::message"
@@ -84193,14 +84153,6 @@ availability = "default+all-features"
 area = "triggers"
 disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerOccurrenceFilter. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash_core::TriggerOccurrenceFilter::for_source"
-kind = "function"
-availability = "default+all-features"
-area = "triggers"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerOccurrenceFilter::for_source. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
 symbol = "lash_core::TriggerOccurrenceFilter::matches"

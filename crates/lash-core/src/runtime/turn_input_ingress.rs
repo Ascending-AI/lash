@@ -220,12 +220,6 @@ impl From<&PendingTurnInput> for TurnInputAcceptanceReceipt {
 }
 
 impl PendingTurnInput {
-    /// Returns the source key when present and otherwise the durable input ID for store
-    /// implementors producing a stable reconciliation key.
-    pub fn source_or_id(&self) -> &str {
-        self.source_key.as_deref().unwrap_or(&self.input_id)
-    }
-
     /// Exposes accepted input to store and durable-substrate implementors while claiming and
     /// settling durable turn inputs. Returns `None` when no accepted input is present.
     pub fn accepted_input(&self) -> Option<crate::AcceptedInjectedTurnInput> {

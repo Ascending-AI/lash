@@ -192,12 +192,6 @@ impl RuntimeError {
         }
     }
 
-    /// Lets effect-host implementors test whether this `RuntimeError` is code while creating,
-    /// observing, or resolving a durable wait.
-    pub fn is_code(&self, code: RuntimeErrorCode) -> bool {
-        self.code == code
-    }
-
     /// Build the loud error raised when a process (re-)execution is handed an
     /// empty/non-persisted id.
     ///

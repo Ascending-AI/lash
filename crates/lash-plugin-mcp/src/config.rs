@@ -76,25 +76,6 @@ pub enum McpServerConfig {
         #[serde(default, skip_serializing_if = "is_false")]
         binary_content_attachments: bool,
     },
-    /// Older MCP spec HTTP+SSE transport.
-    Sse {
-        url: String,
-        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-        headers: BTreeMap<String, String>,
-        #[serde(
-            default = "default_startup_timeout_ms",
-            skip_serializing_if = "is_default_startup_timeout_ms"
-        )]
-        startup_timeout_ms: u64,
-        #[serde(
-            default = "default_call_timeout_ms",
-            skip_serializing_if = "is_default_call_timeout_ms"
-        )]
-        call_timeout_ms: u64,
-        /// Persist non-image MCP binary content as model attachments.
-        #[serde(default, skip_serializing_if = "is_false")]
-        binary_content_attachments: bool,
-    },
 }
 
 impl McpServerConfig {
@@ -122,26 +103,12 @@ impl McpServerConfig {
         }
     }
 
-    /// Convenience constructor for SSE servers.
-    pub fn sse(url: impl Into<String>) -> Self {
-        Self::Sse {
-            url: url.into(),
-            headers: BTreeMap::new(),
-            startup_timeout_ms: default_startup_timeout_ms(),
-            call_timeout_ms: default_call_timeout_ms(),
-            binary_content_attachments: false,
-        }
-    }
-
     pub fn startup_timeout(&self) -> Duration {
         Duration::from_millis(match self {
             Self::Stdio {
                 startup_timeout_ms, ..
             }
             | Self::StreamableHttp {
-                startup_timeout_ms, ..
-            }
-            | Self::Sse {
                 startup_timeout_ms, ..
             } => *startup_timeout_ms,
         })
@@ -153,9 +120,6 @@ impl McpServerConfig {
                 call_timeout_ms, ..
             }
             | Self::StreamableHttp {
-                call_timeout_ms, ..
-            }
-            | Self::Sse {
                 call_timeout_ms, ..
             } => *call_timeout_ms,
         })
@@ -170,10 +134,6 @@ impl McpServerConfig {
             | Self::StreamableHttp {
                 binary_content_attachments,
                 ..
-            }
-            | Self::Sse {
-                binary_content_attachments,
-                ..
             } => *binary_content_attachments = enabled,
         }
         self
@@ -186,10 +146,6 @@ impl McpServerConfig {
                 ..
             }
             | Self::StreamableHttp {
-                binary_content_attachments,
-                ..
-            }
-            | Self::Sse {
                 binary_content_attachments,
                 ..
             } => *binary_content_attachments,
@@ -211,11 +167,9 @@ impl McpServerConfig {
             Self::Stdio { command, .. } if command.trim().is_empty() => Err(McpError::Config(
                 format!("MCP server `{server_name}` command cannot be empty"),
             )),
-            Self::StreamableHttp { url, .. } | Self::Sse { url, .. } if url.trim().is_empty() => {
-                Err(McpError::Config(format!(
-                    "MCP server `{server_name}` URL cannot be empty"
-                )))
-            }
+            Self::StreamableHttp { url, .. } if url.trim().is_empty() => Err(McpError::Config(
+                format!("MCP server `{server_name}` URL cannot be empty"),
+            )),
             _ => Ok(()),
         }
     }
@@ -238,5 +192,35 @@ mod tests {
             serde_json::to_value(enabled).unwrap()["binary_content_attachments"],
             true
         );
+    }
+
+    /// The accepted `transport` tags are exactly the two that can connect.
+    /// A config naming any other transport — notably the legacy `sse` one this
+    /// crate never supported — is rejected at deserialization, so an operator
+    /// learns about it from their config rather than from a connect failure.
+    #[test]
+    fn only_stdio_and_streamable_http_transports_deserialize() {
+        let stdio: McpServerConfig =
+            serde_json::from_value(serde_json::json!({"transport": "stdio", "command": "srv"}))
+                .expect("stdio config must deserialize");
+        assert!(matches!(stdio, McpServerConfig::Stdio { .. }));
+
+        let http: McpServerConfig = serde_json::from_value(
+            serde_json::json!({"transport": "streamable_http", "url": "http://localhost:1/mcp"}),
+        )
+        .expect("streamable_http config must deserialize");
+        assert!(matches!(http, McpServerConfig::StreamableHttp { .. }));
+
+        for transport in ["sse", "http", "websocket"] {
+            let err = serde_json::from_value::<McpServerConfig>(
+                serde_json::json!({"transport": transport, "url": "http://localhost:1/mcp"}),
+            )
+            .expect_err("unsupported transport must be rejected");
+            let msg = err.to_string();
+            assert!(
+                msg.contains("stdio") && msg.contains("streamable_http"),
+                "rejection should name the supported transports: {msg}"
+            );
+        }
     }
 }

@@ -15,7 +15,7 @@ Planning, tracking, and everything in-flight live in **Linear** (team `figments`
 | A well-understood work item (bug, feature, follow-up) | A plain FIG issue in the `lash` Linear project |
 | A big or foggy effort that needs decisions before building | A **parent FIG issue** holding the destination plus a one-line-per-child index, with a child ticket per decision or slice ([ticket-style.md](ticket-style.md)) |
 | A research report or an RCA write-up | A **comment on the Linear ticket** that asked for it. Never a repo file |
-| An implementation plan or design spec | The parent ticket and its children *are* the plan. A locked design that must outlive them → ADR. (`docs/plans/` holds two legacy files; don't add to it) |
+| An implementation plan or design spec | The parent ticket and its children *are* the plan. A locked design that must outlive them → ADR. There is no `docs/plans/` directory; don't create one |
 | A decision with lasting architectural weight | An ADR in `docs/adr/` (see ADR norms) |
 | A validation procedure for new or changed live behavior | `runbooks/<scenario>/runbook.md` (see Runbook norms) |
 | A new or sharpened domain term | Root `CONTEXT.md` glossary (honor its `_Avoid_` lines). One glossary, no per-crate shadow glossaries |

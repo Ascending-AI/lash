@@ -24,7 +24,6 @@ lash-postgres-store = { workspace = true }
 lash-provider-openai = { workspace = true }
 lash-s3-store = { workspace = true }
 lash-sqlite-store = { workspace = true }
-lash-standard-plugins = { workspace = true, features = ["lashlang"] }
 lash-subagents = { workspace = true }
 lashlang = { workspace = true }
 schemars = { workspace = true, features = ["derive"] }

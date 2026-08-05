@@ -80,6 +80,7 @@ jobs:
 
       - name: Test repository scripts
         run: |
+          python3 scripts/test_check_core_public_member_docs.py
           python3 scripts/test_check_transcript_diff.py
           python3 scripts/test_release_version.py
           python3 scripts/test_publish_workspace.py

@@ -38,7 +38,6 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-chrono = { workspace = true }
 lash-core = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true, features = ["testing"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
