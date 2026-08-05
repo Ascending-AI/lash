@@ -937,6 +937,53 @@ impl RuntimeCommit {
     }
 }
 
+/// Build the exact identity-bearing append commit used by the runtime.
+///
+/// The perf harness needs this test-gated seam to isolate receipt derivation
+/// and real backend publication without adding timing hooks to production. It
+/// deliberately stops before the host-owned parts of the production sequence:
+/// protocol-plugin mutation/rollback, live plugin-state stamping, the host clock
+/// (this hook uses `SystemClock`), staged token-ledger merging, and fresh
+/// session-execution-lease acquisition. Keep those divergences visible here when
+/// the production append sequence changes.
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub fn append_request_commit_for_testing(
+    state: &mut crate::RuntimeSessionState,
+    operation_id: &str,
+    nodes: &[crate::SessionAppendNode],
+    requested_ancestor_node_id: Option<&str>,
+) -> Result<RuntimeCommit, StoreError> {
+    let operation = crate::runtime::state::boundary_operation(
+        &state.session_id,
+        operation_id,
+        "append-session-nodes",
+    );
+    let stamp = RuntimeTurnCommitStamp::append_session_nodes(
+        operation.clone(),
+        requested_ancestor_node_id,
+        nodes,
+    )?;
+    let draft_namespace = operation.storage_key()?;
+    crate::runtime::state::append_session_nodes_to_state_with_clock(
+        state,
+        nodes,
+        &draft_namespace,
+        &crate::SystemClock,
+    );
+    let mut graph = state.pending_graph_commit();
+    graph.derive_node_ids(&state.session_id, &operation)?;
+    let mut commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation(
+        state,
+        graph,
+        &[],
+        operation,
+    )?;
+    commit.turn_commit = stamp;
+    commit.debug_assert_append_envelope_scope();
+    Ok(commit)
+}
+
 fn remap_optional_node_id(node_id: &mut Option<String>, mapping: &[(String, String)]) {
     let Some(current) = node_id.as_mut() else {
         return;

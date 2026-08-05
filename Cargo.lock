@@ -2034,6 +2034,7 @@ dependencies = [
  "lash-core",
  "lash-lashlang-runtime",
  "lash-llm-tools",
+ "lash-postgres-store",
  "lash-protocol-rlm",
  "lash-provider-openai",
  "lash-rlm-types",

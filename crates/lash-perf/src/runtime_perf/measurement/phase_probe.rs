@@ -137,6 +137,9 @@ pub(crate) async fn run_once(
         RuntimePerfScenario::ProcessListStress => {
             return run_once_process_list_stress(chat_turns).await;
         }
+        RuntimePerfScenario::StoreHardeningHotPaths => {
+            return run_once_store_hardening_hot_paths(chat_turns).await;
+        }
         RuntimePerfScenario::QueuedWorkClaimStress => {
             return Box::pin(run_once_queued_work_claim_stress(chat_turns)).await;
         }

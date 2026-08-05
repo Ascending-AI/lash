@@ -69,6 +69,13 @@ struct Args {
     /// Exit non-zero when a runtime perf budget is exceeded
     #[arg(long)]
     runtime_perf_enforce_budgets: bool,
+
+    /// Exit non-zero only on machine-independent inventory failures (missing
+    /// required phases, emitted phases without a checked-in budget). Duration
+    /// and allocation ceilings are calibrated on the release profile and are
+    /// enforced by --runtime-perf-enforce-budgets at release time.
+    #[arg(long)]
+    runtime_perf_enforce_inventory: bool,
 }
 
 fn tokio_thread_stack_bytes(args: &Args) -> usize {
@@ -98,6 +105,7 @@ fn main() -> anyhow::Result<()> {
         args.runtime_perf_scenario,
         args.runtime_perf_turns,
         args.runtime_perf_enforce_budgets,
+        args.runtime_perf_enforce_inventory,
         APP_VERSION,
     ))
 }

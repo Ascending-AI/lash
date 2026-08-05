@@ -16,6 +16,11 @@ categories = ["database", "asynchronous"]
 [lints]
 workspace = true
 
+[features]
+default = []
+# Test/performance-only seams. Production builds cannot bypass the schema gate.
+testing = []
+
 [dependencies]
 async-trait = { workspace = true }
 hmac = { workspace = true }

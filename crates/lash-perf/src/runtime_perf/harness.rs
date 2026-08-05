@@ -1374,5 +1374,8 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
             "Turn {} in the active-ingress projection benchmark. Continue after the checkpoint and incorporate the injected marker.",
             turn_index + 1
         ),
+        RuntimePerfScenario::StoreHardeningHotPaths => {
+            format!("Turn {} in the store-hardening benchmark.", turn_index + 1)
+        }
     }
 }

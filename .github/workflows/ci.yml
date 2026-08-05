@@ -252,7 +252,10 @@ jobs:
       # The clippy feature set mirrors the test-doc workspace check so the
       # dependency graph resolves identically.
       - name: Check formatting
-        run: cargo fmt --all --check
+        run: |
+          cargo fmt --all --check
+          # include!d files escape cargo fmt's module walk; list each one here.
+          rustfmt --edition 2024 --check crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs
 
       - name: Clippy (workspace, all targets)
         run: |
@@ -262,11 +265,11 @@ jobs:
       - name: Surface durable transcript changes
         run: python3 scripts/check-transcript-diff.py
 
-      # Functional only: exercise every runtime and Lashlang measurement path
-      # cheaply on each push/PR. Full budget enforcement belongs to release.yml.
+      # Exercise every database-free runtime and Lashlang measurement path and
+      # enforce the cheap budget/phase inventory before release.
       - name: Run performance harness smoke
         run: |
-          python3 scripts/profile_runtime.py --profile quick --out .benchmarks/perf-smoke/runtime.json
+          python3 scripts/profile_runtime.py --profile quick --enforce-inventory --out .benchmarks/perf-smoke/runtime.json
           python3 scripts/profile_lashlang.py --debug --iterations 10 --profile-iterations 10 --out .benchmarks/perf-smoke/lashlang.json
 
       - name: Check core/UI boundary

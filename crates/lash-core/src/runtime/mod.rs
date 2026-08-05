@@ -307,9 +307,23 @@ pub use usage::{
 use usage::{merge_ledger_entry, merge_usage_delta_entries, normalize_prompt_usage};
 pub use wake_delivery_driver::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 
-#[doc(hidden)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum RuntimeTurnPhase {
+macro_rules! define_runtime_turn_phases {
+    ($($phase:ident),+ $(,)?) => {
+        #[doc(hidden)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        pub enum RuntimeTurnPhase {
+            $($phase),+
+        }
+
+        #[cfg(any(test, feature = "testing"))]
+        impl RuntimeTurnPhase {
+            #[doc(hidden)]
+            pub const ALL: &'static [Self] = &[$(Self::$phase),+];
+        }
+    };
+}
+
+define_runtime_turn_phases!(
     ContextTransform,
     BeforeTurnHooks,
     PromptBuild,
@@ -317,7 +331,7 @@ pub enum RuntimeTurnPhase {
     PreparedTurn,
     CommittedTurn,
     PostCommitDelivery,
-}
+);
 
 #[doc(hidden)]
 pub trait RuntimeTurnPhaseProbe: Send + Sync {

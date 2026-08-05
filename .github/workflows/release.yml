@@ -110,6 +110,24 @@ jobs:
     runs-on: blacksmith-16vcpu-ubuntu-2404
     needs: prepare-release
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: lash
+          POSTGRES_PASSWORD: lash
+          POSTGRES_DB: lash
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lash -d lash"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -140,7 +158,7 @@ jobs:
 
       - name: Run full runtime performance checks
         run: |
-          python3 scripts/profile_runtime.py --profile full --release --enforce-budgets --out .benchmarks/perf-guard/runtime.json
+          python3 scripts/profile_runtime.py --profile full --release --scenario all --enforce-budgets --out .benchmarks/perf-guard/runtime.json
           python3 scripts/profile_lashlang.py --iterations 2500 --profile-iterations 2500 --enforce-budgets --out .benchmarks/perf-guard/lashlang.json
 
       - name: Publish performance summaries

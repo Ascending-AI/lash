@@ -385,16 +385,20 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             workspace,
         )
 
-    def test_lint_job_runs_functional_perf_smoke_without_budgets(self) -> None:
+    def test_lint_job_runs_database_free_budgeted_perf_smoke(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         lint = workflow_job_block(workflow, "lint")
 
         self.assertIn("runs-on: blacksmith-8vcpu-ubuntu-2404", lint)
+        # PR-time smoke enforces the machine-independent inventory only;
+        # duration/allocation ceilings are calibrated on the release profile
+        # and enforced by --enforce-budgets in perf.yml and the Release job.
         self.assertIn(
             "profile_runtime.py --profile quick "
-            "--out .benchmarks/perf-smoke/runtime.json",
+            "--enforce-inventory --out .benchmarks/perf-smoke/runtime.json",
             lint,
         )
+        self.assertNotIn("--profile quick --enforce-budgets", lint)
         self.assertIn(
             "profile_lashlang.py --debug --iterations 10 "
             "--profile-iterations 10 --out .benchmarks/perf-smoke/lashlang.json",
@@ -402,7 +406,12 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         )
         smoke = lint[lint.index("- name: Run performance harness smoke") :]
         smoke = smoke[: smoke.index("- name: Check core/UI boundary")]
-        self.assertNotIn("--enforce-budgets", smoke)
+        self.assertNotIn("--scenario all", smoke)
+        self.assertIn(
+            "rustfmt --edition 2024 --check "
+            "crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs",
+            lint,
+        )
 
     def test_workflow_graph_example_is_in_functional_matrix(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -518,7 +527,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertNotIn("\n  push:\n", workflow)
         self.assertLess(
             workflow.index(
-                "profile_runtime.py --profile full --release --enforce-budgets"
+                "profile_runtime.py --profile full --release --scenario all "
+                "--enforce-budgets"
             ),
             workflow.index('git tag "${RELEASE_TAG}" "${RELEASE_SHA}"'),
         )
@@ -545,7 +555,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn('head_sha="$(git rev-parse HEAD)"', publish_crates)
         self.assertIn('head_sha="$(git rev-parse HEAD)"', publish)
         self.assertIn(
-            "profile_runtime.py --profile full --release --enforce-budgets",
+            "profile_runtime.py --profile full --release --scenario all "
+            "--enforce-budgets",
             validate_release,
         )
         self.assertIn(
@@ -567,12 +578,17 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn("cargo build --locked --release --workspace", release_cache)
         self.assertNotIn("--target x86_64-unknown-linux-gnu", release_cache)
         for command in (
-            "profile_runtime.py --profile full --release --enforce-budgets",
+            "profile_runtime.py --profile full --release --scenario all "
+            "--enforce-budgets",
             "profile_lashlang.py --iterations 2500 --profile-iterations 2500 "
             "--enforce-budgets",
         ):
             self.assertIn(command, perf)
             self.assertIn(command, release)
+
+        for workflow_with_postgres in (perf, release):
+            self.assertIn("image: postgres:16-alpine", workflow_with_postgres)
+            self.assertIn("LASH_POSTGRES_DATABASE_URL:", workflow_with_postgres)
 
     def test_all_confidence_fast_shards_use_blacksmith(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
