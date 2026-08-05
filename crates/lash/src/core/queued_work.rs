@@ -43,44 +43,16 @@ impl InlineQueuedWorkRunHandle {
     pub(super) fn new(config: Arc<InlineQueuedWorkRunConfig>) -> Self {
         Self { config }
     }
-}
 
-#[async_trait]
-impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
-    async fn peek_claimable_queued_work(
-        &self,
-        session_id: Option<&str>,
-    ) -> std::result::Result<Option<bool>, facade_support::QueuedWorkRunError> {
-        let Some(session_id) = session_id else {
-            return Ok(None);
-        };
-        let mut policy = self.config.policy.clone();
-        policy.session_id = Some(session_id.to_string());
-        self.config
-            .store_factory
-            .has_claimable_queued_work(
-                &SessionStoreCreateRequest {
-                    session_id: session_id.to_string(),
-                    relation: SessionRelation::default(),
-                    policy,
-                },
-                self.config.env.core.clock.timestamp_ms(),
-            )
-            .await
-            .map_err(|error| {
-                facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
-                    error.to_string(),
-                ))
-            })
-            .map(Some)
-    }
-
-    async fn run_queued_work(
+    async fn drive_queued_work(
         &self,
         request: QueuedWorkRunRequest,
-    ) -> std::result::Result<(), facade_support::QueuedWorkRunError> {
+    ) -> std::result::Result<
+        facade_support::QueuedWorkRunProgress,
+        facade_support::QueuedWorkRunError,
+    > {
         let Some(session_id) = request.session_id else {
-            return Ok(());
+            return Ok(facade_support::QueuedWorkRunProgress::Unknown);
         };
         let reason = request.reason;
         let mut policy = self.config.policy.clone();
@@ -140,6 +112,7 @@ impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
             runtime,
             Arc::clone(&self.config.live_replay_store),
         );
+        let mut claimed = false;
         loop {
             let scope = handle
                 .observe()
@@ -168,9 +141,67 @@ impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
                 }
             })?;
             if ran.is_none() {
-                break;
+                return Ok(if claimed {
+                    facade_support::QueuedWorkRunProgress::Claimed
+                } else {
+                    facade_support::QueuedWorkRunProgress::Blocked
+                });
             }
+            claimed = true;
         }
+    }
+}
+
+#[async_trait]
+impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
+    async fn peek_claimable_queued_work(
+        &self,
+        session_id: Option<&str>,
+    ) -> std::result::Result<Option<bool>, facade_support::QueuedWorkRunError> {
+        let Some(session_id) = session_id else {
+            return Ok(None);
+        };
+        let mut policy = self.config.policy.clone();
+        policy.session_id = Some(session_id.to_string());
+        self.config
+            .store_factory
+            .has_claimable_queued_work(
+                &SessionStoreCreateRequest {
+                    session_id: session_id.to_string(),
+                    relation: SessionRelation::default(),
+                    policy,
+                },
+                self.config.env.core.clock.timestamp_ms(),
+            )
+            .await
+            .map_err(|error| {
+                facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
+                    error.to_string(),
+                ))
+            })
+    }
+
+    async fn run_queued_work(
+        &self,
+        request: QueuedWorkRunRequest,
+    ) -> std::result::Result<(), facade_support::QueuedWorkRunError> {
+        self.drive_queued_work(request).await?;
         Ok(())
+    }
+
+    async fn claim_and_run_pending_with_progress(
+        &self,
+        session_id: Option<&str>,
+        reason: &str,
+    ) -> std::result::Result<
+        facade_support::QueuedWorkRunProgress,
+        facade_support::QueuedWorkRunError,
+    > {
+        self.drive_queued_work(QueuedWorkRunRequest {
+            session_id: session_id.map(str::to_string),
+            reason: reason.to_string(),
+            trace_idle: false,
+        })
+        .await
     }
 }

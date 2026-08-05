@@ -568,10 +568,10 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         &self,
         request: &SessionStoreCreateRequest,
         now_epoch_ms: u64,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<Option<bool>, StoreError> {
         let path = self.catalog_path();
         if !path.exists() {
-            return Ok(false);
+            return Ok(Some(false));
         }
         let conn = SqliteConnection::open_readonly(&path)
             .await
@@ -584,27 +584,11 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                     FROM queued_work_batches qwb
                     WHERE qwb.session_id = ?1
                       AND qwb.available_at_ms <= ?2
-                      AND (qwb.claim_token IS NULL OR NOT EXISTS (
-                          SELECT 1 FROM session_execution_leases sel
-                          WHERE sel.session_id = ?1
-                            AND sel.lease_token IS NOT NULL
-                            AND sel.lease_expires_at_ms > ?2
-                            AND sel.lease_fencing_token
-                                = qwb.claim_session_lease_generation
-                      ))
                 ) OR EXISTS(
                     SELECT 1
                     FROM pending_turn_inputs pti
                     WHERE pti.session_id = ?1
                       AND pti.state = ?3
-                      AND (pti.claim_token IS NULL OR NOT EXISTS (
-                          SELECT 1 FROM session_execution_leases sel
-                          WHERE sel.session_id = ?1
-                            AND sel.lease_token IS NOT NULL
-                            AND sel.lease_expires_at_ms > ?2
-                            AND sel.lease_fencing_token
-                                = pti.claim_session_lease_generation
-                      ))
                 )",
                 params![
                     session_id,
@@ -615,6 +599,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             )
         })
         .await
+        .map(Some)
         .map_err(sqlite_error)
     }
 

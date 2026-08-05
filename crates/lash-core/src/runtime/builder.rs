@@ -23,8 +23,16 @@ pub struct EmbeddedRuntimeBuilder {
     store: Option<Arc<dyn RuntimePersistence>>,
     attachment_manifest_store: Option<Arc<dyn RuntimePersistence>>,
     process_registry: Option<Arc<dyn ProcessRegistry>>,
-    process_work_driver: Option<crate::ProcessWorkDriver>,
-    queued_work_driver: Option<crate::QueuedWorkDriver>,
+    drivers: Box<EmbeddedRuntimeDriverBindings>,
+}
+
+/// Cold builder-only bindings live off the async build frame. Keeping this
+/// optional host wiring together avoids growing every `build` caller's future
+/// as new inline drivers are added.
+#[derive(Default)]
+struct EmbeddedRuntimeDriverBindings {
+    process: Option<crate::ProcessWorkDriver>,
+    queued: Option<crate::QueuedWorkDriver>,
 }
 
 impl Default for EmbeddedRuntimeBuilder {
@@ -44,8 +52,7 @@ impl Default for EmbeddedRuntimeBuilder {
             store: None,
             attachment_manifest_store: None,
             process_registry: None,
-            process_work_driver: None,
-            queued_work_driver: None,
+            drivers: Box::default(),
         }
     }
 }
@@ -195,12 +202,12 @@ impl EmbeddedRuntimeBuilder {
     }
 
     pub fn with_process_work_driver(mut self, driver: crate::ProcessWorkDriver) -> Self {
-        self.process_work_driver = Some(driver);
+        self.drivers.process = Some(driver);
         self
     }
 
     pub fn with_queued_work_driver(mut self, driver: crate::QueuedWorkDriver) -> Self {
-        self.queued_work_driver = Some(driver);
+        self.drivers.queued = Some(driver);
         self
     }
 
@@ -301,10 +308,6 @@ impl EmbeddedRuntimeBuilder {
     }
 
     pub async fn build(self) -> Result<LashRuntime, SessionError> {
-        Box::pin(self.build_inner()).await
-    }
-
-    async fn build_inner(self) -> Result<LashRuntime, SessionError> {
         let state = self.resolve_state().await?;
         let plugins = self.resolve_plugins(&state)?;
         let mut persistence = super::lifecycle::RuntimePersistenceBindings::new(self.store);
@@ -328,8 +331,8 @@ impl EmbeddedRuntimeBuilder {
             crate::SessionRelation::Root,
         )
         .await?;
-        runtime.host.process_work_driver = self.process_work_driver;
-        runtime.host.queued_work_driver = self.queued_work_driver;
+        runtime.host.process_work_driver = self.drivers.process;
+        runtime.host.queued_work_driver = self.drivers.queued;
         Ok(runtime)
     }
 }

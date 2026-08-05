@@ -12,6 +12,9 @@ const WAKE_RETRY_INITIAL: Duration = Duration::from_millis(25);
 const WAKE_RETRY_MAX: Duration = Duration::from_secs(1);
 const WAKE_MAX_ATTEMPTS: u32 = 8;
 
+#[cfg(any(test, feature = "testing"))]
+pub const QUEUED_WORK_MAX_TRANSIENT_ATTEMPTS: usize = WAKE_MAX_ATTEMPTS as usize;
+
 /// Default maximum number of queued-work wake executions admitted at once.
 pub const DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY: usize = 64;
 
@@ -22,8 +25,6 @@ pub const QUEUED_WORK_SLOW_WAKE_THRESHOLD: Duration = Duration::from_secs(30);
 struct QueuedWorkExecutionConcurrency(usize);
 
 impl QueuedWorkExecutionConcurrency {
-    const DEFAULT: Self = Self(DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY);
-
     fn new(concurrency: usize) -> Result<Self, QueuedWorkExecutionConcurrencyError> {
         if !(1..=Semaphore::MAX_PERMITS).contains(&concurrency) {
             return Err(QueuedWorkExecutionConcurrencyError { concurrency });
@@ -129,6 +130,40 @@ pub struct QueuedWorkSlowWake {
     pub reason: String,
     pub attempt: u32,
     pub threshold_ms: u64,
+    pub available_permits: Option<usize>,
+    pub admission_limit: Option<usize>,
+}
+
+/// Repeating operational evidence that queued work is blocked by a live
+/// session execution lease.
+///
+/// This event is observational only. The inline driver must fully hydrate the
+/// runtime before it can distinguish a blocked claim from an idle queue, so
+/// one hydration per bounded contention poll is the current floor. The cheap
+/// pre-hydration peek deliberately remains a conservative queue predicate; it
+/// does not expose lease state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueuedWorkWakeContended {
+    pub session_id: Option<String>,
+    pub reason: String,
+    pub contended_passes: u32,
+    pub contended_ms: u64,
+    pub threshold_ms: u64,
+    pub available_permits: Option<usize>,
+    pub admission_limit: Option<usize>,
+}
+
+/// Whether one queued-work pass actually claimed durable work.
+///
+/// The inline reference driver reports this so a positive conservative peek
+/// followed by a live session-lease conflict backs off instead of rehydrating
+/// eagerly. External engine submitters may retain the default `Unknown` result;
+/// Lash never re-drives engine-owned work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QueuedWorkRunProgress {
+    Unknown,
+    Claimed,
+    Blocked,
 }
 
 #[async_trait::async_trait]
@@ -167,6 +202,19 @@ pub trait QueuedWorkRunHandle: Send + Sync {
         let request =
             QueuedWorkRunRequest::new(session_id.map(str::to_string), reason.to_string(), false);
         self.run_queued_work(request).await
+    }
+
+    /// Run one pass and report whether the pass claimed durable work.
+    ///
+    /// External handles keep the single-pass default. The inline reference
+    /// handle overrides this to distinguish progress from lease contention.
+    async fn claim_and_run_pending_with_progress(
+        &self,
+        session_id: Option<&str>,
+        reason: &str,
+    ) -> Result<QueuedWorkRunProgress, QueuedWorkRunError> {
+        self.claim_and_run_pending(session_id, reason).await?;
+        Ok(QueuedWorkRunProgress::Unknown)
     }
 }
 
@@ -233,9 +281,10 @@ struct QueuedWorkExecutionSchedulerState {
 }
 
 struct QueuedWorkExecutionScheduler {
-    permits: Arc<Semaphore>,
+    permits: Option<Arc<Semaphore>>,
+    admission_limit: Option<usize>,
     state: Mutex<QueuedWorkExecutionSchedulerState>,
-    changed: tokio::sync::Notify,
+    changed: Arc<tokio::sync::Notify>,
 }
 
 struct QueuedWorkExecutionTaskCompletion {
@@ -270,23 +319,41 @@ impl QueuedWorkExecutionDispatcherGuard {
 impl Drop for QueuedWorkExecutionDispatcherGuard {
     fn drop(&mut self) {
         if self.armed {
-            self.scheduler
-                .state
-                .lock()
-                .expect("lock queued-work scheduler")
-                .dispatcher_running = false;
+            self.scheduler.lock_state().dispatcher_running = false;
             self.scheduler.changed.notify_one();
         }
     }
 }
 
 impl QueuedWorkExecutionScheduler {
-    fn new(concurrency: QueuedWorkExecutionConcurrency) -> Self {
+    fn unbounded() -> Self {
         Self {
-            permits: Arc::new(Semaphore::new(concurrency.get())),
+            permits: None,
+            admission_limit: None,
             state: Mutex::new(QueuedWorkExecutionSchedulerState::default()),
-            changed: tokio::sync::Notify::new(),
+            changed: Arc::new(tokio::sync::Notify::new()),
         }
+    }
+
+    fn inline(concurrency: QueuedWorkExecutionConcurrency) -> Self {
+        Self {
+            permits: Some(Arc::new(Semaphore::new(concurrency.get()))),
+            admission_limit: Some(concurrency.get()),
+            state: Mutex::new(QueuedWorkExecutionSchedulerState::default()),
+            changed: Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+
+    fn lock_state(&self) -> std::sync::MutexGuard<'_, QueuedWorkExecutionSchedulerState> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn available_permits(&self) -> Option<usize> {
+        self.permits
+            .as_ref()
+            .map(|permits| permits.available_permits())
     }
 }
 
@@ -298,10 +365,19 @@ impl QueuedWorkDriver {
     }
 
     pub fn new(run_handle: Arc<dyn QueuedWorkRunHandle>) -> Self {
-        Self::with_shutdown_token(run_handle, CancellationToken::new())
+        Self::from_parts(
+            run_handle,
+            CancellationToken::new(),
+            None,
+            QUEUED_WORK_SLOW_WAKE_THRESHOLD,
+        )
     }
 
-    /// Construct a driver with a host-selected admission bound.
+    /// Construct an inline reference-substrate driver with a host-selected
+    /// admission bound.
+    ///
+    /// Engine-backed submitters should use [`Self::new`]: their substrate owns
+    /// backpressure and Lash only coalesces same-session notifications.
     pub fn with_execution_concurrency(
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         concurrency: usize,
@@ -309,7 +385,7 @@ impl QueuedWorkDriver {
         Ok(Self::from_parts(
             run_handle,
             CancellationToken::new(),
-            QueuedWorkExecutionConcurrency::new(concurrency)?,
+            Some(QueuedWorkExecutionConcurrency::new(concurrency)?),
             QUEUED_WORK_SLOW_WAKE_THRESHOLD,
         ))
     }
@@ -318,18 +394,13 @@ impl QueuedWorkDriver {
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         shutdown: CancellationToken,
     ) -> Self {
-        Self::from_parts(
-            run_handle,
-            shutdown,
-            QueuedWorkExecutionConcurrency::DEFAULT,
-            QUEUED_WORK_SLOW_WAKE_THRESHOLD,
-        )
+        Self::from_parts(run_handle, shutdown, None, QUEUED_WORK_SLOW_WAKE_THRESHOLD)
     }
 
     fn from_parts(
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         shutdown: CancellationToken,
-        concurrency: QueuedWorkExecutionConcurrency,
+        concurrency: Option<QueuedWorkExecutionConcurrency>,
         slow_wake_threshold: Duration,
     ) -> Self {
         let shutdown = shutdown.child_token();
@@ -339,7 +410,10 @@ impl QueuedWorkDriver {
                 run_handle,
                 shutdown: shutdown.clone(),
                 wake_tasks: wake_tasks.clone(),
-                scheduler: Arc::new(QueuedWorkExecutionScheduler::new(concurrency)),
+                scheduler: Arc::new(match concurrency {
+                    Some(concurrency) => QueuedWorkExecutionScheduler::inline(concurrency),
+                    None => QueuedWorkExecutionScheduler::unbounded(),
+                }),
                 slow_wake_threshold,
             }),
             _lifetime: Arc::new(QueuedWorkDriverLifetime {
@@ -377,12 +451,7 @@ impl QueuedWorkDriver {
         let session_id = session_id.map(str::to_string);
         let reason = reason.to_string();
         let should_start_dispatcher = {
-            let mut state = self
-                .inner
-                .scheduler
-                .state
-                .lock()
-                .expect("lock queued-work scheduler");
+            let mut state = self.inner.scheduler.lock_state();
             let demand = QueuedWorkDemand::new(session_id.clone(), reason);
             if state.scheduled.insert(session_id.clone()) {
                 state.pending.push_back(demand);
@@ -419,7 +488,8 @@ struct QueuedWorkTaskDriver {
 enum QueuedWorkRunAttemptOutcome {
     Idle,
     Complete,
-    Recheck,
+    Progress,
+    Contended,
 }
 
 impl QueuedWorkTaskDriver {
@@ -436,20 +506,27 @@ impl QueuedWorkTaskDriver {
                     session_id: demand.session_id.clone(),
                     completed: completed_tx.clone(),
                 };
+                let scheduler = Arc::clone(&self.inner.scheduler);
                 self.inner.wake_tasks.spawn(async move {
                     let _completion = completion;
-                    let _permit = permit;
-                    driver.run_demand(demand).await;
+                    match (permit, scheduler.permits.as_ref()) {
+                        (Some(permit), Some(permits)) => {
+                            super::process_worker::scope_queued_work_execution_permit(
+                                Arc::clone(permits),
+                                permit,
+                                Arc::clone(&scheduler.changed),
+                                driver.run_demand(demand),
+                            )
+                            .await;
+                        }
+                        (None, None) => driver.run_demand(demand).await,
+                        _ => unreachable!("queued-work admission permit matches scheduler mode"),
+                    }
                 });
             }
 
             {
-                let mut state = self
-                    .inner
-                    .scheduler
-                    .state
-                    .lock()
-                    .expect("lock queued-work scheduler");
+                let mut state = self.inner.scheduler.lock_state();
                 if state.pending.is_empty() && state.active == 0 {
                     state.dispatcher_running = false;
                     dispatcher_guard.disarm();
@@ -460,16 +537,17 @@ impl QueuedWorkTaskDriver {
             tokio::select! {
                 () = self.inner.shutdown.cancelled() => return,
                 Some(session_id) = completed_rx.recv() => {
-                    let mut state = self
-                        .inner
-                        .scheduler
-                        .state
-                        .lock()
-                        .expect("lock queued-work scheduler");
-                    state.active = state
-                        .active
-                        .checked_sub(1)
-                        .expect("a completed queued-work execution was active");
+                    let mut state = self.inner.scheduler.lock_state();
+                    if state.active == 0 {
+                        tracing::warn!(
+                            target: "lash_core::queued_work",
+                            session_id = session_id.as_deref(),
+                            event = "queued_work.scheduler_accounting",
+                            "queued-work execution completed without an active scheduler entry"
+                        );
+                    } else {
+                        state.active -= 1;
+                    }
                     if let Some(demand) = state.rerun.remove(&session_id) {
                         state.pending.push_back(demand);
                     } else {
@@ -481,16 +559,15 @@ impl QueuedWorkTaskDriver {
         }
     }
 
-    fn next_execution(&self) -> Option<(QueuedWorkDemand, OwnedSemaphorePermit)> {
-        let mut state = self
-            .inner
-            .scheduler
-            .state
-            .lock()
-            .expect("lock queued-work scheduler");
-        let permit = Arc::clone(&self.inner.scheduler.permits)
-            .try_acquire_owned()
-            .ok()?;
+    fn next_execution(&self) -> Option<(QueuedWorkDemand, Option<OwnedSemaphorePermit>)> {
+        let mut state = self.inner.scheduler.lock_state();
+        if state.pending.is_empty() {
+            return None;
+        }
+        let permit = match self.inner.scheduler.permits.as_ref() {
+            Some(permits) => Some(Arc::clone(permits).try_acquire_owned().ok()?),
+            None => None,
+        };
         let mut demand = state.pending.pop_front()?;
         if let Some(coalesced) = state.rerun.remove(&demand.session_id) {
             demand.merge(coalesced);
@@ -499,12 +576,17 @@ impl QueuedWorkTaskDriver {
         Some((demand, permit))
     }
 
-    async fn run_demand(&self, demand: QueuedWorkDemand) {
-        let reason = demand.reason();
-        let mut attempt = 1_u32;
-        let mut retry_after = WAKE_RETRY_INITIAL;
+    async fn run_demand(&self, mut demand: QueuedWorkDemand) {
+        let mut pass = 1_u32;
+        let mut transient_attempt = 1_u32;
+        let mut transient_retry_after = WAKE_RETRY_INITIAL;
+        let mut contended_passes = 0_u32;
+        let mut contended_retry_after = WAKE_RETRY_INITIAL;
+        let mut contended_since = None;
+        let mut next_contention_heartbeat = None;
         loop {
-            let result = self.run_attempt(&demand, &reason, attempt).await;
+            let reason = demand.reason();
+            let result = self.run_attempt(&demand, &reason, pass).await;
             match result {
                 None => return,
                 Some(Ok(
@@ -512,15 +594,72 @@ impl QueuedWorkTaskDriver {
                 )) => {
                     return;
                 }
-                Some(Ok(QueuedWorkRunAttemptOutcome::Recheck)) => {
-                    attempt = 1;
-                    retry_after = WAKE_RETRY_INITIAL;
+                Some(Ok(QueuedWorkRunAttemptOutcome::Progress)) => {
+                    transient_attempt = 1;
+                    transient_retry_after = WAKE_RETRY_INITIAL;
+                    contended_passes = 0;
+                    contended_retry_after = WAKE_RETRY_INITIAL;
+                    contended_since = None;
+                    next_contention_heartbeat = None;
+                    self.merge_rerun(&mut demand);
+                    pass = pass.saturating_add(1);
+                    continue;
+                }
+                Some(Ok(QueuedWorkRunAttemptOutcome::Contended)) => {
+                    // A blocked verdict is only available after full runtime
+                    // hydration. Keep that expensive poll bounded and visible,
+                    // while preserving an independent full error-retry budget
+                    // for the commit race that commonly follows lease release.
+                    transient_attempt = 1;
+                    transient_retry_after = WAKE_RETRY_INITIAL;
+                    contended_passes = contended_passes.saturating_add(1);
+                    let now = tokio::time::Instant::now();
+                    let started = *contended_since.get_or_insert(now);
+                    let heartbeat = next_contention_heartbeat
+                        .get_or_insert(started + self.inner.slow_wake_threshold);
+                    if now >= *heartbeat {
+                        let event = QueuedWorkWakeContended {
+                            session_id: demand.session_id.clone(),
+                            reason: reason.clone(),
+                            contended_passes,
+                            contended_ms: now.duration_since(started).as_millis() as u64,
+                            threshold_ms: self.inner.slow_wake_threshold.as_millis() as u64,
+                            available_permits: self.inner.scheduler.available_permits(),
+                            admission_limit: self.inner.scheduler.admission_limit,
+                        };
+                        tracing::warn!(
+                            target: "lash_core::queued_work",
+                            session_id = event.session_id.as_deref(),
+                            reason = %event.reason,
+                            contended_passes = event.contended_passes,
+                            contended_ms = event.contended_ms,
+                            threshold_ms = event.threshold_ms,
+                            available_permits = ?event.available_permits,
+                            admission_limit = ?event.admission_limit,
+                            event = "queued_work.wake_contended",
+                            "queued-work wake remains blocked by session execution contention"
+                        );
+                        *heartbeat = now + self.inner.slow_wake_threshold;
+                    }
+                    if !self.wait_for_retry(contended_retry_after).await {
+                        return;
+                    }
+                    contended_retry_after =
+                        contended_retry_after.saturating_mul(2).min(WAKE_RETRY_MAX);
+                    self.merge_rerun(&mut demand);
+                    pass = pass.saturating_add(1);
                     continue;
                 }
                 Some(Err(err)) => {
+                    contended_passes = 0;
+                    contended_retry_after = WAKE_RETRY_INITIAL;
+                    contended_since = None;
+                    next_contention_heartbeat = None;
                     let disposition = match err.class {
                         QueuedWorkRunErrorClass::Terminal => QueuedWorkWakeDisposition::Terminal,
-                        QueuedWorkRunErrorClass::Transient if attempt >= WAKE_MAX_ATTEMPTS => {
+                        QueuedWorkRunErrorClass::Transient
+                            if transient_attempt >= WAKE_MAX_ATTEMPTS =>
+                        {
                             QueuedWorkWakeDisposition::Exhausted
                         }
                         QueuedWorkRunErrorClass::Transient => QueuedWorkWakeDisposition::Retrying,
@@ -528,12 +667,12 @@ impl QueuedWorkTaskDriver {
                     let failure = QueuedWorkWakeFailure {
                         session_id: demand.session_id.clone(),
                         reason: reason.clone(),
-                        attempt,
+                        attempt: transient_attempt,
                         retry_after_ms: if matches!(
                             disposition,
                             QueuedWorkWakeDisposition::Retrying
                         ) {
-                            retry_after.as_millis() as u64
+                            transient_retry_after.as_millis() as u64
                         } else {
                             0
                         },
@@ -576,14 +715,39 @@ impl QueuedWorkTaskDriver {
                             return;
                         }
                     }
+                    if !self.wait_for_retry(transient_retry_after).await {
+                        return;
+                    }
+                    transient_retry_after =
+                        transient_retry_after.saturating_mul(2).min(WAKE_RETRY_MAX);
+                    transient_attempt = transient_attempt.saturating_add(1);
+                    self.merge_rerun(&mut demand);
+                    pass = pass.saturating_add(1);
                 }
             }
-            tokio::select! {
-                () = self.inner.shutdown.cancelled() => return,
-                () = tokio::time::sleep(retry_after) => {}
-            }
-            retry_after = retry_after.saturating_mul(2).min(WAKE_RETRY_MAX);
-            attempt = attempt.saturating_add(1);
+        }
+    }
+
+    async fn wait_for_retry(&self, retry_after: Duration) -> bool {
+        let backoff = super::process_worker::release_process_execution_permit_while(
+            tokio::time::sleep(retry_after),
+        );
+        tokio::pin!(backoff);
+        tokio::select! {
+            () = self.inner.shutdown.cancelled() => false,
+            () = &mut backoff => true,
+        }
+    }
+
+    fn merge_rerun(&self, demand: &mut QueuedWorkDemand) {
+        if let Some(coalesced) = self
+            .inner
+            .scheduler
+            .lock_state()
+            .rerun
+            .remove(&demand.session_id)
+        {
+            demand.merge(coalesced);
         }
     }
 
@@ -602,27 +766,39 @@ impl QueuedWorkTaskDriver {
             if claimable == Some(false) {
                 return Ok(QueuedWorkRunAttemptOutcome::Idle);
             }
-            run_handle
-                .claim_and_run_pending(session_id.as_deref(), reason)
+            // Unknown claimability bounds a successfully completed hydration to
+            // this one pass. It does not convert a transiently failed hydration
+            // into success: that error still receives the finite retry ladder in
+            // `run_demand`, after which the demand idles until a new notification
+            // re-arms it.
+            let progress = run_handle
+                .claim_and_run_pending_with_progress(session_id.as_deref(), reason)
                 .await?;
-            Ok(if claimable.is_some() {
-                QueuedWorkRunAttemptOutcome::Recheck
-            } else {
-                QueuedWorkRunAttemptOutcome::Complete
+            Ok(match progress {
+                QueuedWorkRunProgress::Blocked if claimable == Some(true) => {
+                    QueuedWorkRunAttemptOutcome::Contended
+                }
+                QueuedWorkRunProgress::Claimed if claimable.is_some() => {
+                    QueuedWorkRunAttemptOutcome::Progress
+                }
+                QueuedWorkRunProgress::Unknown
+                | QueuedWorkRunProgress::Claimed
+                | QueuedWorkRunProgress::Blocked => QueuedWorkRunAttemptOutcome::Complete,
             })
         };
         tokio::pin!(run);
-        let slow = tokio::time::sleep(self.inner.slow_wake_threshold);
-        tokio::pin!(slow);
-        tokio::select! {
-            () = self.inner.shutdown.cancelled() => None,
-            result = &mut run => Some(result),
-            () = &mut slow => {
+        loop {
+            tokio::select! {
+                () = self.inner.shutdown.cancelled() => return None,
+                result = &mut run => return Some(result),
+                () = tokio::time::sleep(self.inner.slow_wake_threshold) => {
                 let event = QueuedWorkSlowWake {
                     session_id: demand.session_id.clone(),
                     reason: reason.to_string(),
                     attempt,
                     threshold_ms: self.inner.slow_wake_threshold.as_millis() as u64,
+                    available_permits: self.inner.scheduler.available_permits(),
+                    admission_limit: self.inner.scheduler.admission_limit,
                 };
                 tracing::warn!(
                     target: "lash_core::queued_work",
@@ -630,12 +806,11 @@ impl QueuedWorkTaskDriver {
                     reason = %event.reason,
                     attempt = event.attempt,
                     threshold_ms = event.threshold_ms,
+                    available_permits = ?event.available_permits,
+                    admission_limit = ?event.admission_limit,
                     event = "queued_work.wake_slow",
                     "queued-work wake remains unfinished past the slow-wake threshold"
                 );
-                tokio::select! {
-                    () = self.inner.shutdown.cancelled() => None,
-                    result = &mut run => Some(result),
                 }
             }
         }
@@ -682,6 +857,15 @@ mod tests {
             self.observed.lock().expect("lock observed").extend(drained);
             self.completed.notify_one();
             Ok(())
+        }
+
+        async fn claim_and_run_pending_with_progress(
+            &self,
+            session_id: Option<&str>,
+            reason: &str,
+        ) -> Result<QueuedWorkRunProgress, QueuedWorkRunError> {
+            self.claim_and_run_pending(session_id, reason).await?;
+            Ok(QueuedWorkRunProgress::Claimed)
         }
     }
 
@@ -812,9 +996,101 @@ mod tests {
         assert_eq!(handle.max_active.load(Ordering::SeqCst), CONCURRENCY);
     }
 
+    #[tokio::test]
+    async fn external_engine_submitters_do_not_inherit_the_inline_admission_bound() {
+        const SIGNALS: usize = 8;
+        let handle = Arc::new(AdmissionRunHandle {
+            active: AtomicUsize::new(0),
+            max_active: AtomicUsize::new(0),
+            entered: AtomicUsize::new(0),
+            completed: AtomicUsize::new(0),
+            changed: tokio::sync::Notify::new(),
+            release: tokio::sync::Semaphore::new(0),
+        });
+        let driver = QueuedWorkDriver::new(handle.clone());
+        for index in 0..SIGNALS {
+            driver.notify_pending_work(Some(&format!("engine-session-{index}")), "engine_submit");
+        }
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let changed = handle.changed.notified();
+                if handle.entered.load(Ordering::SeqCst) == SIGNALS {
+                    break;
+                }
+                changed.await;
+            }
+        })
+        .await
+        .expect("the engine substrate admits every submitted session");
+        assert_eq!(handle.max_active.load(Ordering::SeqCst), SIGNALS);
+        handle.release.add_permits(SIGNALS);
+    }
+
+    struct ParkAwareRunHandle {
+        first_parked: tokio::sync::Notify,
+        second_entered: tokio::sync::Notify,
+        resume_first: tokio::sync::Semaphore,
+        completed: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl QueuedWorkRunHandle for ParkAwareRunHandle {
+        async fn run_queued_work(
+            &self,
+            request: QueuedWorkRunRequest,
+        ) -> Result<(), QueuedWorkRunError> {
+            match request.session_id.as_deref() {
+                Some("session-parked") => {
+                    self.first_parked.notify_one();
+                    super::super::process_worker::release_process_execution_permit_while(async {
+                        self.resume_first
+                            .acquire()
+                            .await
+                            .expect("resume semaphore remains open")
+                            .forget();
+                    })
+                    .await;
+                }
+                Some("session-runnable") => self.second_entered.notify_one(),
+                session => panic!("unexpected session: {session:?}"),
+            }
+            self.completed.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn inline_admission_slot_is_released_while_a_turn_is_parked() {
+        let handle = Arc::new(ParkAwareRunHandle {
+            first_parked: tokio::sync::Notify::new(),
+            second_entered: tokio::sync::Notify::new(),
+            resume_first: tokio::sync::Semaphore::new(0),
+            completed: AtomicUsize::new(0),
+        });
+        let driver = QueuedWorkDriver::with_execution_concurrency(handle.clone(), 1)
+            .expect("valid concurrency");
+        driver.notify_pending_work(Some("session-parked"), "queued_turn_input");
+        handle.first_parked.notified().await;
+
+        driver.notify_pending_work(Some("session-runnable"), "queued_turn_input");
+        tokio::time::timeout(Duration::from_secs(1), handle.second_entered.notified())
+            .await
+            .expect("a parked inline turn releases its queued-work slot");
+        handle.resume_first.add_permits(1);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while handle.completed.load(Ordering::SeqCst) != 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the parked turn reacquires its slot and completes");
+    }
+
     struct RerunRunHandle {
         pending: Mutex<VecDeque<usize>>,
         observed: Mutex<Vec<usize>>,
+        reasons: Mutex<Vec<String>>,
         runs: AtomicUsize,
         first_entered: tokio::sync::Notify,
         release_first: tokio::sync::Semaphore,
@@ -832,9 +1108,13 @@ mod tests {
 
         async fn run_queued_work(
             &self,
-            _request: QueuedWorkRunRequest,
+            request: QueuedWorkRunRequest,
         ) -> Result<(), QueuedWorkRunError> {
             let run = self.runs.fetch_add(1, Ordering::SeqCst);
+            self.reasons
+                .lock()
+                .expect("lock rerun reasons")
+                .push(request.reason);
             let drained = self
                 .pending
                 .lock()
@@ -860,6 +1140,7 @@ mod tests {
         let handle = Arc::new(RerunRunHandle {
             pending: Mutex::new(VecDeque::from([0])),
             observed: Mutex::new(Vec::new()),
+            reasons: Mutex::new(Vec::new()),
             runs: AtomicUsize::new(0),
             first_entered: tokio::sync::Notify::new(),
             release_first: tokio::sync::Semaphore::new(0),
@@ -886,6 +1167,11 @@ mod tests {
 
         assert_eq!(handle.runs.load(Ordering::SeqCst), 2);
         assert_eq!(*handle.observed.lock().expect("lock observed"), vec![0, 1]);
+        assert_eq!(
+            *handle.reasons.lock().expect("lock rerun reasons"),
+            vec!["first", "second"],
+            "the in-flight signal is attributed to the rerun it schedules"
+        );
     }
 
     struct EmptyPeekRunHandle {
@@ -931,6 +1217,138 @@ mod tests {
         assert_eq!(handle.peeks.load(Ordering::SeqCst), 1);
         assert_eq!(handle.hydrations.load(Ordering::SeqCst), 0);
     }
+
+    struct CreateOnlyFactory {
+        inner: crate::InMemorySessionStoreFactory,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::SessionStoreFactory for CreateOnlyFactory {
+        async fn create_store(
+            &self,
+            request: &crate::SessionStoreCreateRequest,
+        ) -> Result<Arc<dyn crate::RuntimePersistence>, crate::StoreError> {
+            self.inner.create_store(request).await
+        }
+
+        async fn delete_session(&self, session_id: &str) -> Result<(), String> {
+            self.inner.delete_session(session_id).await
+        }
+    }
+
+    #[tokio::test]
+    async fn create_only_factory_treats_claimability_as_unknown_and_runs() {
+        let factory = CreateOnlyFactory {
+            inner: crate::InMemorySessionStoreFactory::new(),
+        };
+        let request = crate::SessionStoreCreateRequest {
+            session_id: "create-only-factory".to_string(),
+            relation: crate::SessionRelation::Root,
+            policy: crate::SessionPolicy::default(),
+        };
+
+        assert_eq!(
+            crate::SessionStoreFactory::has_claimable_queued_work(&factory, &request, 0)
+                .await
+                .expect("the conservative default succeeds"),
+            None,
+            "a factory that cannot inspect an existing store must preserve unknown claimability"
+        );
+    }
+
+    struct PublicProbeRunHandle {
+        peeks: AtomicUsize,
+        hydrations: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl QueuedWorkRunHandle for PublicProbeRunHandle {
+        async fn peek_claimable_queued_work(
+            &self,
+            _session_id: Option<&str>,
+        ) -> Result<Option<bool>, QueuedWorkRunError> {
+            self.peeks.fetch_add(1, Ordering::SeqCst);
+            Ok(Some(true))
+        }
+
+        async fn run_queued_work(
+            &self,
+            _request: QueuedWorkRunRequest,
+        ) -> Result<(), QueuedWorkRunError> {
+            self.hydrations.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn public_single_pass_handle_never_eagerly_rehydrates_a_positive_peek() {
+        let handle = Arc::new(PublicProbeRunHandle {
+            peeks: AtomicUsize::new(0),
+            hydrations: AtomicUsize::new(0),
+        });
+        let driver = QueuedWorkDriver::new(handle.clone());
+
+        driver.notify_pending_work(Some("session-public-probe"), "queued_turn_input");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(handle.hydrations.load(Ordering::SeqCst), 1);
+        assert_eq!(handle.peeks.load(Ordering::SeqCst), 1);
+    }
+
+    struct ContendedRunHandle {
+        peeks: AtomicUsize,
+        hydrations: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl QueuedWorkRunHandle for ContendedRunHandle {
+        async fn peek_claimable_queued_work(
+            &self,
+            _session_id: Option<&str>,
+        ) -> Result<Option<bool>, QueuedWorkRunError> {
+            self.peeks.fetch_add(1, Ordering::SeqCst);
+            Ok(Some(true))
+        }
+
+        async fn run_queued_work(
+            &self,
+            _request: QueuedWorkRunRequest,
+        ) -> Result<(), QueuedWorkRunError> {
+            self.hydrations.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        async fn claim_and_run_pending_with_progress(
+            &self,
+            session_id: Option<&str>,
+            reason: &str,
+        ) -> Result<QueuedWorkRunProgress, QueuedWorkRunError> {
+            self.claim_and_run_pending(session_id, reason).await?;
+            Ok(QueuedWorkRunProgress::Blocked)
+        }
+    }
+
+    #[tokio::test]
+    async fn one_notification_during_live_lease_contention_has_bounded_hydrations() {
+        let handle = Arc::new(ContendedRunHandle {
+            peeks: AtomicUsize::new(0),
+            hydrations: AtomicUsize::new(0),
+        });
+        let driver = QueuedWorkDriver::with_execution_concurrency(handle.clone(), 1)
+            .expect("valid concurrency");
+
+        driver.notify_pending_work(Some("session-contended"), "queued_turn_input");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let hydrations = handle.hydrations.load(Ordering::SeqCst);
+        assert!(
+            (3..=5).contains(&hydrations),
+            "one contended notification must back off, got {hydrations} hydrations"
+        );
+        assert_eq!(handle.peeks.load(Ordering::SeqCst), hydrations);
+    }
+
+    mod final_regressions;
 
     struct FailOnceRunHandle {
         attempts: Arc<AtomicUsize>,
@@ -1115,7 +1533,7 @@ mod tests {
             let driver = QueuedWorkDriver::from_parts(
                 captured_handle.clone(),
                 CancellationToken::new(),
-                QueuedWorkExecutionConcurrency::new(CONCURRENCY).expect("valid concurrency"),
+                Some(QueuedWorkExecutionConcurrency::new(CONCURRENCY).expect("valid concurrency")),
                 Duration::from_millis(10),
             );
             for index in 0..SIGNALS {
@@ -1146,12 +1564,17 @@ mod tests {
         .await;
 
         let slow = capture.named("queued_work.wake_slow");
-        assert_eq!(slow.len(), CONCURRENCY);
+        assert!(
+            slow.len() >= CONCURRENCY * 2,
+            "a wedged wake must emit repeating slow-wake heartbeats"
+        );
         assert!(slow.iter().all(|event| {
             event.level == "WARN"
                 && event.target == "lash_core::queued_work"
                 && event.field("threshold_ms") == "10"
                 && event.field("reason") == "process_wake"
+                && event.field("available_permits") == "Some(0)"
+                && event.field("admission_limit") == "Some(2)"
         }));
     }
 }

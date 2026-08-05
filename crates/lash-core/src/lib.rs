@@ -208,8 +208,10 @@ pub mod facade_support {
     pub use crate::runtime::QueuedWorkExecutionConcurrencyError;
     pub use crate::runtime::QueuedWorkRunError;
     pub use crate::runtime::QueuedWorkRunHandle;
+    pub use crate::runtime::QueuedWorkRunProgress;
     pub use crate::runtime::QueuedWorkRunRequest;
     pub use crate::runtime::QueuedWorkSlowWake;
+    pub use crate::runtime::QueuedWorkWakeContended;
     pub use crate::runtime::QueuedWorkWakeDisposition;
     pub use crate::runtime::QueuedWorkWakeFailure;
     pub use crate::runtime::RuntimeAwaitEventOptions;

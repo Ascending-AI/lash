@@ -1,7 +1,5 @@
 use super::*;
 use crate::facade_support::SessionGraphFacadeOps;
-use crate::store::QueuedWorkStore;
-use crate::store::TurnInputStore;
 
 /// Session-id-keyed factory: the same in-memory store is returned for a given
 /// session across opens (so a worker rebuild sees the session's state), and a
@@ -131,7 +129,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         &self,
         request: &SessionStoreCreateRequest,
         now_epoch_ms: u64,
-    ) -> Result<bool, crate::StoreError> {
+    ) -> Result<Option<bool>, crate::StoreError> {
         let store = self
             .stores
             .lock()
@@ -139,21 +137,35 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .get(&request.session_id)
             .cloned();
         let Some(store) = store else {
-            return Ok(false);
+            return Ok(Some(false));
         };
+        // This is a conservative readiness peek, not a claim. A due row with a
+        // same-generation claim may belong to a crashed/live lease holder; it
+        // must keep the driver's bounded contention recheck armed until the
+        // generation becomes reclaimable.
         if store
-            .list_pending_queued_work(&request.session_id)
-            .await?
-            .into_iter()
-            .any(|batch| batch.available_at_ms <= now_epoch_ms)
+            .queued_work
+            .lock()
+            .expect("lock queued work")
+            .iter()
+            .any(|entry| {
+                entry.batch.session_id == request.session_id
+                    && entry.batch.available_at_ms <= now_epoch_ms
+            })
         {
-            return Ok(true);
+            return Ok(Some(true));
         }
-        Ok(store
-            .list_pending_turn_inputs(&request.session_id)
-            .await?
-            .into_iter()
-            .any(|input| input.state == crate::TurnInputState::DeferredNextTurn))
+        Ok(Some(
+            store
+                .pending_turn_inputs
+                .lock()
+                .expect("lock pending turn input")
+                .iter()
+                .any(|entry| {
+                    entry.input.session_id == request.session_id
+                        && entry.input.state == crate::TurnInputState::DeferredNextTurn
+                }),
+        ))
     }
 
     async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {

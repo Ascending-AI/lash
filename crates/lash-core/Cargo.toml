@@ -49,4 +49,5 @@ proptest = { version = "1", optional = true }
 insta = "1"
 proptest = "1"
 tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true }

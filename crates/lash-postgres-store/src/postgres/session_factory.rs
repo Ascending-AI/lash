@@ -128,34 +128,18 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         &self,
         request: &SessionStoreCreateRequest,
         now_epoch_ms: u64,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<Option<bool>, StoreError> {
         sqlx::query_scalar(
             "SELECT EXISTS(
                 SELECT 1
                 FROM lash_queued_work_batches qwb
                 WHERE qwb.session_id = $1
                   AND qwb.available_at_ms <= $2
-                  AND (qwb.claim_token IS NULL OR NOT EXISTS (
-                      SELECT 1 FROM lash_session_execution_leases sel
-                      WHERE sel.session_id = $1
-                        AND sel.lease_token IS NOT NULL
-                        AND sel.lease_expires_at_ms > $2
-                        AND sel.lease_fencing_token
-                            = qwb.claim_session_lease_generation
-                  ))
             ) OR EXISTS(
                 SELECT 1
                 FROM lash_pending_turn_inputs pti
                 WHERE pti.session_id = $1
                   AND pti.state = $3
-                  AND (pti.claim_token IS NULL OR NOT EXISTS (
-                      SELECT 1 FROM lash_session_execution_leases sel
-                      WHERE sel.session_id = $1
-                        AND sel.lease_token IS NOT NULL
-                        AND sel.lease_expires_at_ms > $2
-                        AND sel.lease_fencing_token
-                            = pti.claim_session_lease_generation
-                  ))
             )",
         )
         .bind(&request.session_id)
@@ -163,6 +147,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .bind(lash_core::TurnInputState::DeferredNextTurn.as_str())
         .fetch_one(&self.pool)
         .await
+        .map(Some)
         .map_err(store_sqlx_error)
     }
 

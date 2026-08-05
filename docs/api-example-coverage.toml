@@ -45190,12 +45190,52 @@ disposition = "unused-add"
 reason = "Add the optional durable claimability peek to the embedding turns example."
 
 [[api]]
+symbol = "lash::runtime::QueuedWorkRunHandle::claim_and_run_pending_with_progress"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add the inline queued-work progress outcome to the embedding turns example."
+
+[[api]]
 symbol = "lash::runtime::QueuedWorkRunHandle::run_queued_work"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add lash::runtime::QueuedWorkRunHandle::run_queued_work to the docs-snippets embedding/turns example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkRunProgress"
+kind = "enum"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add lash::runtime::QueuedWorkRunProgress to the embedding turns example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkRunProgress::Blocked"
+kind = "variant"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Exercise a live session-lease contention pass in the embedding turns example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkRunProgress::Claimed"
+kind = "variant"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Exercise a queued-work pass that claims durable work in the embedding turns example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkRunProgress::Unknown"
+kind = "variant"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Exercise the external engine-submitter progress default in the embedding turns example."
 
 [[api]]
 symbol = "lash::runtime::QueuedWorkRunRequest"
@@ -45246,6 +45286,22 @@ disposition = "unused-add"
 reason = "Assert the slow queued-work attempt field in the operations example."
 
 [[api]]
+symbol = "lash::runtime::QueuedWorkSlowWake::admission_limit"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert the queued-work admission-limit field in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkSlowWake::available_permits"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert the queued-work available-permits field in the operations example."
+
+[[api]]
 symbol = "lash::runtime::QueuedWorkSlowWake::reason"
 kind = "field"
 availability = "default+all-features"
@@ -45268,6 +45324,70 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "unused-add"
 reason = "Assert the slow queued-work warning threshold in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkWakeContended"
+kind = "struct"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add typed queued-work contention telemetry to the recovery and operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkWakeContended::admission_limit"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert the contended queued-work admission-limit field in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkWakeContended::available_permits"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert the contended queued-work available-permits field in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkWakeContended::contended_ms"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert elapsed queued-work contention time in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkWakeContended::contended_passes"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert the bounded queued-work contention pass count in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkWakeContended::reason"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert aggregated contended queued-work reasons in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkWakeContended::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert contended queued-work session identity in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkWakeContended::threshold_ms"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert the queued-work contention heartbeat threshold in the operations example."
 
 [[api]]
 symbol = "lash::runtime::QueuedWorkWakeDisposition"

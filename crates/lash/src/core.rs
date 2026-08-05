@@ -929,7 +929,8 @@ impl LashCoreBuilder {
 
     /// Set the number of queued-work notifications the default inline driver
     /// may execute at once. Additional per-session demand is retained and
-    /// coalesced without spawning a task per signal.
+    /// coalesced without spawning a task per signal. A running queued-work
+    /// turn releases its slot while parked and reacquires it before resuming.
     ///
     /// The default is [`DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY`](facade_support::DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY).
     /// Invalid values are reported by [`build`](Self::build).

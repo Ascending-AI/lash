@@ -306,6 +306,12 @@ impl WakeDeliveryDriver {
             {
                 Ok(enqueue_outcome) => {
                     let enqueued = enqueue_outcome.batch();
+                    // Dispatch is best-effort and strictly post-commit. Do it
+                    // before settling the outbox claim so Applied, ClaimLost,
+                    // and terminal-mark failures all re-arm the durable row.
+                    if let Some(driver) = queued_work_driver.as_ref() {
+                        driver.notify_pending_work(Some(&target_session_id), "process_wake");
+                    }
                     if enqueue_outcome.process_wake_was_absorbed() {
                         tracing::info!(
                             delivery_id = %delivery.delivery_id,
@@ -340,10 +346,6 @@ impl WakeDeliveryDriver {
                                 state = "enqueued",
                                 "process wake delivery marked terminal"
                             );
-                            if let Some(driver) = queued_work_driver.as_ref() {
-                                driver
-                                    .notify_pending_work(Some(&target_session_id), "process_wake");
-                            }
                             report.enqueued += 1;
                         }
                         Ok(WakeDeliveryClaimOutcome::ClaimLost { state }) => {
