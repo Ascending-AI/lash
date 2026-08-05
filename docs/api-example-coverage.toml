@@ -50716,6 +50716,14 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::process_prune_deletes_owned_session_stores to the agent-workbench durable process flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::process_prune_batch_tombstones"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::process_prune_batch_tombstones to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::testing::conformance::process_registry"
 kind = "function"
 availability = "all-features"

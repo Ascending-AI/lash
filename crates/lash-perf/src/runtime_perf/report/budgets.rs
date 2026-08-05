@@ -474,7 +474,7 @@ pub(super) const GLOBAL_PHASE_BUDGETS: &[PhaseBudget] = &[
     },
     PhaseBudget {
         phase: "store_hardening.postgres.prune_terminal_processes",
-        budget_ms: 4_000.0,
+        budget_ms: 300.0,
     },
 ];
 
