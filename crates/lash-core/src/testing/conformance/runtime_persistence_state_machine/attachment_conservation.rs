@@ -7,7 +7,7 @@
 
 use super::*;
 
-const RECONCILE_ALL_UNCOMMITTED: u64 = u64::MAX;
+const RECONCILE_SQL_SAFE_MAX: u64 = i64::MAX as u64;
 
 /// Production handles required by the runtime-persistence state machine.
 ///
@@ -18,6 +18,7 @@ pub struct RuntimePersistenceStateMachineHandles {
     pub(super) runtime: Arc<dyn RuntimePersistence>,
     pub(super) session_factory: Arc<dyn crate::SessionStoreFactory>,
     pub(super) attachment_backend: Arc<dyn crate::AttachmentStore>,
+    pub(super) process_owner_liveness_wired: bool,
 }
 
 impl RuntimePersistenceStateMachineHandles {
@@ -25,6 +26,7 @@ impl RuntimePersistenceStateMachineHandles {
     /// supplies its attachment root-set oracle.
     pub async fn create(
         session_factory: Arc<dyn crate::SessionStoreFactory>,
+        process_owner_liveness_wired: bool,
     ) -> Result<Self, crate::StoreError> {
         let attachment_backend = Arc::new(crate::InMemoryAttachmentStore::new());
         let runtime = session_factory
@@ -38,6 +40,7 @@ impl RuntimePersistenceStateMachineHandles {
             runtime,
             session_factory,
             attachment_backend,
+            process_owner_liveness_wired,
         })
     }
 }
@@ -54,6 +57,7 @@ struct AttachmentCommitInput {
     session_selection: u8,
     attachment_slot: u8,
     value: u8,
+    turn_owned: bool,
 }
 
 pub(super) async fn apply_attachment_operation(
@@ -69,6 +73,7 @@ pub(super) async fn apply_attachment_operation(
             session_selection,
             attachment_slot,
             value,
+            turn_owned,
         } => {
             commit_with_attachment_refs(
                 handles,
@@ -80,7 +85,24 @@ pub(super) async fn apply_attachment_operation(
                     session_selection: *session_selection,
                     attachment_slot: *attachment_slot,
                     value: *value,
+                    turn_owned: *turn_owned,
                 },
+            )
+            .await
+        }
+        RuntimePersistenceOp::PutAttachmentIntent {
+            owner_kind,
+            attachment_slot,
+            value,
+        } => {
+            put_attachment_intent(
+                handles,
+                model,
+                shape,
+                seed,
+                *owner_kind,
+                *attachment_slot,
+                *value,
             )
             .await
         }
@@ -107,6 +129,7 @@ async fn commit_with_attachment_refs(
         session_selection,
         attachment_slot,
         value,
+        turn_owned,
     } = input;
     let create = new_session || model.attachment_sessions.is_empty();
     let (session_index, session_id, head_revision, store) = if create {
@@ -133,13 +156,15 @@ async fn commit_with_attachment_refs(
         )
     };
 
-    let facade = crate::SessionAttachmentStore::new(
+    let facade = Arc::new(crate::SessionAttachmentStore::new(
         Arc::clone(&handles.attachment_backend),
         Arc::new(crate::attachments::PersistenceManifestAdapter(Arc::clone(
             &store,
         ))),
         session_id.clone(),
-    );
+    ));
+    let turn_id = format!("attachment-turn:{seed}:{session_id}:{head_revision}");
+    let _owner_binding = turn_owned.then(|| facade.bind_turn_scoped(turn_id.clone()));
     let attachment = facade
         .put(
             attachment_bytes(attachment_slot, value),
@@ -153,16 +178,24 @@ async fn commit_with_attachment_refs(
         head_revision,
         ..RuntimeSessionState::default()
     };
-    let operation = crate::OperationId::new(
-        crate::ExecutionScope::runtime_operation(format!(
-            "attachment-conservation:{seed}:{session_id}:{head_revision}"
-        )),
-        "commit-with-attachment-refs",
-    );
+    let operation = if turn_owned {
+        crate::OperationId::turn(&session_id, turn_id, "commit-with-attachment-refs")
+    } else {
+        crate::OperationId::new(
+            crate::ExecutionScope::runtime_operation(format!(
+                "attachment-conservation:{seed}:{session_id}:{head_revision}"
+            )),
+            "commit-with-attachment-refs",
+        )
+    };
     let (commit, _) =
         RuntimeCommit::persisted_state_with_operation_and_staged_usage(&mut state, &[], operation)
             .map_err(|error| error.to_string())?;
-    let commit = commit.with_committed_attachments([attachment.id.clone()]);
+    let commit = if turn_owned {
+        commit
+    } else {
+        commit.with_committed_attachments([attachment.id.clone()])
+    };
     let result = store
         .commit_runtime_state(commit.clone())
         .await
@@ -175,6 +208,15 @@ async fn commit_with_attachment_refs(
             "attachment commit advanced head {head_revision} -> {}",
             result.head_revision
         ));
+    }
+    if turn_owned
+        && store
+            .list_uncommitted(RECONCILE_SQL_SAFE_MAX)
+            .map_err(|error| error.to_string())?
+            .iter()
+            .any(|entry| entry.attachment_id == attachment.id)
+    {
+        return Err("turn commit did not stamp its owner-bound attachment intent".to_string());
     }
 
     model.known_attachment_ids.insert(attachment.id.clone());
@@ -195,6 +237,58 @@ async fn commit_with_attachment_refs(
     Ok(())
 }
 
+async fn put_attachment_intent(
+    handles: &RuntimePersistenceStateMachineHandles,
+    model: &mut ReferenceModel,
+    _shape: &mut RunShape,
+    seed: u64,
+    owner_kind: u8,
+    attachment_slot: u8,
+    value: u8,
+) -> Result<(), String> {
+    model.attachment_session_sequence += 1;
+    let session_id = format!(
+        "runtime-persistence-intent-{seed}-{}",
+        model.attachment_session_sequence
+    );
+    let store = handles
+        .session_factory
+        .create_store(&session_request(&session_id))
+        .await
+        .map_err(|error| error.to_string())?;
+    let facade = Arc::new(crate::SessionAttachmentStore::new(
+        Arc::clone(&handles.attachment_backend),
+        Arc::new(crate::attachments::PersistenceManifestAdapter(store)),
+        session_id,
+    ));
+    let owner_id = format!(
+        "attachment-intent-owner:{seed}:{}",
+        model.attachment_session_sequence
+    );
+    let _owner_binding = match owner_kind % 3 {
+        1 => Some(facade.bind_turn_scoped(owner_id)),
+        2 => Some(facade.bind_process_scoped(owner_id)),
+        _ => None,
+    };
+    let attachment = facade
+        .put(
+            attachment_bytes(attachment_slot, value),
+            attachment_meta(attachment_slot, value)?,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    model.known_attachment_ids.insert(attachment.id.clone());
+    let remains_live = match owner_kind % 3 {
+        1 => true,
+        2 => !handles.process_owner_liveness_wired,
+        _ => false,
+    };
+    if remains_live {
+        model.live_uncommitted_attachment_refs.insert(attachment.id);
+    }
+    Ok(())
+}
+
 async fn replay_attachment_commit(
     handles: &RuntimePersistenceStateMachineHandles,
     model: &ReferenceModel,
@@ -208,7 +302,7 @@ async fn replay_attachment_commit(
     let session = &model.attachment_sessions[index];
     let before = handles
         .session_factory
-        .live_attachment_refs(RECONCILE_ALL_UNCOMMITTED)
+        .live_attachment_refs(RECONCILE_SQL_SAFE_MAX)
         .await
         .map_err(|error| error.to_string())?;
     let result = open_session(handles, &session.session_id)
@@ -224,7 +318,7 @@ async fn replay_attachment_commit(
     }
     let after = handles
         .session_factory
-        .live_attachment_refs(RECONCILE_ALL_UNCOMMITTED)
+        .live_attachment_refs(RECONCILE_SQL_SAFE_MAX)
         .await
         .map_err(|error| error.to_string())?;
     if after != before {
@@ -261,7 +355,7 @@ async fn probe_attachment_gc(
     let expected = expected_live_refs(model);
     let roots = handles
         .session_factory
-        .live_attachment_refs(RECONCILE_ALL_UNCOMMITTED)
+        .live_attachment_refs(RECONCILE_SQL_SAFE_MAX)
         .await
         .map_err(|error| error.to_string())?;
     if !expected.is_empty() && roots.is_empty() {
@@ -312,7 +406,7 @@ pub(super) async fn assert_attachment_conservation(
     let expected = expected_live_refs(model);
     let actual = handles
         .session_factory
-        .live_attachment_refs(RECONCILE_ALL_UNCOMMITTED)
+        .live_attachment_refs(RECONCILE_SQL_SAFE_MAX)
         .await
         .map_err(|error| error.to_string())?;
     if !expected.is_empty() && actual.is_empty() {
@@ -330,7 +424,7 @@ pub(super) async fn assert_attachment_conservation(
         let expected_live = expected.contains(attachment_id);
         let targeted = handles
             .session_factory
-            .has_live_attachment_ref(attachment_id, RECONCILE_ALL_UNCOMMITTED)
+            .has_live_attachment_ref(attachment_id, RECONCILE_SQL_SAFE_MAX)
             .await
             .map_err(|error| error.to_string())?;
         if targeted != expected_live {
@@ -354,11 +448,13 @@ pub(super) async fn assert_attachment_conservation(
 }
 
 fn expected_live_refs(model: &ReferenceModel) -> BTreeSet<crate::AttachmentId> {
-    model
+    let mut refs: BTreeSet<_> = model
         .attachment_sessions
         .iter()
         .flat_map(|session| session.committed_refs.iter().cloned())
-        .collect()
+        .collect();
+    refs.extend(model.live_uncommitted_attachment_refs.iter().cloned());
+    refs
 }
 
 async fn open_session(

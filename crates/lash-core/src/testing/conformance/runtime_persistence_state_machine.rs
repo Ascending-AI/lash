@@ -91,6 +91,13 @@ pub enum RuntimePersistenceOp {
         session_selection: u8,
         attachment_slot: u8,
         value: u8,
+        #[serde(default)]
+        turn_owned: bool,
+    },
+    PutAttachmentIntent {
+        owner_kind: u8,
+        attachment_slot: u8,
+        value: u8,
     },
     ReplayAttachmentCommit {
         selection: u8,
@@ -162,6 +169,7 @@ struct ReferenceModel {
     last_usage_commit: Option<RuntimeCommit>,
     attachment_sessions: Vec<attachment_conservation::ModeledAttachmentSession>,
     known_attachment_ids: BTreeSet<crate::AttachmentId>,
+    live_uncommitted_attachment_refs: BTreeSet<crate::AttachmentId>,
     attachment_session_sequence: u64,
     operation_sequence: u64,
 }
@@ -714,6 +722,7 @@ async fn apply_operation(
         ConfirmUsage { selection } => confirm_usage(model, shape, *selection)?,
         ReplayUsageReceipt => replay_usage_receipt(store, model, shape).await?,
         attachment_operation @ (CommitWithAttachmentRefs { .. }
+        | PutAttachmentIntent { .. }
         | ReplayAttachmentCommit { .. }
         | ReclaimAttachmentSession { .. }
         | ProbeAttachmentGc) => {

@@ -293,9 +293,17 @@ async fn sqlite_runtime_persistence_state_machine_properties() {
         let dirs = Arc::clone(&dirs);
         async move {
             let dir = tempfile::tempdir().expect("runtime-persistence property tempdir");
+            let process_registry_path = dir.path().join("processes.db");
+            SqliteProcessRegistry::open(&process_registry_path, dir.path().join("sessions"))
+                .await
+                .expect("open property process registry");
             let handles =
                 lash_core::testing::conformance::RuntimePersistenceStateMachineHandles::create(
-                    Arc::new(SqliteSessionStoreFactory::new(dir.path())),
+                    Arc::new(SqliteSessionStoreFactory::new_with_process_registry(
+                        dir.path(),
+                        process_registry_path,
+                    )),
+                    true,
                 )
                 .await
                 .expect("create SQLite runtime-persistence property handles");

@@ -65,5 +65,32 @@
       { "op": "record_usage", "slot": 0, "value": 7 },
       { "op": "stage_usage", "replay_last_commit": true }
     ]
+  },
+  {
+    "seed": 921,
+    "operations": [
+      {
+        "op": "commit_with_attachment_refs",
+        "new_session": true,
+        "session_selection": 0,
+        "attachment_slot": 0,
+        "value": 0,
+        "turn_owned": false
+      }
+    ]
+  },
+  {
+    "seed": 922,
+    "operations": [
+      {
+        "op": "commit_with_attachment_refs",
+        "new_session": true,
+        "session_selection": 0,
+        "attachment_slot": 2,
+        "value": 2,
+        "turn_owned": false
+      },
+      { "op": "reclaim_attachment_session", "selection": 0 }
+    ]
   }
 ]

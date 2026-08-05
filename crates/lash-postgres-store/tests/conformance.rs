@@ -1588,6 +1588,7 @@ async fn postgres_runtime_persistence_state_machine_properties_when_configured()
             reset(&storage).await;
             lash_core::testing::conformance::RuntimePersistenceStateMachineHandles::create(
                 Arc::new(storage.session_store_factory_with_shared_process_registry()),
+                true,
             )
             .await
             .expect("create Postgres runtime-persistence property handles")
