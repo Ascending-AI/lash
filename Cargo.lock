@@ -974,7 +974,6 @@ dependencies = [
  "lash-runtime",
  "lash-s3-store",
  "lash-sqlite-store",
- "lash-standard-plugins",
  "lash-subagents",
  "lashlang",
  "schemars",
@@ -2081,7 +2080,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -2093,7 +2091,6 @@ dependencies = [
  "lash-lashlang-runtime",
  "lash-tool-support",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -2246,7 +2243,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]
@@ -2359,7 +2355,6 @@ dependencies = [
  "futures-util",
  "lash-core",
  "object_store",
- "serde_json",
  "tokio",
  "url",
 ]
@@ -2414,7 +2409,6 @@ name = "lash-sqlite-store"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
- "chrono",
  "flate2",
  "futures-executor",
  "hmac",

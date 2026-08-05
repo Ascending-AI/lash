@@ -28,7 +28,6 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 schemars = { workspace = true, features = ["derive"] }
 tracing = { workspace = true }
-uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 lash-core = { workspace = true, features = ["testing"] }

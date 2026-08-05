@@ -256,7 +256,7 @@ let core = lash::LashCore::rlm_builder(factory)
         <div class="section" id="mcp-servers">
           <div class="section-header">
             <h2>MCP Servers</h2>
-            <p><code>lash-plugin-mcp</code> wraps the <code>rmcp</code> SDK with three transports: <code>stdio</code>, <code>streamable_http</code>, <code>sse</code>. The plugin keeps a shared connection pool; stdio servers spawn once per process, not per session.</p>
+            <p><code>lash-plugin-mcp</code> wraps the <code>rmcp</code> SDK with two transports: <code>stdio</code> and <code>streamable_http</code>. SSE-capable servers are reached through <code>streamable_http</code>, which negotiates SSE responses itself. The plugin keeps a shared connection pool; stdio servers spawn once per process, not per session.</p>
           </div>
           <pre data-lang="rust" data-snippet="embedding_advanced#mcp-core"><code>use std::collections::BTreeMap;
 

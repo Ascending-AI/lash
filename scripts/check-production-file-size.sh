@@ -37,7 +37,6 @@ declare -A allowlist=(
   ["crates/lash-restate/src/lib.rs"]="Restate durable-execution backend adapter"
   ["crates/lash-remote-protocol/src/core_conversions/processes.rs"]="process DTO <-> core conversions"
   ["crates/lash-core/src/runtime/turn_loop.rs"]="core runtime turn loop"
-  ["crates/lash-core/src/tool_provider.rs"]="core tool-provider surface"
   ["crates/lash-perf/src/runtime_perf/providers.rs"]="dev-only runtime perf provider harness"
   ["runbooks/restate-postgres-workers/src/bin/runner.rs"]="distributed-workers e2e runner binary"
   ["crates/lash-restate/src/tests.rs"]="Restate backend test suite"

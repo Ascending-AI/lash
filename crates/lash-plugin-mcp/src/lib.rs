@@ -8,8 +8,9 @@
 //!
 //! Supported transports (selected per server via the `transport` field):
 //! - `stdio` — spawn a child process and speak JSON-RPC over its pipes.
-//! - `streamable_http` — HTTP/JSON streaming transport (newer MCP spec).
-//! - `sse` — older HTTP+SSE transport.
+//! - `streamable_http` — HTTP/JSON streaming transport (newer MCP spec). This
+//!   is also how SSE-capable servers are reached: the current MCP HTTP
+//!   transport negotiates SSE responses itself.
 //!
 //! Implementation note: the wire-level client is provided by the official
 //! [`rmcp`] SDK. The plugin owns a single connection pool (`McpConnectionPool`)

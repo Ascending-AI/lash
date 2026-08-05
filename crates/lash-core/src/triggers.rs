@@ -277,16 +277,6 @@ pub struct TriggerOccurrenceFilter {
 }
 
 impl TriggerOccurrenceFilter {
-    /// Constructs a `TriggerOccurrenceFilter` using for source semantics for store and
-    /// durable-substrate implementors while persisting trigger subscriptions and occurrences.
-    pub fn for_source(source_type: impl Into<String>, source_key: impl Into<String>) -> Self {
-        Self {
-            source_type: Some(source_type.into()),
-            source_key: Some(source_key.into()),
-            ..Self::default()
-        }
-    }
-
     /// Applies every populated occurrence filter conjunctively for trigger-store and conformance
     /// implementors; occurrence time uses a half-open `[start, end)` range.
     pub fn matches(&self, record: &TriggerOccurrenceRecord) -> bool {
