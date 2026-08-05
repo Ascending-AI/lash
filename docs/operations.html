@@ -52,7 +52,7 @@
         </div>
         <div class="listing__row">
           <div class="listing__label">Restate-backed durable tier</div>
-          <div class="listing__body"><p>Turns run under a workflow engine with <code>RestateRuntimeEffectController</code>, so a crash reruns the handler and replays effect outcomes before the final commit. Long turns and background processes survive worker loss. See <a href="./architecture/durability.html">durability and replay</a>.</p></div>
+          <div class="listing__body"><p>Turns run under a workflow engine with <code>RestateRuntimeEffectController</code>, so a crash reruns the handler and replays effect outcomes before the Committed Turn. Long turns and background processes survive worker loss. See <a href="./architecture/durability.html">durability and replay</a>.</p></div>
         </div>
       </div>
     </div>
@@ -93,7 +93,7 @@ let session = core
       </aside>
       <aside class="gotcha">
         <strong>Version 24 host migration</strong>
-        <p>Deploy the fresh database, protocol 24 hosts, and the new identity code together. Drain and purge pre-cutover Restate invocations, then recreate <code>LashDurableWaitIndex</code> and <code>LashDurableWaitWorkflow</code> state. The adapter's epoch gate rejects old state only on a path that executes after deployment; a fully parked v2 invocation executes no new code, is unreachable by v3 resolutions, and never self-terminates, so the documented drain/purge is its only remedy. Every <code>ProcessInput::SessionTurn</code> now needs a non-empty caller-owned <code>definition_key</code>. Rotate it whenever <code>create_request</code>, <code>turn_input</code>, or the output contract changes; failing to rotate is a deliberate false merge, so otherwise make the process id unique per definition. Direct LLM requests need a non-empty, per-logical-call <code>request_id</code>. Unkeyed <code>DirectRequest</code> calls require deterministic call order on redrive, and concurrent calls sharing a causal lane and usage source require distinct replay keys; lifecycle hooks should use distinct usage sources and key any fan-out explicitly. Lifecycle-hook failures are host-visible: pre-commit failures appear as turn issues, and post-persist failures are added to the returned turn without rolling back its durable commit.</p>
+        <p>Deploy the fresh database, protocol 24 hosts, and the new identity code together. Drain and purge pre-cutover Restate invocations, then recreate <code>LashDurableWaitIndex</code> and <code>LashDurableWaitWorkflow</code> state. The adapter's epoch gate rejects old state only on a path that executes after deployment; a fully parked v2 invocation executes no new code, is unreachable by v3 resolutions, and never self-terminates, so the documented drain/purge is its only remedy. Every <code>ProcessInput::SessionTurn</code> now needs a non-empty caller-owned <code>definition_key</code>. Rotate it whenever <code>create_request</code>, <code>turn_input</code>, or the output contract changes; failing to rotate is a deliberate false merge, so otherwise make the process id unique per definition. Direct LLM requests need a non-empty, per-logical-call <code>request_id</code>. Unkeyed <code>DirectRequest</code> calls require deterministic call order on redrive, and concurrent calls sharing a causal lane and usage source require distinct replay keys; lifecycle hooks should use distinct usage sources and key any fan-out explicitly. Lifecycle-hook failures are host-visible: Prepared Turn failures appear as turn issues, and Post-Commit Delivery failures are added to the returned Committed Turn without rolling back its durable state.</p>
         <p><code>LashRuntime::update_session_config</code> and the five prompt helpers <code>set_prompt_template</code>, <code>clear_prompt_template</code>, <code>add_prompt_contribution</code>, <code>replace_prompt_slot</code>, and <code>clear_prompt_slot</code> now return <code>Result&lt;(), SessionError&gt;</code>. This is a source break for hosts that drive <code>LashRuntime</code> directly.</p>
       </aside>
       <p>Mid-incident that reads smaller than it is. Once the stores are recreated, redeploying the previous image does not bring the service back. It fails at store open with a schema-version mismatch and never serves a request. <strong>That is the policy working, not a second outage.</strong> The old binary cannot read the new schema, and lash refuses the open rather than writing into rows it does not understand. So plan the bump such that forward is the only direction you need: know before the deploy whether the new version requires recreation, keep its image and configuration ready to redeploy, and treat "roll back the deployment" as unavailable from the moment the first store is recreated.</p>
@@ -477,7 +477,7 @@ Ok(())</code></pre>
         </div>
         <div class="listing__row">
           <div class="listing__label">resident reload</div>
-          <div class="listing__body"><p>A post-commit delivery failure returns the committed turn with a non-retryable issue and invalidates live plugin/protocol state. Every later resident-state consumer reloads the durable head before use. If restore fails deterministically, each attempt returns <code>resident_session_reload_failed</code> until the cause is repaired and reload succeeds; cold-opening a new handle from the durable state is the alternative recovery path.</p></div>
+          <div class="listing__body"><p>A Post-Commit Delivery failure returns the Committed Turn with a non-retryable issue and invalidates live plugin/protocol state. Later asynchronous consumers reload the durable head before use; synchronous accessors cannot await and refuse invalidated state while pointing at the same reload decision identity. Within one Post-Commit Delivery phase, an earlier failure invalidates the session immediately, so any later <code>TurnPersisted</code> hook delivery is skipped rather than running against suspect resident state. If restore fails deterministically, each attempt returns <code>resident_session_reload_failed</code> until the cause is repaired and reload succeeds; cold-opening a new handle from the durable state is the alternative recovery path.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">provider failures</div>
@@ -514,7 +514,7 @@ Ok(())</code></pre>
       </div>
       <pre data-lang="rust" data-snippet="operations#monitoring"><code>// Per-turn timing, straight off the runtime clock.
 let started_at = output.result.started_at(); // SystemTime the turn was claimed
-let elapsed = output.result.duration(); // claim -&gt; commit + post-persist hooks
+let elapsed = output.result.duration(); // claim -&gt; Committed Turn + Post-Commit Delivery
 let _ = (started_at, elapsed);
 
 // Cumulative token usage for the session, split by source and by model.
@@ -523,7 +523,7 @@ let _ = (usage.entry_count, usage.usage);</code></pre>
       <div class="listing">
         <div class="listing__row">
           <div class="listing__label">timing</div>
-          <div class="listing__body"><p><code>TurnResult::started_at</code> is the wall-clock instant the runtime claimed the turn; <code>TurnResult::duration</code> is the whole-turn window (claim through final commit and post-persist hooks) on the runtime clock's monotonic source. Export both as request latency.</p></div>
+          <div class="listing__body"><p><code>TurnResult::started_at</code> is the wall-clock instant the runtime claimed the turn; <code>TurnResult::duration</code> is the whole-turn window (claim through Committed Turn adoption and Post-Commit Delivery) on the runtime clock's monotonic source. Export both as request latency.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">usage</div>

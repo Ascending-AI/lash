@@ -26,6 +26,7 @@ impl LashRuntime {
         &self,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
         if !self.resident_session_state_valid {
+            self.trace_synchronous_resident_state_refusal("active_tool_catalog_shared");
             return Err(crate::PluginError::Session(
                 "resident session state is invalidated; durable reload is required".to_string(),
             ));
@@ -38,6 +39,7 @@ impl LashRuntime {
 
     pub fn tool_state(&self) -> Result<crate::ToolState, SessionError> {
         if !self.resident_session_state_valid {
+            self.trace_synchronous_resident_state_refusal("tool_state");
             return Err(SessionError::Protocol(
                 "resident session state is invalidated; durable reload is required".to_string(),
             ));
@@ -84,6 +86,7 @@ impl LashRuntime {
         is_root_session: bool,
     ) -> Result<(), crate::PluginError> {
         if !self.resident_session_state_valid {
+            self.trace_synchronous_resident_state_refusal("configure_protocol_on_materialize");
             return Err(crate::PluginError::Session(
                 "resident session state is invalidated; durable reload is required".to_string(),
             ));
@@ -132,10 +135,6 @@ impl LashRuntime {
         state: RuntimeSessionState,
     ) -> Result<(), SessionError> {
         self.set_persisted_state(state)
-    }
-
-    pub(crate) fn export_graph_first_state(&self) -> RuntimeSessionState {
-        self.state.clone()
     }
 
     /// Export a persistence-ready state envelope with dynamic/plugin snapshots
@@ -219,6 +218,7 @@ impl LashRuntime {
         &self,
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
         if !self.resident_session_state_valid {
+            self.trace_synchronous_resident_state_refusal("runtime_session_services");
             return Err(PluginOperationInvokeError::Unknown(
                 "resident session state is invalidated; durable reload is required".to_string(),
             ));
@@ -309,9 +309,11 @@ impl LashRuntime {
 
     /// The plugin session bound to the currently active runtime session, if any.
     pub fn plugin_session(&self) -> Option<Arc<crate::PluginSession>> {
-        self.resident_session_state_valid
-            .then(|| self.session.as_ref().map(|s| Arc::clone(s.plugins())))
-            .flatten()
+        if !self.resident_session_state_valid {
+            self.trace_synchronous_resident_state_refusal("plugin_session");
+            return None;
+        }
+        self.session.as_ref().map(|s| Arc::clone(s.plugins()))
     }
 
     pub async fn open_agent_frame(

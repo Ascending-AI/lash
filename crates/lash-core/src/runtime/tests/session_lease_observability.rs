@@ -19,13 +19,13 @@ use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::{Layer, Registry};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct CapturedEvent {
+pub(super) struct CapturedEvent {
     level: String,
     fields: BTreeMap<String, String>,
 }
 
 impl CapturedEvent {
-    fn field(&self, name: &str) -> &str {
+    pub(super) fn field(&self, name: &str) -> &str {
         self.fields
             .get(name)
             .map(String::as_str)
@@ -34,13 +34,13 @@ impl CapturedEvent {
 }
 
 #[derive(Clone, Default)]
-struct EventCapture {
+pub(super) struct EventCapture {
     events: Arc<Mutex<Vec<CapturedEvent>>>,
 }
 
 impl EventCapture {
     /// Every captured event whose `event` field names this lease transition.
-    fn named(&self, event: &str) -> Vec<CapturedEvent> {
+    pub(super) fn named(&self, event: &str) -> Vec<CapturedEvent> {
         self.events
             .lock()
             .expect("lock captured events")
@@ -50,7 +50,7 @@ impl EventCapture {
             .collect()
     }
 
-    fn exactly_one(&self, event: &str) -> CapturedEvent {
+    pub(super) fn exactly_one(&self, event: &str) -> CapturedEvent {
         let matched = self.named(event);
         assert_eq!(
             matched.len(),
@@ -108,7 +108,7 @@ impl<S: tracing::Subscriber> Layer<S> for EventCapture {
 ///
 /// `#[tokio::test]` builds a current-thread runtime, so the lease renewal task
 /// is polled on this same thread and its events land in the same capture.
-async fn capturing<F, Fut, T>(body: F) -> (T, EventCapture)
+pub(super) async fn capturing<F, Fut, T>(body: F) -> (T, EventCapture)
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = T>,

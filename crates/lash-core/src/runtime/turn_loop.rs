@@ -439,6 +439,13 @@ impl Drop for TurnDriverSessionLoan<'_, '_> {
 
 impl LashRuntime {
     pub(super) fn invalidate_resident_session_state(&mut self) {
+        if self.resident_session_state_valid {
+            self.resident_session_reload_decision_id = Some(format!(
+                "resident-session-reload:{}:{}",
+                self.state.session_id,
+                uuid::Uuid::new_v4()
+            ));
+        }
         self.resident_session_state_valid = false;
         self.graph_loaded_from_store = false;
         self.last_committed_lease_continuity = None;
@@ -448,96 +455,230 @@ impl LashRuntime {
         }
     }
 
+    pub(super) fn trace_synchronous_resident_state_refusal(&self, consumer: &'static str) {
+        tracing::info!(
+            event = "resident_session_state.sync_refusal",
+            decision_id = self
+                .resident_session_reload_decision_id
+                .as_deref()
+                .unwrap_or("resident-session-reload:missing"),
+            session_id = %self.state.session_id,
+            consumer,
+            consulted_validity = self.resident_session_state_valid,
+            outcome = "refused",
+            error_classification = RuntimeErrorCode::ResidentSessionReloadFailed.as_str(),
+            "synchronous resident-state consumer refused invalidated state"
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn trace_resident_session_reload_decision(
+        &self,
+        decision_id: &str,
+        consulted_validity: bool,
+        durable_source: &'static str,
+        resident_head_revision: u64,
+        durable_head_freshness: &'static str,
+        durable_head_revision: u64,
+        failing_restore_stage: &'static str,
+        outcome: &'static str,
+        error_classification: &str,
+    ) {
+        tracing::info!(
+            event = "resident_session_state.reload_decision",
+            decision_id,
+            session_id = %self.state.session_id,
+            consulted_validity,
+            durable_source,
+            resident_head_revision,
+            durable_head_freshness,
+            durable_head_revision,
+            failing_restore_stage,
+            outcome,
+            error_classification,
+            "resident-state reload gate decided"
+        );
+    }
+
     pub(super) async fn reload_invalidated_resident_session_state(
         &mut self,
     ) -> Result<(), RuntimeError> {
         if self.resident_session_state_valid {
+            self.trace_resident_session_reload_decision(
+                "resident-session-reload:not-required",
+                true,
+                "not_consulted",
+                self.state.head_revision,
+                "current_resident_state",
+                self.state.head_revision,
+                "none",
+                "not_required",
+                "none",
+            );
             return Ok(());
         }
 
+        let decision_id = self
+            .resident_session_reload_decision_id
+            .clone()
+            .unwrap_or_else(|| "resident-session-reload:missing".to_string());
+        let resident_head_revision = self.state.head_revision;
         let store = self
             .session
             .as_ref()
             .and_then(|session| session.history_store());
+        let durable_source = if store.is_some() {
+            "history_store"
+        } else {
+            "resident_snapshot"
+        };
+        let mut durable_head_freshness = if store.is_some() {
+            "refresh_pending"
+        } else {
+            "store_unavailable"
+        };
         let mut durable_state = self.state.clone();
-        if let Some(store) = store.as_ref() {
-            crate::store::refresh_persisted_session_state(store.as_ref(), &mut durable_state)
-                .await
-                .map_err(|err| {
+        let mut durable_head_revision = durable_state.head_revision;
+        let reload_result: Result<(), (&'static str, RuntimeError)> = async {
+            if let Some(store) = store.as_ref() {
+                crate::store::refresh_persisted_session_state(store.as_ref(), &mut durable_state)
+                    .await
+                    .map_err(|err| {
+                        (
+                            "durable_head_refresh",
+                            RuntimeError::new(
+                                RuntimeErrorCode::ResidentSessionReloadFailed,
+                                format!(
+                                    "failed to reload invalidated resident session state: {err}"
+                                ),
+                            ),
+                        )
+                    })?;
+                durable_head_freshness = "reloaded_from_store";
+                durable_head_revision = durable_state.head_revision;
+            }
+
+            let session = self.session.as_mut().ok_or_else(|| {
+                (
+                    "session_availability",
                     RuntimeError::new(
                         RuntimeErrorCode::ResidentSessionReloadFailed,
-                        format!("failed to reload invalidated resident session state: {err}"),
-                    )
-                })?;
-        }
-
-        let session = self.session.as_mut().ok_or_else(|| {
-            RuntimeError::new(
-                RuntimeErrorCode::ResidentSessionReloadFailed,
-                "runtime session is unavailable while reloading invalidated resident state",
-            )
-        })?;
-        session.invalidate_runtime_caches();
-        if let Some(tool_state) = durable_state.tool_state_snapshot.clone() {
-            session
-                .plugins()
-                .tool_registry()
-                .restore_state(tool_state)
-                .map_err(|err| {
+                        "runtime session is unavailable while reloading invalidated resident state",
+                    ),
+                )
+            })?;
+            session.invalidate_runtime_caches();
+            if let Some(tool_state) = durable_state.tool_state_snapshot.clone() {
+                session
+                    .plugins()
+                    .tool_registry()
+                    .restore_state(tool_state)
+                    .map_err(|err| {
+                        (
+                            "tool_state_restore",
+                            RuntimeError::new(
+                                RuntimeErrorCode::ResidentSessionReloadFailed,
+                                err.to_string(),
+                            ),
+                        )
+                    })?;
+            }
+            session.refresh_tool_catalog().await.map_err(|err| {
+                (
+                    "tool_catalog_refresh",
                     RuntimeError::new(
                         RuntimeErrorCode::ResidentSessionReloadFailed,
                         err.to_string(),
+                    ),
+                )
+            })?;
+            if let Some(snapshot) = durable_state.plugin_snapshot.as_ref() {
+                session.plugins().restore(snapshot).map_err(|err| {
+                    (
+                        "plugin_snapshot_restore",
+                        RuntimeError::new(
+                            RuntimeErrorCode::ResidentSessionReloadFailed,
+                            err.to_string(),
+                        ),
                     )
                 })?;
-        }
-        session.refresh_tool_catalog().await.map_err(|err| {
-            RuntimeError::new(
-                RuntimeErrorCode::ResidentSessionReloadFailed,
-                err.to_string(),
-            )
-        })?;
-        if let Some(snapshot) = durable_state.plugin_snapshot.as_ref() {
-            session.plugins().restore(snapshot).map_err(|err| {
-                RuntimeError::new(
-                    RuntimeErrorCode::ResidentSessionReloadFailed,
-                    err.to_string(),
+            }
+            let protocol_session = Arc::clone(session.plugins().protocol_session());
+            let session_id = durable_state.session_id.clone();
+            protocol_session
+                .restore_session(
+                    crate::plugin::ProtocolSessionContext::new(session, &session_id),
+                    &durable_state,
                 )
-            })?;
-        }
-        let protocol_session = Arc::clone(session.plugins().protocol_session());
-        let session_id = durable_state.session_id.clone();
-        protocol_session
-            .restore_session(
-                crate::plugin::ProtocolSessionContext::new(session, &session_id),
-                &durable_state,
-            )
-            .await
-            .map_err(|err| {
-                RuntimeError::new(
-                    RuntimeErrorCode::ResidentSessionReloadFailed,
-                    err.to_string(),
-                )
-            })?;
+                .await
+                .map_err(|err| {
+                    (
+                        "protocol_session_restore",
+                        RuntimeError::new(
+                            RuntimeErrorCode::ResidentSessionReloadFailed,
+                            err.to_string(),
+                        ),
+                    )
+                })?;
 
-        durable_state.discard_runtime_snapshots();
-        session
-            .plugins()
-            .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(
-                crate::SessionReadView::from_persisted_state(&durable_state),
-            ))
-            .await
-            .map_err(|err| {
-                RuntimeError::new(
-                    RuntimeErrorCode::ResidentSessionReloadFailed,
-                    err.to_string(),
-                )
-            })?;
-        self.policy = durable_state.effective_policy().clone();
-        self.protocol_turn_options = durable_state.effective_protocol_turn_options().clone();
-        self.state = durable_state;
-        self.graph_loaded_from_store = false;
-        self.resident_session_state_valid = true;
-        Ok(())
+            durable_state.discard_runtime_snapshots();
+            session
+                .plugins()
+                .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(
+                    crate::SessionReadView::from_persisted_state(&durable_state),
+                ))
+                .await
+                .map_err(|err| {
+                    (
+                        "session_restored_hook",
+                        RuntimeError::new(
+                            RuntimeErrorCode::ResidentSessionReloadFailed,
+                            err.to_string(),
+                        ),
+                    )
+                })?;
+            self.policy = durable_state.effective_policy().clone();
+            self.protocol_turn_options = durable_state.effective_protocol_turn_options().clone();
+            self.state = durable_state;
+            self.graph_loaded_from_store = false;
+            self.resident_session_state_valid = true;
+            Ok(())
+        }
+        .await;
+
+        match reload_result {
+            Ok(()) => {
+                self.trace_resident_session_reload_decision(
+                    &decision_id,
+                    false,
+                    durable_source,
+                    resident_head_revision,
+                    durable_head_freshness,
+                    durable_head_revision,
+                    "none",
+                    "restored",
+                    "none",
+                );
+                Ok(())
+            }
+            Err((failing_restore_stage, err)) => {
+                if failing_restore_stage == "durable_head_refresh" {
+                    durable_head_freshness = "refresh_failed";
+                }
+                self.trace_resident_session_reload_decision(
+                    &decision_id,
+                    false,
+                    durable_source,
+                    resident_head_revision,
+                    durable_head_freshness,
+                    durable_head_revision,
+                    failing_restore_stage,
+                    "denied",
+                    err.code.as_str(),
+                );
+                Err(err)
+            }
+        }
     }
 
     pub(super) async fn reload_invalidated_resident_session_state_for_session(
@@ -1157,7 +1298,7 @@ impl LashRuntime {
             self.state.turn_scope(&trace_turn_id),
         );
         turn_pipeline.apply_prepared_messages(&messages);
-        Box::pin(self.finish_turn(
+        let finish_result = Box::pin(self.finish_turn(
             TurnFinishInput {
                 turn_pipeline,
                 assembler,
@@ -1177,7 +1318,14 @@ impl LashRuntime {
             SessionExecutionLeaseReleasePolicy::KeepOnAgentFrameSwitch,
             &turn_control,
         ))
-        .await
+        .await;
+        if let Err(err) = &finish_result {
+            self.abandon_queued_work_claims_after_local_abort(err, &claims.queued)
+                .await;
+            self.abandon_turn_input_claims_after_local_abort(err, &claims.turn_inputs)
+                .await;
+        }
+        finish_result
     }
 
     async fn emit_turn_persisted_event(

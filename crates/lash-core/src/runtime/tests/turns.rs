@@ -35,6 +35,12 @@ struct FailCaptureAfterFirstCommittedTurn {
     committed_turns: AtomicUsize,
 }
 
+struct FailCaptureAfterCommittedTurns {
+    executor: Arc<FailingCaptureExecutor>,
+    committed_turns: AtomicUsize,
+    fail_after: usize,
+}
+
 struct FailCaptureAfterEffectLoop {
     executor: Arc<FailingCaptureExecutor>,
 }
@@ -56,6 +62,19 @@ impl crate::runtime::RuntimeTurnPhaseProbe for FailCaptureAfterFirstCommittedTur
     fn end(&self, phase: crate::runtime::RuntimeTurnPhase) {
         if phase == crate::runtime::RuntimeTurnPhase::CommittedTurn
             && self.committed_turns.fetch_add(1, Ordering::SeqCst) == 0
+        {
+            self.executor.dirty.store(true, Ordering::SeqCst);
+            self.executor.fail_capture.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+impl crate::runtime::RuntimeTurnPhaseProbe for FailCaptureAfterCommittedTurns {
+    fn begin(&self, _phase: crate::runtime::RuntimeTurnPhase) {}
+
+    fn end(&self, phase: crate::runtime::RuntimeTurnPhase) {
+        if phase == crate::runtime::RuntimeTurnPhase::CommittedTurn
+            && self.committed_turns.fetch_add(1, Ordering::SeqCst) + 1 == self.fail_after
         {
             self.executor.dirty.store(true, Ordering::SeqCst);
             self.executor.fail_capture.store(true, Ordering::SeqCst);
@@ -486,13 +505,78 @@ async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reload() {
         .expect("committed session");
     assert_eq!(durable.head_revision, 1);
 
-    let exported = runtime
-        .export_persisted_state()
-        .await
-        .expect("persisted export reloads before capturing invalidated live state");
+    let ((refusal, reload_error, exported), capture) =
+        super::session_lease_observability::capturing(|| async {
+            let refusal = runtime
+                .tool_state()
+                .expect_err("a synchronous accessor refuses invalidated resident state");
+            protocol.fail_next.store(true, Ordering::SeqCst);
+            let reload_error = runtime
+                .export_persisted_state()
+                .await
+                .expect_err("the injected protocol restore fault denies reload");
+            let exported = runtime
+                .export_persisted_state()
+                .await
+                .expect("persisted export retries reload from the durable head");
+            (refusal, reload_error, exported)
+        })
+        .await;
+    assert!(refusal.to_string().contains("durable reload is required"));
+    assert_eq!(
+        reload_error.code,
+        crate::RuntimeErrorCode::ResidentSessionReloadFailed
+    );
     assert_eq!(exported.head_revision, 1);
     assert!(runtime.resident_session_state_valid);
-    assert_eq!(protocol.restore_count.load(Ordering::SeqCst), 3);
+    assert_eq!(protocol.restore_count.load(Ordering::SeqCst), 4);
+
+    let refusal_event = capture.exactly_one("resident_session_state.sync_refusal");
+    assert_eq!(refusal_event.field("consumer"), "tool_state");
+    assert_eq!(refusal_event.field("consulted_validity"), "false");
+    assert_eq!(refusal_event.field("outcome"), "refused");
+    assert_eq!(
+        refusal_event.field("error_classification"),
+        "resident_session_reload_failed"
+    );
+    let reload_decisions = capture.named("resident_session_state.reload_decision");
+    assert_eq!(
+        reload_decisions.len(),
+        2,
+        "one decision event is required for each reload attempt"
+    );
+    let denied = &reload_decisions[0];
+    assert_eq!(denied.field("consulted_validity"), "false");
+    assert_eq!(denied.field("durable_source"), "history_store");
+    assert_eq!(
+        denied.field("durable_head_freshness"),
+        "reloaded_from_store"
+    );
+    assert_eq!(denied.field("resident_head_revision"), "1");
+    assert_eq!(denied.field("durable_head_revision"), "1");
+    assert_eq!(
+        denied.field("failing_restore_stage"),
+        "protocol_session_restore"
+    );
+    assert_eq!(denied.field("outcome"), "denied");
+    assert_eq!(
+        denied.field("error_classification"),
+        "resident_session_reload_failed"
+    );
+    let restored = &reload_decisions[1];
+    assert_eq!(restored.field("failing_restore_stage"), "none");
+    assert_eq!(restored.field("outcome"), "restored");
+    assert_eq!(restored.field("error_classification"), "none");
+    assert_eq!(
+        refusal_event.field("decision_id"),
+        denied.field("decision_id"),
+        "synchronous refusal must reference the reload decision identity"
+    );
+    assert_eq!(
+        denied.field("decision_id"),
+        restored.field("decision_id"),
+        "retrying one invalidation incident preserves its decision identity"
+    );
 
     let recovered = runtime
         .run_turn_assembled(
@@ -507,7 +591,7 @@ async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reload() {
         "resident state reloaded"
     );
     assert!(runtime.resident_session_state_valid);
-    assert_eq!(protocol.restore_count.load(Ordering::SeqCst), 3);
+    assert_eq!(protocol.restore_count.load(Ordering::SeqCst), 4);
 }
 
 #[tokio::test]
@@ -3870,6 +3954,100 @@ async fn frame_switch_limit_commits_terminal_error_and_settles_claim() {
         inputs
             .iter()
             .all(|input| input.input_id != inbound.input_id)
+    );
+}
+
+#[tokio::test]
+async fn frame_switch_limit_capture_abort_abandons_prompt_claim_before_returning_diagnostic() {
+    let switch_count = crate::runtime::logical_turn::MAX_AGENT_FRAME_SWITCHES;
+    let executor = Arc::new(FailingCaptureExecutor {
+        dirty: AtomicBool::new(false),
+        fail_capture: AtomicBool::new(false),
+        snapshot: std::sync::Mutex::new(Vec::new()),
+        restored: std::sync::Mutex::new(Vec::new()),
+    });
+    let protocol: Arc<dyn crate::plugin::ProtocolSessionPlugin> =
+        Arc::new(RestoreExecutorFromRuntimeState {
+            executor: Arc::clone(&executor),
+        });
+    let code_executor: Arc<dyn crate::plugin::CodeExecutorPlugin> = executor.clone();
+    let protocol_factory = crate::testing::test_standard_protocol_factory_with_runtime_state(
+        protocol,
+        Some(code_executor),
+    );
+    let call_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let captured_call_index = Arc::clone(&call_index);
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |_| {
+            let call_index = Arc::clone(&captured_call_index);
+            async move {
+                let index = call_index.fetch_add(1, Ordering::SeqCst);
+                Ok(LlmResponse {
+                    parts: vec![LlmOutputPart::ToolCall {
+                        call_id: format!("switch-{index}"),
+                        tool_name: format!("terminal_tool_{index}"),
+                        input_json: "{}".to_string(),
+                        replay: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build();
+    let controls = (0..switch_count)
+        .map(|index| crate::ToolControl::SwitchAgentFrame {
+            frame_id: format!("capture-abort-frame-{index}"),
+            initial_nodes: Vec::new(),
+            task: Some(format!("continue capture-abort chain {index}")),
+        })
+        .collect();
+    let store = Arc::new(RecordingStore::default());
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![protocol_factory],
+        Arc::new(TerminalControlTool { controls }),
+        transport,
+        test_host_config(),
+        store.clone() as Arc<dyn crate::RuntimePersistence>,
+    )
+    .await;
+    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
+    runtime.set_turn_phase_probe(Arc::new(FailCaptureAfterCommittedTurns {
+        executor,
+        committed_turns: AtomicUsize::new(0),
+        fail_after: switch_count,
+    }));
+    enqueue_idle_turn_input(store.as_ref(), "root", "start capture-abort chain").await;
+
+    let committed = runtime
+        .stream_next_queued_work(TurnOptions::new(
+            CancellationToken::new(),
+            named_turn_scope("root", "bounded-frame-capture-abort"),
+        ))
+        .await
+        .expect("a failed terminal capture preserves the last committed frame")
+        .expect("the last committed frame is returned");
+
+    assert!(matches!(
+        committed.outcome,
+        TurnOutcome::AgentFrameSwitch { .. }
+    ));
+    assert!(committed.errors.iter().any(|issue| {
+        issue.code.as_deref() == Some("execution_state_capture_failed")
+            && issue.retryable == Some(false)
+    }));
+    assert_eq!(
+        store.abandoned_claim_counts(),
+        (1, 0),
+        "the claimed handoff must pass through ordinary local-abort cleanup"
+    );
+    let queued = store.raw_queued_work_for_testing();
+    assert_eq!(queued.len(), 1, "only the uncommitted handoff remains");
+    assert!(
+        queued[0].1.is_none() && !queued[0].3,
+        "the remaining handoff must have no claim identity or token: {queued:?}"
     );
 }
 

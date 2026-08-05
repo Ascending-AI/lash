@@ -1398,4 +1398,7 @@ pub struct LashRuntime {
     /// The next turn must rebuild all resident/plugin state from the durable
     /// head before it can execute.
     pub(in crate::runtime) resident_session_state_valid: bool,
+    /// Stable identity for the invalidation incident consulted by async reload
+    /// decisions and synchronous refusal gates.
+    pub(in crate::runtime) resident_session_reload_decision_id: Option<String>,
 }
