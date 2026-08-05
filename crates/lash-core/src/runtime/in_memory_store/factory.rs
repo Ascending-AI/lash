@@ -125,6 +125,49 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .map(|store| store as Arc<dyn RuntimePersistence>))
     }
 
+    async fn has_claimable_queued_work(
+        &self,
+        request: &SessionStoreCreateRequest,
+        now_epoch_ms: u64,
+    ) -> Result<Option<bool>, crate::StoreError> {
+        let store = self
+            .stores
+            .lock()
+            .expect("in-memory store factory")
+            .get(&request.session_id)
+            .cloned();
+        let Some(store) = store else {
+            return Ok(Some(false));
+        };
+        // This is a conservative readiness peek, not a claim. A due row with a
+        // same-generation claim may belong to a crashed/live lease holder; it
+        // must keep the driver's bounded contention recheck armed until the
+        // generation becomes reclaimable.
+        if store
+            .queued_work
+            .lock()
+            .expect("lock queued work")
+            .iter()
+            .any(|entry| {
+                entry.batch.session_id == request.session_id
+                    && entry.batch.available_at_ms <= now_epoch_ms
+            })
+        {
+            return Ok(Some(true));
+        }
+        Ok(Some(
+            store
+                .pending_turn_inputs
+                .lock()
+                .expect("lock pending turn input")
+                .iter()
+                .any(|entry| {
+                    entry.input.session_id == request.session_id
+                        && entry.input.state == crate::TurnInputState::DeferredNextTurn
+                }),
+        ))
+    }
+
     async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
         Ok(self
             .deleted_session_ids

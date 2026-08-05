@@ -564,6 +564,45 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         Ok(Some(store as Arc<dyn RuntimePersistence>))
     }
 
+    async fn has_claimable_queued_work(
+        &self,
+        request: &SessionStoreCreateRequest,
+        now_epoch_ms: u64,
+    ) -> Result<Option<bool>, StoreError> {
+        let path = self.catalog_path();
+        if !path.exists() {
+            return Ok(Some(false));
+        }
+        let conn = SqliteConnection::open_readonly(&path)
+            .await
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        let session_id = request.session_id.clone();
+        conn.call(move |conn| {
+            conn.query_row(
+                "SELECT EXISTS(
+                    SELECT 1
+                    FROM queued_work_batches qwb
+                    WHERE qwb.session_id = ?1
+                      AND qwb.available_at_ms <= ?2
+                ) OR EXISTS(
+                    SELECT 1
+                    FROM pending_turn_inputs pti
+                    WHERE pti.session_id = ?1
+                      AND pti.state = ?3
+                )",
+                params![
+                    session_id,
+                    now_epoch_ms as i64,
+                    lash_core::TurnInputState::DeferredNextTurn.as_str()
+                ],
+                |row| row.get(0),
+            )
+        })
+        .await
+        .map(Some)
+        .map_err(sqlite_error)
+    }
+
     async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
         let path = self.catalog_path();
         if !path.exists() {

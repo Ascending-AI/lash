@@ -267,9 +267,13 @@ pub use process_worker::{
     ProcessDrainDeferred, ProcessDrainReport, ProcessExecutionConcurrencyError,
     ProcessRecoveryAttemptDisposition, ProcessRecoveryOperation,
 };
+#[cfg(any(test, feature = "testing"))]
+pub use queued_work_driver::QUEUED_WORK_MAX_TRANSIENT_ATTEMPTS;
 pub use queued_work_driver::{
-    QueuedWorkDriver, QueuedWorkRunError, QueuedWorkRunErrorClass, QueuedWorkRunHandle,
-    QueuedWorkRunRequest, QueuedWorkWakeDisposition, QueuedWorkWakeFailure,
+    DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, QUEUED_WORK_SLOW_WAKE_THRESHOLD, QueuedWorkDriver,
+    QueuedWorkExecutionConcurrencyError, QueuedWorkRunError, QueuedWorkRunErrorClass,
+    QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest, QueuedWorkSlowWake,
+    QueuedWorkWakeContended, QueuedWorkWakeDisposition, QueuedWorkWakeFailure,
 };
 pub use scenario_contracts::{RUNTIME_SCENARIO_CONTRACTS, ScenarioContractSpec};
 pub use session_manager::DirectCompletionClient;
@@ -1286,6 +1290,45 @@ pub trait SessionStoreFactory: Send + Sync {
         _request: &SessionStoreCreateRequest,
     ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, String> {
         Ok(None)
+    }
+
+    /// Cheap durable read used to reject an idle queued-work notification
+    /// before session state, plugins, and a runtime are hydrated.
+    ///
+    /// First-party factories override this at their database seam. `Some`
+    /// reports a known durable answer; `None` means claimability is unknown and
+    /// admits one conservative, successfully completed run. A transiently
+    /// failed pass still receives the driver's finite retry ladder before the
+    /// demand idles. Unknown must hydrate rather than silently strand durable
+    /// work, but it must not become a permanently positive poll after that run
+    /// drains nothing. The fallback never creates a session.
+    async fn has_claimable_queued_work(
+        &self,
+        request: &SessionStoreCreateRequest,
+        now_epoch_ms: u64,
+    ) -> Result<Option<bool>, crate::StoreError> {
+        let Some(store) = self
+            .open_existing_store(request)
+            .await
+            .map_err(crate::StoreError::Backend)?
+        else {
+            return Ok(None);
+        };
+        if store
+            .list_pending_queued_work(&request.session_id)
+            .await?
+            .into_iter()
+            .any(|batch| batch.available_at_ms <= now_epoch_ms)
+        {
+            return Ok(Some(true));
+        }
+        Ok(Some(
+            store
+                .list_pending_turn_inputs(&request.session_id)
+                .await?
+                .into_iter()
+                .any(|input| input.state == crate::TurnInputState::DeferredNextTurn),
+        ))
     }
 
     /// Report whether the permanent host-facing session tombstone exists.

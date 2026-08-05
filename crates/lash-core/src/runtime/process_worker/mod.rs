@@ -310,19 +310,51 @@ struct ProcessExecutionPermit {
     held: std::sync::Mutex<Option<OwnedSemaphorePermit>>,
     reacquire: tokio::sync::Mutex<()>,
     dispatcher_changed: Arc<tokio::sync::Notify>,
+    telemetry: ExecutionPermitTelemetry,
 }
 
+#[derive(Clone, Copy)]
+struct ExecutionPermitTelemetry {
+    reacquire_event: &'static str,
+    semaphore: &'static str,
+}
+
+const PROCESS_EXECUTION_PERMIT_TELEMETRY: ExecutionPermitTelemetry = ExecutionPermitTelemetry {
+    reacquire_event: "process_execution_permit.reacquire",
+    semaphore: "process_execution_semaphore",
+};
+
+const QUEUED_WORK_EXECUTION_PERMIT_TELEMETRY: ExecutionPermitTelemetry = ExecutionPermitTelemetry {
+    reacquire_event: "queued_work_execution_permit.reacquire",
+    semaphore: "queued_work_execution_semaphore",
+};
+
 impl ProcessExecutionPermit {
-    fn new(
+    pub(super) fn new(
         semaphore: Arc<Semaphore>,
         permit: OwnedSemaphorePermit,
         dispatcher_changed: Arc<tokio::sync::Notify>,
+    ) -> Self {
+        Self::new_with_telemetry(
+            semaphore,
+            permit,
+            dispatcher_changed,
+            PROCESS_EXECUTION_PERMIT_TELEMETRY,
+        )
+    }
+
+    fn new_with_telemetry(
+        semaphore: Arc<Semaphore>,
+        permit: OwnedSemaphorePermit,
+        dispatcher_changed: Arc<tokio::sync::Notify>,
+        telemetry: ExecutionPermitTelemetry,
     ) -> Self {
         Self {
             semaphore,
             held: std::sync::Mutex::new(Some(permit)),
             reacquire: tokio::sync::Mutex::new(()),
             dispatcher_changed,
+            telemetry,
         }
     }
 
@@ -337,8 +369,8 @@ impl ProcessExecutionPermit {
                 consulted = "held_permit",
                 gate = "fast_path",
                 outcome = "already_held",
-                event = "process_execution_permit.reacquire",
-                "process execution permit is already held; the run resumes without waiting"
+                event = self.telemetry.reacquire_event,
+                "execution permit is already held; the run resumes without waiting"
             );
             return;
         }
@@ -353,7 +385,7 @@ impl ProcessExecutionPermit {
                 consulted = "held_permit",
                 gate = "reacquire_serialization",
                 outcome = "already_held",
-                event = "process_execution_permit.reacquire",
+                event = self.telemetry.reacquire_event,
                 "another branch of this run reacquired the permit while this one waited"
             );
             return;
@@ -366,20 +398,20 @@ impl ProcessExecutionPermit {
             Ok(permit) => {
                 tracing::debug!(
                     available_permits = self.semaphore.available_permits(),
-                    consulted = "process_execution_semaphore",
+                    consulted = self.telemetry.semaphore,
                     outcome = "immediate",
-                    event = "process_execution_permit.reacquire",
-                    "reacquired the process execution permit without waiting"
+                    event = self.telemetry.reacquire_event,
+                    "reacquired the execution permit without waiting"
                 );
                 permit
             }
             Err(_) => {
                 tracing::debug!(
                     available_permits = 0,
-                    consulted = "process_execution_semaphore",
+                    consulted = self.telemetry.semaphore,
                     outcome = "waiting",
-                    event = "process_execution_permit.reacquire",
-                    "waiting for a process execution permit before resuming the run"
+                    event = self.telemetry.reacquire_event,
+                    "waiting for an execution permit before resuming the run"
                 );
                 Arc::clone(&self.semaphore)
                     .acquire_owned()
@@ -389,10 +421,10 @@ impl ProcessExecutionPermit {
         };
         *self.held.lock().expect("process execution permit lock") = Some(permit);
         tracing::debug!(
-            consulted = "process_execution_semaphore",
+            consulted = self.telemetry.semaphore,
             outcome = "held",
-            event = "process_execution_permit.reacquire",
-            "reacquired the process execution permit"
+            event = self.telemetry.reacquire_event,
+            "reacquired the execution permit"
         );
     }
 
@@ -415,6 +447,43 @@ impl ProcessExecutionPermit {
 
 tokio::task_local! {
     static PROCESS_EXECUTION_PERMIT: Arc<ProcessExecutionPermit>;
+}
+
+/// Run one inline execution under the shared park-aware admission discipline.
+///
+/// Inline process recovery and inline queued-work hydration deliberately share
+/// this scope: the existing turn/process park seams release whichever
+/// reference-substrate slot admitted the logical run. Engine-owned execution
+/// never installs this task local and therefore remains substrate-bounded.
+pub(super) async fn scope_process_execution_permit<F: Future>(
+    semaphore: Arc<Semaphore>,
+    permit: OwnedSemaphorePermit,
+    dispatcher_changed: Arc<tokio::sync::Notify>,
+    future: F,
+) -> F::Output {
+    let permit = Arc::new(ProcessExecutionPermit::new(
+        semaphore,
+        permit,
+        dispatcher_changed,
+    ));
+    PROCESS_EXECUTION_PERMIT.scope(permit, future).await
+}
+
+/// Run one inline queued-work hydration under the shared park-aware admission
+/// discipline while keeping its telemetry distinct from process slots.
+pub(super) async fn scope_queued_work_execution_permit<F: Future>(
+    semaphore: Arc<Semaphore>,
+    permit: OwnedSemaphorePermit,
+    dispatcher_changed: Arc<tokio::sync::Notify>,
+    future: F,
+) -> F::Output {
+    let permit = Arc::new(ProcessExecutionPermit::new_with_telemetry(
+        semaphore,
+        permit,
+        dispatcher_changed,
+        QUEUED_WORK_EXECUTION_PERMIT_TELEMETRY,
+    ));
+    PROCESS_EXECUTION_PERMIT.scope(permit, future).await
 }
 
 pub(crate) async fn release_process_execution_permit_while<F: Future>(future: F) -> F::Output {
@@ -688,19 +757,16 @@ impl DurableProcessWorker {
                     process_id: record.id.clone(),
                     completed: completed_tx.clone(),
                 };
-                let execution_permit = Arc::new(ProcessExecutionPermit::new(
-                    Arc::clone(&self.execution_scheduler.permits),
-                    permit,
-                    Arc::clone(&self.execution_scheduler.changed),
-                ));
                 crate::task::spawn(async move {
                     let _completion = completion;
                     // Install the execution budget only at the inline worker
                     // boundary, never in the shared process-segment path.
-                    Box::pin(
-                        PROCESS_EXECUTION_PERMIT
-                            .scope(execution_permit, worker.recover_process(record)),
-                    )
+                    Box::pin(scope_process_execution_permit(
+                        Arc::clone(&worker.execution_scheduler.permits),
+                        permit,
+                        Arc::clone(&worker.execution_scheduler.changed),
+                        worker.recover_process(record),
+                    ))
                     .await;
                 });
             }

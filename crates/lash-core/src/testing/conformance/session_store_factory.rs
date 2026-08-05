@@ -19,6 +19,7 @@ where
     session_store_factory_open_missing_returns_none(make()).await;
     session_store_factory_create_seeds_and_reopens_meta(make()).await;
     session_store_factory_create_is_idempotent(make()).await;
+    session_store_factory_claimable_queued_work_peek(make()).await;
     session_store_factory_never_used_delete_is_noop(make()).await;
     session_store_factory_rejects_writes_after_delete(make()).await;
     attachment_ownership_isolation(make()).await;
@@ -27,6 +28,264 @@ where
     session_store_factory_vacuums_organic_retained_tombstone(make()).await;
     session_store_factory_delete_removes_store_and_is_idempotent(make()).await;
     session_store_factory_delete_fences_stale_handles(make()).await;
+}
+
+/// The notification fast path reads durable claimable work without creating a
+/// session or hydrating runtime state. Future-only and empty queues are idle.
+async fn session_store_factory_claimable_queued_work_peek(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    const NOW_MS: u64 = 100;
+    let request = session_store_request(
+        "claimable-queued-work-peek",
+        "claimable-queued-work-model",
+        crate::SessionRelation::Root,
+    );
+    assert!(
+        factory
+            .has_claimable_queued_work(&request, NOW_MS)
+            .await
+            .expect("peek a missing session")
+            == Some(false),
+        "a missing session must not report claimable queued work"
+    );
+    let store = factory
+        .create_store(&request)
+        .await
+        .expect("create peek conformance store");
+    assert!(
+        factory
+            .has_claimable_queued_work(&request, NOW_MS)
+            .await
+            .expect("peek an empty queue")
+            == Some(false),
+        "an empty queue must not report claimable queued work"
+    );
+
+    store
+        .enqueue_queued_work(
+            crate::QueuedWorkBatchDraft::new(
+                &request.session_id,
+                crate::DeliveryPolicy::EarliestSafeBoundary,
+                crate::SlotPolicy::Exclusive,
+                vec![crate::QueuedWorkPayload::session_command(
+                    crate::SessionCommand::RefreshToolCatalog {
+                        reason: "future".to_string(),
+                    },
+                )],
+            )
+            .with_available_at_ms(NOW_MS + 1),
+        )
+        .await
+        .expect("enqueue future queued work");
+    assert!(
+        factory
+            .has_claimable_queued_work(&request, NOW_MS)
+            .await
+            .expect("peek a future-only queue")
+            == Some(false),
+        "future queued work is not yet claimable"
+    );
+
+    let ready = store
+        .enqueue_queued_work(
+            crate::QueuedWorkBatchDraft::new(
+                &request.session_id,
+                crate::DeliveryPolicy::EarliestSafeBoundary,
+                crate::SlotPolicy::Exclusive,
+                vec![crate::QueuedWorkPayload::session_command(
+                    crate::SessionCommand::RefreshToolCatalog {
+                        reason: "ready".to_string(),
+                    },
+                )],
+            )
+            .with_available_at_ms(NOW_MS),
+        )
+        .await
+        .expect("enqueue ready queued work");
+    assert!(
+        factory
+            .has_claimable_queued_work(&request, NOW_MS)
+            .await
+            .expect("peek a ready queue")
+            == Some(true),
+        "ready queued work must be visible through the factory peek"
+    );
+    store
+        .cancel_queued_work_batch(&request.session_id, &ready.batch_id)
+        .await
+        .expect("cancel ready queued work")
+        .expect("ready batch remains cancellable");
+    assert!(
+        factory
+            .has_claimable_queued_work(&request, NOW_MS)
+            .await
+            .expect("peek after cancelling the only ready batch")
+            == Some(false),
+        "future-only work must remain idle after the ready batch is removed"
+    );
+
+    store
+        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+            &request.session_id,
+            crate::TurnInputIngress::NextTurn,
+            crate::TurnInput::text("claimable next-turn input"),
+        ))
+        .await
+        .expect("enqueue claimable next-turn input");
+    assert!(
+        factory
+            .has_claimable_queued_work(&request, NOW_MS)
+            .await
+            .expect("peek a claimable next-turn input")
+            == Some(true),
+        "deferred next-turn input must be visible through the factory peek"
+    );
+
+    let fenced_request = session_store_request(
+        "claimable-queued-work-fences",
+        "claimable-queued-work-model",
+        crate::SessionRelation::Root,
+    );
+    let fenced_store = factory
+        .create_store(&fenced_request)
+        .await
+        .expect("create claim-fence conformance store");
+    fenced_store
+        .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
+            &fenced_request.session_id,
+            crate::DeliveryPolicy::EarliestSafeBoundary,
+            crate::SlotPolicy::Exclusive,
+            vec![crate::QueuedWorkPayload::agent_frame_task(
+                "claim-fence-frame",
+                "claim fence",
+                None,
+            )],
+        ))
+        .await
+        .expect("enqueue claim-fenced queued work");
+    fenced_store
+        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+            &fenced_request.session_id,
+            crate::TurnInputIngress::NextTurn,
+            crate::TurnInput::text("claim-fenced next-turn input"),
+        ))
+        .await
+        .expect("enqueue claim-fenced next-turn input");
+    let first_owner = crate::LeaseOwnerIdentity::opaque("peek-fence-first", "incarnation");
+    let first_lease = fenced_store
+        .try_claim_session_execution_lease(&fenced_request.session_id, &first_owner, 60_000)
+        .await
+        .expect("claim first session execution lease")
+        .acquired()
+        .expect("first session execution lease is acquired");
+    fenced_store
+        .claim_ready_queued_work(
+            &fenced_request.session_id,
+            &first_lease.fence(),
+            &first_owner,
+            crate::QueuedWorkClaimBoundary::Idle,
+            1,
+        )
+        .await
+        .expect("claim queued work under first generation")
+        .expect("queued work claim under first generation exists");
+    fenced_store
+        .claim_next_turn_inputs(
+            &fenced_request.session_id,
+            &first_lease.fence(),
+            &first_owner,
+            1,
+        )
+        .await
+        .expect("claim next-turn input under first generation")
+        .expect("next-turn input claim under first generation exists");
+    assert!(
+        fenced_store
+            .claim_ready_queued_work(
+                &fenced_request.session_id,
+                &first_lease.fence(),
+                &first_owner,
+                crate::QueuedWorkClaimBoundary::Idle,
+                1,
+            )
+            .await
+            .expect("re-scan live queued-work claim")
+            .is_none(),
+        "a live same-generation queued-work claim is fenced"
+    );
+    assert!(
+        fenced_store
+            .claim_next_turn_inputs(
+                &fenced_request.session_id,
+                &first_lease.fence(),
+                &first_owner,
+                1,
+            )
+            .await
+            .expect("re-scan live turn-input claim")
+            .is_none(),
+        "a live same-generation turn-input claim is fenced"
+    );
+    assert!(
+        factory
+            .has_claimable_queued_work(&fenced_request, i64::MAX as u64)
+            .await
+            .expect("conservatively peek live claims")
+            == Some(true),
+        "a live claim must keep bounded recovery armed rather than create a false negative"
+    );
+
+    fenced_store
+        .renew_session_execution_lease(&first_lease.fence(), 0)
+        .await
+        .expect("expire the first generation deterministically");
+    assert!(
+        factory
+            .has_claimable_queued_work(&fenced_request, i64::MAX as u64)
+            .await
+            .expect("peek expired claims")
+            == Some(true),
+        "expired claims remain visible to the conservative recovery peek"
+    );
+    let successor = crate::LeaseOwnerIdentity::opaque("peek-fence-successor", "incarnation");
+    let successor_lease = fenced_store
+        .try_claim_session_execution_lease(&fenced_request.session_id, &successor, 60_000)
+        .await
+        .expect("claim successor session execution lease")
+        .acquired()
+        .expect("expired generation is superseded");
+    assert!(
+        successor_lease.fencing_token > first_lease.fencing_token,
+        "successor lease must advance the fencing generation"
+    );
+    assert!(
+        fenced_store
+            .claim_ready_queued_work(
+                &fenced_request.session_id,
+                &successor_lease.fence(),
+                &successor,
+                crate::QueuedWorkClaimBoundary::Idle,
+                1,
+            )
+            .await
+            .expect("reclaim queued work under successor generation")
+            .is_some(),
+        "a superseded queued-work claim is claimable"
+    );
+    assert!(
+        fenced_store
+            .claim_next_turn_inputs(
+                &fenced_request.session_id,
+                &successor_lease.fence(),
+                &successor,
+                1,
+            )
+            .await
+            .expect("reclaim turn input under successor generation")
+            .is_some(),
+        "a superseded turn-input claim is claimable"
+    );
 }
 
 /// Deleting a session must erase readable state and fence handles that were

@@ -1,12 +1,16 @@
 use crate::support::*;
 use lash_core::facade_support;
-use lash_core::facade_support::{RuntimeSessionStateFacadeOps, ScopedEffectControllerFacadeOps};
+use lash_core::facade_support::ScopedEffectControllerFacadeOps;
 use lash_core::runtime::{
     ProcessCommand, ProcessEffectOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope,
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
     RuntimeScope,
 };
 use std::collections::HashSet;
+
+mod queued_work;
+
+use queued_work::{InlineQueuedWorkRunConfig, InlineQueuedWorkRunHandle};
 
 #[derive(Clone)]
 pub struct LashCore {
@@ -114,6 +118,7 @@ pub(crate) enum QueuedWorkDriverSetup {
     None,
     LazyDefault {
         config: Arc<InlineQueuedWorkRunConfig>,
+        execution_concurrency: usize,
     },
     External {
         driver: QueuedWorkDriver,
@@ -175,9 +180,16 @@ impl InlineWorkDriverSlot {
                 let queued = match &self.setup.queued {
                     QueuedWorkDriverSetup::None => None,
                     QueuedWorkDriverSetup::External { driver } => Some(driver.clone()),
-                    QueuedWorkDriverSetup::LazyDefault { config } => Some(QueuedWorkDriver::new(
-                        Arc::new(InlineQueuedWorkRunHandle::new(Arc::clone(config))),
-                    )),
+                    QueuedWorkDriverSetup::LazyDefault {
+                        config,
+                        execution_concurrency,
+                    } => Some(
+                        QueuedWorkDriver::with_execution_concurrency(
+                            Arc::new(InlineQueuedWorkRunHandle::new(Arc::clone(config))),
+                            *execution_concurrency,
+                        )
+                        .expect("queued-work execution concurrency was validated at build"),
+                    ),
                 };
                 let (process, drive_process_on_open) = match &self.setup.process {
                     ProcessWorkDriverSetup::None => (None, false),
@@ -248,142 +260,6 @@ impl Drop for InlineWorkDriverSlot {
         {
             wake.request_shutdown();
         }
-    }
-}
-
-pub(crate) struct InlineQueuedWorkRunConfig {
-    env: RuntimeEnvironment,
-    policy: SessionPolicy,
-    protocol_factory: Option<Arc<dyn PluginFactory>>,
-    plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
-    store_factory: Arc<dyn SessionStoreFactory>,
-    live_replay_store: Arc<dyn LiveReplayStore>,
-    process_lifecycle_available: bool,
-}
-
-impl InlineQueuedWorkRunConfig {
-    fn new(
-        env: RuntimeEnvironment,
-        policy: SessionPolicy,
-        protocol_factory: Option<Arc<dyn PluginFactory>>,
-        plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
-        store_factory: Arc<dyn SessionStoreFactory>,
-        live_replay_store: Arc<dyn LiveReplayStore>,
-        process_lifecycle_available: bool,
-    ) -> Self {
-        Self {
-            env,
-            policy,
-            protocol_factory,
-            plugin_factories,
-            store_factory,
-            live_replay_store,
-            process_lifecycle_available,
-        }
-    }
-}
-
-struct InlineQueuedWorkRunHandle {
-    config: Arc<InlineQueuedWorkRunConfig>,
-}
-
-impl InlineQueuedWorkRunHandle {
-    fn new(config: Arc<InlineQueuedWorkRunConfig>) -> Self {
-        Self { config }
-    }
-}
-
-#[async_trait]
-impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
-    async fn run_queued_work(
-        &self,
-        request: QueuedWorkRunRequest,
-    ) -> std::result::Result<(), facade_support::QueuedWorkRunError> {
-        let Some(session_id) = request.session_id else {
-            return Ok(());
-        };
-        let reason = request.reason;
-        let mut policy = self.config.policy.clone();
-        policy.session_id = Some(session_id.clone());
-        let store = self
-            .config
-            .store_factory
-            .create_store(&SessionStoreCreateRequest {
-                session_id: session_id.clone(),
-                relation: SessionRelation::default(),
-                policy: policy.clone(),
-            })
-            .await
-            .map_err(|error| {
-                facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
-                    error.to_string(),
-                ))
-            })?;
-        let state = crate::session::load_state_from_store(&session_id, &policy, store.as_ref())
-            .await
-            .map_err(|error| {
-                facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
-                    error.to_string(),
-                ))
-            })?;
-        let plugin_host = build_plugin_host(
-            self.config.protocol_factory.as_ref(),
-            self.config.plugin_factories.as_ref(),
-            Vec::new(),
-        )
-        .map_err(|error| {
-            facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
-                error.to_string(),
-            ))
-        })?;
-        let mut env = self.config.env.clone();
-        env.core = plugin_host
-            .install_process_engine_contributions(
-                env.core.clone(),
-                self.config.process_lifecycle_available,
-            )
-            .map_err(|error| {
-                facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
-                    error.to_string(),
-                ))
-            })?;
-        env.plugin_host = Some(Arc::new(plugin_host));
-        let effect_host = Arc::clone(&env.core.control.effect_host);
-        let runtime = LashRuntime::from_environment(&env, policy, state, Some(store))
-            .await
-            .map_err(|error| {
-                facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
-                    error.to_string(),
-                ))
-            })?;
-        let handle = RuntimeHandle::with_live_replay_store(
-            runtime,
-            Arc::clone(&self.config.live_replay_store),
-        );
-        let scope = handle.observe().persisted_state.queue_drain_scope(reason);
-        let scoped = effect_host.scoped(scope).map_err(|error| {
-            facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
-                error.to_string(),
-            ))
-        })?;
-        crate::turn::stream_next_queued_prepared_turn(
-            &handle,
-            crate::turn::TurnSinks::default(),
-            scoped,
-            CancellationToken::new(),
-            lash_core::TurnCancelOriginHint::default(),
-            &[],
-        )
-        .await
-        .map_err(|error| {
-            let plugin_error = lash_core::PluginError::Session(error.to_string());
-            if error.is_retryable() {
-                facade_support::QueuedWorkRunError::transient(plugin_error)
-            } else {
-                facade_support::QueuedWorkRunError::terminal(plugin_error)
-            }
-        })?;
-        Ok(())
     }
 }
 
@@ -604,7 +480,7 @@ impl LashCore {
                 ))
             })?;
         if is_next_turn && let Some(driver) = self.work_driver.drivers().await.queued.as_ref() {
-            drop(driver.wake_pending(Some(&enqueued.session_id), "queued_turn_input"));
+            driver.notify_pending_work(Some(&enqueued.session_id), "queued_turn_input");
         }
         Ok(facade_support::TurnInputAcceptanceReceipt::from(&enqueued))
     }
@@ -948,6 +824,8 @@ pub struct LashCoreBuilder {
     process_work_source: ProcessWorkSource,
     // Per-worker bound for the default inline process executor.
     process_execution_concurrency: Option<usize>,
+    // Per-driver bound for the default inline queued-work executor.
+    queued_work_execution_concurrency: Option<usize>,
     // Optional host-facing best-effort feed of appended process events,
     // installed on the inline process-registry decorator at build time.
     process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
@@ -1046,6 +924,18 @@ impl LashCoreBuilder {
     /// Invalid values are reported by [`build`](Self::build).
     pub fn process_execution_concurrency(mut self, concurrency: usize) -> Self {
         self.process_execution_concurrency = Some(concurrency);
+        self
+    }
+
+    /// Set the number of queued-work notifications the default inline driver
+    /// may execute at once. Additional per-session demand is retained and
+    /// coalesced without spawning a task per signal. A running queued-work
+    /// turn releases its slot while parked and reacquires it before resuming.
+    ///
+    /// The default is [`DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY`](facade_support::DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY).
+    /// Invalid values are reported by [`build`](Self::build).
+    pub fn queued_work_execution_concurrency(mut self, concurrency: usize) -> Self {
+        self.queued_work_execution_concurrency = Some(concurrency);
         self
     }
 
@@ -1226,6 +1116,12 @@ impl LashCoreBuilder {
         DurableProcessWorkerConfig::validate_process_execution_concurrency(
             process_execution_concurrency,
         )?;
+        let queued_work_execution_concurrency = self
+            .queued_work_execution_concurrency
+            .unwrap_or(facade_support::DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY);
+        facade_support::QueuedWorkDriver::validate_execution_concurrency(
+            queued_work_execution_concurrency,
+        )?;
         let protocol_factory = self.protocol_factory.clone();
         if protocol_factory.is_none() && self.plugin_host.is_none() {
             return Err(EmbedError::MissingProtocolPlugin);
@@ -1350,6 +1246,7 @@ impl LashCoreBuilder {
                 .or(self.store_factory.as_ref()),
             Arc::clone(&live_replay_store),
             process_lifecycle_available,
+            queued_work_execution_concurrency,
         );
         let work_driver = InlineWorkDriverSetup {
             process: process_work_driver,
@@ -1460,6 +1357,7 @@ impl LashCoreBuilder {
         store_factory: Option<&Arc<dyn SessionStoreFactory>>,
         live_replay_store: Arc<dyn LiveReplayStore>,
         process_lifecycle_available: bool,
+        queued_work_execution_concurrency: usize,
     ) -> QueuedWorkDriverSetup {
         match queued_work_source {
             QueuedWorkSource::None => QueuedWorkDriverSetup::None,
@@ -1477,6 +1375,7 @@ impl LashCoreBuilder {
                         live_replay_store,
                         process_lifecycle_available,
                     )),
+                    execution_concurrency: queued_work_execution_concurrency,
                 },
                 None => QueuedWorkDriverSetup::None,
             },

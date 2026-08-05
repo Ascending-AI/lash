@@ -124,6 +124,33 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         }
     }
 
+    async fn has_claimable_queued_work(
+        &self,
+        request: &SessionStoreCreateRequest,
+        now_epoch_ms: u64,
+    ) -> Result<Option<bool>, StoreError> {
+        sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1
+                FROM lash_queued_work_batches qwb
+                WHERE qwb.session_id = $1
+                  AND qwb.available_at_ms <= $2
+            ) OR EXISTS(
+                SELECT 1
+                FROM lash_pending_turn_inputs pti
+                WHERE pti.session_id = $1
+                  AND pti.state = $3
+            )",
+        )
+        .bind(&request.session_id)
+        .bind(now_epoch_ms as i64)
+        .bind(lash_core::TurnInputState::DeferredNextTurn.as_str())
+        .fetch_one(&self.pool)
+        .await
+        .map(Some)
+        .map_err(store_sqlx_error)
+    }
+
     async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
         sqlx::query_scalar(
             "SELECT EXISTS(

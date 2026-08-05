@@ -550,6 +550,22 @@ disposition = "unused-add"
 reason = "Add lash::EmbedError::ProcessRegistryRequiresStoreFactory to the agent-workbench durable process flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::EmbedError::QueuedWorkExecutionConcurrency"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add the invalid queued-work concurrency builder outcome to the agent-workbench durable process flow example."
+
+[[api]]
+symbol = "lash::EmbedError::QueuedWorkExecutionConcurrency::0"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add the typed queued-work concurrency validation error to the agent-workbench durable process flow example."
+
+[[api]]
 symbol = "lash::EmbedError::ProtocolTurnOptions"
 kind = "variant"
 availability = "default+all-features"
@@ -1341,6 +1357,14 @@ area = "processes"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests.rs:407#.process_registry(Arc::clone(&process_registry))"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:444#assert!(matches!("
+
+[[api]]
+symbol = "lash::LashCoreBuilder::queued_work_execution_concurrency"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add bounded queued-work execution configuration to the agent-workbench durable process flow example."
 
 [[api]]
 symbol = "lash::LashCoreBuilder::process_tool_visibility_filter"
@@ -14066,6 +14090,14 @@ disposition = "unused-add"
 reason = "Add lash::persistence::SessionStoreFactory::has_live_attachment_ref to the agent-workbench attachment upload example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::persistence::SessionStoreFactory::has_claimable_queued_work"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add the durable queued-work notification peek to the agent-service persistence setup example."
+
+[[api]]
 symbol = "lash::persistence::SessionStoreFactory::live_attachment_refs"
 kind = "function"
 availability = "default+all-features"
@@ -19385,6 +19417,22 @@ disposition = "unused-add"
 reason = "Add lash::prelude::EmbedError::ProcessRegistryRequiresStoreFactory to the agent-workbench durable process flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::prelude::EmbedError::QueuedWorkExecutionConcurrency"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add the invalid queued-work concurrency builder outcome to the prelude example."
+
+[[api]]
+symbol = "lash::prelude::EmbedError::QueuedWorkExecutionConcurrency::0"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add the typed queued-work concurrency validation error to the prelude example."
+
+[[api]]
 symbol = "lash::prelude::EmbedError::ProtocolTurnOptions"
 kind = "variant"
 availability = "default+all-features"
@@ -20088,6 +20136,14 @@ area = "processes"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests.rs:407#.process_registry(Arc::clone(&process_registry))"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:444#assert!(matches!("
+
+[[api]]
+symbol = "lash::prelude::LashCoreBuilder::queued_work_execution_concurrency"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add bounded queued-work execution configuration to the prelude example."
 
 [[api]]
 symbol = "lash::prelude::LashCoreBuilder::process_tool_visibility_filter"
@@ -44959,6 +45015,22 @@ disposition = "unused-add"
 reason = "Add lash::runtime::ProtocolTurnOptions::typed to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::runtime::DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY"
+kind = "constant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Document the default queued-work admission bound in the durable process example."
+
+[[api]]
+symbol = "lash::runtime::QUEUED_WORK_SLOW_WAKE_THRESHOLD"
+kind = "constant"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Document the queued-work slow-wake observability threshold in the operations example."
+
+[[api]]
 symbol = "lash::runtime::QueuedWorkDriver"
 kind = "struct"
 availability = "default+all-features"
@@ -44986,12 +45058,28 @@ usage = "examples/agent-workbench/src/restate_tests.rs:245#lash::runtime::Queued
 assertion = "examples/agent-workbench/src/restate_tests.rs:259#assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);"
 
 [[api]]
-symbol = "lash::runtime::QueuedWorkDriver::wake_pending"
+symbol = "lash::runtime::QueuedWorkDriver::notify_pending_work"
 kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "unused-add"
-reason = "Add lash::runtime::QueuedWorkDriver::wake_pending to the agent-workbench durable process flow example and assert its externally observable result."
+reason = "Add lash::runtime::QueuedWorkDriver::notify_pending_work to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkDriver::validate_execution_concurrency"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add queued-work admission validation to the agent-workbench durable process flow example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkDriver::with_execution_concurrency"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add a directly configured bounded queued-work driver to the durable process example."
 
 [[api]]
 symbol = "lash::runtime::QueuedWorkDriver::with_shutdown_token"
@@ -45000,6 +45088,14 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add lash::runtime::QueuedWorkDriver::with_shutdown_token to the docs-snippets embedding/turns example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkExecutionConcurrencyError"
+kind = "struct"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add the typed queued-work admission validation error to the durable process example."
 
 [[api]]
 symbol = "lash::runtime::QueuedWorkRunError"
@@ -45086,12 +45182,60 @@ usage = "examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs:2
 assertion = "examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs:66#assert!("
 
 [[api]]
+symbol = "lash::runtime::QueuedWorkRunHandle::peek_claimable_queued_work"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add the optional durable claimability peek to the embedding turns example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkRunHandle::claim_and_run_pending_with_progress"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add the inline queued-work progress outcome to the embedding turns example."
+
+[[api]]
 symbol = "lash::runtime::QueuedWorkRunHandle::run_queued_work"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add lash::runtime::QueuedWorkRunHandle::run_queued_work to the docs-snippets embedding/turns example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkRunProgress"
+kind = "enum"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add lash::runtime::QueuedWorkRunProgress to the embedding turns example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkRunProgress::Blocked"
+kind = "variant"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Exercise a live session-lease contention pass in the embedding turns example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkRunProgress::Claimed"
+kind = "variant"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Exercise a queued-work pass that claims durable work in the embedding turns example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkRunProgress::Unknown"
+kind = "variant"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Exercise the external engine-submitter progress default in the embedding turns example."
 
 [[api]]
 symbol = "lash::runtime::QueuedWorkRunRequest"
@@ -45124,6 +45268,126 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "unused-add"
 reason = "Add lash::runtime::QueuedWorkRunRequest::trace_idle to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkSlowWake"
+kind = "struct"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add typed slow queued-work telemetry to the recovery and operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkSlowWake::attempt"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert the slow queued-work attempt field in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkSlowWake::admission_limit"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert the queued-work admission-limit field in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkSlowWake::available_permits"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert the queued-work available-permits field in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkSlowWake::reason"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert aggregated slow queued-work reasons in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkSlowWake::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert slow queued-work session identity in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkSlowWake::threshold_ms"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert the slow queued-work warning threshold in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkWakeContended"
+kind = "struct"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add typed queued-work contention telemetry to the recovery and operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkWakeContended::admission_limit"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert the contended queued-work admission-limit field in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkWakeContended::available_permits"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert the contended queued-work available-permits field in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkWakeContended::contended_ms"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert elapsed queued-work contention time in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkWakeContended::contended_passes"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert the bounded queued-work contention pass count in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkWakeContended::reason"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert aggregated contended queued-work reasons in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkWakeContended::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert contended queued-work session identity in the operations example."
+
+[[api]]
+symbol = "lash::runtime::QueuedWorkWakeContended::threshold_ms"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Assert the queued-work contention heartbeat threshold in the operations example."
 
 [[api]]
 symbol = "lash::runtime::QueuedWorkWakeDisposition"
@@ -77951,6 +78215,14 @@ availability = "default+all-features"
 area = "attachments"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash_core::SessionStoreFactory::has_claimable_queued_work"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers may override the notification fast-path query; bundled hosts use repository factories."
 
 [[api]]
 symbol = "lash_core::SessionStoreFactory::live_attachment_refs"

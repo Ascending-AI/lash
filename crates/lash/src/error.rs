@@ -40,6 +40,10 @@ pub enum EmbedError {
     ProcessExecutionConcurrency(
         #[from] lash_core::facade_support::ProcessExecutionConcurrencyError,
     ),
+    #[error("invalid queued-work execution configuration: {0}")]
+    QueuedWorkExecutionConcurrency(
+        #[from] lash_core::facade_support::QueuedWorkExecutionConcurrencyError,
+    ),
     #[error("this operation requires a LashCore store factory")]
     MissingSessionStoreFactory,
     #[error("failed to delete process state for session `{session_id}`: {message}")]
@@ -149,6 +153,7 @@ impl EmbedError {
             | Self::ProcessRegistryRequiresStoreFactory
             | Self::MissingProcessRegistry
             | Self::ProcessExecutionConcurrency(_)
+            | Self::QueuedWorkExecutionConcurrency(_)
             | Self::MissingSessionStoreFactory
             | Self::MissingPluginTurnInput { .. }
             | Self::DurableEffectHostRequiresHandlerContext { .. }

@@ -984,6 +984,20 @@ fn builder_rejects_invalid_process_execution_concurrency() {
     assert!(matches!(err, EmbedError::ProcessExecutionConcurrency(_)));
 }
 
+#[test]
+fn builder_rejects_invalid_queued_work_execution_concurrency() {
+    let err = expect_build_error(
+        explicit_ephemeral_facets(peer_coherence_builder(inline_artifact_store()))
+            .queued_work_execution_concurrency(0)
+            .build(),
+        "zero queued-work execution concurrency must be rejected",
+    );
+    assert!(matches!(
+        err,
+        EmbedError::QueuedWorkExecutionConcurrency(_)
+    ));
+}
+
 #[tokio::test]
 async fn durable_process_worker_config_requires_core_process_registry() {
     let core = explicit_ephemeral_facets(peer_coherence_builder(inline_artifact_store()))
