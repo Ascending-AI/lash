@@ -205,6 +205,12 @@ gate-stale-trace-regression:
 session-lease-triage-e2e:
   bash "{{repo}}/scripts/session-lease-triage-e2e.sh"
 
+graceful-drain-e2e:
+  bash "{{repo}}/scripts/graceful-drain-e2e.sh"
+
+request-abandon-e2e:
+  bash "{{repo}}/scripts/request-abandon-e2e.sh"
+
 stack-budget:
   bash "{{repo}}/scripts/ci-stack-budget.sh"
 

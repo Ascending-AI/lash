@@ -37,6 +37,10 @@ path = "src/bin/version_bump.rs"
 name = "lash-e2e-session-lease-triage"
 path = "src/bin/session_lease_triage.rs"
 
+[[bin]]
+name = "lash-e2e-process-operator-flow"
+path = "src/bin/process_operator_flow.rs"
+
 [lints]
 workspace = true
 
