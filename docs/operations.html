@@ -461,7 +461,7 @@ Ok(())</code></pre>
       <div class="listing">
         <div class="listing__row">
           <div class="listing__label">is_retryable</div>
-          <div class="listing__body"><p>True only for a typed retryable signal: <code>session_execution_busy</code> (another owner rejected the turn before it started) and <code>session_execution_lease_lost</code> (an operation observed lease handoff). Lease loss alone neither proves that no current-head commit landed nor releases generation-pinned claims; reload durable state before retrying after a backoff.</p></div>
+          <div class="listing__body"><p>True only for a typed retryable signal: <code>session_execution_busy</code> (another owner rejected the turn before it started) and <code>store_commit_contended</code> (transactional write authority rejected the commit before publication). Lease loss is not safe to retry as-is: reload durable state first.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">is_terminal</div>
@@ -470,6 +470,14 @@ Ok(())</code></pre>
         <div class="listing__row">
           <div class="listing__label">busy vs lease-lost</div>
           <div class="listing__body"><p><code>Busy</code> means a live owner holds the lane; back off and retry the same session. <code>LeaseLost</code> means ownership moved; reopen the session before retrying. <code>store_commit_failed</code> is deliberately neither retryable nor terminal: the code cannot distinguish transient store I/O from a real conflict. Reload and apply your own bounded policy. The full conflict-retry shape is on <a href="./persistence.html#cas-conflicts">persistence</a>, and <a href="#stuck-turn">triaging a stuck turn</a> covers telling these apart from the outside.</p></div>
+        </div>
+        <div class="listing__row">
+          <div class="listing__label">capture abort</div>
+          <div class="listing__body"><p><code>execution_state_capture_failed</code> is an unambiguous local abort before any store commit attempt. lash releases the live session lease and abandons queued-work and turn-input claims immediately; it is non-retryable as-is because the executor snapshot fault must be repaired first.</p></div>
+        </div>
+        <div class="listing__row">
+          <div class="listing__label">resident reload</div>
+          <div class="listing__body"><p>A post-commit delivery failure returns the committed turn with a non-retryable issue and invalidates live plugin/protocol state. Every later resident-state consumer reloads the durable head before use. If restore fails deterministically, each attempt returns <code>resident_session_reload_failed</code> until the cause is repaired and reload succeeds; cold-opening a new handle from the durable state is the alternative recovery path.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">provider failures</div>

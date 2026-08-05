@@ -1623,8 +1623,11 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
     println!("consumer 3 primary LlmRequest.model: {}", requests[0]);
 
     let writer = session.runtime.writer();
-    let runtime = writer.lock().await;
-    let state = runtime.export_persisted_state();
+    let mut runtime = writer.lock().await;
+    let state = runtime
+        .export_persisted_state()
+        .await
+        .expect("export persisted state");
     drop(runtime);
     let historical = state
         .agent_frames
@@ -1693,7 +1696,12 @@ async fn open_with_state_reconciles_live_policy_without_rewriting_frame_history(
 
     let session = core.session(session_id).open_with_state(persisted).await?;
     let writer = session.runtime.writer();
-    let state = writer.lock().await.export_persisted_state();
+    let state = writer
+        .lock()
+        .await
+        .export_persisted_state()
+        .await
+        .expect("export persisted state");
     assert_eq!(state.policy.model, builder_model);
     assert_eq!(
         state

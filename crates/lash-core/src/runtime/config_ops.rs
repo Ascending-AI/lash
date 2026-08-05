@@ -57,6 +57,8 @@ impl LashRuntime {
         &mut self,
         patch: SessionConfigPatch,
     ) -> Result<(), SessionError> {
+        self.reload_invalidated_resident_session_state_for_session()
+            .await?;
         let previous = self.session_policy();
         if let Some(provider) = patch.provider {
             self.set_provider(provider);
@@ -124,6 +126,8 @@ impl LashRuntime {
 
     /// Re-register the current tool catalog in the live protocol session.
     pub async fn refresh_session_tool_catalog(&mut self) -> Result<(), SessionError> {
+        self.reload_invalidated_resident_session_state_for_session()
+            .await?;
         let Some(session) = self.session.as_mut() else {
             return Err(SessionError::Protocol(
                 "runtime session not available".to_string(),
@@ -143,6 +147,8 @@ impl LashRuntime {
         &mut self,
         snapshot: crate::ToolState,
     ) -> Result<u64, SessionError> {
+        self.reload_invalidated_resident_session_state_for_session()
+            .await?;
         let Some(session) = self.session.as_mut() else {
             return Err(SessionError::Protocol(
                 "runtime session not available".to_string(),
@@ -175,6 +181,8 @@ impl LashRuntime {
         &mut self,
         snapshot: crate::ToolState,
     ) -> Result<crate::ToolRestoreReport, SessionError> {
+        self.reload_invalidated_resident_session_state_for_session()
+            .await?;
         let Some(session) = self.session.as_mut() else {
             return Err(SessionError::Protocol(
                 "runtime session not available".to_string(),

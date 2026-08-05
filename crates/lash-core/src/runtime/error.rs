@@ -24,6 +24,15 @@ pub enum RuntimeErrorCode {
     /// Process execution identity is the persisted `process_id`; a retry that
     /// cannot present that stable id has lost its idempotency anchor.
     MissingProcessExecutionId,
+    /// Dirty executor state could not be captured before commit. No store
+    /// publication was attempted; the live lease and claims are released.
+    ExecutionStateCaptureFailed,
+    /// Resident plugin/protocol state was invalidated after a committed turn.
+    /// Every subsequent resident-state consumer fails with this code until a
+    /// durable reload succeeds. A deterministic restore fault therefore keeps
+    /// returning this error; retry after repairing the cause or cold-open a new
+    /// handle from the durable state.
+    ResidentSessionReloadFailed,
     StoreCommitFailed,
     PluginSessionManager,
     PluginFinalizeTurn,
@@ -52,6 +61,8 @@ impl RuntimeErrorCode {
             Self::StoreCommitNodeBudgetExceeded => "store_commit_node_budget_exceeded",
             Self::StoreCommitByteBudgetExceeded => "store_commit_byte_budget_exceeded",
             Self::MissingProcessExecutionId => "missing_process_execution_id",
+            Self::ExecutionStateCaptureFailed => "execution_state_capture_failed",
+            Self::ResidentSessionReloadFailed => "resident_session_reload_failed",
             Self::StoreCommitFailed => "store_commit_failed",
             Self::PluginSessionManager => "plugin_session_manager",
             Self::PluginFinalizeTurn => "plugin_finalize_turn",
@@ -66,6 +77,14 @@ impl RuntimeErrorCode {
             Self::DurableEffectLivePluginInput => "durable_effect_live_plugin_input",
             Self::Other(code) => code.as_str(),
         }
+    }
+
+    /// Whether retrying the identical operation is explicitly safe.
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::SessionExecutionBusy | Self::StoreCommitContended
+        )
     }
 }
 
@@ -86,6 +105,8 @@ impl From<&str> for RuntimeErrorCode {
             "store_commit_node_budget_exceeded" => Self::StoreCommitNodeBudgetExceeded,
             "store_commit_byte_budget_exceeded" => Self::StoreCommitByteBudgetExceeded,
             "missing_process_execution_id" => Self::MissingProcessExecutionId,
+            "execution_state_capture_failed" => Self::ExecutionStateCaptureFailed,
+            "resident_session_reload_failed" => Self::ResidentSessionReloadFailed,
             "store_commit_failed" => Self::StoreCommitFailed,
             "plugin_session_manager" => Self::PluginSessionManager,
             "plugin_finalize_turn" => Self::PluginFinalizeTurn,

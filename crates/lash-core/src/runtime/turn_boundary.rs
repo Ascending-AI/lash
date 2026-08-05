@@ -10,10 +10,14 @@ use crate::{
     ToolCallRecord, TurnOutcome,
 };
 
-use super::{RuntimeError, RuntimeSessionState, TurnCommitDraft, merge_ledger_entry};
+use super::{
+    RuntimeError, RuntimeErrorCode, RuntimeSessionState, TurnCommitDraft, merge_ledger_entry,
+};
 
 mod materialize;
 use materialize::*;
+mod accepted_commit;
+pub(super) use accepted_commit::AcceptedTurnCommit;
 mod settlement;
 use settlement::*;
 
@@ -96,10 +100,6 @@ impl ExecutionStateUpdate {
             Self::Clear => state.set_execution_state_snapshot(None),
         }
     }
-}
-
-fn execution_state_capture_message(err: crate::SessionError) -> String {
-    format!("failed to snapshot dirty execution state: {err}")
 }
 
 impl TurnBoundary {
@@ -190,7 +190,7 @@ impl TurnBoundary {
         let execution_state_update = match session {
             Some(session) => Self::capture_execution_state_update(session)
                 .await
-                .map_err(|err| StoreError::Backend(execution_state_capture_message(err)))?,
+                .map_err(accepted_commit::execution_state_capture_error)?,
             None => ExecutionStateUpdate::Clean,
         };
         let state = self.draft_mut().state_mut();
@@ -221,8 +221,8 @@ impl TurnBoundary {
             .await
             .map_err(|err| {
                 RuntimeError::new(
-                    "execution_state_capture_failed",
-                    execution_state_capture_message(err),
+                    RuntimeErrorCode::ExecutionStateCaptureFailed,
+                    format!("failed to snapshot dirty execution state: {err}"),
                 )
             })?;
         let plugins = Arc::clone(session.plugins());
@@ -310,19 +310,13 @@ impl TurnBoundary {
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<String>,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
-    ) -> Result<
-        (
-            Vec<crate::QueuedWorkBatch>,
-            Vec<crate::store::RuntimeUsageDeltaIdentity>,
-        ),
-        StoreError,
-    > {
+    ) -> Result<AcceptedTurnCommit, StoreError> {
         let (store, plugins, execution_state_update) = match session {
             Some(session) => {
                 let store = session.history_store();
                 let execution_state_update = Self::capture_execution_state_update(session)
                     .await
-                    .map_err(|err| StoreError::Backend(execution_state_capture_message(err)))?;
+                    .map_err(accepted_commit::execution_state_capture_error)?;
                 let plugins = Arc::clone(session.plugins());
                 (store, Some(plugins), execution_state_update)
             }
@@ -350,7 +344,10 @@ impl TurnBoundary {
             })
             .await?;
         returned_turn.state = self.final_state_mut().to_snapshot();
-        Ok(enqueued_queue_batches)
+        Ok(AcceptedTurnCommit::new(
+            enqueued_queue_batches.0,
+            enqueued_queue_batches.1,
+        ))
     }
 
     pub(super) fn into_final_state(self) -> RuntimeSessionState {

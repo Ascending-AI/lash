@@ -2056,6 +2056,9 @@ impl BackendRunner {
 
 fn normalized_store_error(backend: &str, error: &StoreError) -> String {
     match error {
+        StoreError::ExecutionStateCaptureFailed { message } => {
+            format!("ExecutionStateCaptureFailed:{message}")
+        }
         StoreError::Contended => "Contended".to_string(),
         StoreError::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded".to_string(),
         StoreError::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded".to_string(),

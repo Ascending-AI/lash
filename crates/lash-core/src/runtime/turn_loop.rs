@@ -65,6 +65,12 @@ pub(super) fn post_commit_delivery_issue(
     }
 }
 
+fn post_commit_plugin_lifecycle_hook_issue(error: crate::PluginError) -> TurnIssue {
+    let mut issue = crate::plugin::plugin_lifecycle_hook_issue(error);
+    issue.retryable = Some(false);
+    issue
+}
+
 fn session_head_refresh_error(err: SessionError) -> RuntimeError {
     RuntimeError::new(
         RuntimeErrorCode::Other("session_head_refresh".to_string()),
@@ -268,6 +274,63 @@ struct PreparedTurn {
     events: Vec<SessionStreamEvent>,
 }
 
+impl PreparedTurn {
+    fn outcome(&self) -> &TurnOutcome {
+        &self.turn.outcome
+    }
+
+    fn final_operation(&self) -> crate::OperationId {
+        self.turn_pipeline.final_operation()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn commit(
+        mut self,
+        session: Option<&mut Session>,
+        staged_usage: session_manager::StagedTokenLedger,
+        commit_effects: super::logical_turn::LogicalTurnCommitEffects,
+        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+        release_session_execution_lease: bool,
+        trace_turn_id: &str,
+    ) -> Result<CommittedTurn, crate::StoreError> {
+        let accepted = self
+            .turn_pipeline
+            .final_commit(
+                &mut self.turn,
+                session,
+                staged_usage.deltas(),
+                commit_effects.originating_queue_claims,
+                commit_effects.originating_turn_input_claims,
+                commit_effects.completed_queue_claims,
+                commit_effects.completed_turn_input_claims,
+                commit_effects.queue_claim_generations,
+                commit_effects.turn_input_claim_generations,
+                session_execution_lease.map(|lease| lease.fence().fencing_token),
+                commit_effects.enqueued_queue_batches,
+                // Any active-turn input that missed the turn's final
+                // checkpoint must become the next ordinary user turn.
+                Some(trace_turn_id.to_string()),
+                release_session_execution_lease
+                    .then(|| session_execution_lease.map(SessionExecutionLeaseGuard::completion))
+                    .flatten(),
+            )
+            .await?;
+        Ok(CommittedTurn {
+            turn: self.turn,
+            events: self.events,
+            resident_state: self.turn_pipeline.into_final_state(),
+            accepted,
+            staged_usage,
+            release_session_execution_lease,
+            retained_lease_continuity: if release_session_execution_lease {
+                None
+            } else {
+                session_execution_lease.and_then(SessionExecutionLeaseGuard::continuity)
+            },
+        })
+    }
+}
+
 impl TypedTurnPhase for PreparedTurn {
     const RUNTIME_PHASE: RuntimeTurnPhase = RuntimeTurnPhase::PreparedTurn;
 }
@@ -276,7 +339,10 @@ struct CommittedTurn {
     turn: AssembledTurn,
     events: Vec<SessionStreamEvent>,
     resident_state: RuntimeSessionState,
-    enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
+    accepted: AcceptedTurnCommit,
+    staged_usage: session_manager::StagedTokenLedger,
+    release_session_execution_lease: bool,
+    retained_lease_continuity: Option<SessionExecutionLeaseContinuity>,
 }
 
 impl TypedTurnPhase for CommittedTurn {
@@ -287,7 +353,20 @@ impl CommittedTurn {
     /// Synchronize the accepted durable commit into the resident runtime.
     /// This transition intentionally cannot await; consuming `self` is the
     /// only way to obtain the post-commit delivery phase.
-    fn adopt(self, runtime: &mut LashRuntime, trace_turn_id: &str) -> PostCommitDelivery {
+    fn adopt(
+        self,
+        runtime: &mut LashRuntime,
+        trace_turn_id: &str,
+        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+    ) -> PostCommitDelivery {
+        let (enqueued_queue_batches, confirmed_usage) = self.accepted.into_parts();
+        self.staged_usage.confirm_identities(&confirmed_usage);
+        if self.release_session_execution_lease
+            && let Some(lease) = session_execution_lease
+        {
+            lease.mark_released();
+        }
+        runtime.last_committed_lease_continuity = self.retained_lease_continuity;
         runtime.state = self.resident_state;
         let observation_revision = if runtime.state.checkpoint_ref.is_some() {
             runtime.state.head_revision
@@ -299,7 +378,7 @@ impl CommittedTurn {
         PostCommitDelivery {
             turn: self.turn,
             events: self.events,
-            enqueued_queue_batches: self.enqueued_queue_batches,
+            enqueued_queue_batches,
             post_commit_delivery_failed: false,
         }
     }
@@ -363,12 +442,15 @@ impl LashRuntime {
         self.resident_session_state_valid = false;
         self.graph_loaded_from_store = false;
         self.last_committed_lease_continuity = None;
+        self.last_committed_observation_turn = None;
         if let Some(session) = self.session.as_ref() {
             session.invalidate_runtime_caches();
         }
     }
 
-    async fn reload_invalidated_resident_session_state(&mut self) -> Result<(), RuntimeError> {
+    pub(super) async fn reload_invalidated_resident_session_state(
+        &mut self,
+    ) -> Result<(), RuntimeError> {
         if self.resident_session_state_valid {
             return Ok(());
         }
@@ -383,7 +465,7 @@ impl LashRuntime {
                 .await
                 .map_err(|err| {
                     RuntimeError::new(
-                        "resident_session_reload_failed",
+                        RuntimeErrorCode::ResidentSessionReloadFailed,
                         format!("failed to reload invalidated resident session state: {err}"),
                     )
                 })?;
@@ -391,7 +473,7 @@ impl LashRuntime {
 
         let session = self.session.as_mut().ok_or_else(|| {
             RuntimeError::new(
-                "resident_session_reload_failed",
+                RuntimeErrorCode::ResidentSessionReloadFailed,
                 "runtime session is unavailable while reloading invalidated resident state",
             )
         })?;
@@ -402,16 +484,24 @@ impl LashRuntime {
                 .tool_registry()
                 .restore_state(tool_state)
                 .map_err(|err| {
-                    RuntimeError::new("resident_session_reload_failed", err.to_string())
+                    RuntimeError::new(
+                        RuntimeErrorCode::ResidentSessionReloadFailed,
+                        err.to_string(),
+                    )
                 })?;
         }
-        session
-            .refresh_tool_catalog()
-            .await
-            .map_err(|err| RuntimeError::new("resident_session_reload_failed", err.to_string()))?;
+        session.refresh_tool_catalog().await.map_err(|err| {
+            RuntimeError::new(
+                RuntimeErrorCode::ResidentSessionReloadFailed,
+                err.to_string(),
+            )
+        })?;
         if let Some(snapshot) = durable_state.plugin_snapshot.as_ref() {
             session.plugins().restore(snapshot).map_err(|err| {
-                RuntimeError::new("resident_session_reload_failed", err.to_string())
+                RuntimeError::new(
+                    RuntimeErrorCode::ResidentSessionReloadFailed,
+                    err.to_string(),
+                )
             })?;
         }
         let protocol_session = Arc::clone(session.plugins().protocol_session());
@@ -422,7 +512,12 @@ impl LashRuntime {
                 &durable_state,
             )
             .await
-            .map_err(|err| RuntimeError::new("resident_session_reload_failed", err.to_string()))?;
+            .map_err(|err| {
+                RuntimeError::new(
+                    RuntimeErrorCode::ResidentSessionReloadFailed,
+                    err.to_string(),
+                )
+            })?;
 
         durable_state.discard_runtime_snapshots();
         session
@@ -431,13 +526,26 @@ impl LashRuntime {
                 crate::SessionReadView::from_persisted_state(&durable_state),
             ))
             .await
-            .map_err(|err| RuntimeError::new("resident_session_reload_failed", err.to_string()))?;
+            .map_err(|err| {
+                RuntimeError::new(
+                    RuntimeErrorCode::ResidentSessionReloadFailed,
+                    err.to_string(),
+                )
+            })?;
         self.policy = durable_state.effective_policy().clone();
         self.protocol_turn_options = durable_state.effective_protocol_turn_options().clone();
         self.state = durable_state;
-        self.graph_loaded_from_store = store.is_some();
+        self.graph_loaded_from_store = false;
         self.resident_session_state_valid = true;
         Ok(())
+    }
+
+    pub(super) async fn reload_invalidated_resident_session_state_for_session(
+        &mut self,
+    ) -> Result<(), SessionError> {
+        self.reload_invalidated_resident_session_state()
+            .await
+            .map_err(|err| SessionError::Protocol(err.to_string()))
     }
 
     fn max_context_tokens(&self) -> usize {
@@ -518,16 +626,22 @@ impl LashRuntime {
         }
     }
 
-    // Prompt handback after an operation observes lease loss. Abandon clears
+    // Prompt handback after an operation observes lease loss or an unambiguous
+    // local pre-commit capture abort. Abandon clears
     // claim ownership, which both frees the rows for a peer and invalidates this
     // owner's pending completion. That is safe here because the turn is already
     // failing on the observed lease loss (ADR 0029).
-    async fn abandon_queued_work_claims_after_lease_loss(
+    async fn abandon_queued_work_claims_after_local_abort(
         &self,
         err: &RuntimeError,
         claims: &[crate::QueuedWorkClaim],
     ) {
-        if err.code != RuntimeErrorCode::SessionExecutionLeaseLost || claims.is_empty() {
+        if !matches!(
+            err.code,
+            RuntimeErrorCode::SessionExecutionLeaseLost
+                | RuntimeErrorCode::ExecutionStateCaptureFailed
+        ) || claims.is_empty()
+        {
             return;
         }
         let Some(store) = self
@@ -541,17 +655,22 @@ impl LashRuntime {
             tracing::warn!(
                 error = %abandon_err,
                 claim_count = claims.len(),
-                "failed to abandon queued work claims after session execution lease loss"
+                "failed to abandon queued work claims after local turn abort"
             );
         }
     }
 
-    async fn abandon_turn_input_claims_after_lease_loss(
+    async fn abandon_turn_input_claims_after_local_abort(
         &self,
         err: &RuntimeError,
         claims: &[crate::TurnInputClaim],
     ) {
-        if err.code != RuntimeErrorCode::SessionExecutionLeaseLost || claims.is_empty() {
+        if !matches!(
+            err.code,
+            RuntimeErrorCode::SessionExecutionLeaseLost
+                | RuntimeErrorCode::ExecutionStateCaptureFailed
+        ) || claims.is_empty()
+        {
             return;
         }
         let Some(store) = self
@@ -565,7 +684,7 @@ impl LashRuntime {
             tracing::warn!(
                 error = %abandon_err,
                 claim_count = claims.len(),
-                "failed to abandon turn input claims after session execution lease loss"
+                "failed to abandon turn input claims after local turn abort"
             );
         }
     }
@@ -720,7 +839,6 @@ impl LashRuntime {
                 ));
             }
         };
-        self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
         let mut returned_turn = finalized.turn;
         if returned_turn.cancellation.is_some()
             && !matches!(
@@ -735,6 +853,7 @@ impl LashRuntime {
             TurnOutcome::Stopped(TurnStop::Cancelled)
         ) && returned_turn.cancellation.is_none()
         {
+            self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
             return Err(RuntimeError::new(
                 "turn_cancellation_evidence_missing",
                 "cancelled turns must carry cancellation evidence",
@@ -745,53 +864,38 @@ impl LashRuntime {
             turn: returned_turn,
             events: finalized.events,
         };
-        let PreparedTurn {
-            mut turn_pipeline,
-            turn: mut returned_turn,
-            events: finalized_events,
-        } = prepared;
         let release_session_execution_lease =
-            session_execution_lease_release_policy.should_release(&returned_turn.outcome);
+            session_execution_lease_release_policy.should_release(prepared.outcome());
         let commit_effects = claims.commit_effects(
-            &returned_turn.outcome,
+            prepared.outcome(),
             &self.state.session_id,
             &trace_turn_id,
             Some(self.state.effective_protocol_turn_options().clone()),
         );
-        self.mark_phase_begin(CommittedTurn::RUNTIME_PHASE);
         let queued_work_completion_trace = commit_effects.completed_queue_claims.clone();
         let turn_input_completion_trace = commit_effects.completed_turn_input_claims.clone();
-        let staged_usage = session_manager::stage_token_ledger_shared(
+        let staged_usage = match session_manager::stage_token_ledger_shared(
             &self.shared_token_ledger,
-            &turn_pipeline.final_operation(),
-        )
-        .map_err(runtime_error_from_store_commit)?;
-        let (enqueued_queue_batches, confirmed_usage) = match turn_pipeline
-            .final_commit(
-                &mut returned_turn,
+            &prepared.final_operation(),
+        ) {
+            Ok(staged_usage) => staged_usage,
+            Err(err) => {
+                self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
+                return Err(runtime_error_from_store_commit(err));
+            }
+        };
+        let committed = match prepared
+            .commit(
                 self.session.as_mut(),
-                staged_usage.deltas(),
-                commit_effects.originating_queue_claims,
-                commit_effects.originating_turn_input_claims,
-                commit_effects.completed_queue_claims,
-                commit_effects.completed_turn_input_claims,
-                commit_effects.queue_claim_generations,
-                commit_effects.turn_input_claim_generations,
-                session_execution_lease.map(|lease| lease.fence().fencing_token),
-                commit_effects.enqueued_queue_batches,
-                // Any active-turn input that missed the turn's final
-                // checkpoint must become the next ordinary user turn. The
-                // store transition is part of this same final commit, so a
-                // terminal race cannot strand pending-active input or make a
-                // replay observe a different delivery boundary.
-                Some(trace_turn_id.clone()),
-                release_session_execution_lease
-                    .then(|| session_execution_lease.map(SessionExecutionLeaseGuard::completion))
-                    .flatten(),
+                staged_usage,
+                commit_effects,
+                session_execution_lease,
+                release_session_execution_lease,
+                &trace_turn_id,
             )
             .await
         {
-            Ok(batches) => batches,
+            Ok(committed) => committed,
             Err(err) => {
                 // Reported here, not inside the commit: the guard reference and the
                 // claimant are already live in this future, so naming the writer
@@ -805,27 +909,13 @@ impl LashRuntime {
                     &self.runtime_lease_owner,
                     &err,
                 );
-                self.mark_phase_end(CommittedTurn::RUNTIME_PHASE);
+                self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
                 return Err(runtime_error_from_store_commit(err));
             }
         };
-        staged_usage.confirm_identities(&confirmed_usage);
-        if release_session_execution_lease && let Some(lease) = session_execution_lease {
-            lease.mark_released();
-        }
-        self.last_committed_lease_continuity = if release_session_execution_lease {
-            None
-        } else {
-            session_execution_lease.and_then(SessionExecutionLeaseGuard::continuity)
-        };
-        let committed = CommittedTurn {
-            turn: returned_turn,
-            events: finalized_events,
-            resident_state: turn_pipeline.into_final_state(),
-            enqueued_queue_batches,
-        };
-
-        let mut delivery = committed.adopt(self, &trace_turn_id);
+        self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
+        self.mark_phase_begin(CommittedTurn::RUNTIME_PHASE);
+        let mut delivery = committed.adopt(self, &trace_turn_id, session_execution_lease);
         self.mark_phase_end(CommittedTurn::RUNTIME_PHASE);
         self.mark_phase_begin(PostCommitDelivery::RUNTIME_PHASE);
 
@@ -900,7 +990,7 @@ impl LashRuntime {
                 delivery
                     .turn
                     .errors
-                    .push(crate::plugin::plugin_lifecycle_hook_issue(error));
+                    .push(post_commit_plugin_lifecycle_hook_issue(error));
                 delivery.post_commit_delivery_failed = true;
                 self.invalidate_resident_session_state();
             }
@@ -960,7 +1050,7 @@ impl LashRuntime {
         assembler.push(&SessionStreamEvent::Done);
         emit_session_event_to_sink(events, SessionStreamEvent::Done).await;
         let claims = LogicalTurnClaims::new(pending_queue_claims, pending_turn_input_claims);
-        self.finish_turn(
+        Box::pin(self.finish_turn(
             TurnFinishInput {
                 turn_pipeline,
                 assembler,
@@ -976,7 +1066,7 @@ impl LashRuntime {
             session_execution_lease,
             session_execution_lease_release_policy,
             turn_control,
-        )
+        ))
         .await
     }
 
@@ -1067,7 +1157,7 @@ impl LashRuntime {
             self.state.turn_scope(&trace_turn_id),
         );
         turn_pipeline.apply_prepared_messages(&messages);
-        self.finish_turn(
+        Box::pin(self.finish_turn(
             TurnFinishInput {
                 turn_pipeline,
                 assembler,
@@ -1086,7 +1176,7 @@ impl LashRuntime {
             session_execution_lease,
             SessionExecutionLeaseReleasePolicy::KeepOnAgentFrameSwitch,
             &turn_control,
-        )
+        ))
         .await
     }
 
@@ -1274,7 +1364,7 @@ impl LashRuntime {
                 .await
                 .map(AgentFrameRun::into_final_turn);
                 if let Err(err) = &result {
-                    self.abandon_turn_input_claims_after_lease_loss(
+                    self.abandon_turn_input_claims_after_local_abort(
                         err,
                         std::slice::from_ref(&claim_for_abandon),
                     )
@@ -1373,7 +1463,7 @@ impl LashRuntime {
         .await
         .map(AgentFrameRun::into_final_turn);
         if let Err(err) = &result {
-            self.abandon_queued_work_claims_after_lease_loss(
+            self.abandon_queued_work_claims_after_local_abort(
                 err,
                 std::slice::from_ref(&claim_for_abandon),
             )
@@ -1647,28 +1737,27 @@ impl LashRuntime {
                 );
                 turn_pipeline.apply_prepared_messages(&messages);
                 let claims = LogicalTurnClaims::new(queued_claims, turn_input_claims);
-                return self
-                    .finish_turn(
-                        TurnFinishInput {
-                            turn_pipeline,
-                            assembler,
-                            new_messages: messages,
-                            policy: RuntimeSessionPolicy::new(
-                                self.state.effective_policy().clone(),
-                                Default::default(),
-                            ),
-                            turn_index,
-                            trace_turn_id,
-                        },
-                        &claims,
-                        events,
-                        &scoped_effect_controller,
-                        &cancel,
-                        session_execution_lease,
-                        session_execution_lease_release_policy,
-                        &turn_control,
-                    )
-                    .await;
+                return Box::pin(self.finish_turn(
+                    TurnFinishInput {
+                        turn_pipeline,
+                        assembler,
+                        new_messages: messages,
+                        policy: RuntimeSessionPolicy::new(
+                            self.state.effective_policy().clone(),
+                            Default::default(),
+                        ),
+                        turn_index,
+                        trace_turn_id,
+                    },
+                    &claims,
+                    events,
+                    &scoped_effect_controller,
+                    &cancel,
+                    session_execution_lease,
+                    session_execution_lease_release_policy,
+                    &turn_control,
+                ))
+                .await;
             }
         };
         let turn_index = self.state.turn_index + 1;
@@ -2074,7 +2163,7 @@ impl LashRuntime {
         emit_session_event_to_sink(events, outcome_event).await;
         assembler.push(&SessionStreamEvent::Done);
         emit_session_event_to_sink(events, SessionStreamEvent::Done).await;
-        self.finish_turn(
+        Box::pin(self.finish_turn(
             TurnFinishInput {
                 turn_pipeline,
                 assembler,
@@ -2093,7 +2182,7 @@ impl LashRuntime {
             session_execution_lease,
             session_execution_lease_release_policy,
             turn_control,
-        )
+        ))
         .await
     }
 
@@ -2341,9 +2430,9 @@ impl LashRuntime {
                     ..
                 } = *driver;
                 self.session = Some(session);
-                self.abandon_queued_work_claims_after_lease_loss(&err, &pending_queue_claims)
+                self.abandon_queued_work_claims_after_local_abort(&err, &pending_queue_claims)
                     .await;
-                self.abandon_turn_input_claims_after_lease_loss(&err, &pending_turn_input_claims)
+                self.abandon_turn_input_claims_after_local_abort(&err, &pending_turn_input_claims)
                     .await;
                 return Err(err);
             }
@@ -2357,9 +2446,9 @@ impl LashRuntime {
                     ..
                 } = *driver;
                 self.session = Some(session);
-                self.abandon_queued_work_claims_after_lease_loss(&err, &pending_queue_claims)
+                self.abandon_queued_work_claims_after_local_abort(&err, &pending_queue_claims)
                     .await;
-                self.abandon_turn_input_claims_after_lease_loss(&err, &pending_turn_input_claims)
+                self.abandon_turn_input_claims_after_local_abort(&err, &pending_turn_input_claims)
                     .await;
                 return Err(err);
             }
@@ -2403,9 +2492,9 @@ impl LashRuntime {
         ))
         .await;
         if let Err(err) = &finish_result {
-            self.abandon_queued_work_claims_after_lease_loss(err, &pending_claims.queued)
+            self.abandon_queued_work_claims_after_local_abort(err, &pending_claims.queued)
                 .await;
-            self.abandon_turn_input_claims_after_lease_loss(err, &pending_claims.turn_inputs)
+            self.abandon_turn_input_claims_after_local_abort(err, &pending_claims.turn_inputs)
                 .await;
         }
         finish_result

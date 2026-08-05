@@ -107,6 +107,10 @@ pub(super) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> 
             RuntimeErrorCode::SessionExecutionLeaseLost,
             format!("session execution lease for session `{session_id}` was lost before commit"),
         ),
+        crate::store::StoreError::ExecutionStateCaptureFailed { message } => RuntimeError::new(
+            RuntimeErrorCode::ExecutionStateCaptureFailed,
+            format!("failed to snapshot dirty execution state: {message}"),
+        ),
         err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
     }
 }

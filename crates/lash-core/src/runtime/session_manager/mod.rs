@@ -24,7 +24,8 @@ pub(crate) use usage::{
 };
 #[cfg(not(any(test, feature = "testing")))]
 pub(in crate::runtime) use usage::{
-    PendingTokenLedgerEntry, record_token_usage_shared, stage_token_ledger_shared,
+    PendingTokenLedgerEntry, StagedTokenLedger, record_token_usage_shared,
+    stage_token_ledger_shared,
 };
 
 #[derive(Clone)]

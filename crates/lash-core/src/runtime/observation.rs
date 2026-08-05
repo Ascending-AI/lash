@@ -50,9 +50,14 @@ impl RuntimeObservation {
             Err(err) => (Arc::new(Vec::new()), Some(err.to_string())),
         };
         let tool_state_generation = runtime
-            .session
-            .as_ref()
-            .map(|session| session.plugins().tool_registry().generation());
+            .resident_session_state_valid
+            .then(|| {
+                runtime
+                    .session
+                    .as_ref()
+                    .map(|session| session.plugins().tool_registry().generation())
+            })
+            .flatten();
         let tool_state = match (
             tool_state_generation,
             previous.and_then(|observation| observation.tool_state.as_ref()),
@@ -219,7 +224,10 @@ fn export_observation_state(
     crate::SessionReadView,
     super::SessionUsageReport,
 ) {
-    let mut state = runtime.export_persisted_state();
+    // Observation publication is synchronous. When resident state has been
+    // invalidated, project only the already-adopted durable snapshot; never
+    // recapture live plugin/tool state before the async reload gate runs.
+    let mut state = runtime.export_persistence_state();
     let read_view = runtime.read_view();
     let shared_ledger = runtime
         .shared_token_ledger
@@ -805,7 +813,7 @@ mod tests {
         runtime.state.turn_index = 9;
         runtime.state.head_revision = 17;
 
-        let exported = runtime.export_persisted_state();
+        let exported = runtime.export_persistence_state();
         let exported_revision = SessionRevision::from_state(&exported);
         let accessor_revision = SessionRevision::from_runtime(&runtime);
         assert_eq!(accessor_revision, exported_revision);

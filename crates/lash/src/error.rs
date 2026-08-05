@@ -107,12 +107,8 @@ impl EmbedError {
     /// their typed retryability is carried on
     /// [`TurnIssue::retryable`](crate::turn::TurnIssue) instead.
     pub fn is_retryable(&self) -> bool {
-        use lash_core::RuntimeErrorCode;
         match self {
-            Self::Runtime(err) => matches!(
-                err.code,
-                RuntimeErrorCode::SessionExecutionBusy | RuntimeErrorCode::StoreCommitContended
-            ),
+            Self::Runtime(err) => err.code.is_retryable(),
             _ => false,
         }
     }
@@ -230,6 +226,13 @@ mod tests {
     #[test]
     fn store_commit_failed_is_neither_retryable_nor_terminal() {
         let err = runtime_error(RuntimeErrorCode::StoreCommitFailed);
+        assert!(!err.is_retryable(), "{err}");
+        assert!(!err.is_terminal(), "{err}");
+    }
+
+    #[test]
+    fn execution_state_capture_failed_is_non_retryable_and_non_terminal() {
+        let err = runtime_error(RuntimeErrorCode::ExecutionStateCaptureFailed);
         assert!(!err.is_retryable(), "{err}");
         assert!(!err.is_terminal(), "{err}");
     }

@@ -25,6 +25,11 @@ impl LashRuntime {
     pub(super) fn active_tool_catalog_shared(
         &self,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
+        if !self.resident_session_state_valid {
+            return Err(crate::PluginError::Session(
+                "resident session state is invalidated; durable reload is required".to_string(),
+            ));
+        }
         self.session
             .as_ref()
             .map(|session| session.shared_tool_catalog(&self.state.session_id))
@@ -32,6 +37,11 @@ impl LashRuntime {
     }
 
     pub fn tool_state(&self) -> Result<crate::ToolState, SessionError> {
+        if !self.resident_session_state_valid {
+            return Err(SessionError::Protocol(
+                "resident session state is invalidated; durable reload is required".to_string(),
+            ));
+        }
         let Some(session) = self.session.as_ref() else {
             return Err(SessionError::Protocol(
                 "runtime session not available".to_string(),
@@ -73,6 +83,11 @@ impl LashRuntime {
         plugin_options: &crate::PluginOptions,
         is_root_session: bool,
     ) -> Result<(), crate::PluginError> {
+        if !self.resident_session_state_valid {
+            return Err(crate::PluginError::Session(
+                "resident session state is invalidated; durable reload is required".to_string(),
+            ));
+        }
         let protocol_session = self
             .session
             .as_ref()
@@ -125,7 +140,8 @@ impl LashRuntime {
 
     /// Export a persistence-ready state envelope with dynamic/plugin snapshots
     /// refreshed from the live session.
-    pub fn export_persisted_state(&self) -> RuntimeSessionState {
+    pub async fn export_persisted_state(&mut self) -> Result<RuntimeSessionState, RuntimeError> {
+        self.reload_invalidated_resident_session_state().await?;
         let mut state = self.state.clone();
         state.protocol_turn_options = self.protocol_turn_options.clone();
         if let Some(session) = self.session.as_ref() {
@@ -137,7 +153,7 @@ impl LashRuntime {
             state.plugin_snapshot_revision =
                 Some(session.plugins().snapshot_revision_fingerprint());
         }
-        state
+        Ok(state)
     }
 
     pub fn usage_report(&self) -> SessionUsageReport {
@@ -202,6 +218,11 @@ impl LashRuntime {
     pub(super) fn runtime_session_services(
         &self,
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
+        if !self.resident_session_state_valid {
+            return Err(PluginOperationInvokeError::Unknown(
+                "resident session state is invalidated; durable reload is required".to_string(),
+            ));
+        }
         Ok(Arc::new(RuntimeSessionServices::new(self, true, None)?))
     }
 
@@ -288,18 +309,21 @@ impl LashRuntime {
 
     /// The plugin session bound to the currently active runtime session, if any.
     pub fn plugin_session(&self) -> Option<Arc<crate::PluginSession>> {
-        self.session.as_ref().map(|s| Arc::clone(s.plugins()))
+        self.resident_session_state_valid
+            .then(|| self.session.as_ref().map(|s| Arc::clone(s.plugins())))
+            .flatten()
     }
 
-    pub fn open_agent_frame(
+    pub async fn open_agent_frame(
         &mut self,
         request: crate::OpenAgentFrameRequest,
-    ) -> crate::OpenAgentFrameResult {
-        open_agent_frame_in_state_with_clock(
+    ) -> Result<crate::OpenAgentFrameResult, RuntimeError> {
+        self.reload_invalidated_resident_session_state().await?;
+        Ok(open_agent_frame_in_state_with_clock(
             &mut self.state,
             request,
             self.host.core.clock.as_ref(),
-        )
+        ))
     }
 
     /// Run the registered compaction provider and commit the resulting
@@ -309,6 +333,9 @@ impl LashRuntime {
         instructions: Option<String>,
         scoped_effect_controller: crate::ScopedEffectController<'_>,
     ) -> Result<bool, PluginOperationInvokeError> {
+        self.reload_invalidated_resident_session_state()
+            .await
+            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         let services = self.runtime_session_services()?;
         let compaction_boundary = scoped_effect_controller.scope_id().to_string();
         let Some(plugin_session) = self.session.as_ref().map(|s| Arc::clone(s.plugins())) else {
@@ -339,10 +366,13 @@ impl LashRuntime {
                 .as_deref()
                 .unwrap_or_default(),
         );
-        let result = self.open_agent_frame(
-            crate::OpenAgentFrameRequest::new(frame_id, crate::AgentFrameReason::compaction())
-                .with_initial_nodes(compaction.initial_nodes),
-        );
+        let result = self
+            .open_agent_frame(
+                crate::OpenAgentFrameRequest::new(frame_id, crate::AgentFrameReason::compaction())
+                    .with_initial_nodes(compaction.initial_nodes),
+            )
+            .await
+            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         if result.opened {
             self.stamp_live_plugin_state();
         }
@@ -435,6 +465,7 @@ impl LashRuntime {
         command: crate::SessionCommand,
         idempotency_key: impl Into<String>,
     ) -> Result<crate::SessionCommandReceipt, RuntimeError> {
+        self.reload_invalidated_resident_session_state().await?;
         let idempotency_key = idempotency_key.into();
         if idempotency_key.trim().is_empty() {
             return Err(RuntimeError::new(
@@ -499,6 +530,7 @@ impl LashRuntime {
         &mut self,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
+        self.reload_invalidated_resident_session_state().await?;
         let Some(store) = self
             .session
             .as_ref()
