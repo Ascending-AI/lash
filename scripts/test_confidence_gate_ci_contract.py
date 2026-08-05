@@ -385,14 +385,14 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             workspace,
         )
 
-    def test_lint_job_runs_functional_perf_smoke_without_budgets(self) -> None:
+    def test_lint_job_runs_database_free_budgeted_perf_smoke(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         lint = workflow_job_block(workflow, "lint")
 
         self.assertIn("runs-on: blacksmith-8vcpu-ubuntu-2404", lint)
         self.assertIn(
             "profile_runtime.py --profile quick "
-            "--out .benchmarks/perf-smoke/runtime.json",
+            "--enforce-budgets --out .benchmarks/perf-smoke/runtime.json",
             lint,
         )
         self.assertIn(
@@ -402,7 +402,12 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         )
         smoke = lint[lint.index("- name: Run performance harness smoke") :]
         smoke = smoke[: smoke.index("- name: Check core/UI boundary")]
-        self.assertNotIn("--enforce-budgets", smoke)
+        self.assertNotIn("--scenario all", smoke)
+        self.assertIn(
+            "rustfmt --edition 2024 --check "
+            "crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs",
+            lint,
+        )
 
     def test_workflow_graph_example_is_in_functional_matrix(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

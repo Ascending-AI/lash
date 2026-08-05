@@ -267,7 +267,7 @@ fn record_schema_gate_decision(
 
 /// Renders the reject-and-recreate boundary error, naming the remedy rather than
 /// only the numbers.
-fn version_mismatch_error(found: Option<i32>) -> StoreError {
+pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
     let (found, expected) = match found {
         Some(version) => (
             format!("has version {version}"),

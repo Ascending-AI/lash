@@ -393,7 +393,7 @@ impl RuntimePerfScenario {
             "store_hardening_hot_paths",
             Standard,
             RuntimeScenario,
-            "Measures hardening-era identity, schema-open, claim settlement, receipt, usage, and attachment-manifest costs on the real in-memory, SQLite, and PostgreSQL backends."
+            "Measures hardening-era store operations below protocol and facade ownership on the in-memory floor and real SQLite/PostgreSQL backends."
         ),
     ];
     pub(crate) const KNOWN: [Self; 38] = runtime_perf_known_scenarios();

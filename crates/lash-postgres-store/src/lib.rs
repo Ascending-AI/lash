@@ -339,13 +339,25 @@ impl PostgresStorage {
         })
     }
 
-    /// Construct storage after the caller has already verified this exact pool.
+    /// Construct storage after the caller has already structurally verified this
+    /// exact pool.
     ///
     /// This testing-only seam exists so the performance harness can subtract the
-    /// cost of an otherwise identical open from the enforced schema-gate open.
-    /// Production builds expose no unchecked construction path.
+    /// structural catalog gate from an otherwise identical open. It still checks
+    /// the unconditional component-version boundary and the signing-secret data
+    /// precondition; only structural verification is skipped.
     #[cfg(feature = "testing")]
+    #[doc(hidden)]
     pub async fn from_preverified_pool_for_testing(pool: PgPool) -> Result<Self, StoreError> {
+        let found_version: Option<i32> =
+            sqlx::query_scalar("SELECT version FROM lash_schema_versions WHERE component = $1")
+                .bind(SCHEMA_COMPONENT)
+                .fetch_optional(&pool)
+                .await
+                .map_err(store_sqlx_error)?;
+        if found_version != Some(SCHEMA_VERSION) {
+            return Err(version_mismatch_error(found_version));
+        }
         let signing_secret: Option<Vec<u8>> = sqlx::query_scalar(
             "SELECT signing_secret FROM lash_await_event_meta WHERE singleton = TRUE",
         )

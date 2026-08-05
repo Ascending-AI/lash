@@ -90,9 +90,15 @@ async fn run_once_store_hardening_hot_paths(
 
     let memory_registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let sqlite_registry: Arc<dyn lash_core::ProcessRegistry> =
-        Arc::new(lash_sqlite_store::SqliteProcessRegistry::memory().await?);
-    let postgres_registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(postgres.process_registry());
+    let sqlite_registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(
+        lash_sqlite_store::SqliteProcessRegistry::open(
+            &sqlite_root.join("process-registry.sqlite"),
+            sqlite_root.join("process-sessions"),
+        )
+        .await?,
+    );
+    let postgres_registry: Arc<dyn lash_core::ProcessRegistry> =
+        Arc::new(postgres.process_registry());
     let build_runtime_ms = elapsed_ms(build_started);
     let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
     let after_build_memory = process_memory_sample();
@@ -120,23 +126,23 @@ async fn run_once_store_hardening_hot_paths(
 
         measure_hardening_identity_phases(turn_index, &mut phase_profile)?;
 
-        let (_, phase) = measure_runtime_perf_async_phase(
-            "store_hardening.postgres.open_preverified",
-            async {
+        let (_, phase) =
+            measure_runtime_perf_async_phase("store_hardening.postgres.open_preverified", async {
                 lash_postgres_store::PostgresStorage::from_preverified_pool_for_testing(
                     postgres.pool().clone(),
                 )
                 .await
                 .map(drop)
                 .map_err(anyhow::Error::from)
-            },
-        )
-        .await?;
+            })
+            .await?;
         phase_profile.insert(phase.0, phase.1);
 
-        let (_, phase) = measure_runtime_perf_async_phase(
-            "store_hardening.postgres.open_enforce",
-            async {
+        let (_, phase) =
+            measure_runtime_perf_async_phase("store_hardening.postgres.open_enforce", async {
+                // Deliberately HostProvisioned: this arm measures the structural
+                // verification gate without LashManaged's version preflight and
+                // idempotent DDL. The report calls out that narrower open mode.
                 lash_postgres_store::PostgresStorage::from_pool_with(
                     postgres.pool().clone(),
                     lash_postgres_store::PostgresStoreConfig {
@@ -149,9 +155,8 @@ async fn run_once_store_hardening_hot_paths(
                 .await
                 .map(drop)
                 .map_err(anyhow::Error::from)
-            },
-        )
-        .await?;
+            })
+            .await?;
         phase_profile.insert(phase.0, phase.1);
 
         phase_profile.extend(
@@ -222,8 +227,7 @@ async fn run_once_store_hardening_hot_paths(
         let await_background_work_ms = elapsed_ms(background_started);
         let await_background_work_alloc = alloc_delta(await_before_alloc, allocator_stats());
         let after_await_memory = process_memory_sample();
-        let total_alloc =
-            sum_allocation_deltas([&run_turn_alloc, &await_background_work_alloc]);
+        let total_alloc = sum_allocation_deltas([&run_turn_alloc, &await_background_work_alloc]);
         turns.push(RuntimePerfTurnResult {
             turn_index,
             run_turn_ms,
@@ -324,22 +328,20 @@ fn measure_hardening_identity_phases(
     turn_index: usize,
     phase_profile: &mut BTreeMap<String, RuntimePerfPhaseRunResult>,
 ) -> anyhow::Result<()> {
-    let registration = lash_core::runtime::prepare_process_registration(
-        lash_core::ProcessRegistration::new(
-        format!("identity-process-{turn_index}"),
-        lash_core::ProcessInput::External {
-            metadata: serde_json::json!({
-                "nested": {"z": 3, "a": [1, 2, 3]},
-                "turn": turn_index,
-            }),
-        },
-        lash_core::RecoveryDisposition::ExternallyOwned,
-        lash_core::ProcessProvenance::host(),
-        ),
-    )?;
-    let (_, phase) = measure_runtime_perf_phase(
-        "store_hardening.identity.process_registration",
-        || {
+    let registration =
+        lash_core::runtime::prepare_process_registration(lash_core::ProcessRegistration::new(
+            format!("identity-process-{turn_index}"),
+            lash_core::ProcessInput::External {
+                metadata: serde_json::json!({
+                    "nested": {"z": 3, "a": [1, 2, 3]},
+                    "turn": turn_index,
+                }),
+            },
+            lash_core::RecoveryDisposition::ExternallyOwned,
+            lash_core::ProcessProvenance::host(),
+        ))?;
+    let (_, phase) =
+        measure_runtime_perf_phase("store_hardening.identity.process_registration", || {
             for index in 0..HARDENING_IDENTITY_ITERATIONS {
                 std::hint::black_box(lash_core::runtime::process_registration_fingerprint(
                     &registration,
@@ -347,8 +349,7 @@ fn measure_hardening_identity_phases(
                 ));
             }
             Ok(())
-        },
-    )?;
+        })?;
     phase_profile.insert(phase.0, phase.1);
 
     let occurrence = lash_core::TriggerOccurrenceRequest::new(
@@ -357,33 +358,28 @@ fn measure_hardening_identity_phases(
         serde_json::json!({"payload": [1, 2, 3]}),
         format!("occurrence-{turn_index}"),
     );
-    let (_, phase) = measure_runtime_perf_phase(
-        "store_hardening.identity.trigger_occurrence",
-        || {
+    let (_, phase) =
+        measure_runtime_perf_phase("store_hardening.identity.trigger_occurrence", || {
             for _ in 0..HARDENING_OCCURRENCE_ITERATIONS {
                 std::hint::black_box(lash_core::facade_support::deterministic_occurrence_id(
                     &occurrence,
                 )?);
             }
             Ok(())
-        },
-    )?;
+        })?;
     phase_profile.insert(phase.0, phase.1);
 
     let usage = store_hardening_usage(turn_index);
-    let (_, phase) = measure_runtime_perf_phase(
-        "store_hardening.identity.usage_delta",
-        || {
-            for ordinal in 0..HARDENING_IDENTITY_ITERATIONS {
-                std::hint::black_box(lash_core::store::RuntimeUsageDeltaIdentity::for_entry(
-                    format!("perf-operation-{turn_index}"),
-                    ordinal as u64,
-                    &usage,
-                ));
-            }
-            Ok(())
-        },
-    )?;
+    let (_, phase) = measure_runtime_perf_phase("store_hardening.identity.usage_delta", || {
+        for ordinal in 0..HARDENING_IDENTITY_ITERATIONS {
+            std::hint::black_box(lash_core::store::RuntimeUsageDeltaIdentity::for_entry(
+                format!("perf-operation-{turn_index}"),
+                ordinal as u64,
+                &usage,
+            ));
+        }
+        Ok(())
+    })?;
     phase_profile.insert(phase.0, phase.1);
     Ok(())
 }
@@ -447,9 +443,8 @@ async fn measure_store_hardening_backend_turn(
     .await?;
     phases.insert(phase.0, phase.1);
 
-    let attachment_id = lash_core::AttachmentId::new(format!(
-        "hardening-attachment-{session_id}-{turn_index}"
-    ));
+    let attachment_id =
+        lash_core::AttachmentId::new(format!("hardening-attachment-{session_id}-{turn_index}"));
     let (_, phase) = measure_runtime_perf_phase(names.attachment_intent, || {
         Ok(store.record_intent(AttachmentIntent {
             attachment_id: attachment_id.clone(),
@@ -468,32 +463,31 @@ async fn measure_store_hardening_backend_turn(
         "perf-hardening",
         serde_json::json!({"turn": turn_index, "payload": [1, 2, 3, 4]}),
     )];
-    let (replay_commit, phase) =
-        measure_runtime_perf_async_phase(names.append_receipt_usage_fresh, async {
-            let mut commit = lash_core::store::append_request_commit_for_testing(
-                &mut state,
-                &operation_id,
-                &nodes,
-                None,
-            )?;
-            let usage = store_hardening_usage(turn_index);
-            let operation_storage_key = commit.turn_commit.operation.storage_key()?;
-            commit.usage_deltas = vec![lash_core::store::RuntimeUsageDelta {
-                identity: lash_core::store::RuntimeUsageDeltaIdentity::for_entry(
-                    operation_storage_key,
-                    0,
-                    &usage,
-                ),
-                entry: usage,
-            }];
-            let replay_commit = commit.clone();
-            let result = store.commit_runtime_state(commit).await?;
-            if result.receipt_replayed {
-                anyhow::bail!("fresh hardening append unexpectedly replayed");
-            }
-            Ok::<_, anyhow::Error>(replay_commit)
-        })
-        .await?;
+    let mut commit = lash_core::store::append_request_commit_for_testing(
+        &mut state,
+        &operation_id,
+        &nodes,
+        None,
+    )?;
+    let usage = store_hardening_usage(turn_index);
+    let operation_storage_key = commit.turn_commit.operation.storage_key()?;
+    commit.usage_deltas = vec![lash_core::store::RuntimeUsageDelta {
+        identity: lash_core::store::RuntimeUsageDeltaIdentity::for_entry(
+            operation_storage_key,
+            0,
+            &usage,
+        ),
+        entry: usage,
+    }];
+    let replay_commit = commit.clone();
+    let (_, phase) = measure_runtime_perf_async_phase(names.append_receipt_usage_fresh, async {
+        let result = store.commit_runtime_state(commit).await?;
+        if result.receipt_replayed {
+            anyhow::bail!("fresh hardening append unexpectedly replayed");
+        }
+        Ok::<(), anyhow::Error>(())
+    })
+    .await?;
     phases.insert(phase.0, phase.1);
 
     let (_, phase) = measure_runtime_perf_async_phase(names.append_receipt_replay, async {
@@ -552,11 +546,7 @@ async fn measure_process_prune(
     }
     let (report, phase) = measure_runtime_perf_async_phase(phase_name, async {
         registry
-            .prune_terminal_processes(
-                u64::MAX,
-                None,
-                lash_core::ProjectionWatermark::NoProjector,
-            )
+            .prune_terminal_processes(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
             .await
             .map_err(anyhow::Error::from)
     })
@@ -575,12 +565,14 @@ async fn load_store_hardening_state(
     store: &Arc<dyn lash_core::RuntimePersistence>,
     session_id: &str,
 ) -> anyhow::Result<RuntimeSessionState> {
-    Ok(lash::persistence::load_persisted_session_state(store.as_ref())
-        .await?
-        .unwrap_or_else(|| RuntimeSessionState {
-            session_id: session_id.to_string(),
-            ..RuntimeSessionState::default()
-        }))
+    Ok(
+        lash::persistence::load_persisted_session_state(store.as_ref())
+            .await?
+            .unwrap_or_else(|| RuntimeSessionState {
+                session_id: session_id.to_string(),
+                ..RuntimeSessionState::default()
+            }),
+    )
 }
 
 fn store_hardening_create_request(session_id: &str) -> lash_core::SessionStoreCreateRequest {

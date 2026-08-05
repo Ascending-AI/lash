@@ -940,7 +940,12 @@ impl RuntimeCommit {
 /// Build the exact identity-bearing append commit used by the runtime.
 ///
 /// The perf harness needs this test-gated seam to isolate receipt derivation
-/// and real backend publication without adding timing hooks to production.
+/// and real backend publication without adding timing hooks to production. It
+/// deliberately stops before the host-owned parts of the production sequence:
+/// protocol-plugin mutation/rollback, live plugin-state stamping, the host clock
+/// (this hook uses `SystemClock`), staged token-ledger merging, and fresh
+/// session-execution-lease acquisition. Keep those divergences visible here when
+/// the production append sequence changes.
 #[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
 pub fn append_request_commit_for_testing(
@@ -975,6 +980,7 @@ pub fn append_request_commit_for_testing(
         operation,
     )?;
     commit.turn_commit = stamp;
+    commit.debug_assert_append_envelope_scope();
     Ok(commit)
 }
 

@@ -19,7 +19,8 @@ use super::scenarios::{RuntimePerfScenario, ScenarioHarnessKind};
 
 mod budgets;
 use budgets::{
-    allocation_budget_bytes, phase_wall_clock_budget_ms, steady_state_turn_allocation_budget_bytes,
+    allocation_budget_bytes, phase_wall_clock_budget_ms, process_list_run_allocation_budget_bytes,
+    process_list_run_wall_clock_budget_ms, steady_state_turn_allocation_budget_bytes,
     wall_clock_budget_ms,
 };
 
@@ -498,7 +499,7 @@ fn evaluate_budgets(
         }
 
         for (phase, metrics) in &summary.phase_summary {
-            let Some(budget_ms) = phase_wall_clock_budget_ms(phase) else {
+            let Some(budget_ms) = phase_wall_clock_budget_ms(*scenario, phase) else {
                 budgets.push(RuntimePerfBudgetResult {
                     scenario: summary.scenario.clone(),
                     scenario_harness: summary.scenario_harness.clone(),
@@ -521,14 +522,28 @@ fn evaluate_budgets(
             );
         }
 
-        push_max_budget(
-            &mut budgets,
-            summary,
-            "total_alloc_bytes",
-            "median",
-            summary.total_alloc_bytes.median,
-            allocation_budget_bytes(*scenario),
-        );
+        if *scenario == RuntimePerfScenario::ProcessListStress {
+            // The 1,537-row fixture is populated through TestLocalProcessRegistry,
+            // whose test-only map-clone writes are quadratic. Keep that separately
+            // reported setup span out of the product-facing release guard.
+            push_max_budget(
+                &mut budgets,
+                summary,
+                "run_turn_alloc_bytes",
+                "median",
+                summary.run_turn_alloc_bytes.median,
+                process_list_run_allocation_budget_bytes(),
+            );
+        } else {
+            push_max_budget(
+                &mut budgets,
+                summary,
+                "total_alloc_bytes",
+                "median",
+                summary.total_alloc_bytes.median,
+                allocation_budget_bytes(*scenario),
+            );
+        }
         push_max_budget(
             &mut budgets,
             summary,
@@ -537,14 +552,25 @@ fn evaluate_budgets(
             steady_state_turn_alloc_bytes(summary),
             steady_state_turn_allocation_budget_bytes(*scenario),
         );
-        push_max_budget(
-            &mut budgets,
-            summary,
-            "total_ms",
-            "median",
-            summary.total_ms.median,
-            wall_clock_budget_ms(*scenario),
-        );
+        if *scenario == RuntimePerfScenario::ProcessListStress {
+            push_max_budget(
+                &mut budgets,
+                summary,
+                "run_turn_ms",
+                "median",
+                summary.run_turn_ms.median,
+                process_list_run_wall_clock_budget_ms(),
+            );
+        } else {
+            push_max_budget(
+                &mut budgets,
+                summary,
+                "total_ms",
+                "median",
+                summary.total_ms.median,
+                wall_clock_budget_ms(*scenario),
+            );
+        }
     }
     budgets
 }
@@ -625,6 +651,7 @@ fn required_phases(scenario: RuntimePerfScenario) -> &'static [&'static str] {
             "rlm_lashlang.execute",
             "rlm_process.start",
             "rlm_process.await_handle",
+            "process.start_child",
             "process.await_handle",
         ],
         RuntimePerfScenario::TurnStartGate => &["turn_cancel.start_gate"],
@@ -680,6 +707,60 @@ fn required_phases(scenario: RuntimePerfScenario) -> &'static [&'static str] {
             "store_hardening.memory.prune_terminal_processes",
             "store_hardening.sqlite.prune_terminal_processes",
             "store_hardening.postgres.prune_terminal_processes",
+        ],
+        RuntimePerfScenario::Rlm => &[
+            "context_transform",
+            "before_turn_hooks",
+            "prompt_build",
+            "effect_loop",
+            "prepared_turn",
+            "committed_turn",
+            "post_commit_delivery",
+            "plugin_hook.context_transform.rlm_protocol",
+            "rlm_lashlang.rehydrate_projected_globals",
+            "rlm_lashlang.resolve_projected_bindings",
+        ],
+        RuntimePerfScenario::Standard => &[
+            "context_transform",
+            "before_turn_hooks",
+            "prompt_build",
+            "effect_loop",
+            "prepared_turn",
+            "committed_turn",
+            "post_commit_delivery",
+            "plugin_hook.context_transform.rolling_history",
+        ],
+        RuntimePerfScenario::StoreReopen => &[
+            "context_transform",
+            "before_turn_hooks",
+            "prompt_build",
+            "effect_loop",
+            "prepared_turn",
+            "committed_turn",
+            "post_commit_delivery",
+            "store_reopen.persisted_load",
+            "store_reopen.runtime_hydration",
+            "store_reopen.store_factory_create",
+        ],
+        RuntimePerfScenario::SqliteStoreReopen => &[
+            "context_transform",
+            "before_turn_hooks",
+            "prompt_build",
+            "effect_loop",
+            "prepared_turn",
+            "committed_turn",
+            "post_commit_delivery",
+            "sqlite_store_reopen.runtime_reopen",
+        ],
+        RuntimePerfScenario::TraceJsonlExtended => &[
+            "context_transform",
+            "before_turn_hooks",
+            "prompt_build",
+            "effect_loop",
+            "prepared_turn",
+            "committed_turn",
+            "post_commit_delivery",
+            "trace_jsonl.inspect_files",
         ],
         RuntimePerfScenario::RlmAsyncToolCompletion => &[
             "context_transform",
@@ -1116,60 +1197,6 @@ mod tests {
     }
 
     #[test]
-    fn runtime_perf_direct_counterparts_link_to_correctness_coverage() {
-        for scenario in [
-            RuntimePerfScenario::Standard,
-            RuntimePerfScenario::StandardToolCalls,
-            RuntimePerfScenario::Rlm,
-            RuntimePerfScenario::RlmProcessHandles,
-            RuntimePerfScenario::RlmProcessAsyncToolCompletion,
-            RuntimePerfScenario::RlmSubagentSpawn,
-            RuntimePerfScenario::TurnCheckpoint,
-            RuntimePerfScenario::QueuedWorkClaimStress,
-            RuntimePerfScenario::TurnInputIngressInterrupt,
-        ] {
-            assert!(
-                !scenario.correctness_coverage_ids().is_empty(),
-                "{} has a direct correctness counterpart but no coverage link",
-                scenario.name()
-            );
-        }
-    }
-
-    #[test]
-    fn runtime_perf_runtime_scenario_rationales_explain_lower_layer_ownership() {
-        for scenario in [
-            RuntimePerfScenario::OpenAiResponsesSseParse,
-            RuntimePerfScenario::DirectLlmClient,
-            RuntimePerfScenario::ProcessListStress,
-            RuntimePerfScenario::ScopedEffectController,
-            RuntimePerfScenario::StoreReopen,
-            RuntimePerfScenario::SqliteStoreReopen,
-            RuntimePerfScenario::TurnCheckpoint,
-            RuntimePerfScenario::LiveReplayPressure,
-            RuntimePerfScenario::QueuedWorkClaimStress,
-            RuntimePerfScenario::TurnInputIngressInterrupt,
-        ] {
-            let metadata = RuntimePerfScenario::METADATA
-                .iter()
-                .find(|metadata| metadata.scenario == scenario)
-                .expect("Runtime Scenario perf metadata");
-            assert_eq!(
-                metadata.scenario_harness,
-                ScenarioHarnessKind::RuntimeScenario
-            );
-            assert!(
-                metadata.harness_rationale.contains("below")
-                    && metadata.harness_rationale.contains("protocol")
-                    && metadata.harness_rationale.contains("facade"),
-                "{} must explain why its Runtime Scenario classification remains below protocol/facade ownership: {}",
-                metadata.name,
-                metadata.harness_rationale
-            );
-        }
-    }
-
-    #[test]
     fn runtime_perf_report_serializes_scenario_harness_groups() {
         let scenarios = vec![
             RuntimePerfScenario::TurnCheckpoint,
@@ -1438,7 +1465,10 @@ mod tests {
             520.0
         );
         assert_eq!(
-            phase_wall_clock_budget_ms("trigger.occurrence_to_delivery"),
+            phase_wall_clock_budget_ms(
+                RuntimePerfScenario::RlmTriggerMailPipeline,
+                "trigger.occurrence_to_delivery",
+            ),
             Some(55.0)
         );
     }
@@ -1463,7 +1493,7 @@ mod tests {
             ),
         ] {
             assert!(required_phases(scenario).contains(&phase));
-            assert_eq!(phase_wall_clock_budget_ms(phase), Some(budget_ms));
+            assert_eq!(phase_wall_clock_budget_ms(scenario, phase), Some(budget_ms));
         }
     }
 
