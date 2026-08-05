@@ -49252,6 +49252,54 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::RuntimePersistenceOp::Commit::value to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::CommitWithAttachmentRefs"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::CommitWithAttachmentRefs to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::CommitWithAttachmentRefs::attachment_slot"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::CommitWithAttachmentRefs::attachment_slot to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::CommitWithAttachmentRefs::new_session"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::CommitWithAttachmentRefs::new_session to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::CommitWithAttachmentRefs::session_selection"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::CommitWithAttachmentRefs::session_selection to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::CommitWithAttachmentRefs::turn_owned"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::CommitWithAttachmentRefs::turn_owned to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::CommitWithAttachmentRefs::value"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::CommitWithAttachmentRefs::value to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::testing::conformance::RuntimePersistenceOp::ConfirmUsage"
 kind = "variant"
 availability = "all-features"
@@ -49332,6 +49380,62 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::RuntimePersistenceOp::EnqueueWork::value to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::ProbeAttachmentGc"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::ProbeAttachmentGc to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::PutAttachmentIntent"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::PutAttachmentIntent to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::PutAttachmentIntent::attachment_slot"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::PutAttachmentIntent::attachment_slot to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::PutAttachmentIntent::owner_kind"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::PutAttachmentIntent::owner_kind to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::PutAttachmentIntent::value"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::PutAttachmentIntent::value to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::ReclaimAttachmentSession"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::ReclaimAttachmentSession to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::ReclaimAttachmentSession::selection"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::ReclaimAttachmentSession::selection to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::testing::conformance::RuntimePersistenceOp::RecordUsage"
 kind = "variant"
 availability = "all-features"
@@ -49372,6 +49476,22 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::RuntimePersistenceOp::RenewLease::stale to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::ReplayAttachmentCommit"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::ReplayAttachmentCommit to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceOp::ReplayAttachmentCommit::selection"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceOp::ReplayAttachmentCommit::selection to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::testing::conformance::RuntimePersistenceOp::ReplayUsageReceipt"
 kind = "variant"
 availability = "all-features"
@@ -49410,6 +49530,22 @@ availability = "all-features"
 area = "stores"
 disposition = "unused-add"
 reason = "Add lash::testing::conformance::RuntimePersistenceOp::StageUsage::replay_last_commit to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceStateMachineHandles"
+kind = "struct"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceStateMachineHandles to the agent-service persistence setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::RuntimePersistenceStateMachineHandles::create"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::RuntimePersistenceStateMachineHandles::create to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::testing::conformance::RuntimeRebuildBackend"
