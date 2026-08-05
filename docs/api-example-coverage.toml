@@ -86905,3 +86905,307 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete integrator class: process-registry adopters report the offending wake id when rejecting a malformed adoption."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryAttemptDisposition::BackendError::error"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryAttemptDisposition::BackendError::error to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::TestLocalProcessRegistry::set_process_lease_claim_error"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::testing::TestLocalProcessRegistry::set_process_lease_claim_error to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::TestLocalProcessRegistry::set_process_lease_release_error"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::testing::TestLocalProcessRegistry::set_process_lease_release_error to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::TestLocalProcessRegistry::set_process_lease_renew_error"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::testing::TestLocalProcessRegistry::set_process_lease_renew_error to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::TestLocalProcessRegistry::set_process_read_error_after"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::testing::TestLocalProcessRegistry::set_process_read_error_after to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::TestLocalProcessRegistry::set_process_terminal_write_error"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::testing::TestLocalProcessRegistry::set_process_terminal_write_error to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash_core::TestLocalProcessRegistry::set_process_lease_claim_error"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::TestLocalProcessRegistry::set_process_lease_release_error"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::TestLocalProcessRegistry::set_process_lease_renew_error"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::TestLocalProcessRegistry::set_process_read_error_after"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::TestLocalProcessRegistry::set_process_terminal_write_error"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::TestLocalProcessRegistry::set_process_read_absent"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::TestLocalProcessRegistry::set_process_read_override"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::TestLocalProcessRegistry::set_process_terminal_write_outcome"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash::testing::TestLocalProcessRegistry::set_process_read_absent"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::testing::TestLocalProcessRegistry::set_process_read_absent to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::TestLocalProcessRegistry::set_process_read_override"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::testing::TestLocalProcessRegistry::set_process_read_override to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::TestLocalProcessRegistry::set_process_terminal_write_outcome"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::testing::TestLocalProcessRegistry::set_process_terminal_write_outcome to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessDrainDeferred"
+kind = "struct"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessDrainDeferred to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessDrainDeferred::disposition"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessDrainDeferred::disposition to the agent-workbench durable process flow example and assert the typed disposition a drain report carries for a deferred row."
+
+[[api]]
+symbol = "lash::durability::ProcessDrainDeferred::process_id"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessDrainDeferred::process_id to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessDrainReport::deferred"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessDrainReport::deferred to the agent-workbench durable process flow example and assert the typed disposition a drain report carries for rows it could not terminalize."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryAttemptDisposition"
+kind = "enum"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryAttemptDisposition to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryAttemptDisposition::Absent"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryAttemptDisposition::Absent to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryAttemptDisposition::AlreadyApplied"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryAttemptDisposition::AlreadyApplied to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryAttemptDisposition::AlreadyApplied::terminal_status"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryAttemptDisposition::AlreadyApplied::terminal_status to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryAttemptDisposition::BackendError"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryAttemptDisposition::BackendError to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryAttemptDisposition::BackendError::operation"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryAttemptDisposition::BackendError::operation to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryAttemptDisposition::Busy"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryAttemptDisposition::Busy to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryAttemptDisposition::LeaseLost"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryAttemptDisposition::LeaseLost to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryAttemptDisposition::LeaseLost::operation"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryAttemptDisposition::LeaseLost::operation to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryAttemptDisposition::SettledByPeer"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryAttemptDisposition::SettledByPeer to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryAttemptDisposition::SettledByPeer::terminal_status"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryAttemptDisposition::SettledByPeer::terminal_status to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryOperation"
+kind = "enum"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryOperation to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryOperation::ClaimLease"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryOperation::ClaimLease to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryOperation::ReadProcess"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryOperation::ReadProcess to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryOperation::ReleaseLease"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryOperation::ReleaseLease to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryOperation::RenewLease"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryOperation::RenewLease to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::durability::ProcessRecoveryOperation::WriteTerminal"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::durability::ProcessRecoveryOperation::WriteTerminal to the agent-workbench durable process flow example and assert its externally observable result."

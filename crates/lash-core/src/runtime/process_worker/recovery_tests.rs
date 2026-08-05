@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use super::*;
 use crate::TestProcessRegistryWriteExt;
+use crate::runtime::tests::trace_capture::{CapturedFieldKind, EventCapture, capturing};
 use crate::{
     AbandonRequest, AttachmentStore, LeaseOwnerIdentity, ProcessExecutionEnvRef, ProcessInput,
     ProcessListFilter, ProcessRegistration, ProcessStarted, ProcessStatus,
@@ -11,6 +12,8 @@ use crate::{
 };
 
 mod attachment_owner_tests;
+#[path = "recovery_disposition_tests.rs"]
+mod recovery_disposition_tests;
 
 const TEST_PROCESS_EXECUTION_CONCURRENCY: usize = 4;
 
@@ -106,7 +109,39 @@ async fn worker_with_engine(
     Arc<LateBoundProcessRunHandle>,
     ProcessExecutionEnvRef,
 ) {
-    let raw_registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
+    let (worker, registry, run_handle, env_ref, _) =
+        worker_with_engine_and_registry(concurrency, engine, run_handle).await;
+    (worker, registry, run_handle, env_ref)
+}
+
+async fn worker_with_engine_and_registry(
+    concurrency: usize,
+    engine: Arc<dyn crate::ProcessEngine>,
+    run_handle: Arc<LateBoundProcessRunHandle>,
+) -> (
+    DurableProcessWorker,
+    Arc<dyn ProcessRegistry>,
+    Arc<LateBoundProcessRunHandle>,
+    ProcessExecutionEnvRef,
+    Arc<TestLocalProcessRegistry>,
+) {
+    worker_with_engine_registry_and_timings(concurrency, engine, run_handle, None).await
+}
+
+async fn worker_with_engine_registry_and_timings(
+    concurrency: usize,
+    engine: Arc<dyn crate::ProcessEngine>,
+    run_handle: Arc<LateBoundProcessRunHandle>,
+    lease_timings: Option<crate::LeaseTimings>,
+) -> (
+    DurableProcessWorker,
+    Arc<dyn ProcessRegistry>,
+    Arc<LateBoundProcessRunHandle>,
+    ProcessExecutionEnvRef,
+    Arc<TestLocalProcessRegistry>,
+) {
+    let test_registry = Arc::new(TestLocalProcessRegistry::default());
+    let raw_registry: Arc<dyn ProcessRegistry> = test_registry.clone();
     let driver = crate::ProcessWorkDriver::new(
         Arc::clone(&raw_registry),
         Arc::clone(&run_handle) as Arc<dyn crate::ProcessRunHandle>,
@@ -114,6 +149,9 @@ async fn worker_with_engine(
     let registry = driver.process_registry();
     let mut runtime_host = RuntimeHostConfig::in_memory();
     runtime_host.process_engines = crate::ProcessEngineRegistry::new().with_engine(engine);
+    if let Some(lease_timings) = lease_timings {
+        runtime_host = runtime_host.with_lease_timings(lease_timings);
+    }
     let policy = crate::SessionPolicy {
         provider_id: "test".to_string(),
         model: crate::ModelSpec::from_token_limits("test-model", Default::default(), 16_384, None)
@@ -144,7 +182,7 @@ async fn worker_with_engine(
         .worker
         .set(worker.clone())
         .unwrap_or_else(|_| panic!("test process worker is bound exactly once"));
-    (worker, registry, run_handle, env_ref)
+    (worker, registry, run_handle, env_ref, test_registry)
 }
 
 fn engine_registration(
@@ -252,8 +290,7 @@ fn inline_worker_with_trigger_store(
     )
 }
 
-/// A registration with an explicit disposition. Uses an External input as a
-/// convenient no-env placeholder; the disposition-driven sweep keys off the
+/// A registration with an explicit disposition; the disposition-driven sweep keys off the
 /// declared disposition, not the input kind, so these unit tests exercise the
 /// verdict without standing up execution infrastructure.
 fn registration_with_disposition(
@@ -284,6 +321,39 @@ async fn abandoned_evidence(
             *evidence
         }
         other => panic!("expected an Abandoned terminal, got {other:?}"),
+    }
+}
+
+fn assert_recovery_backend_error_event(
+    capture: &EventCapture,
+    process_id: &str,
+    operation: &str,
+    error: &str,
+) {
+    let event = capture.exactly_one("process_recovery.backend_error");
+    assert_eq!(event.level, "WARN");
+    assert_eq!(event.target, "lash_core::process_recovery");
+    let expected = [
+        (
+            "event",
+            "process_recovery.backend_error",
+            CapturedFieldKind::Str,
+        ),
+        ("decision_basis", "backend_error", CapturedFieldKind::Str),
+        ("process_id", process_id, CapturedFieldKind::Str),
+        ("operation", operation, CapturedFieldKind::Str),
+        ("outcome", "deferred", CapturedFieldKind::Str),
+        ("error", error, CapturedFieldKind::Str),
+        (
+            "message",
+            "process recovery backend operation failed; row deferred",
+            CapturedFieldKind::Debug,
+        ),
+    ];
+    assert_eq!(event.field_count(), expected.len());
+    for (field, value, kind) in expected {
+        assert_eq!(event.field_kind(field), kind, "field kind for {field}");
+        assert_eq!(event.field(field), value, "field value for {field}");
     }
 }
 
@@ -2007,6 +2077,7 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
 
     let report = worker.drain_owner_bound_work().await.expect("drain");
     assert_eq!(report.abandoned, vec!["mine-started".to_string()]);
+    assert!(report.deferred.is_empty());
 
     let evidence = abandoned_evidence(&registry, "mine-started").await;
     assert_eq!(evidence.writer, AbandonWriter::OwnerDrain);
@@ -2087,5 +2158,343 @@ async fn inline_start_records_stable_owner_that_owner_drain_can_match() {
     assert_eq!(
         report.abandoned,
         vec!["real-inline-owner-bound".to_string()]
+    );
+    assert!(report.deferred.is_empty());
+}
+
+#[tokio::test]
+async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let owner = local_owner("drain-write-failure", "host-a", "start-a");
+    let process_id = "owner-bound-terminal-write-failure";
+    registry
+        .register_process(registration_with_disposition(
+            process_id,
+            RecoveryDisposition::OwnerBound,
+        ))
+        .await
+        .expect("register owner-bound row");
+    registry
+        .record_first_started(
+            process_id,
+            ProcessStarted {
+                owner: owner.clone(),
+                fencing_token: 0,
+                attempt: 1,
+                started_at_ms: 1,
+            },
+        )
+        .await
+        .expect("record first start");
+    registry
+        .set_process_terminal_write_error(Some(PluginError::Session(
+            "injected terminal-write failure".to_string(),
+        )))
+        .await;
+
+    let worker = inline_worker(registry.clone(), owner);
+    let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
+    let report = report.expect("owner drain");
+
+    assert!(
+        report.abandoned.is_empty(),
+        "abandoned evidence requires an acknowledged terminal write"
+    );
+    assert_eq!(
+        report.deferred,
+        vec![ProcessDrainDeferred {
+            process_id: process_id.to_string(),
+            disposition: ProcessRecoveryAttemptDisposition::BackendError {
+                operation: ProcessRecoveryOperation::WriteTerminal,
+                error: "plugin session error: injected terminal-write failure".to_string(),
+            },
+        }]
+    );
+    assert_recovery_backend_error_event(
+        &capture,
+        process_id,
+        "write_terminal",
+        "plugin session error: injected terminal-write failure",
+    );
+    assert!(
+        !registry
+            .get_process(process_id)
+            .await
+            .expect("read process")
+            .expect("process exists")
+            .is_terminal(),
+        "the injected store failure is fail-closed"
+    );
+
+    registry.set_process_terminal_write_error(None).await;
+    let retry = worker
+        .drain_owner_bound_work()
+        .await
+        .expect("retry owner drain");
+    assert_eq!(retry.abandoned, vec![process_id.to_string()]);
+    assert!(retry.deferred.is_empty());
+}
+
+#[tokio::test]
+async fn drain_reports_claim_backend_error_and_retries() {
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let owner = local_owner("drain-claim-failure", "host-a", "start-a");
+    let process_id = "owner-bound-claim-failure";
+    registry
+        .register_process(registration_with_disposition(
+            process_id,
+            RecoveryDisposition::OwnerBound,
+        ))
+        .await
+        .expect("register owner-bound row");
+    registry
+        .record_first_started(
+            process_id,
+            ProcessStarted {
+                owner: owner.clone(),
+                fencing_token: 0,
+                attempt: 1,
+                started_at_ms: 1,
+            },
+        )
+        .await
+        .expect("record first start");
+    registry
+        .set_process_lease_claim_error(Some(PluginError::Session(
+            "injected claim failure".to_string(),
+        )))
+        .await;
+
+    let worker = inline_worker(registry.clone(), owner);
+    let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
+    let report = report.expect("owner drain");
+    assert!(report.abandoned.is_empty());
+    assert_eq!(
+        report.deferred,
+        vec![ProcessDrainDeferred {
+            process_id: process_id.to_string(),
+            disposition: ProcessRecoveryAttemptDisposition::BackendError {
+                operation: ProcessRecoveryOperation::ClaimLease,
+                error: "plugin session error: injected claim failure".to_string(),
+            },
+        }]
+    );
+    assert_recovery_backend_error_event(
+        &capture,
+        process_id,
+        "claim_lease",
+        "plugin session error: injected claim failure",
+    );
+
+    registry.set_process_lease_claim_error(None).await;
+    let retry = worker
+        .drain_owner_bound_work()
+        .await
+        .expect("retry owner drain");
+    assert_eq!(retry.abandoned, vec![process_id.to_string()]);
+    assert!(retry.deferred.is_empty());
+}
+
+#[tokio::test]
+async fn drain_reports_lease_renewal_backend_error_and_retries() {
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let owner = local_owner("drain-renew-failure", "host-a", "start-a");
+    let process_id = "owner-bound-renew-failure";
+    registry
+        .register_process(registration_with_disposition(
+            process_id,
+            RecoveryDisposition::OwnerBound,
+        ))
+        .await
+        .expect("register owner-bound row");
+    registry
+        .record_first_started(
+            process_id,
+            ProcessStarted {
+                owner: owner.clone(),
+                fencing_token: 0,
+                attempt: 1,
+                started_at_ms: 1,
+            },
+        )
+        .await
+        .expect("record first start");
+    registry
+        .set_process_lease_renew_error(Some(PluginError::Session(
+            "injected lease-renewal failure".to_string(),
+        )))
+        .await;
+
+    let worker = inline_worker(registry.clone(), owner);
+    let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
+    let report = report.expect("owner drain");
+    assert!(report.abandoned.is_empty());
+    assert_eq!(
+        report.deferred,
+        vec![ProcessDrainDeferred {
+            process_id: process_id.to_string(),
+            disposition: ProcessRecoveryAttemptDisposition::BackendError {
+                operation: ProcessRecoveryOperation::RenewLease,
+                error: "plugin session error: injected lease-renewal failure".to_string(),
+            },
+        }]
+    );
+    assert_recovery_backend_error_event(
+        &capture,
+        process_id,
+        "renew_lease",
+        "plugin session error: injected lease-renewal failure",
+    );
+
+    registry.set_process_lease_renew_error(None).await;
+    let retry = worker
+        .drain_owner_bound_work()
+        .await
+        .expect("retry owner drain");
+    assert_eq!(retry.abandoned, vec![process_id.to_string()]);
+    assert!(retry.deferred.is_empty());
+}
+
+#[tokio::test]
+async fn drain_reports_registry_read_error_instead_of_absent() {
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let owner = local_owner("drain-read-failure", "host-a", "start-a");
+    let process_id = "owner-bound-read-failure";
+    registry
+        .register_process(registration_with_disposition(
+            process_id,
+            RecoveryDisposition::OwnerBound,
+        ))
+        .await
+        .expect("register owner-bound row");
+    registry
+        .record_first_started(
+            process_id,
+            ProcessStarted {
+                owner: owner.clone(),
+                fencing_token: 0,
+                attempt: 1,
+                started_at_ms: 1,
+            },
+        )
+        .await
+        .expect("record first start");
+    registry
+        .set_process_read_error(Some(PluginError::Session(
+            "injected registry read failure".to_string(),
+        )))
+        .await;
+
+    let worker = inline_worker(registry.clone(), owner);
+    let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
+    let report = report.expect("owner drain");
+    assert!(report.abandoned.is_empty());
+    assert_eq!(
+        report.deferred,
+        vec![ProcessDrainDeferred {
+            process_id: process_id.to_string(),
+            disposition: ProcessRecoveryAttemptDisposition::BackendError {
+                operation: ProcessRecoveryOperation::ReadProcess,
+                error: "plugin session error: injected registry read failure".to_string(),
+            },
+        }]
+    );
+    assert_recovery_backend_error_event(
+        &capture,
+        process_id,
+        "read_process",
+        "plugin session error: injected registry read failure",
+    );
+
+    registry.set_process_read_error(None).await;
+    let retry = worker
+        .drain_owner_bound_work()
+        .await
+        .expect("retry owner drain");
+    assert_eq!(retry.abandoned, vec![process_id.to_string()]);
+    assert!(retry.deferred.is_empty());
+}
+
+#[tokio::test]
+async fn drain_distinguishes_busy_and_absent_rows() {
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let owner = local_owner("drain-legitimate-deferrals", "host-a", "start-a");
+    for process_id in ["owner-bound-busy", "owner-bound-absent"] {
+        registry
+            .register_process(registration_with_disposition(
+                process_id,
+                RecoveryDisposition::OwnerBound,
+            ))
+            .await
+            .expect("register owner-bound row");
+        registry
+            .record_first_started(
+                process_id,
+                ProcessStarted {
+                    owner: owner.clone(),
+                    fencing_token: 0,
+                    attempt: 1,
+                    started_at_ms: 1,
+                },
+            )
+            .await
+            .expect("record first start");
+    }
+    registry
+        .claim_process_lease(
+            "owner-bound-busy",
+            &LeaseOwnerIdentity::opaque("live-peer", "live-peer-incarnation"),
+            60_000,
+        )
+        .await
+        .expect("claim live peer lease")
+        .acquired()
+        .expect("peer acquires lease");
+    let worker = inline_worker(registry.clone(), owner);
+
+    let busy = worker.drain_owner_bound_work().await.expect("busy drain");
+    assert_eq!(
+        busy.deferred,
+        vec![ProcessDrainDeferred {
+            process_id: "owner-bound-busy".to_string(),
+            disposition: ProcessRecoveryAttemptDisposition::Busy,
+        }]
+    );
+    assert_eq!(busy.abandoned, vec!["owner-bound-absent".to_string()]);
+
+    let absent_id = "owner-bound-read-as-absent";
+    registry
+        .register_process(registration_with_disposition(
+            absent_id,
+            RecoveryDisposition::OwnerBound,
+        ))
+        .await
+        .expect("register read-as-absent row");
+    registry
+        .record_first_started(
+            absent_id,
+            ProcessStarted {
+                owner: worker.config().lease_owner.clone(),
+                fencing_token: 0,
+                attempt: 1,
+                started_at_ms: 1,
+            },
+        )
+        .await
+        .expect("record read-as-absent start");
+    registry.set_process_read_absent(true).await;
+    let absent = worker.drain_owner_bound_work().await.expect("absent drain");
+    assert_eq!(
+        absent.deferred,
+        vec![
+            ProcessDrainDeferred {
+                process_id: "owner-bound-busy".to_string(),
+                disposition: ProcessRecoveryAttemptDisposition::Busy,
+            },
+            ProcessDrainDeferred {
+                process_id: absent_id.to_string(),
+                disposition: ProcessRecoveryAttemptDisposition::Absent,
+            },
+        ]
     );
 }

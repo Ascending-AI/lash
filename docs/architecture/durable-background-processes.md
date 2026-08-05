@@ -435,6 +435,20 @@ owner identity it was established against, and the timestamp — and
 it is immutable: an owner that reappears is fenced by its stale lease token, never
 healed back to running.
 
+The graceful-drain report follows the same evidence rule. Its `abandoned` ids
+are only rows for which this pass receives `Committed` from the fenced terminal
+write. Exact already-applied outcomes, a peer's superseding terminal, and rows
+found terminal on the post-claim read remain deferred with the retained terminal
+status; none impersonates this pass's write. Legitimate contention, a row that
+disappeared after enumeration, and a superseded lease remain distinct `Busy`,
+`Absent`, and `LeaseLost` dispositions. Registry failures add a typed
+`BackendError` entry to `deferred` and emit the structured
+`process_recovery.backend_error` warn event on the
+`lash_core::process_recovery` target with the process id, failed operation,
+decision basis, string-typed error, and `deferred` outcome. Lease supersession is
+normal fencing evidence instead: it emits `process_recovery.lease_lost` and
+defers to the new owner without backend-failure guidance.
+
 There is exactly one legitimate writer per path:
 
 - **`OwnerDrain`** — the owner abandons its own started `OwnerBound` work inline at

@@ -5,9 +5,19 @@ use std::sync::Arc;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 
+use self::recovery::{
+    RecoveryBackendError, RecoveryClaimDisposition, RecoveryCompletionDisposition,
+    RecoveryReadDisposition, RecoveryReleaseDisposition,
+};
 use self::registration::registration_from_record;
 
+mod recovery;
 mod registration;
+
+pub use self::recovery::{
+    ProcessDrainDeferred, ProcessDrainReport, ProcessRecoveryAttemptDisposition,
+    ProcessRecoveryOperation,
+};
 
 use super::effect::ProcessRunner;
 use super::session_manager::RuntimeSessionServices;
@@ -16,8 +26,7 @@ use crate::InMemorySessionStore;
 use crate::{
     AbandonEvidence, AbandonWriter, LashRuntime, PluginError, PluginFactory, PluginHost,
     PluginStack, ProcessAwaitOutput, ProcessExecutionContext, ProcessInput, ProcessLease,
-    ProcessLeaseCompletion, ProcessRecord, ProcessRegistration, ProcessRegistry,
-    RecoveryDisposition, SessionStoreFactory,
+    ProcessRecord, ProcessRegistration, ProcessRegistry, RecoveryDisposition, SessionStoreFactory,
 };
 
 /// Default maximum number of processes one [`DurableProcessWorker`] executes
@@ -436,20 +445,14 @@ pub(crate) fn inherit_process_execution_permit<F: Future>(
     }
 }
 
-/// Report from a graceful [owner drain](DurableProcessWorker::drain_owner_bound_work).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ProcessDrainReport {
-    /// Process ids this host's own started `OwnerBound` work was terminalized as
-    /// `Abandoned{OwnerDrain}` on, in the order they were drained.
-    pub abandoned: Vec<String>,
-}
-
 /// Why a recovery run did not produce a terminal outcome under the lease.
 enum RecoverFailure {
     /// The lease was lost mid-run (another owner reclaimed an expired lease).
     /// The losing worker must not write a terminal outcome — the new owner is
     /// now the single writer.
     LeaseLost(PluginError),
+    /// A process-registry operation failed through the typed recovery seam.
+    BackendError(RecoveryBackendError),
     /// The process could not be run (rebuild/store-facet failure). The lease is
     /// still held, so this worker terminalizes the row.
     Run(PluginError),
@@ -511,6 +514,29 @@ impl DurableProcessWorker {
             .ok_or_else(|| {
                 PluginError::Session(format!("unknown process `{}`", registration.id))
             })?;
+        self.run_process_segment_from_current(
+            registration,
+            current,
+            execution_context,
+            execution_write_authority,
+            scoped_effect_controller,
+            cancellation,
+            handover,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn run_process_segment_from_current(
+        &self,
+        registration: ProcessRegistration,
+        current: ProcessRecord,
+        execution_context: ProcessExecutionContext,
+        execution_write_authority: crate::ProcessExecutionWriteAuthority,
+        scoped_effect_controller: crate::ScopedEffectController<'_>,
+        cancellation: CancellationToken,
+        handover: Option<crate::SegmentHandover>,
+    ) -> Result<crate::ProcessRunOutcome, PluginError> {
         let (owner, fencing_token) = match &execution_write_authority {
             crate::ProcessExecutionWriteAuthority::Lease(lease) => {
                 (self.config.lease_owner.clone(), lease.fencing_token)
@@ -819,6 +845,7 @@ impl DurableProcessWorker {
     /// [ADR 0011]: durable process registration is session-independent.
     pub async fn drain_owner_bound_work(&self) -> Result<ProcessDrainReport, PluginError> {
         let mut abandoned = Vec::new();
+        let mut deferred = Vec::new();
         for record in self.config.process_registry.list_non_terminal().await? {
             if record.disposition != RecoveryDisposition::OwnerBound {
                 continue;
@@ -834,45 +861,97 @@ impl DurableProcessWorker {
                 continue;
             }
             let owner = first_started.owner.clone();
-            if self.drain_one_owner_bound(&record.id, owner).await {
-                abandoned.push(record.id);
+            match self.drain_one_owner_bound(&record.id, owner).await {
+                RecoveryCompletionDisposition::Committed => abandoned.push(record.id),
+                RecoveryCompletionDisposition::Busy => deferred.push(ProcessDrainDeferred {
+                    process_id: record.id,
+                    disposition: ProcessRecoveryAttemptDisposition::Busy,
+                }),
+                RecoveryCompletionDisposition::Absent => deferred.push(ProcessDrainDeferred {
+                    process_id: record.id,
+                    disposition: ProcessRecoveryAttemptDisposition::Absent,
+                }),
+                RecoveryCompletionDisposition::AlreadyApplied(terminal_status) => {
+                    deferred.push(ProcessDrainDeferred {
+                        process_id: record.id,
+                        disposition: ProcessRecoveryAttemptDisposition::AlreadyApplied {
+                            terminal_status,
+                        },
+                    });
+                }
+                RecoveryCompletionDisposition::SettledByPeer(terminal_status) => {
+                    deferred.push(ProcessDrainDeferred {
+                        process_id: record.id,
+                        disposition: ProcessRecoveryAttemptDisposition::SettledByPeer {
+                            terminal_status,
+                        },
+                    });
+                }
+                RecoveryCompletionDisposition::LeaseLost(operation) => {
+                    deferred.push(ProcessDrainDeferred {
+                        process_id: record.id,
+                        disposition: ProcessRecoveryAttemptDisposition::LeaseLost { operation },
+                    });
+                }
+                RecoveryCompletionDisposition::BackendError(error) => {
+                    deferred.push(ProcessDrainDeferred {
+                        process_id: record.id,
+                        disposition: error.into_public(),
+                    });
+                }
             }
         }
-        Ok(ProcessDrainReport { abandoned })
+        Ok(ProcessDrainReport {
+            abandoned,
+            deferred,
+        })
     }
 
     /// Terminalize one of this host's started OwnerBound rows as
     /// `Abandoned{OwnerDrain}` under a freshly claimed drain lease. Returns
-    /// whether the terminal was written (`false` when the row is held by a live
-    /// foreign lease, already terminal, or the claim failed).
+    /// a typed disposition distinguishing an acknowledged terminal write from
+    /// contention, absence, peer settlement, lease loss, and backend failure.
     async fn drain_one_owner_bound(
         &self,
         process_id: &str,
         owner: crate::LeaseOwnerIdentity,
-    ) -> bool {
+    ) -> RecoveryCompletionDisposition {
         let lease_ttl_ms = self.lease_timings().ttl_ms();
         let drain_owner = self.recovery_lease_owner();
         let lease = match self
-            .config
-            .process_registry
-            .claim_process_lease(process_id, &drain_owner, lease_ttl_ms)
+            .claim_for_recovery(process_id, &drain_owner, lease_ttl_ms)
             .await
         {
-            Ok(crate::ProcessLeaseClaimOutcome::Acquired(lease)) => lease,
-            // A live run still holds the lease, or the claim failed: defer.
-            Ok(crate::ProcessLeaseClaimOutcome::Busy { .. }) | Err(_) => return false,
+            RecoveryClaimDisposition::Acquired(lease) => lease,
+            RecoveryClaimDisposition::Busy => return RecoveryCompletionDisposition::Busy,
+            RecoveryClaimDisposition::BackendError(error) => {
+                return RecoveryCompletionDisposition::BackendError(error);
+            }
         };
-        if self
-            .config
-            .process_registry
-            .get_process(process_id)
-            .await
-            .ok()
-            .flatten()
-            .is_some_and(|current| current.is_terminal())
-        {
-            self.release_or_log(&lease).await;
-            return false;
+        let current = match self.read_for_recovery(process_id).await {
+            RecoveryReadDisposition::Found(current) => *current,
+            RecoveryReadDisposition::Absent => {
+                return match self.release_for_recovery(&lease).await {
+                    RecoveryReleaseDisposition::Released => RecoveryCompletionDisposition::Absent,
+                    RecoveryReleaseDisposition::BackendError(error) => {
+                        RecoveryCompletionDisposition::BackendError(error)
+                    }
+                };
+            }
+            RecoveryReadDisposition::BackendError(error) => {
+                self.release_or_log(&lease).await;
+                return RecoveryCompletionDisposition::BackendError(error);
+            }
+        };
+        if current.is_terminal() {
+            return match self.release_for_recovery(&lease).await {
+                RecoveryReleaseDisposition::Released => {
+                    RecoveryCompletionDisposition::SettledByPeer(current.status)
+                }
+                RecoveryReleaseDisposition::BackendError(error) => {
+                    RecoveryCompletionDisposition::BackendError(error)
+                }
+            };
         }
         let evidence = AbandonEvidence {
             writer: AbandonWriter::OwnerDrain,
@@ -887,8 +966,7 @@ impl DurableProcessWorker {
                 control: None,
             },
         )
-        .await;
-        true
+        .await
     }
 
     /// Unique lease owner for one recovery attempt.
@@ -937,24 +1015,21 @@ impl DurableProcessWorker {
         let owner = self.recovery_lease_owner();
         // Claim the single-owner lease. A live holder or a claim error leaves
         // the row to its owner until the lease TTL expires.
-        let Some(lease) = self
+        let lease = match self
             .claim_for_recovery(&process_id, &owner, lease_ttl_ms)
             .await
-        else {
-            return;
+        {
+            RecoveryClaimDisposition::Acquired(lease) => lease,
+            RecoveryClaimDisposition::Busy | RecoveryClaimDisposition::BackendError(_) => return,
         };
         // Terminal between the list and the claim. Idempotent by process_id: do
         // not re-execute or re-terminalize a finished process.
-        let Some(record) = self
-            .config
-            .process_registry
-            .get_process(&process_id)
-            .await
-            .ok()
-            .flatten()
-        else {
-            self.release_or_log(&lease).await;
-            return;
+        let record = match self.read_for_recovery(&process_id).await {
+            RecoveryReadDisposition::Found(record) => *record,
+            RecoveryReadDisposition::Absent | RecoveryReadDisposition::BackendError(_) => {
+                self.release_or_log(&lease).await;
+                return;
+            }
         };
         if record.is_terminal() {
             self.release_or_log(&lease).await;
@@ -965,19 +1040,21 @@ impl DurableProcessWorker {
                 (record.max_attempts, record.first_started.as_deref())
             && started.attempt >= max_attempts
         {
-            self.complete_and_release(
-                &lease,
-                &process_id,
-                ProcessAwaitOutput::Abandoned {
-                    evidence: Box::new(AbandonEvidence {
-                        writer: AbandonWriter::EngineGaveUp,
-                        owner: Some(started.owner.clone()),
-                        epoch_ms: self.now_ms(),
-                    }),
-                    control: None,
-                },
-            )
-            .await;
+            Self::observe_recovery_completion(
+                self.complete_and_release(
+                    &lease,
+                    &process_id,
+                    ProcessAwaitOutput::Abandoned {
+                        evidence: Box::new(AbandonEvidence {
+                            writer: AbandonWriter::EngineGaveUp,
+                            owner: Some(started.owner.clone()),
+                            epoch_ms: self.now_ms(),
+                        }),
+                        control: None,
+                    },
+                )
+                .await,
+            );
             return;
         }
 
@@ -1008,15 +1085,17 @@ impl DurableProcessWorker {
                 };
                 match evidence {
                     Some(evidence) => {
-                        self.complete_and_release(
-                            &lease,
-                            &process_id,
-                            ProcessAwaitOutput::Abandoned {
-                                evidence: Box::new(evidence),
-                                control: None,
-                            },
-                        )
-                        .await;
+                        Self::observe_recovery_completion(
+                            self.complete_and_release(
+                                &lease,
+                                &process_id,
+                                ProcessAwaitOutput::Abandoned {
+                                    evidence: Box::new(evidence),
+                                    control: None,
+                                },
+                            )
+                            .await,
+                        );
                     }
                     None => self.release_or_log(&lease).await,
                 }
@@ -1034,26 +1113,6 @@ impl DurableProcessWorker {
         self.config.runtime_host.clock.timestamp_ms()
     }
 
-    /// Claim the recovery lease. Returns `None` while another owner still holds
-    /// the row or when the claim fails; either way this pass leaves the row to
-    /// its owner until the lease TTL expires.
-    async fn claim_for_recovery(
-        &self,
-        process_id: &str,
-        owner: &crate::LeaseOwnerIdentity,
-        lease_ttl_ms: u64,
-    ) -> Option<ProcessLease> {
-        match self
-            .config
-            .process_registry
-            .claim_process_lease(process_id, owner, lease_ttl_ms)
-            .await
-        {
-            Ok(crate::ProcessLeaseClaimOutcome::Acquired(lease)) => Some(lease),
-            Ok(crate::ProcessLeaseClaimOutcome::Busy { .. }) | Err(_) => None,
-        }
-    }
-
     /// Reconcile a pending Abandon Request on an externally-owned row into an
     /// `Abandoned{reconciled_request}` terminal. Lash never executed the row, so
     /// there is no owner lease to wait out — but the sweep claims its own lease
@@ -1062,24 +1121,20 @@ impl DurableProcessWorker {
         let lease_ttl_ms = self.lease_timings().ttl_ms();
         let owner = self.recovery_lease_owner();
         let lease = match self
-            .config
-            .process_registry
-            .claim_process_lease(process_id, &owner, lease_ttl_ms)
+            .claim_for_recovery(process_id, &owner, lease_ttl_ms)
             .await
         {
-            Ok(crate::ProcessLeaseClaimOutcome::Acquired(lease)) => lease,
-            // A concurrent writer holds the lease; let it finish.
-            Ok(crate::ProcessLeaseClaimOutcome::Busy { .. }) | Err(_) => return,
+            RecoveryClaimDisposition::Acquired(lease) => lease,
+            RecoveryClaimDisposition::Busy | RecoveryClaimDisposition::BackendError(_) => return,
         };
-        if self
-            .config
-            .process_registry
-            .get_process(process_id)
-            .await
-            .ok()
-            .flatten()
-            .is_some_and(|current| current.is_terminal())
-        {
+        let current = match self.read_for_recovery(process_id).await {
+            RecoveryReadDisposition::Found(current) => *current,
+            RecoveryReadDisposition::Absent | RecoveryReadDisposition::BackendError(_) => {
+                self.release_or_log(&lease).await;
+                return;
+            }
+        };
+        if current.is_terminal() {
             self.release_or_log(&lease).await;
             return;
         }
@@ -1089,15 +1144,17 @@ impl DurableProcessWorker {
             owner: None,
             epoch_ms: self.now_ms(),
         };
-        self.complete_and_release(
-            &lease,
-            process_id,
-            ProcessAwaitOutput::Abandoned {
-                evidence: Box::new(evidence),
-                control: None,
-            },
-        )
-        .await;
+        Self::observe_recovery_completion(
+            self.complete_and_release(
+                &lease,
+                process_id,
+                ProcessAwaitOutput::Abandoned {
+                    evidence: Box::new(evidence),
+                    control: None,
+                },
+            )
+            .await,
+        );
     }
 
     /// (Re-)run a claimed row under its renewed lease and write the terminal
@@ -1119,8 +1176,10 @@ impl DurableProcessWorker {
                 // Ran to a terminal outcome (success or a process-level failure) while
                 // holding the lease: this owner is the single writer of the terminal.
                 Ok(crate::ProcessRunOutcome::Terminal(output)) => {
-                    self.complete_and_release(&lease, &process_id, *output)
-                        .await;
+                    Self::observe_recovery_completion(
+                        self.complete_and_release(&lease, &process_id, *output)
+                            .await,
+                    );
                     return;
                 }
                 Ok(crate::ProcessRunOutcome::SegmentBoundary(next)) => {
@@ -1136,12 +1195,12 @@ impl DurableProcessWorker {
                 // outcome or release the lease: that would race the new owner and
                 // could record a succeeded process as Failed. Leave the row to the
                 // lease holder; it will finish (or another sweep retries it).
-                Err(RecoverFailure::LeaseLost(err)) => {
-                    tracing::warn!(
-                        process_id = %process_id,
-                        error = %err,
-                        "process recovery lost its lease mid-run; deferring to the new owner",
-                    );
+                Err(RecoverFailure::LeaseLost(_error)) => return,
+                Err(RecoverFailure::BackendError(_error)) => {
+                    // The typed backend event was emitted at the failing
+                    // operation. Token-fenced release makes the row claimable
+                    // for a healthy retry without risking a successor's lease.
+                    self.release_or_log(&lease).await;
                     return;
                 }
                 // Rebuild/store-facet failures are infrastructure failures, not
@@ -1160,58 +1219,6 @@ impl DurableProcessWorker {
         }
     }
 
-    /// Write a recovered process's terminal outcome and release its lease in one
-    /// atomic fenced registry operation.
-    async fn complete_and_release(
-        &self,
-        lease: &ProcessLease,
-        process_id: &str,
-        output: ProcessAwaitOutput,
-    ) {
-        // Refresh first so a healthy long-running worker has a full completion
-        // window. The registry then validates this exact fence, appends the
-        // terminal event, and clears the lease in one transaction. There is no
-        // renew-then-unfenced-write gap for a stalled worker to cross.
-        let fenced = match self
-            .config
-            .process_registry
-            .renew_process_lease(lease, self.lease_timings().ttl_ms())
-            .await
-        {
-            Ok(renewed) => renewed,
-            Err(err) => {
-                tracing::warn!(
-                    process_id = %process_id,
-                    error = %err,
-                    "lost process lease before terminal write; deferring to the new owner",
-                );
-                return;
-            }
-        };
-        if let Err(err) = self
-            .config
-            .process_registry
-            .complete_process_with_lease(&fenced, output)
-            .await
-        {
-            tracing::warn!(
-                process_id = %process_id,
-                error = %err,
-                "failed to write recovered process terminal outcome",
-            );
-        }
-    }
-
-    async fn release_or_log(&self, lease: &ProcessLease) {
-        if let Err(err) = self.release_process_lease(lease).await {
-            tracing::warn!(
-                process_id = %lease.process_id,
-                error = %err,
-                "failed to release recovered process lease",
-            );
-        }
-    }
-
     /// Run a recovered process while renewing its lease across the execution,
     /// mirroring the turn-lease renewal that keeps a long-running effect's lease
     /// from expiring under the live owner.
@@ -1223,6 +1230,25 @@ impl DurableProcessWorker {
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, RecoverFailure> {
         let process_id = registration.id.clone();
+        self.ensure_stable_process_id(&registration)
+            .map_err(RecoverFailure::Run)?;
+        if registration.disposition == RecoveryDisposition::ExternallyOwned {
+            return Err(RecoverFailure::Run(PluginError::Session(format!(
+                "process `{}` is externally-owned and must not be executed by lash",
+                registration.id
+            ))));
+        }
+        let current = match self.read_for_recovery(&process_id).await {
+            RecoveryReadDisposition::Found(current) => *current,
+            RecoveryReadDisposition::Absent => {
+                return Err(RecoverFailure::Run(PluginError::Session(format!(
+                    "unknown process `{process_id}`"
+                ))));
+            }
+            RecoveryReadDisposition::BackendError(error) => {
+                return Err(RecoverFailure::BackendError(error));
+            }
+        };
         let cancellation = CancellationToken::new();
         let cancel_watcher = {
             let awaiter = self
@@ -1263,8 +1289,9 @@ impl DurableProcessWorker {
                     "process worker effect host must provide a static process scope".to_string(),
                 ))
             })?;
-        let pending = self.run_process_segment_with_scoped_effect_controller(
+        let pending = self.run_process_segment_from_current(
             registration,
+            current,
             execution_context,
             crate::ProcessExecutionWriteAuthority::lease(lease.clone()),
             scoped_effect_controller,
@@ -1289,23 +1316,26 @@ impl DurableProcessWorker {
                         Err(err) => {
                             cancellation.cancel();
                             cancel_watcher.abort();
-                            return Err(RecoverFailure::LeaseLost(err));
+                            if matches!(&err, PluginError::ProcessLeaseSuperseded { .. }) {
+                                self.recovery_lease_lost(
+                                    &process_id,
+                                    ProcessRecoveryOperation::RenewLease,
+                                    &err,
+                                );
+                                return Err(RecoverFailure::LeaseLost(err));
+                            }
+                            return Err(RecoverFailure::BackendError(
+                                self.recovery_backend_error(
+                                    &process_id,
+                                    ProcessRecoveryOperation::RenewLease,
+                                    err,
+                                ),
+                            ));
                         }
                     }
                 }
             }
         }
-    }
-
-    fn lease_timings(&self) -> crate::LeaseTimings {
-        self.config.runtime_host.control.lease_timings
-    }
-
-    async fn release_process_lease(&self, lease: &ProcessLease) -> Result<(), PluginError> {
-        self.config
-            .process_registry
-            .complete_process_lease(&ProcessLeaseCompletion::from_lease(lease))
-            .await
     }
 
     pub async fn request_process_cancel(

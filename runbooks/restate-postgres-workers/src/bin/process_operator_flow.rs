@@ -475,6 +475,10 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
         report.abandoned == vec![MINE.to_string()],
         "unexpected drain report: {report:?}"
     );
+    ensure!(
+        report.deferred.is_empty(),
+        "owner drain left rows deferred: {report:?}"
+    );
     let awaited = tokio::time::timeout(GATE_TIMEOUT, waiter)
         .await
         .context("owner-drain observer did not settle")?
@@ -507,6 +511,10 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
         "journal_active": journal.active(),
         "journal_completed": journal.completed(),
         "drain_report_abandoned": report.abandoned,
+        "drain_report_deferred": report.deferred.iter().map(|entry| json!({
+            "process_id": entry.process_id,
+            "disposition": format!("{:?}", entry.disposition),
+        })).collect::<Vec<_>>(),
         "observer_terminal": "Abandoned",
         "observer_abandon_writer": format!("{:?}", evidence.writer),
         "observer_abandon_owner_id": evidence.owner.as_ref().map(|owner| owner.owner_id.clone()),
