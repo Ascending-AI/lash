@@ -38,6 +38,45 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
         ConfirmUsage { selection: 0 },
         ReplayUsageReceipt,
         ConfirmUsage { selection: 0 },
+        CommitWithAttachmentRefs {
+            new_session: true,
+            session_selection: 0,
+            attachment_slot: 0,
+            value: 0,
+            turn_owned: false,
+        },
+        CommitWithAttachmentRefs {
+            new_session: true,
+            session_selection: 0,
+            attachment_slot: 0,
+            value: 0,
+            turn_owned: false,
+        },
+        CommitWithAttachmentRefs {
+            new_session: false,
+            session_selection: 1,
+            attachment_slot: 1,
+            value: 1,
+            turn_owned: true,
+        },
+        ReplayAttachmentCommit { selection: 1 },
+        PutAttachmentIntent {
+            owner_kind: 1,
+            attachment_slot: 6,
+            value: 254,
+        },
+        PutAttachmentIntent {
+            owner_kind: 2,
+            attachment_slot: 7,
+            value: 255,
+        },
+        PutAttachmentIntent {
+            owner_kind: 0,
+            attachment_slot: 5,
+            value: 253,
+        },
+        ReclaimAttachmentSession { selection: 0 },
+        ProbeAttachmentGc,
         EnqueueWork {
             slot: 0,
             value: 0,
@@ -191,6 +230,17 @@ fn operation() -> impl Strategy<Value = RuntimePersistenceOp> {
         2 => any::<bool>().prop_map(|replay_last_commit| StageUsage { replay_last_commit }),
         2 => any::<u8>().prop_map(|selection| ConfirmUsage { selection }),
         1 => Just(ReplayUsageReceipt),
+        4 => (any::<bool>(), any::<u8>(), 0_u8..8, any::<u8>(), any::<bool>())
+            .prop_map(|(new_session, session_selection, attachment_slot, value, turn_owned)| CommitWithAttachmentRefs {
+                new_session, session_selection, attachment_slot, value, turn_owned,
+            }),
+        3 => (0_u8..3, 0_u8..8, any::<u8>())
+            .prop_map(|(owner_kind, attachment_slot, value)| PutAttachmentIntent {
+                owner_kind, attachment_slot, value,
+            }),
+        2 => any::<u8>().prop_map(|selection| ReplayAttachmentCommit { selection }),
+        2 => any::<u8>().prop_map(|selection| ReclaimAttachmentSession { selection }),
+        2 => Just(ProbeAttachmentGc),
         6 => (0_u8..5, any::<u8>(), any::<bool>(), any::<bool>(), any::<bool>())
             .prop_map(|(component_mode, value, settle_work, settle_inputs, stale_head)| Commit {
                 component_mode, value, settle_work, settle_inputs, stale_head,

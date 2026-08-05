@@ -20,10 +20,12 @@ use crate::{
     TurnInputClaim, TurnInputIngress, facade_support::ToolStateFacadeOps,
 };
 
+mod attachment_conservation;
 mod claim_honesty;
 mod generator;
 mod usage_conservation;
-
+pub use attachment_conservation::RuntimePersistenceStateMachineHandles;
+use attachment_conservation::{apply_attachment_operation, assert_attachment_conservation};
 use generator::generated_case;
 use usage_conservation::{
     assert_usage_conservation, confirm_usage, record_usage, register_committed_usage,
@@ -34,8 +36,8 @@ const SESSION_ID: &str = "runtime-persistence-property";
 const DEFAULT_CASES: u32 = 32;
 const DEFAULT_RUNNER_SEED: u64 = 857;
 const DEDICATED_LAW_SEED: u64 = 0x0ded_1ca7_e857;
-const MAX_OPS: usize = 80;
-const GENERATED_PREFIX_OPS: usize = 51;
+const MAX_OPS: usize = 96;
+const GENERATED_PREFIX_OPS: usize = 60;
 
 /// The generated operation alphabet shared by every runtime-persistence backend.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -83,6 +85,26 @@ pub enum RuntimePersistenceOp {
         selection: u8,
     },
     ReplayUsageReceipt,
+    CommitWithAttachmentRefs {
+        new_session: bool,
+        session_selection: u8,
+        attachment_slot: u8,
+        value: u8,
+        #[serde(default)]
+        turn_owned: bool,
+    },
+    PutAttachmentIntent {
+        owner_kind: u8,
+        attachment_slot: u8,
+        value: u8,
+    },
+    ReplayAttachmentCommit {
+        selection: u8,
+    },
+    ReclaimAttachmentSession {
+        selection: u8,
+    },
+    ProbeAttachmentGc,
     Commit {
         component_mode: u8,
         value: u8,
@@ -93,13 +115,11 @@ pub enum RuntimePersistenceOp {
     SettleStaleWork,
     SettleStaleTurnInputs,
 }
-
 #[derive(Clone, Debug, serde::Deserialize)]
 struct GeneratedCase {
     seed: u64,
     operations: Vec<RuntimePersistenceOp>,
 }
-
 #[derive(Clone)]
 struct ModeledWork {
     batch: QueuedWorkBatch,
@@ -144,6 +164,10 @@ struct ReferenceModel {
     durable_usage: HashMap<RuntimeUsageDeltaIdentity, crate::TokenLedgerEntry>,
     recorded_usage: crate::TokenUsage,
     last_usage_commit: Option<RuntimeCommit>,
+    attachment_sessions: Vec<attachment_conservation::ModeledAttachmentSession>,
+    attachment_ids_to_reprobe: BTreeSet<crate::AttachmentId>,
+    live_uncommitted_attachment_refs: BTreeSet<crate::AttachmentId>,
+    attachment_session_sequence: u64,
     operation_sequence: u64,
 }
 
@@ -151,7 +175,6 @@ struct PendingUsageConfirmation {
     staged: crate::runtime::StagedTokenLedger,
     identities: Vec<RuntimeUsageDeltaIdentity>,
 }
-
 #[derive(Clone, Copy, Debug, Default)]
 struct RunShape {
     lease_acquisitions: u64,
@@ -173,6 +196,11 @@ struct RunShape {
     usage_stages: u64,
     usage_confirmations: u64,
     usage_receipt_replays: u64,
+    attachment_commits: u64,
+    attachment_intent_puts: u64,
+    attachment_receipt_replays: u64,
+    attachment_session_reclaims: u64,
+    attachment_gc_probes: u64,
     accepted_commits: u64,
     stale_head_rejections: u64,
     checkpoint_stores: u64,
@@ -202,6 +230,11 @@ struct RunShapeTotals {
     usage_stages: AtomicU64,
     usage_confirmations: AtomicU64,
     usage_receipt_replays: AtomicU64,
+    attachment_commits: AtomicU64,
+    attachment_intent_puts: AtomicU64,
+    attachment_receipt_replays: AtomicU64,
+    attachment_session_reclaims: AtomicU64,
+    attachment_gc_probes: AtomicU64,
     accepted_commits: AtomicU64,
     stale_head_rejections: AtomicU64,
     checkpoint_stores: AtomicU64,
@@ -236,6 +269,11 @@ impl RunShapeTotals {
         add!(usage_stages);
         add!(usage_confirmations);
         add!(usage_receipt_replays);
+        add!(attachment_commits);
+        add!(attachment_intent_puts);
+        add!(attachment_receipt_replays);
+        add!(attachment_session_reclaims);
+        add!(attachment_gc_probes);
         add!(accepted_commits);
         add!(stale_head_rejections);
         add!(checkpoint_stores);
@@ -249,12 +287,12 @@ impl RunShapeTotals {
 pub async fn runtime_persistence_state_machine<F, Fut>(backend: &'static str, make: F)
 where
     F: Fn(u64) -> Fut + Send + Sync + Clone + 'static,
-    Fut: Future<Output = Arc<dyn RuntimePersistence>> + Send + 'static,
+    Fut: Future<Output = RuntimePersistenceStateMachineHandles> + Send + 'static,
 {
     let first = make(u64::MAX - 3).await;
     let second = make(u64::MAX - 3).await;
     assert!(
-        !Arc::ptr_eq(&first, &second),
+        !Arc::ptr_eq(&first.runtime, &second.runtime),
         "runtime_persistence_state_machine factory reused one Arc"
     );
     drop((first, second));
@@ -313,7 +351,7 @@ where
     }
 
     eprintln!(
-        "runtime-persistence run shape ({backend}, cases={cases}): lease_acquisitions={} lease_fence_rejections={} queue_enqueues={} queue_claims={} selected_batch_claims={} queue_completions={} claim_supersession_rejections={} stale_claim_settlements={} out_of_order_settlements={} coalesced_claims={} queue_cancellations={} input_enqueues={} input_claims={} input_applications={} input_cancellations={} usage_records={} usage_stages={} usage_confirmations={} usage_receipt_replays={} accepted_commits={} stale_head_rejections={} checkpoint_stores={} checkpoint_ref_reuses={} crash_points={} crash_reclaims={}",
+        "runtime-persistence run shape ({backend}, cases={cases}): lease_acquisitions={} lease_fence_rejections={} queue_enqueues={} queue_claims={} selected_batch_claims={} queue_completions={} claim_supersession_rejections={} stale_claim_settlements={} out_of_order_settlements={} coalesced_claims={} queue_cancellations={} input_enqueues={} input_claims={} input_applications={} input_cancellations={} usage_records={} usage_stages={} usage_confirmations={} usage_receipt_replays={} attachment_commits={} attachment_intent_puts={} attachment_receipt_replays={} attachment_session_reclaims={} attachment_gc_probes={} accepted_commits={} stale_head_rejections={} checkpoint_stores={} checkpoint_ref_reuses={} crash_points={} crash_reclaims={}",
         totals.lease_acquisitions.load(Ordering::Relaxed),
         totals.lease_fence_rejections.load(Ordering::Relaxed),
         totals.queue_enqueues.load(Ordering::Relaxed),
@@ -333,6 +371,11 @@ where
         totals.usage_stages.load(Ordering::Relaxed),
         totals.usage_confirmations.load(Ordering::Relaxed),
         totals.usage_receipt_replays.load(Ordering::Relaxed),
+        totals.attachment_commits.load(Ordering::Relaxed),
+        totals.attachment_intent_puts.load(Ordering::Relaxed),
+        totals.attachment_receipt_replays.load(Ordering::Relaxed),
+        totals.attachment_session_reclaims.load(Ordering::Relaxed),
+        totals.attachment_gc_probes.load(Ordering::Relaxed),
         totals.accepted_commits.load(Ordering::Relaxed),
         totals.stale_head_rejections.load(Ordering::Relaxed),
         totals.checkpoint_stores.load(Ordering::Relaxed),
@@ -369,6 +412,17 @@ fn assert_required_shape(shape: RunShape) -> Result<(), TestCaseError> {
         (shape.usage_stages, "usage stages"),
         (shape.usage_confirmations, "usage confirmations"),
         (shape.usage_receipt_replays, "usage receipt replays"),
+        (shape.attachment_commits, "attachment commits"),
+        (shape.attachment_intent_puts, "attachment intent puts"),
+        (
+            shape.attachment_receipt_replays,
+            "attachment receipt replays",
+        ),
+        (
+            shape.attachment_session_reclaims,
+            "attachment session reclaims",
+        ),
+        (shape.attachment_gc_probes, "attachment GC probes"),
         (shape.accepted_commits, "accepted commits"),
         (shape.stale_head_rejections, "stale-head rejections"),
         (shape.checkpoint_stores, "checkpoint stores"),
@@ -383,27 +437,37 @@ fn assert_required_shape(shape: RunShape) -> Result<(), TestCaseError> {
 }
 
 async fn replay_case(
-    store: Arc<dyn RuntimePersistence>,
+    handles: RuntimePersistenceStateMachineHandles,
     seed: u64,
     operations: &[RuntimePersistenceOp],
 ) -> Result<RunShape, TestCaseError> {
     let mut model = ReferenceModel::default();
     let mut shape = RunShape::default();
     for (step, operation) in operations.iter().enumerate() {
-        apply_operation(store.as_ref(), &mut model, &mut shape, seed, operation)
-            .await
-            .map_err(|reason| {
-                TestCaseError::fail(format!("step {step} {operation:?}: {reason}"))
-            })?;
-        assert_model_agreement(store.as_ref(), &model)
+        apply_operation(
+            handles.runtime.as_ref(),
+            Some(&handles),
+            &mut model,
+            &mut shape,
+            seed,
+            operation,
+        )
+        .await
+        .map_err(|reason| TestCaseError::fail(format!("step {step} {operation:?}: {reason}")))?;
+        assert_model_agreement(handles.runtime.as_ref(), &model)
             .await
             .map_err(|reason| {
                 TestCaseError::fail(format!("model agreement at step {step}: {reason}"))
             })?;
-        assert_usage_conservation(store.as_ref(), &model)
+        assert_usage_conservation(handles.runtime.as_ref(), &model)
             .await
             .map_err(|reason| {
                 TestCaseError::fail(format!("usage conservation at step {step}: {reason}"))
+            })?;
+        assert_attachment_conservation(&handles, &mut model)
+            .await
+            .map_err(|reason| {
+                TestCaseError::fail(format!("attachment conservation at step {step}: {reason}"))
             })?;
     }
     Ok(shape)
@@ -412,7 +476,7 @@ async fn replay_case(
 async fn replay_regression_corpus<F, Fut>(make: &F) -> Result<(), TestCaseError>
 where
     F: Fn(u64) -> Fut,
-    Fut: Future<Output = Arc<dyn RuntimePersistence>>,
+    Fut: Future<Output = RuntimePersistenceStateMachineHandles>,
 {
     let cases: Vec<GeneratedCase> = serde_json::from_str(include_str!(
         "runtime_persistence_state_machine_regressions.json"
@@ -428,6 +492,7 @@ where
 
 async fn apply_operation(
     store: &dyn RuntimePersistence,
+    attachment_handles: Option<&RuntimePersistenceStateMachineHandles>,
     model: &mut ReferenceModel,
     shape: &mut RunShape,
     seed: u64,
@@ -657,6 +722,16 @@ async fn apply_operation(
         StageUsage { replay_last_commit } => stage_usage(model, shape, seed, *replay_last_commit)?,
         ConfirmUsage { selection } => confirm_usage(model, shape, *selection)?,
         ReplayUsageReceipt => replay_usage_receipt(store, model, shape).await?,
+        attachment_operation @ (CommitWithAttachmentRefs { .. }
+        | PutAttachmentIntent { .. }
+        | ReplayAttachmentCommit { .. }
+        | ReclaimAttachmentSession { .. }
+        | ProbeAttachmentGc) => {
+            let handles = attachment_handles.ok_or_else(|| {
+                "attachment operation requires factory and blob handles".to_string()
+            })?;
+            apply_attachment_operation(handles, model, shape, seed, attachment_operation).await?
+        }
         Commit {
             component_mode,
             value,
@@ -1618,7 +1693,7 @@ fn json<T: serde::Serialize>(value: &T) -> Result<serde_json::Value, String> {
 async fn assert_dedicated_laws<F, Fut>(make: &F, seed: u64) -> Result<(), TestCaseError>
 where
     F: Fn(u64) -> Fut,
-    Fut: Future<Output = Arc<dyn RuntimePersistence>>,
+    Fut: Future<Output = RuntimePersistenceStateMachineHandles>,
 {
     assert_on_fresh_store(make, seed, |store| async move {
         law_lease_exclusivity_and_claim_generation_fencing(store).await
@@ -1670,12 +1745,12 @@ async fn assert_on_fresh_store<F, Fut, Law, LawFut>(
 ) -> Result<(), TestCaseError>
 where
     F: Fn(u64) -> Fut,
-    Fut: Future<Output = Arc<dyn RuntimePersistence>>,
+    Fut: Future<Output = RuntimePersistenceStateMachineHandles>,
     Law: FnOnce(Arc<dyn RuntimePersistence>) -> LawFut,
     LawFut: Future<Output = Result<(), TestCaseError>>,
 {
     // Structural guard: every dedicated law obtains its own backend here.
-    law(make(seed).await).await
+    law(make(seed).await.runtime).await
 }
 
 async fn law_lease_exclusivity_and_claim_generation_fencing(
@@ -1699,7 +1774,7 @@ async fn law_lease_exclusivity_and_claim_generation_fencing(
         RuntimePersistenceOp::ClaimTurnInputsWithStaleLease,
     ];
     for op in &ops {
-        apply_operation(store.as_ref(), &mut model, &mut shape, 10, op)
+        apply_operation(store.as_ref(), None, &mut model, &mut shape, 10, op)
             .await
             .map_err(TestCaseError::fail)?;
     }
@@ -2296,7 +2371,7 @@ async fn law_commit_atomicity_and_stale_head_non_mutation(
             stale_head: true,
         },
     ] {
-        apply_operation(store.as_ref(), &mut model, &mut shape, 11, &op)
+        apply_operation(store.as_ref(), None, &mut model, &mut shape, 11, &op)
             .await
             .map_err(TestCaseError::fail)?;
     }
@@ -2306,6 +2381,7 @@ async fn law_commit_atomicity_and_stale_head_non_mutation(
     prop_assert!(model.components.tool_ref.is_none());
     apply_operation(
         store.as_ref(),
+        None,
         &mut model,
         &mut shape,
         11,
@@ -2364,7 +2440,7 @@ async fn law_checkpoint_refs_track_content(
             stale_head: false,
         },
     ] {
-        apply_operation(store.as_ref(), &mut model, &mut shape, 12, &op)
+        apply_operation(store.as_ref(), None, &mut model, &mut shape, 12, &op)
             .await
             .map_err(TestCaseError::fail)?;
     }

@@ -11,7 +11,7 @@ pub(super) async fn non_law_pre_reclaim_commit_symmetry<F, Fut>(
 ) -> Result<(), TestCaseError>
 where
     F: Fn(u64) -> Fut,
-    Fut: Future<Output = Arc<dyn RuntimePersistence>>,
+    Fut: Future<Output = RuntimePersistenceStateMachineHandles>,
 {
     // FIG-460 / ADR 0045 make the lease advisory and CAS authoritative. ADR 0029
     // makes supersession reclaim-mediated, so both pre-reclaim commit shapes
@@ -100,10 +100,10 @@ where
         Ok(result.head_revision)
     }
 
-    let claim_free = run(make(seed).await, false)
+    let claim_free = run(make(seed).await.runtime, false)
         .await
         .map_err(TestCaseError::fail)?;
-    let claim_carrying = run(make(seed + 1).await, true)
+    let claim_carrying = run(make(seed + 1).await.runtime, true)
         .await
         .map_err(TestCaseError::fail)?;
     prop_assert_eq!(claim_free, 1);

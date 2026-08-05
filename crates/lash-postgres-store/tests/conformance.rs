@@ -1586,7 +1586,12 @@ async fn postgres_runtime_persistence_state_machine_properties_when_configured()
         let storage = Arc::clone(&storage);
         async move {
             reset(&storage).await;
-            Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>
+            lash_core::testing::conformance::RuntimePersistenceStateMachineHandles::create(
+                Arc::new(storage.session_store_factory_with_shared_process_registry()),
+                true,
+            )
+            .await
+            .expect("create Postgres runtime-persistence property handles")
         }
     })
     .await;
