@@ -79,6 +79,7 @@ pub async fn run_cli(
     scenario_filters: Vec<String>,
     chat_turns: usize,
     enforce_budgets: bool,
+    enforce_inventory: bool,
     version: &str,
 ) -> anyhow::Result<()> {
     if dhat_out.is_some() && !enable_dhat {
@@ -144,11 +145,13 @@ pub async fn run_cli(
         "{}",
         serde_json::to_string_pretty(&runtime_perf_output_json(&out_path, &report))?
     );
-    if enforce_budgets {
+    if enforce_budgets || enforce_inventory {
+        let inventory_only = enforce_inventory && !enforce_budgets;
         let failures = report
             .budget_results
             .iter()
             .filter(|budget| !budget.passed)
+            .filter(|budget| !inventory_only || is_inventory_result(budget))
             .map(|budget| {
                 let actual = budget
                     .actual
@@ -166,10 +169,23 @@ pub async fn run_cli(
             })
             .collect::<Vec<_>>();
         if !failures.is_empty() {
-            anyhow::bail!("Runtime perf budget exceeded:\n{}", failures.join("\n"));
+            let label = if inventory_only {
+                "Runtime perf inventory check failed"
+            } else {
+                "Runtime perf budget exceeded"
+            };
+            anyhow::bail!("{label}:\n{}", failures.join("\n"));
         }
     }
     Ok(())
+}
+
+/// Machine-independent inventory result (presence check or emitted phase with
+/// no checked-in budget), as opposed to a release-calibrated ceiling
+/// comparison. Presence checks carry `budget: Some(1.0)`, so the statistic
+/// clause is load-bearing — `is_none()` alone would silently drop them.
+fn is_inventory_result(result: &RuntimePerfBudgetResult) -> bool {
+    result.statistic == "present" || result.budget.is_none()
 }
 
 fn runtime_perf_output_json(out_path: &Path, report: &RuntimePerfReport) -> serde_json::Value {

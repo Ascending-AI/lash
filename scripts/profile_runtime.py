@@ -97,6 +97,15 @@ def parse_args() -> argparse.Namespace:
         help="Exit non-zero when a runtime perf guard budget is exceeded.",
     )
     parser.add_argument(
+        "--enforce-inventory",
+        action="store_true",
+        help=(
+            "Exit non-zero only on machine-independent inventory failures "
+            "(missing required phases, emitted phases without a checked-in "
+            "budget); duration/allocation ceilings stay release-enforced."
+        ),
+    )
+    parser.add_argument(
         "--cargo-feature",
         action="append",
         default=[],
@@ -193,6 +202,8 @@ def main() -> int:
         cmd.append(f"--runtime-perf-dhat-frames={max(args.dhat_frames, 1)}")
     if args.enforce_budgets:
         cmd.append("--runtime-perf-enforce-budgets")
+    if args.enforce_inventory:
+        cmd.append("--runtime-perf-enforce-inventory")
     for scenario in args.scenario:
         cmd.extend(["--runtime-perf-scenario", scenario])
 

@@ -254,6 +254,7 @@ jobs:
       - name: Check formatting
         run: |
           cargo fmt --all --check
+          # include!d files escape cargo fmt's module walk; list each one here.
           rustfmt --edition 2024 --check crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs
 
       - name: Clippy (workspace, all targets)
@@ -268,7 +269,7 @@ jobs:
       # enforce the cheap budget/phase inventory before release.
       - name: Run performance harness smoke
         run: |
-          python3 scripts/profile_runtime.py --profile quick --enforce-budgets --out .benchmarks/perf-smoke/runtime.json
+          python3 scripts/profile_runtime.py --profile quick --enforce-inventory --out .benchmarks/perf-smoke/runtime.json
           python3 scripts/profile_lashlang.py --debug --iterations 10 --profile-iterations 10 --out .benchmarks/perf-smoke/lashlang.json
 
       - name: Check core/UI boundary
