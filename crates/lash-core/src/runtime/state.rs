@@ -668,10 +668,28 @@ pub(super) fn apply_persisted_session_config(
     policy.provider_id = config.provider_id.clone();
 }
 
-pub(super) fn apply_session_checkpoint(
+/// Restore-time headroom shared by every bare next-turn `turn_index + 1`.
+///
+/// All production increment sites reference this invariant. A durable value is
+/// admitted only through [`apply_session_checkpoint`], which reserves enough
+/// room for every bounded increment performed before the next commit.
+pub(super) const RESTORED_TURN_INDEX_HEADROOM: usize = 16;
+const MAX_EXCLUSIVE_RESTORED_TURN_INDEX: usize = usize::MAX - RESTORED_TURN_INDEX_HEADROOM;
+
+fn validate_restored_turn_index(turn_index: usize) -> Result<(), crate::StoreError> {
+    if turn_index >= MAX_EXCLUSIVE_RESTORED_TURN_INDEX {
+        return Err(crate::StoreError::CheckpointTurnIndexOutOfRange {
+            turn_index,
+            max_exclusive: MAX_EXCLUSIVE_RESTORED_TURN_INDEX,
+        });
+    }
+    Ok(())
+}
+
+pub(crate) fn apply_session_checkpoint(
     state: &mut RuntimeSessionState,
     checkpoint: Option<crate::store::HydratedSessionCheckpoint>,
-) {
+) -> Result<(), crate::StoreError> {
     let Some(checkpoint) = checkpoint else {
         state.tool_state_ref = None;
         state.tool_state_generation = None;
@@ -682,8 +700,11 @@ pub(super) fn apply_session_checkpoint(
         state.execution_state_ref = None;
         state.execution_state_snapshot = None;
         state.ensure_agent_frame_initialized();
-        return;
+        return Ok(());
     };
+    // All production next-turn sites rely on RESTORED_TURN_INDEX_HEADROOM.
+    // Validate the durable value once before adopting it.
+    validate_restored_turn_index(checkpoint.turn_state.turn_index)?;
     state.turn_index = checkpoint.turn_state.turn_index;
     state.token_usage = checkpoint.turn_state.token_usage;
     state.last_prompt_usage = checkpoint.turn_state.last_prompt_usage;
@@ -700,6 +721,7 @@ pub(super) fn apply_session_checkpoint(
     state.execution_state_ref = checkpoint.execution_state_ref.clone();
     state.execution_state_snapshot = checkpoint.execution_state;
     state.ensure_agent_frame_initialized();
+    Ok(())
 }
 
 pub(super) fn apply_session_head(

@@ -146,7 +146,26 @@ pub struct TokenUsage {
     pub reasoning_output_tokens: i64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TokenUsageOverflow {
+    counter: &'static str,
+}
+
+impl TokenUsageOverflow {
+    pub fn counter(self) -> &'static str {
+        self.counter
+    }
+}
+
 impl TokenUsage {
+    pub fn is_zero(&self) -> bool {
+        self.input_tokens == 0
+            && self.output_tokens == 0
+            && self.cache_read_input_tokens == 0
+            && self.cache_write_input_tokens == 0
+            && self.reasoning_output_tokens == 0
+    }
+
     pub fn total(&self) -> i64 {
         self.input_tokens
             + self.output_tokens
@@ -158,12 +177,53 @@ impl TokenUsage {
         self.input_tokens + self.cache_read_input_tokens + self.cache_write_input_tokens
     }
 
-    pub fn add(&mut self, other: &TokenUsage) {
-        self.input_tokens += other.input_tokens;
-        self.output_tokens += other.output_tokens;
-        self.cache_read_input_tokens += other.cache_read_input_tokens;
-        self.cache_write_input_tokens += other.cache_write_input_tokens;
-        self.reasoning_output_tokens += other.reasoning_output_tokens;
+    /// Returns a new usage value with every counter added atomically.
+    ///
+    /// `reasoning_output_tokens` is checked as a counter but excluded from
+    /// `total_tokens` because it is a subset of `output_tokens`.
+    pub fn checked_add(&self, other: &TokenUsage) -> Result<Self, TokenUsageOverflow> {
+        let merged = Self {
+            input_tokens: self.input_tokens.checked_add(other.input_tokens).ok_or(
+                TokenUsageOverflow {
+                    counter: "input_tokens",
+                },
+            )?,
+            output_tokens: self.output_tokens.checked_add(other.output_tokens).ok_or(
+                TokenUsageOverflow {
+                    counter: "output_tokens",
+                },
+            )?,
+            cache_read_input_tokens: self
+                .cache_read_input_tokens
+                .checked_add(other.cache_read_input_tokens)
+                .ok_or(TokenUsageOverflow {
+                    counter: "cache_read_input_tokens",
+                })?,
+            cache_write_input_tokens: self
+                .cache_write_input_tokens
+                .checked_add(other.cache_write_input_tokens)
+                .ok_or(TokenUsageOverflow {
+                    counter: "cache_write_input_tokens",
+                })?,
+            reasoning_output_tokens: self
+                .reasoning_output_tokens
+                .checked_add(other.reasoning_output_tokens)
+                .ok_or(TokenUsageOverflow {
+                    counter: "reasoning_output_tokens",
+                })?,
+        };
+        merged.checked_total()?;
+        Ok(merged)
+    }
+
+    pub fn checked_total(&self) -> Result<i64, TokenUsageOverflow> {
+        self.input_tokens
+            .checked_add(self.output_tokens)
+            .and_then(|total| total.checked_add(self.cache_read_input_tokens))
+            .and_then(|total| total.checked_add(self.cache_write_input_tokens))
+            .ok_or(TokenUsageOverflow {
+                counter: "total_tokens",
+            })
     }
 }
 
@@ -470,8 +530,33 @@ pub fn model_tool_specs(tools: &[ToolDefinition]) -> Vec<LlmToolSpec> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ErrorEnvelope, SessionStreamEvent, TurnOutcome};
+    use super::{ErrorEnvelope, SessionStreamEvent, TokenUsage, TurnOutcome};
     use crate::llm::types::{LlmTerminalReason, ProviderFailureKind};
+
+    #[test]
+    fn checked_token_usage_add_is_atomic_and_reasoning_is_not_additive_total() {
+        let existing = TokenUsage {
+            input_tokens: 1,
+            output_tokens: i64::MAX,
+            reasoning_output_tokens: i64::MAX,
+            ..TokenUsage::default()
+        };
+        let overflow = existing
+            .checked_add(&TokenUsage {
+                input_tokens: 1,
+                ..TokenUsage::default()
+            })
+            .expect_err("canonical total must be checked");
+        assert_eq!(overflow.counter(), "total_tokens");
+        assert_eq!(existing.input_tokens, 1);
+
+        let reasoning_subset = TokenUsage {
+            output_tokens: i64::MAX,
+            reasoning_output_tokens: i64::MAX,
+            ..TokenUsage::default()
+        };
+        assert_eq!(reasoning_subset.checked_total(), Ok(i64::MAX));
+    }
 
     // ─── ErrorEnvelope durable-snapshot compatibility ──────────────────
     //

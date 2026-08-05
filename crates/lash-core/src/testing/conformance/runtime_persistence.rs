@@ -225,6 +225,9 @@ where
     concurrent_head_revision_cas_applies_exactly_once(make()).await;
     commit_rejects_a_different_session_id(make()).await;
     load_hydrates_checkpoint_and_usage(make()).await;
+    load_retains_reasoning_only_usage(make()).await;
+    checkpoint_restore_rejects_turn_index_without_increment_headroom(make()).await;
+    load_rejects_token_usage_overflow(make()).await;
     usage_delta_identity_is_idempotent_across_commits(make()).await;
     usage_ordinal_reuse_with_different_payload_survives_receipt_replay(make()).await;
     checkpoint_rejects_unknown_component_ref(make()).await;
@@ -286,6 +289,111 @@ where
     active_turn_input_claim_reacquires_after_unrecorded_checkpoint(make()).await;
     pending_turn_input_cancel_covers_active_and_deferred_states(make()).await;
     pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make()).await;
+}
+
+async fn load_retains_reasoning_only_usage(store: Arc<dyn RuntimePersistence>) {
+    let state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        ..RuntimeSessionState::default()
+    };
+    let usage = TokenLedgerEntry {
+        source: "reasoning-only".to_string(),
+        model: "usage-model".to_string(),
+        usage: TokenUsage {
+            reasoning_output_tokens: 9,
+            ..TokenUsage::default()
+        },
+    };
+    commit_runtime_state_for_test(
+        &store,
+        RuntimeCommit::persisted_state_for_test(&state, std::slice::from_ref(&usage)),
+        "reasoning-only usage seed",
+    )
+    .await
+    .expect("seed reasoning-only durable usage");
+
+    let read = store
+        .load_session()
+        .await
+        .expect("load reasoning-only usage")
+        .expect("reasoning-only usage session exists");
+    assert_eq!(read.token_ledger.len(), 1);
+    assert_eq!(read.token_ledger[0].source, usage.source);
+    assert_eq!(read.token_ledger[0].usage, usage.usage);
+}
+
+async fn load_rejects_token_usage_overflow(store: Arc<dyn RuntimePersistence>) {
+    let state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        ..RuntimeSessionState::default()
+    };
+    let usage = [
+        TokenLedgerEntry {
+            source: "overflow".to_string(),
+            model: "usage-model".to_string(),
+            usage: TokenUsage {
+                input_tokens: i64::MAX,
+                ..TokenUsage::default()
+            },
+        },
+        TokenLedgerEntry {
+            source: "overflow".to_string(),
+            model: "usage-model".to_string(),
+            usage: TokenUsage {
+                input_tokens: 1,
+                ..TokenUsage::default()
+            },
+        },
+    ];
+    commit_runtime_state_for_test(
+        &store,
+        RuntimeCommit::persisted_state_for_test(&state, &usage),
+        "usage overflow seed",
+    )
+    .await
+    .expect("seed distinct durable usage deltas");
+
+    let error = store
+        .load_session()
+        .await
+        .expect_err("overflowing usage rows must fail load");
+    assert!(matches!(
+        error,
+        StoreError::TokenUsageAccountingOverflow {
+            usage_source,
+            model,
+            counter: "input_tokens",
+        } if usage_source == "overflow" && model == "usage-model"
+    ));
+}
+
+async fn checkpoint_restore_rejects_turn_index_without_increment_headroom(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let turn_index = usize::MAX - 16;
+    let state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        turn_index,
+        ..RuntimeSessionState::default()
+    };
+    commit_runtime_state_for_test(
+        &store,
+        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        "turn index overflow seed",
+    )
+    .await
+    .expect("seed corrupt checkpoint turn index");
+
+    let error = crate::store::load_persisted_session_state(store.as_ref())
+        .await
+        .expect_err("checkpoint turn index without increment headroom must fail restore");
+    assert!(matches!(
+        error,
+        StoreError::CheckpointTurnIndexOutOfRange {
+            turn_index: actual,
+            max_exclusive,
+        } if actual == turn_index && max_exclusive == turn_index
+    ));
 }
 
 async fn usage_delta_identity_is_idempotent_across_commits(store: Arc<dyn RuntimePersistence>) {

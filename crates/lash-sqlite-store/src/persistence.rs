@@ -202,10 +202,9 @@ impl SessionCommitStore for Store {
                         graph,
                         checkpoint_ref: meta.checkpoint_ref,
                         checkpoint,
-                        token_ledger: merge_token_ledger_entries(Self::load_usage_deltas_conn(
-                            &tx,
-                            &session_id,
-                        )?),
+                        token_ledger: lash_core::store::merge_token_ledger_entries_checked(
+                            Self::load_usage_deltas_conn(&tx, &session_id)?,
+                        )?,
                     }))
                 })(
                 );

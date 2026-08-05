@@ -723,7 +723,7 @@ impl TurnAssembler {
         };
         let output_state = classify_output_state(&raw_output, &safe_output, &issues);
 
-        let children_usage = aggregate_child_cumulatives(self.child_cumulatives);
+        let children_usage = child_cumulative_entries(self.child_cumulatives);
 
         AssembledTurn {
             execution: ExecutionSummary {
@@ -757,19 +757,15 @@ impl TurnAssembler {
 
 /// Sum the latest cumulative usage reported by each `(session_id, source,
 /// model)` triple into `(source, model)` ledger entries.
-fn aggregate_child_cumulatives(
+fn child_cumulative_entries(
     cumulatives: BTreeMap<(String, String, String), TokenUsage>,
 ) -> Vec<TokenLedgerEntry> {
-    let mut by_source_model: BTreeMap<(String, String), TokenUsage> = BTreeMap::new();
-    for ((_session_id, source, model), usage) in cumulatives {
-        by_source_model
-            .entry((source, model))
-            .or_default()
-            .add(&usage);
-    }
-    by_source_model
+    // Preserve one row per child session. The strict durable ledger merge owns
+    // aggregation by `(source, model)` and can therefore reject overflow with
+    // the same typed pre-commit error used for parent usage.
+    cumulatives
         .into_iter()
-        .map(|((source, model), usage)| TokenLedgerEntry {
+        .map(|((_session_id, source, model), usage)| TokenLedgerEntry {
             source,
             model,
             usage,
@@ -908,4 +904,53 @@ fn contains_traceback_only(raw_text: &str) -> bool {
         }
         !trimmed.contains(':')
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn child_usage_preserves_one_row_per_child_session() {
+        let cumulatives = BTreeMap::from([
+            (
+                (
+                    "child-a".to_string(),
+                    "child".to_string(),
+                    "shared-model".to_string(),
+                ),
+                TokenUsage {
+                    input_tokens: 3,
+                    ..TokenUsage::default()
+                },
+            ),
+            (
+                (
+                    "child-b".to_string(),
+                    "child".to_string(),
+                    "shared-model".to_string(),
+                ),
+                TokenUsage {
+                    input_tokens: 5,
+                    ..TokenUsage::default()
+                },
+            ),
+        ]);
+
+        let entries = child_cumulative_entries(cumulatives);
+
+        assert_eq!(entries.len(), 2);
+        assert!(
+            entries
+                .iter()
+                .all(|entry| { entry.source == "child" && entry.model == "shared-model" })
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.usage.input_tokens)
+                .collect::<Vec<_>>(),
+            vec![3, 5]
+        );
+    }
 }

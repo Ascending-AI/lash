@@ -466,20 +466,38 @@ pub fn runtime_final_value_invariant_facts(
 
 impl RuntimeUsageTotals {
     pub fn from_usage(usage: &lash_core::TokenUsage) -> Self {
+        let total_tokens = [
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cache_read_input_tokens,
+            usage.cache_write_input_tokens,
+        ]
+        .into_iter()
+        .fold(0_i64, i64::saturating_add);
         Self {
             input_tokens: usage.input_tokens,
             output_tokens: usage.output_tokens,
             cache_read_input_tokens: usage.cache_read_input_tokens,
             cache_write_input_tokens: usage.cache_write_input_tokens,
             reasoning_output_tokens: usage.reasoning_output_tokens,
-            total_tokens: usage.total(),
+            total_tokens,
         }
     }
 
     fn sum<'a>(usages: impl IntoIterator<Item = &'a lash_core::TokenUsage>) -> Self {
         let mut usage = lash_core::TokenUsage::default();
         for item in usages {
-            usage.add(item);
+            usage.input_tokens = usage.input_tokens.saturating_add(item.input_tokens);
+            usage.output_tokens = usage.output_tokens.saturating_add(item.output_tokens);
+            usage.cache_read_input_tokens = usage
+                .cache_read_input_tokens
+                .saturating_add(item.cache_read_input_tokens);
+            usage.cache_write_input_tokens = usage
+                .cache_write_input_tokens
+                .saturating_add(item.cache_write_input_tokens);
+            usage.reasoning_output_tokens = usage
+                .reasoning_output_tokens
+                .saturating_add(item.reasoning_output_tokens);
         }
         Self::from_usage(&usage)
     }

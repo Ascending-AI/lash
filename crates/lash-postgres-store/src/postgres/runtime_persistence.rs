@@ -345,8 +345,9 @@ impl SessionCommitStore for PostgresSessionStore {
             Some(blob_ref) => get_checkpoint_tx(&mut tx, blob_ref).await?,
             None => None,
         };
-        let token_ledger =
-            merge_token_ledger_entries(load_usage_deltas_tx(&mut tx, &session_id).await?);
+        let token_ledger = lash_core::store::merge_token_ledger_entries_checked(
+            load_usage_deltas_tx(&mut tx, &session_id).await?,
+        )?;
         let read = PersistedSessionRead {
             session_id: meta.session_id,
             head_revision: meta.head_revision,

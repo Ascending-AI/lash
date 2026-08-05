@@ -1,6 +1,8 @@
 use super::*;
 
-fn persisted_session_state_from_read(read: PersistedSessionRead) -> crate::RuntimeSessionState {
+fn persisted_session_state_from_read(
+    read: PersistedSessionRead,
+) -> Result<crate::RuntimeSessionState, StoreError> {
     persisted_session_state_from_head(
         SessionHead {
             session_id: read.session_id,
@@ -29,7 +31,7 @@ pub async fn load_persisted_session_state(
             read.session_id
         ))
     })?;
-    Ok(Some(persisted_session_state_from_read(read)))
+    Ok(Some(persisted_session_state_from_read(read)?))
 }
 
 pub async fn refresh_persisted_session_state(

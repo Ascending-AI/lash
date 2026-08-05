@@ -1,6 +1,6 @@
 //! The runtime's settled-session persistence contract and shared store types.
 
-use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
+use crate::facade_support::SessionGraphFacadeOps;
 
 mod attachment_manifest;
 mod commit_budget;
@@ -14,6 +14,7 @@ mod realization;
 mod runtime_commit;
 mod session_execution_lease;
 mod turn_id;
+mod usage;
 mod work_claim;
 
 pub use crate::session_graph::RealizedNodeTimestamp;
@@ -39,6 +40,7 @@ pub use session_execution_lease::{
     SessionExecutionLeaseDisplacement,
 };
 pub use turn_id::TurnId;
+pub use usage::{merge_token_ledger_entries_checked, merge_token_ledger_entry_checked};
 pub use work_claim::{WorkClaim, WorkCompletion};
 
 fn default_root_session_id() -> String {
@@ -68,7 +70,8 @@ mod persisted_state_tests {
                 token_ledger: Vec::new(),
             },
             None,
-        );
+        )
+        .expect("valid persisted state");
 
         assert_eq!(state.policy.recorded_provider_id(), "stored-provider");
         assert_eq!(state.policy.recorded_provider_id(), "stored-provider");
@@ -996,7 +999,7 @@ fn remap_optional_node_id(node_id: &mut Option<String>, mapping: &[(String, Stri
 fn persisted_session_state_from_head(
     head: SessionHead,
     checkpoint: Option<HydratedSessionCheckpoint>,
-) -> crate::RuntimeSessionState {
+) -> Result<crate::RuntimeSessionState, StoreError> {
     let persisted_node_ids = head
         .graph
         .nodes
@@ -1030,25 +1033,8 @@ fn persisted_session_state_from_head(
     };
     state.policy.model = head.config.model.clone();
     state.policy.provider_id = head.config.provider_id.clone();
-    if let Some(checkpoint) = checkpoint {
-        state.turn_index = checkpoint.turn_state.turn_index;
-        state.token_usage = checkpoint.turn_state.token_usage;
-        state.last_prompt_usage = checkpoint.turn_state.last_prompt_usage;
-        state.protocol_turn_options = checkpoint.turn_state.protocol_turn_options;
-        state.tool_state_ref = checkpoint.tool_state_ref.clone();
-        state.tool_state_generation = checkpoint
-            .tool_state
-            .as_ref()
-            .map(|snapshot| snapshot.generation());
-        state.tool_state_snapshot = checkpoint.tool_state;
-        state.plugin_snapshot_ref = checkpoint.plugin_snapshot_ref.clone();
-        state.plugin_snapshot_revision = checkpoint.plugin_snapshot_revision;
-        state.plugin_snapshot = checkpoint.plugin_snapshot;
-        state.execution_state_ref = checkpoint.execution_state_ref.clone();
-        state.execution_state_snapshot = checkpoint.execution_state;
-    }
-    state.ensure_agent_frame_initialized();
-    state
+    crate::runtime::state::apply_session_checkpoint(&mut state, checkpoint)?;
+    Ok(state)
 }
 
 impl Default for SessionHead {

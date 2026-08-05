@@ -31,7 +31,7 @@ pub(super) fn record_usage(
     {
         return Err("zero usage recording changed the pending ledger".to_string());
     }
-    model.recorded_usage.add(&entry.usage);
+    accumulate(&mut model.recorded_usage, &entry.usage);
     shape.usage_records += 1;
     Ok(())
 }
@@ -311,7 +311,7 @@ pub(super) async fn assert_usage_conservation(
     let report = crate::facade_support::SessionUsageReport::from_entries(&actual_entries);
     let mut durable_parts = crate::TokenUsage::default();
     for entry in &actual_entries {
-        durable_parts.add(&entry.usage);
+        accumulate(&mut durable_parts, &entry.usage);
     }
     if report.usage.usage != durable_parts || report.usage.total_tokens != durable_parts.total() {
         return Err(
@@ -321,11 +321,11 @@ pub(super) async fn assert_usage_conservation(
 
     let mut surviving = crate::TokenUsage::default();
     for row in &pending {
-        surviving.add(&row.entry.usage);
+        accumulate(&mut surviving, &row.entry.usage);
     }
     for (identity, entry) in &model.durable_usage {
         if !pending_identities.contains(identity) {
-            surviving.add(&entry.usage);
+            accumulate(&mut surviving, &entry.usage);
         }
     }
     if surviving != model.recorded_usage {
@@ -341,10 +341,16 @@ fn usage_by_source_model<'a>(
 ) -> BTreeMap<(String, String), crate::TokenUsage> {
     let mut totals = BTreeMap::new();
     for entry in entries {
-        totals
+        let total = totals
             .entry((entry.source.clone(), entry.model.clone()))
-            .or_insert_with(crate::TokenUsage::default)
-            .add(&entry.usage);
+            .or_insert_with(crate::TokenUsage::default);
+        accumulate(total, &entry.usage);
     }
     totals
+}
+
+fn accumulate(total: &mut crate::TokenUsage, usage: &crate::TokenUsage) {
+    *total = total
+        .checked_add(usage)
+        .expect("the generated conservation corpus stays within checked usage bounds");
 }

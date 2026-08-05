@@ -60603,14 +60603,6 @@ disposition = "unused-add"
 reason = "Add lash::usage::TokenUsage to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::usage::TokenUsage::add"
-kind = "function"
-availability = "default+all-features"
-area = "observation-admin"
-disposition = "unused-add"
-reason = "Add lash::usage::TokenUsage::add to the agent-service recovery/operations flow example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::usage::TokenUsage::cache_read_input_tokens"
 kind = "field"
 availability = "default+all-features"
@@ -79221,14 +79213,6 @@ disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::TokenUsage. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
-symbol = "lash_core::TokenUsage::add"
-kind = "function"
-availability = "default+all-features"
-area = "observation-admin"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::TokenUsage::add. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
 symbol = "lash_core::TokenUsage::cache_read_input_tokens"
 kind = "field"
 availability = "default+all-features"
@@ -87217,3 +87201,154 @@ availability = "default+all-features"
 area = "processes"
 disposition = "unused-add"
 reason = "Add lash::durability::ProcessRecoveryOperation::WriteTerminal to the agent-workbench durable process flow example and assert its externally observable result."
+[[api]]
+symbol = "lash::persistence::StoreError::CheckpointTurnIndexOutOfRange"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add a corrupt-checkpoint restore case to the docs-snippets persistence example and assert this typed variant."
+
+[[api]]
+symbol = "lash::persistence::StoreError::CheckpointTurnIndexOutOfRange::max_exclusive"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add a corrupt-checkpoint restore case to the docs-snippets persistence example and assert the reported restore boundary."
+
+[[api]]
+symbol = "lash::persistence::StoreError::CheckpointTurnIndexOutOfRange::turn_index"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add a corrupt-checkpoint restore case to the docs-snippets persistence example and assert the rejected durable turn index."
+
+[[api]]
+symbol = "lash::usage::SessionUsageReport::saturated"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add saturated usage-report rendering and operator-warning coverage to the agent-workbench usage-ledger example."
+
+[[api]]
+symbol = "lash::usage::TokenUsage::checked_add"
+kind = "function"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add checked multi-call usage accumulation to the agent-service recovery/operations example and assert overflow handling."
+
+[[api]]
+symbol = "lash::usage::TokenUsage::checked_total"
+kind = "function"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add checked canonical-total reporting to the agent-service recovery/operations example and assert overflow handling."
+
+[[api]]
+symbol = "lash::usage::TokenUsage::is_zero"
+kind = "function"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add field-wise empty-usage filtering to the agent-service recovery/operations example, including reasoning-only usage."
+
+[[api]]
+symbol = "lash::usage::TokenUsageOverflow"
+kind = "struct"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add typed checked-usage overflow handling to the agent-service recovery/operations example."
+
+[[api]]
+symbol = "lash::usage::TokenUsageOverflow::counter"
+kind = "function"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add typed checked-usage overflow handling to the agent-service recovery/operations example and assert the counter name."
+
+[[api]]
+symbol = "lash_core::StoreError::CheckpointTurnIndexOutOfRange"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class: custom durable-store and runtime-restore implementers surface corrupt checkpoint indices without string matching."
+
+[[api]]
+symbol = "lash_core::StoreError::CheckpointTurnIndexOutOfRange::max_exclusive"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class: custom durable-store and runtime-restore implementers report the exact checkpoint restore boundary."
+
+[[api]]
+symbol = "lash_core::StoreError::CheckpointTurnIndexOutOfRange::turn_index"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class: custom durable-store and runtime-restore implementers identify the rejected durable turn index."
+
+[[api]]
+symbol = "lash_core::TokenUsage::checked_add"
+kind = "function"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete integrator class: provider adapters and protocol-runtime implementers accumulate multi-call usage before durable publication."
+
+[[api]]
+symbol = "lash_core::TokenUsage::checked_total"
+kind = "function"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete integrator class: provider adapters and protocol-runtime implementers validate canonical totals before durable publication."
+
+[[api]]
+symbol = "lash_core::TokenUsage::is_zero"
+kind = "function"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete integrator class: provider adapters and protocol-runtime implementers retain reasoning-only usage while filtering empty rows."
+
+[[api]]
+symbol = "lash_core::TokenUsageOverflow"
+kind = "struct"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete integrator class: provider adapters and protocol-runtime implementers propagate typed pre-persistence usage overflow."
+
+[[api]]
+symbol = "lash_core::TokenUsageOverflow::counter"
+kind = "function"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete integrator class: provider adapters and protocol-runtime implementers classify the exact overflowing usage counter."
+
+[[api]]
+symbol = "lash::persistence::StoreError::variant_name"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add forward-compatible store-error classification to the docs-snippets persistence example without collapsing unknown variants."
+
+[[api]]
+symbol = "lash_core::StoreError::variant_name"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class: custom durable-store and runtime-restore implementers classify non-exhaustive store errors without collapsing distinct variants."

@@ -119,7 +119,7 @@ impl UsageCapability {
         let staged = stage_token_ledger_shared(&self.token_ledger, operation)?;
         let mut projected = state.token_ledger.clone();
         for delta in staged.deltas() {
-            merge_ledger_entry_checked(&mut projected, delta.entry.clone())?;
+            crate::store::merge_token_ledger_entry_checked(&mut projected, delta.entry.clone())?;
         }
         state.token_ledger = projected;
         Ok(staged)
@@ -254,21 +254,13 @@ pub(crate) fn stage_token_ledger_shared(
     })
 }
 
-fn usage_has_any_tokens(usage: &TokenUsage) -> bool {
-    usage.input_tokens != 0
-        || usage.output_tokens != 0
-        || usage.cache_read_input_tokens != 0
-        || usage.cache_write_input_tokens != 0
-        || usage.reasoning_output_tokens != 0
-}
-
 pub(crate) fn record_token_usage_shared(
     token_ledger: &Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
     source: &str,
     model: &str,
     usage: &TokenUsage,
 ) {
-    if !usage_has_any_tokens(usage) {
+    if usage.is_zero() {
         return;
     }
     let mut ledger = token_ledger
@@ -278,6 +270,10 @@ pub(crate) fn record_token_usage_shared(
         .iter_mut()
         .find(|entry| entry.identity.is_none() && entry.source == source && entry.model == model)
     {
+        // Pre-identity staging deliberately saturates so infallible provider
+        // callbacks cannot wrap or discard a row. The checked merge permits a
+        // clamped counter only when every counter and the canonical total still
+        // fit in i64; otherwise projection/commit returns the typed error.
         entry.entry.usage.input_tokens = entry
             .entry
             .usage
@@ -312,64 +308,6 @@ pub(crate) fn record_token_usage_shared(
     }
 }
 
-fn merge_ledger_entry_checked(
-    ledger: &mut Vec<TokenLedgerEntry>,
-    entry: TokenLedgerEntry,
-) -> Result<(), crate::StoreError> {
-    if !usage_has_any_tokens(&entry.usage) {
-        return Ok(());
-    }
-    usage_total_checked(&entry.usage).ok_or_else(|| {
-        crate::StoreError::TokenUsageAccountingOverflow {
-            usage_source: entry.source.clone(),
-            model: entry.model.clone(),
-            counter: "total_tokens",
-        }
-    })?;
-    let Some(existing) = ledger
-        .iter_mut()
-        .find(|existing| existing.source == entry.source && existing.model == entry.model)
-    else {
-        ledger.push(entry);
-        return Ok(());
-    };
-    macro_rules! checked_counter {
-        ($field:ident) => {
-            existing.usage.$field = existing
-                .usage
-                .$field
-                .checked_add(entry.usage.$field)
-                .ok_or_else(|| crate::StoreError::TokenUsageAccountingOverflow {
-                    usage_source: entry.source.clone(),
-                    model: entry.model.clone(),
-                    counter: stringify!($field),
-                })?;
-        };
-    }
-    checked_counter!(input_tokens);
-    checked_counter!(output_tokens);
-    checked_counter!(cache_read_input_tokens);
-    checked_counter!(cache_write_input_tokens);
-    checked_counter!(reasoning_output_tokens);
-    usage_total_checked(&existing.usage).ok_or(
-        crate::StoreError::TokenUsageAccountingOverflow {
-            usage_source: entry.source,
-            model: entry.model,
-            counter: "total_tokens",
-        },
-    )?;
-    Ok(())
-}
-
-fn usage_total_checked(usage: &TokenUsage) -> Option<i64> {
-    usage
-        .input_tokens
-        .checked_add(usage.output_tokens)?
-        .checked_add(usage.cache_read_input_tokens)?
-        .checked_add(usage.cache_write_input_tokens)?
-        .checked_add(usage.reasoning_output_tokens)
-}
-
 pub(in crate::runtime::session_manager) fn subtract_usage(
     reported_total: &TokenUsage,
     final_total: &TokenUsage,
@@ -391,7 +329,7 @@ pub(in crate::runtime::session_manager) fn subtract_usage(
             .reasoning_output_tokens
             .saturating_sub(reported_total.reasoning_output_tokens),
     };
-    usage_has_any_tokens(&delta).then_some(delta)
+    (!delta.is_zero()).then_some(delta)
 }
 
 impl LiveChildUsageForwarder {
@@ -531,8 +469,11 @@ mod staging_tests {
         let staged = stage_token_ledger_shared(&ledger, &operation("overflow"))
             .expect("identity staging does not perform usage arithmetic");
         let mut projected = Vec::new();
-        let error = merge_ledger_entry_checked(&mut projected, staged.deltas()[0].entry.clone())
-            .expect_err("overflow must be reported");
+        let error = crate::store::merge_token_ledger_entry_checked(
+            &mut projected,
+            staged.deltas()[0].entry.clone(),
+        )
+        .expect_err("overflow must be reported");
         assert!(matches!(
             error,
             crate::StoreError::TokenUsageAccountingOverflow {

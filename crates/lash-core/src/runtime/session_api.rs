@@ -158,10 +158,11 @@ impl LashRuntime {
     pub fn usage_report(&self) -> SessionUsageReport {
         let mut entries = self.state.token_ledger.clone();
         let drained = self.shared_token_ledger.lock().expect("token ledger lock");
+        let mut saturated = false;
         for entry in drained.iter().cloned() {
-            merge_ledger_entry(&mut entries, entry.entry);
+            saturated |= merge_ledger_entry_saturating(&mut entries, entry.entry);
         }
-        SessionUsageReport::from_entries(&entries)
+        SessionUsageReport::from_entries_with_saturation(&entries, saturated)
     }
 
     pub async fn await_background_work(&mut self) -> Result<(), SessionError> {
@@ -205,10 +206,15 @@ impl LashRuntime {
             graph: read.graph,
             config: read.config.clone(),
             checkpoint_ref: read.checkpoint_ref.clone(),
-            token_ledger: merge_usage_delta_entries(read.token_ledger),
+            token_ledger: read.token_ledger,
         };
         apply_session_head(&mut self.state, &head);
-        apply_session_checkpoint(&mut self.state, read.checkpoint);
+        apply_session_checkpoint(&mut self.state, read.checkpoint).map_err(|source| {
+            SessionError::Store {
+                context: "failed to restore session checkpoint".to_string(),
+                source,
+            }
+        })?;
         self.policy = self.state.effective_policy().clone();
         self.protocol_turn_options = self.state.effective_protocol_turn_options().clone();
         Ok(())

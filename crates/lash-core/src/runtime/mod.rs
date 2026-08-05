@@ -305,7 +305,7 @@ pub use usage::{
     SessionUsageReport, TokenLedgerEntry, UsageReportRow, UsageTotals, diff_token_ledger,
     diff_usage_reports,
 };
-use usage::{merge_ledger_entry, merge_usage_delta_entries, normalize_prompt_usage};
+use usage::{merge_ledger_entry_saturating, normalize_prompt_usage};
 pub use wake_delivery_driver::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 
 macro_rules! define_runtime_turn_phases {
