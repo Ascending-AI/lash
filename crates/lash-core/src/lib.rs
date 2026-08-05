@@ -40,6 +40,13 @@ mod trace;
 pub mod triggers;
 
 #[doc(hidden)]
+pub mod store_backend_support {
+    pub use crate::store::session_execution_lease::{
+        SessionExecutionLeaseRefusalOperation, trace_session_execution_lease_refusal,
+    };
+}
+
+#[doc(hidden)]
 pub mod facade_support {
     /// Build the core-level tool-registry projection through the same plugin
     /// composition path used for runtime sessions.
@@ -838,8 +845,8 @@ pub use session_model::SessionPolicy;
 pub use session_model::{ProtocolEvent, SessionHistoryRecord};
 pub use store::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, BlobRef, GcReport,
-    LeaseOwnerIdentity, QueuedWorkStore, RuntimePersistence, SessionAdmission, SessionBinding,
-    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
+    LeaseClaimNonce, LeaseOwnerIdentity, QueuedWorkStore, RuntimePersistence, SessionAdmission,
+    SessionBinding, SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
     SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
     SessionExecutionLeaseDisplacement, SessionExecutionLeaseStore, SessionMeta, StoreError,
     StoreMaintenance, TurnInputStore, VacuumReport,

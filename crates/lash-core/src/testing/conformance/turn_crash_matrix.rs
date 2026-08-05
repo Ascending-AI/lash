@@ -576,18 +576,23 @@ impl TurnInputStore for SeamStore {
 
 #[async_trait::async_trait]
 impl SessionExecutionLeaseStore for SeamStore {
-    async fn try_claim_session_execution_lease(
+    async fn try_claim_session_execution_lease_with_token(
         &self,
         session_id: &str,
         owner: &LeaseOwnerIdentity,
+        claim_nonce: &crate::LeaseClaimNonce,
         ttl: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
         let operation = TurnSeamOperation::Store(StoreOperation::ClaimSessionExecutionLease);
         self.control
             .around(
                 operation,
-                self.inner
-                    .try_claim_session_execution_lease(session_id, owner, ttl),
+                self.inner.try_claim_session_execution_lease_with_token(
+                    session_id,
+                    owner,
+                    claim_nonce,
+                    ttl,
+                ),
             )
             .await
     }

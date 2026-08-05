@@ -11,6 +11,7 @@ use proptest::prelude::*;
 use proptest::test_runner::{Config, RngSeed, TestError, TestRunner};
 
 use super::*;
+use crate::StoreError::SessionExecutionLeaseRenewalRefused as RenewalRefused;
 use crate::{
     LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputDraft,
     PluginSessionSnapshot, PluginSnapshotEntry, PluginSnapshotMeta, QueuedWorkBatch,
@@ -890,7 +891,7 @@ async fn renew_lease(
         .renew_session_execution_lease(&lease.fence(), 60_000)
         .await;
     if stale {
-        if !matches!(result, Err(StoreError::SessionExecutionLeaseExpired { .. })) {
+        if !matches!(result, Err(RenewalRefused { .. })) {
             return Err(format!(
                 "superseded lease renewal was not fenced: {result:?}"
             ));

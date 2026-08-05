@@ -50,8 +50,6 @@ fn session_fence_matches(
     lease.session_id == fence.session_id
         && lease.owner == fence.owner
         && lease.lease_token == fence.lease_token
-        && lease.fencing_token == fence.fencing_token
-        && lease.expires_at_epoch_ms > now_epoch_ms()
 }
 
 fn session_completion_matches(
@@ -61,7 +59,6 @@ fn session_completion_matches(
     lease.session_id == completion.session_id
         && lease.owner == completion.owner
         && lease.lease_token == completion.lease_token
-        && lease.fencing_token == completion.fencing_token
 }
 
 #[derive(Default)]
@@ -361,15 +358,17 @@ impl lash_core::SessionCommitStore for SnapshotStore {
 
 #[async_trait]
 impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
-    async fn try_claim_session_execution_lease(
+    async fn try_claim_session_execution_lease_with_token(
         &self,
         session_id: &str,
         owner: &lash_core::LeaseOwnerIdentity,
+        claim_nonce: &lash_core::LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> std::result::Result<
         lash_core::SessionExecutionLeaseClaimOutcome,
         lash_core::store::StoreError,
     > {
+        let lease_token = claim_nonce.as_str();
         let mut leases = self
             .session_execution_leases
             .lock()
@@ -379,6 +378,9 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
         {
             if existing.owner.same_incarnation(owner) {
                 let mut lease = existing.clone();
+                if lease.lease_token != lease_token {
+                    lease.lease_token = lease_token.to_string();
+                }
                 lease.expires_at_epoch_ms = now_epoch_ms().saturating_add(lease_ttl_ms);
                 leases.insert(session_id.to_string(), lease.clone());
                 return Ok(lash_core::SessionExecutionLeaseClaimOutcome::Acquired(
@@ -415,8 +417,9 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
             .saturating_add(1);
         generations.insert(session_id.to_string(), next_fencing_token);
         drop(generations);
-        let lease =
+        let mut lease =
             test_session_execution_lease(session_id, owner, lease_ttl_ms, next_fencing_token);
+        lease.lease_token = lease_token.to_string();
         leases.insert(session_id.to_string(), lease.clone());
         Ok(lash_core::SessionExecutionLeaseClaimOutcome::Acquired(
             match displaced {
@@ -448,12 +451,26 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
             });
         };
         if !session_fence_matches(existing, fence) {
+            lash_core::store_backend_support::trace_session_execution_lease_refusal(
+                lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,
+                "owner_or_token_mismatch",
+                "facade_test_double_lock",
+                fence,
+                Some(&existing.owner),
+                Some(existing.lease_token.as_str()),
+            );
+            return Err(
+                lash_core::store::StoreError::SessionExecutionLeaseRenewalRefused {
+                    session_id: fence.session_id.clone(),
+                },
+            );
+        }
+        if existing.expires_at_epoch_ms <= now_epoch_ms() {
             return Err(lash_core::store::StoreError::SessionExecutionLeaseExpired {
                 session_id: fence.session_id.clone(),
             });
         }
-        existing.claimed_at_epoch_ms = now_epoch_ms();
-        existing.expires_at_epoch_ms = existing.claimed_at_epoch_ms.saturating_add(lease_ttl_ms);
+        existing.expires_at_epoch_ms = now_epoch_ms().saturating_add(lease_ttl_ms);
         Ok(existing.clone())
     }
 
@@ -472,8 +489,23 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
             // The live row goes; the generation counter deliberately stays, so
             // the next claim mints `previous + 1` (ADR 0029).
             leases.remove(&completion.session_id);
+            Ok(())
+        } else {
+            let current = leases.get(&completion.session_id);
+            lash_core::store_backend_support::trace_session_execution_lease_refusal(
+                lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Release,
+                "token_scoped_release_did_not_match",
+                "facade_test_double_lock",
+                completion,
+                current.map(|lease| &lease.owner),
+                current.map(|lease| lease.lease_token.as_str()),
+            );
+            Err(
+                lash_core::store::StoreError::SessionExecutionLeaseReleaseRefused {
+                    session_id: completion.session_id.clone(),
+                },
+            )
         }
-        Ok(())
     }
 
     async fn get_session_execution_lease(
@@ -789,22 +821,20 @@ impl lash_core::SessionCommitStore for BoundSessionStore {
 
 #[async_trait]
 impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
-    async fn try_claim_session_execution_lease(
+    async fn try_claim_session_execution_lease_with_token(
         &self,
         session_id: &str,
         owner: &lash_core::LeaseOwnerIdentity,
+        claim_nonce: &lash_core::LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> std::result::Result<
         lash_core::SessionExecutionLeaseClaimOutcome,
         lash_core::store::StoreError,
     > {
+        let mut lease = test_session_execution_lease(session_id, owner, lease_ttl_ms, 1);
+        lease.lease_token = claim_nonce.as_str().to_string();
         Ok(lash_core::SessionExecutionLeaseClaimOutcome::Acquired(
-            lash_core::SessionExecutionLeaseAcquisition::fresh(test_session_execution_lease(
-                session_id,
-                owner,
-                lease_ttl_ms,
-                1,
-            )),
+            lash_core::SessionExecutionLeaseAcquisition::fresh(lease),
         ))
     }
 

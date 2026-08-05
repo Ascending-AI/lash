@@ -615,14 +615,20 @@ impl TurnInputStore for ObservedSessionStore {
 
 #[async_trait::async_trait]
 impl SessionExecutionLeaseStore for ObservedSessionStore {
-    async fn try_claim_session_execution_lease(
+    async fn try_claim_session_execution_lease_with_token(
         &self,
         session_id: &str,
         owner: &LeaseOwnerIdentity,
+        claim_nonce: &crate::LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
         self.inner
-            .try_claim_session_execution_lease(session_id, owner, lease_ttl_ms)
+            .try_claim_session_execution_lease_with_token(
+                session_id,
+                owner,
+                claim_nonce,
+                lease_ttl_ms,
+            )
             .await
     }
 

@@ -189,6 +189,14 @@ pub enum StoreError {
     #[error("session execution lease for session `{session_id}` is missing or expired")]
     SessionExecutionLeaseExpired { session_id: String },
     #[error(
+        "session execution lease renewal for session `{session_id}` was refused because owner or lease token is no longer current"
+    )]
+    SessionExecutionLeaseRenewalRefused { session_id: String },
+    #[error(
+        "session execution lease release for session `{session_id}` was refused because owner or lease token is no longer current"
+    )]
+    SessionExecutionLeaseReleaseRefused { session_id: String },
+    #[error(
         "{record_kind} schema_version {actual} is not supported by this binary (expected {expected})"
     )]
     UnsupportedRecordSchemaVersion {
@@ -258,6 +266,12 @@ impl StoreError {
             Self::PendingTurnInputSourceKeyConflict { .. } => "PendingTurnInputSourceKeyConflict",
             Self::ProcessWakeSequenceRewound { .. } => "ProcessWakeSequenceRewound",
             Self::SessionExecutionLeaseExpired { .. } => "SessionExecutionLeaseExpired",
+            Self::SessionExecutionLeaseRenewalRefused { .. } => {
+                "SessionExecutionLeaseRenewalRefused"
+            }
+            Self::SessionExecutionLeaseReleaseRefused { .. } => {
+                "SessionExecutionLeaseReleaseRefused"
+            }
             Self::UnsupportedRecordSchemaVersion { .. } => "UnsupportedRecordSchemaVersion",
             Self::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion",
             Self::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion",

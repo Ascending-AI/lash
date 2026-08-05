@@ -217,7 +217,6 @@ impl RuntimePerfStore {
             });
         };
         if current.owner.as_ref() == Some(&fence.owner)
-            && current.lease_token.as_deref() == Some(fence.lease_token.as_str())
             && current.fencing_token == fence.fencing_token
             && current.expires_at_epoch_ms > now
         {
@@ -246,7 +245,8 @@ impl RuntimePerfStore {
     fn release_session_execution_lease_in_memory(
         &self,
         completion: &SessionExecutionLeaseAuthority,
-    ) {
+        trace_refusal: bool,
+    ) -> bool {
         let mut leases = self
             .session_execution_leases
             .lock()
@@ -254,12 +254,25 @@ impl RuntimePerfStore {
         if let Some(current) = leases.get_mut(&completion.session_id)
             && current.owner.as_ref() == Some(&completion.owner)
             && current.lease_token.as_deref() == Some(completion.lease_token.as_str())
-            && current.fencing_token == completion.fencing_token
         {
             current.owner = None;
             current.lease_token = None;
             current.claimed_at_epoch_ms = 0;
             current.expires_at_epoch_ms = 0;
+            true
+        } else {
+            if trace_refusal {
+                let current = leases.get(&completion.session_id);
+                lash_core::store_backend_support::trace_session_execution_lease_refusal(
+                    lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Release,
+                    "token_scoped_release_did_not_match",
+                    "perf_store_lock",
+                    completion,
+                    current.and_then(|lease| lease.owner.as_ref()),
+                    current.and_then(|lease| lease.lease_token.as_deref()),
+                );
+            }
+            false
         }
     }
 
@@ -641,7 +654,9 @@ impl SessionCommitStore for RuntimePerfStore {
         {
             if stored_hash == turn_commit_hash {
                 if let Some(completion) = release_session_execution_lease.as_ref() {
-                    self.release_session_execution_lease_in_memory(completion);
+                    let _release_was_current =
+                        self.release_session_execution_lease_in_memory(completion, false);
+                    // FIG-884: ancillary stale release must never veto a replayed commit.
                 }
                 return Ok(result);
             }
@@ -836,7 +851,9 @@ impl SessionCommitStore for RuntimePerfStore {
                 (turn_commit_hash, result.clone()),
             );
         if let Some(completion) = release_session_execution_lease.as_ref() {
-            self.release_session_execution_lease_in_memory(completion);
+            let _release_was_current =
+                self.release_session_execution_lease_in_memory(completion, false);
+            // FIG-884: head CAS is commit authority; release is ancillary.
         }
         Ok(result)
     }
@@ -857,12 +874,14 @@ impl SessionCommitStore for RuntimePerfStore {
 
 #[async_trait::async_trait]
 impl SessionExecutionLeaseStore for RuntimePerfStore {
-    async fn try_claim_session_execution_lease(
+    async fn try_claim_session_execution_lease_with_token(
         &self,
         session_id: &str,
         owner: &LeaseOwnerIdentity,
+        claim_nonce: &lash_core::LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
+        let lease_token = claim_nonce.as_str();
         let now = current_epoch_ms();
         let mut leases = self
             .session_execution_leases
@@ -875,6 +894,9 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
                 .as_ref()
                 .is_some_and(|current_owner| current_owner.same_incarnation(owner))
             {
+                if current.lease_token.as_deref() != Some(lease_token) {
+                    current.lease_token = Some(lease_token.to_string());
+                }
                 current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
                 return Ok(SessionExecutionLeaseClaimOutcome::Acquired(
                     SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
@@ -910,10 +932,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
             .map(|previous| (previous, current.fencing_token, current.expires_at_epoch_ms));
         current.fencing_token = current.fencing_token.saturating_add(1);
         current.owner = Some(owner.clone());
-        current.lease_token = Some(format!(
-            "{session_id}:{}:{}:{now}:{}",
-            owner.owner_id, owner.incarnation_id, current.fencing_token
-        ));
+        current.lease_token = Some(lease_token.to_string());
         current.claimed_at_epoch_ms = now;
         current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
         let lease = SessionExecutionLease {
@@ -956,9 +975,20 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
         };
         if current.owner.as_ref() != Some(&fence.owner)
             || current.lease_token.as_deref() != Some(fence.lease_token.as_str())
-            || current.fencing_token != fence.fencing_token
-            || current.expires_at_epoch_ms <= now
         {
+            lash_core::store_backend_support::trace_session_execution_lease_refusal(
+                lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,
+                "owner_or_token_mismatch",
+                "perf_store_lock",
+                fence,
+                current.owner.as_ref(),
+                current.lease_token.as_deref(),
+            );
+            return Err(StoreError::SessionExecutionLeaseRenewalRefused {
+                session_id: fence.session_id.clone(),
+            });
+        }
+        if current.expires_at_epoch_ms <= now {
             return Err(StoreError::SessionExecutionLeaseExpired {
                 session_id: fence.session_id.clone(),
             });
@@ -968,7 +998,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
             session_id: fence.session_id.clone(),
             owner: fence.owner.clone(),
             lease_token: fence.lease_token.clone(),
-            fencing_token: fence.fencing_token,
+            fencing_token: current.fencing_token,
             claimed_at_epoch_ms: current.claimed_at_epoch_ms,
             expires_at_epoch_ms: current.expires_at_epoch_ms,
         })
@@ -978,8 +1008,13 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
         &self,
         completion: &SessionExecutionLeaseAuthority,
     ) -> Result<(), StoreError> {
-        self.release_session_execution_lease_in_memory(completion);
-        Ok(())
+        if self.release_session_execution_lease_in_memory(completion, true) {
+            Ok(())
+        } else {
+            Err(StoreError::SessionExecutionLeaseReleaseRefused {
+                session_id: completion.session_id.clone(),
+            })
+        }
     }
 
     async fn get_session_execution_lease(

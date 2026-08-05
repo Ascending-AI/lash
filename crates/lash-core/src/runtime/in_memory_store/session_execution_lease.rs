@@ -7,12 +7,14 @@ use super::InMemorySessionStore;
 
 #[async_trait::async_trait]
 impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
-    async fn try_claim_session_execution_lease(
+    async fn try_claim_session_execution_lease_with_token(
         &self,
         session_id: &str,
         owner: &crate::LeaseOwnerIdentity,
+        claim_nonce: &crate::LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> Result<crate::SessionExecutionLeaseClaimOutcome, crate::store::StoreError> {
+        let lease_token = claim_nonce.as_str();
         let _transaction = self
             .write_transaction
             .lock()
@@ -30,6 +32,9 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
                 .as_ref()
                 .is_some_and(|current_owner| current_owner.same_incarnation(owner))
             {
+                if current.lease_token.as_deref() != Some(lease_token) {
+                    current.lease_token = Some(lease_token.to_string());
+                }
                 current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
                 // Reentry advances no generation, so it displaces nobody.
                 return Ok(crate::SessionExecutionLeaseClaimOutcome::Acquired(
@@ -53,6 +58,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
         let lease = Self::acquire_session_execution_lease_in_memory(
             session_id,
             owner,
+            lease_token,
             current,
             now,
             lease_ttl_ms,
@@ -109,9 +115,22 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
             .as_ref()
             .is_some_and(|owner| owner.same_incarnation(&fence.owner))
             || current.lease_token.as_deref() != Some(fence.lease_token.as_str())
-            || current.fencing_token != fence.fencing_token
-            || current.expires_at_epoch_ms <= now
         {
+            crate::store_backend_support::trace_session_execution_lease_refusal(
+                crate::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,
+                "owner_or_token_mismatch",
+                "in_memory_write_transaction",
+                fence,
+                current.owner.as_ref(),
+                current.lease_token.as_deref(),
+            );
+            return Err(
+                crate::store::StoreError::SessionExecutionLeaseRenewalRefused {
+                    session_id: fence.session_id.clone(),
+                },
+            );
+        }
+        if current.expires_at_epoch_ms <= now {
             return Err(crate::store::StoreError::SessionExecutionLeaseExpired {
                 session_id: fence.session_id.clone(),
             });
@@ -121,7 +140,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
             session_id: fence.session_id.clone(),
             owner: fence.owner.clone(),
             lease_token: fence.lease_token.clone(),
-            fencing_token: fence.fencing_token,
+            fencing_token: current.fencing_token,
             claimed_at_epoch_ms: current.claimed_at_epoch_ms,
             expires_at_epoch_ms: current.expires_at_epoch_ms,
         })
@@ -147,11 +166,17 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
                 .write_transaction
                 .lock()
                 .expect("lock in-memory write transaction");
-            self.release_session_execution_lease_in_memory(completion);
+            #[cfg(test)]
+            self.session_execution_lease_release_attempt_count
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if !self.release_session_execution_lease_in_memory(completion, true) {
+                return Err(
+                    crate::store::StoreError::SessionExecutionLeaseReleaseRefused {
+                        session_id: completion.session_id.clone(),
+                    },
+                );
+            }
         }
-        #[cfg(test)]
-        self.session_execution_lease_release_count
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
 

@@ -160,7 +160,7 @@ pub struct InMemorySessionStore {
     session_execution_lease_release_gate:
         Mutex<Option<Arc<test_support::SessionExecutionLeaseReleaseGate>>>,
     #[cfg(test)]
-    session_execution_lease_release_count: std::sync::atomic::AtomicUsize,
+    session_execution_lease_release_attempt_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     abandoned_queued_work_claim_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
@@ -256,7 +256,7 @@ impl InMemorySessionStore {
             #[cfg(test)]
             session_execution_lease_release_gate: Mutex::new(None),
             #[cfg(test)]
-            session_execution_lease_release_count: std::sync::atomic::AtomicUsize::new(0),
+            session_execution_lease_release_attempt_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             abandoned_queued_work_claim_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
@@ -290,7 +290,6 @@ impl InMemorySessionStore {
             .owner
             .as_ref()
             .is_some_and(|owner| owner.same_incarnation(&fence.owner))
-            && current.lease_token.as_deref() == Some(fence.lease_token.as_str())
             && current.fencing_token == fence.fencing_token
             && current.expires_at_epoch_ms > now
         {
@@ -320,7 +319,8 @@ impl InMemorySessionStore {
     fn release_session_execution_lease_in_memory(
         &self,
         completion: &crate::SessionExecutionLeaseAuthority,
-    ) {
+        trace_refusal: bool,
+    ) -> bool {
         let mut leases = self
             .session_execution_leases
             .lock()
@@ -331,12 +331,25 @@ impl InMemorySessionStore {
                 .as_ref()
                 .is_some_and(|owner| owner.same_incarnation(&completion.owner))
             && current.lease_token.as_deref() == Some(completion.lease_token.as_str())
-            && current.fencing_token == completion.fencing_token
         {
             current.owner = None;
             current.lease_token = None;
             current.claimed_at_epoch_ms = 0;
             current.expires_at_epoch_ms = 0;
+            true
+        } else {
+            if trace_refusal {
+                let current = leases.get(&completion.session_id);
+                crate::store_backend_support::trace_session_execution_lease_refusal(
+                    crate::store_backend_support::SessionExecutionLeaseRefusalOperation::Release,
+                    "token_scoped_release_did_not_match",
+                    "in_memory_write_transaction",
+                    completion,
+                    current.and_then(|lease| lease.owner.as_ref()),
+                    current.and_then(|lease| lease.lease_token.as_deref()),
+                );
+            }
+            false
         }
     }
 
@@ -357,16 +370,14 @@ impl InMemorySessionStore {
     fn acquire_session_execution_lease_in_memory(
         session_id: &str,
         owner: &crate::LeaseOwnerIdentity,
+        lease_token: &str,
         current: &mut InMemorySessionExecutionLease,
         now: u64,
         lease_ttl_ms: u64,
     ) -> crate::SessionExecutionLease {
         current.fencing_token = current.fencing_token.saturating_add(1);
         current.owner = Some(owner.clone());
-        current.lease_token = Some(format!(
-            "{}:{}:{}:{now}:{}",
-            session_id, owner.owner_id, owner.incarnation_id, current.fencing_token
-        ));
+        current.lease_token = Some(lease_token.to_string());
         current.claimed_at_epoch_ms = now;
         current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
         Self::in_memory_session_execution_lease(session_id, current)
@@ -871,7 +882,9 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 operation_key,
             )?;
             if let Some(completion) = commit.release_session_execution_lease.as_ref() {
-                self.release_session_execution_lease_in_memory(completion);
+                let _release_was_current =
+                    self.release_session_execution_lease_in_memory(completion, false);
+                // FIG-884: ancillary stale release must never veto a replayed commit.
             }
             return Ok(result);
         }
@@ -1407,7 +1420,9 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 },
             );
         if let Some(completion) = commit.release_session_execution_lease.as_ref() {
-            self.release_session_execution_lease_in_memory(completion);
+            let _release_was_current =
+                self.release_session_execution_lease_in_memory(completion, false);
+            // FIG-884: head CAS is commit authority; release is ancillary.
         }
         Ok(result)
     }

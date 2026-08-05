@@ -148,8 +148,8 @@ impl InMemorySessionStore {
         gate
     }
 
-    pub(crate) fn session_execution_lease_release_count(&self) -> usize {
-        self.session_execution_lease_release_count
+    pub(crate) fn session_execution_lease_release_attempt_count(&self) -> usize {
+        self.session_execution_lease_release_attempt_count
             .load(std::sync::atomic::Ordering::SeqCst)
     }
 

@@ -163,6 +163,12 @@ fn store_error_variant(error: &StoreError) -> String {
         StoreError::PendingTurnInputSourceKeyConflict { .. } => "PendingTurnInputSourceKeyConflict",
         StoreError::ProcessWakeSequenceRewound { .. } => "ProcessWakeSequenceRewound",
         StoreError::SessionExecutionLeaseExpired { .. } => "SessionExecutionLeaseExpired",
+        StoreError::SessionExecutionLeaseRenewalRefused { .. } => {
+            "SessionExecutionLeaseRenewalRefused"
+        }
+        StoreError::SessionExecutionLeaseReleaseRefused { .. } => {
+            "SessionExecutionLeaseReleaseRefused"
+        }
         StoreError::UnsupportedRecordSchemaVersion { .. } => "UnsupportedRecordSchemaVersion",
         StoreError::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion",
         StoreError::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion",
