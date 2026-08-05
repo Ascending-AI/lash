@@ -22,10 +22,21 @@ is_test_rust_file() {
   esac
 }
 
+rust_line_limit_for() {
+  local rel="$1"
+  if is_test_rust_file "$rel"; then
+    printf '%s' "$test_limit"
+  else
+    printf '%s' "$production_limit"
+  fi
+}
+
 # Pre-existing files that exceed the budget, exempt with a one-line reason.
 # This is an explicit, closed list — a new file over budget still fails hard.
 # The intended direction of travel is to shrink an entry below its limit and
-# delete its line here, never to raise the global budget.
+# delete its line here, never to raise the global budget. Entries are
+# self-expiring: this script fails when an allowlisted path no longer exists or
+# has shrunk to its limit, so a stale exemption cannot sit here unnoticed.
 declare -A allowlist=(
   ["crates/lash-sim/src/oracles.rs"]="cross-backend divergence oracle catalogue; split tracked separately"
   ["crates/lash-sim/src/provider.rs"]="scripted deterministic sim provider surface"
@@ -46,17 +57,41 @@ declare -A allowlist=(
   ["crates/lash/src/tests/turn_streaming.rs"]="facade turn-streaming test suite"
 )
 
+# Allowlist entries are measured before the tree walk so an exemption that no
+# longer earns its place fails the gate instead of silently lingering. Paths are
+# repository-relative; run this script from the repository root.
+stale_exemptions=()
+for rel in "${!allowlist[@]}"; do
+  if [[ ! -f "$rel" ]]; then
+    stale_exemptions+=("missing:$rel")
+    continue
+  fi
+  limit="$(rust_line_limit_for "$rel")"
+  lines=$(wc -l < "$rel")
+  if ((lines <= limit)); then
+    stale_exemptions+=("within-budget:${lines}<=${limit}:$rel")
+  fi
+done
+
+if ((${#stale_exemptions[@]})); then
+  echo "Stale entries in the file-size allowlist (delete them):" >&2
+  echo "  production limit: ${production_limit} lines" >&2
+  echo "  test/support limit: ${test_limit} lines" >&2
+  mapfile -t stale_exemptions < <(printf '%s\n' "${stale_exemptions[@]}" | sort)
+  printf '  %s\n' "${stale_exemptions[@]}" >&2
+  exit 1
+fi
+
 failures=()
 while IFS= read -r -d '' file; do
   rel="${file#./}"
   if [[ -n "${allowlist[$rel]+set}" ]]; then
     continue
   fi
+  limit="$(rust_line_limit_for "$rel")"
   if is_test_rust_file "$rel"; then
-    limit="$test_limit"
     kind="test"
   else
-    limit="$production_limit"
     kind="production"
   fi
 
