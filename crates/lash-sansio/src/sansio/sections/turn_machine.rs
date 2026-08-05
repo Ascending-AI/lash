@@ -421,20 +421,41 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     /// Feed a response to a previously emitted effect.
     pub fn handle_response(&mut self, response: Response) {
+        if let Err(overflow) = self.try_handle_response(response) {
+            self.fail_turn(make_error_event(
+                "token_usage_accounting",
+                Some("token_usage_overflow"),
+                format!(
+                    "token usage counter `{}` overflowed while accumulating turn usage",
+                    overflow.counter()
+                ),
+                None,
+            ));
+        }
+    }
+
+    /// Fallible host seam for delivering a response whose usage must remain
+    /// suitable for durable accumulation.
+    #[doc(hidden)]
+    pub fn try_handle_response(
+        &mut self,
+        response: Response,
+    ) -> Result<(), TokenUsageOverflow> {
         self.active_effect_redelivery = false;
         match response {
             Response::ExecutionEnvironmentSynced { id, result } => {
-                self.handle_execution_environment_synced(id, result)
+                self.handle_execution_environment_synced(id, result);
             }
             Response::LlmComplete {
                 id,
                 result,
                 text_streamed,
-            } => self.handle_llm_complete(id, result, text_streamed),
+            } => self.handle_llm_complete(id, result, text_streamed)?,
             Response::ToolResults { id, results } => self.handle_tool_results(id, results),
             Response::ExecResult { id, result } => self.handle_exec_result(id, result),
             Response::Checkpoint { id, delivery } => self.handle_checkpoint(id, delivery),
         }
+        Ok(())
     }
 
     fn request_checkpoint(&mut self, checkpoint: CheckpointKind, on_empty: CheckpointResumeAction) {
@@ -638,9 +659,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
         id: EffectId,
         result: Result<LlmResponse, LlmCallError>,
         text_streamed: bool,
-    ) {
+    ) -> Result<(), TokenUsageOverflow> {
         let Some(waiting) = self.take_waiting_llm_state(id) else {
-            return;
+            return Ok(());
         };
         match result {
             Err(error) if error.terminal_reason == LlmTerminalReason::Cancelled => {
@@ -657,9 +678,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     &mut llm_response,
                     self.config.max_context_tokens,
                 );
-                self.record_llm_usage(&llm_response, self.llm_response_text(&llm_response));
+                self.record_llm_usage(&llm_response, self.llm_response_text(&llm_response))?;
                 if self.handle_terminal_llm_response(&llm_response, text_streamed) {
-                    return;
+                    return Ok(());
                 }
                 let actions = {
                     let driver = Arc::clone(&self.config.protocol_driver);
@@ -669,6 +690,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 self.apply_actions(actions);
             }
         }
+        Ok(())
     }
 
     fn handle_terminal_llm_response(
@@ -764,9 +786,13 @@ impl<M: TurnProtocol> TurnMachine<M> {
         (!parts.is_empty()).then_some(Value::Array(parts))
     }
 
-    fn record_llm_usage(&mut self, llm_response: &LlmResponse, response_text: &str) {
+    fn record_llm_usage(
+        &mut self,
+        llm_response: &LlmResponse,
+        response_text: &str,
+    ) -> Result<(), TokenUsageOverflow> {
         let usage = token_usage_from_llm_usage(&llm_response.usage);
-        self.cumulative_usage.add(&usage);
+        self.cumulative_usage = self.cumulative_usage.checked_add(&usage)?;
         self.emit(SessionStreamEvent::TokenUsage {
             protocol_iteration: self.protocol_iteration,
             usage: usage.clone(),
@@ -786,6 +812,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 },
             });
         }
+        Ok(())
     }
 
     fn record_llm_error(&mut self, error: &LlmCallError) {

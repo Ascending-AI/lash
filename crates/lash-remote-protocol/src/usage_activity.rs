@@ -23,11 +23,17 @@ pub struct RemoteUsage {
 
 impl RemoteUsage {
     pub fn add(&mut self, other: &Self) {
-        self.input_tokens += other.input_tokens;
-        self.output_tokens += other.output_tokens;
-        self.cache_read_input_tokens += other.cache_read_input_tokens;
-        self.cache_write_input_tokens += other.cache_write_input_tokens;
-        self.reasoning_output_tokens += other.reasoning_output_tokens;
+        self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
+        self.cache_read_input_tokens = self
+            .cache_read_input_tokens
+            .saturating_add(other.cache_read_input_tokens);
+        self.cache_write_input_tokens = self
+            .cache_write_input_tokens
+            .saturating_add(other.cache_write_input_tokens);
+        self.reasoning_output_tokens = self
+            .reasoning_output_tokens
+            .saturating_add(other.reasoning_output_tokens);
     }
 }
 

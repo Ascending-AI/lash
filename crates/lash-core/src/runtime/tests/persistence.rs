@@ -1,6 +1,142 @@
 use super::*;
 use crate::SessionCommitStore as _;
 
+#[tokio::test]
+async fn durable_turn_commit_rejects_token_usage_overflow() {
+    let overflowing_call = || MockCall {
+        stream_events: vec![LlmStreamEvent::Usage(LlmUsage {
+            input_tokens: i64::MAX,
+            output_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            reasoning_output_tokens: 0,
+        })],
+        response: Ok(LlmResponse {
+            full_text: "accounted".to_string(),
+            parts: vec![LlmOutputPart::Text {
+                text: "accounted".to_string(),
+                response_meta: None,
+            }],
+            response_metadata: Default::default(),
+            ..LlmResponse::default()
+        }),
+    };
+    let transport = mock_provider(vec![overflowing_call(), overflowing_call()]);
+    let store = Arc::new(RecordingStore::default());
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        transport,
+        test_host_config(),
+        store.clone() as Arc<dyn crate::RuntimePersistence>,
+    )
+    .await;
+    runtime.state.token_ledger.push(crate::TokenLedgerEntry {
+        source: "turn".to_string(),
+        model: "mock-model".to_string(),
+        usage: crate::TokenUsage {
+            input_tokens: 1,
+            ..crate::TokenUsage::default()
+        },
+    });
+
+    let error = runtime
+        .run_turn_assembled(
+            TurnInput::text("account this turn"),
+            CancellationToken::new(),
+            named_turn_scope("root", "usage-overflow"),
+        )
+        .await
+        .expect_err("overflow must reject the durable commit");
+
+    assert_eq!(error.code, crate::RuntimeErrorCode::StoreCommitFailed);
+    assert_eq!(
+        error.message,
+        "token usage counter `input_tokens` overflowed while accumulating (turn, mock-model)"
+    );
+    assert_eq!(*store.runtime_commit_count.lock().expect("commit count"), 0);
+
+    let next_error = runtime
+        .run_turn_assembled(
+            TurnInput::text("the poisoned ledger must fail closed again"),
+            CancellationToken::new(),
+            named_turn_scope("root", "usage-overflow-next-turn"),
+        )
+        .await
+        .expect_err("the unconfirmed overflowing row must poison the next turn");
+    assert_eq!(next_error.code, crate::RuntimeErrorCode::StoreCommitFailed);
+    assert_eq!(next_error.message, error.message);
+    assert_eq!(*store.runtime_commit_count.lock().expect("commit count"), 0);
+}
+
+#[tokio::test]
+async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
+    let transport = mock_provider(vec![
+        MockCall {
+            stream_events: vec![LlmStreamEvent::Usage(LlmUsage {
+                input_tokens: i64::MAX - 1,
+                output_tokens: 0,
+                cache_read_input_tokens: 0,
+                cache_write_input_tokens: 0,
+                reasoning_output_tokens: 0,
+            })],
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::ToolCall {
+                    call_id: "overflow-tool-call".to_string(),
+                    tool_name: "echo_tool".to_string(),
+                    input_json: serde_json::json!({"value": "continue"}).to_string(),
+                    replay: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        },
+        MockCall {
+            stream_events: vec![LlmStreamEvent::Usage(LlmUsage {
+                input_tokens: 2,
+                output_tokens: 0,
+                cache_read_input_tokens: 0,
+                cache_write_input_tokens: 0,
+                reasoning_output_tokens: 0,
+            })],
+            response: Ok(LlmResponse {
+                full_text: "must not commit".to_string(),
+                parts: vec![LlmOutputPart::Text {
+                    text: "must not commit".to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        },
+    ]);
+    let store = Arc::new(RecordingStore::default());
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EchoTool),
+        transport,
+        test_host_config(),
+        store.clone() as Arc<dyn crate::RuntimePersistence>,
+    )
+    .await;
+
+    let error = runtime
+        .run_turn_assembled(
+            TurnInput::text("use the tool, then answer"),
+            CancellationToken::new(),
+            named_turn_scope("root", "multi-call-usage-overflow"),
+        )
+        .await
+        .expect_err("the second LLM usage event must reject cumulative overflow");
+
+    assert_eq!(error.code, crate::RuntimeErrorCode::StoreCommitFailed);
+    assert_eq!(
+        error.message,
+        "token usage counter `input_tokens` overflowed while accumulating (turn, mock-model)"
+    );
+    assert_eq!(*store.runtime_commit_count.lock().expect("commit count"), 0);
+}
+
 // The in-memory `RecordingStore` stands in for the real store across these
 // runtime tests; the conformance suite holds it to the same durability
 // contract as the durable backend so it can't silently drift.

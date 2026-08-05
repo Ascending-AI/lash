@@ -128,7 +128,7 @@ fn backend_fault_store_error(operation: &str, attempt: usize, retryable: bool) -
     }
 }
 
-fn store_error_variant(error: &StoreError) -> &'static str {
+fn store_error_variant(error: &StoreError) -> String {
     match error {
         StoreError::ExecutionStateCaptureFailed { .. } => "ExecutionStateCaptureFailed",
         StoreError::Contended => "Contended",
@@ -147,6 +147,7 @@ fn store_error_variant(error: &StoreError) -> &'static str {
             "AppendReceiptRequestedNodeCountCorrupt"
         }
         StoreError::TokenUsageAccountingOverflow { .. } => "TokenUsageAccountingOverflow",
+        StoreError::CheckpointTurnIndexOutOfRange { .. } => "CheckpointTurnIndexOutOfRange",
         StoreError::AppendAncestorNotActive { .. } => "AppendAncestorNotActive",
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch",
         StoreError::NodeIdCollision { .. } => "NodeIdCollision",
@@ -166,7 +167,9 @@ fn store_error_variant(error: &StoreError) -> &'static str {
         StoreError::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion",
         StoreError::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion",
         StoreError::CheckpointComponentMissing { .. } => "CheckpointComponentMissing",
+        other => return format!("Unmapped:{}", other.variant_name()),
     }
+    .to_string()
 }
 
 #[derive(Clone, Debug, Default)]

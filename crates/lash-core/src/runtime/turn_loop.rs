@@ -874,7 +874,7 @@ impl LashRuntime {
         turn_pipeline.state_mut().policy = self.policy.clone();
         turn_pipeline.state_mut().turn_index = turn_index;
 
-        if assembler.token_usage.total() > 0 {
+        if !assembler.token_usage.is_zero() {
             session_manager::record_token_usage_shared(
                 &self.shared_token_ledger,
                 "turn",
@@ -905,7 +905,7 @@ impl LashRuntime {
         let interrupted = cancellation.is_some();
 
         turn_pipeline.finalize_turn_read_state(new_messages, interrupted);
-        if assembler.token_usage.total() > 0 {
+        if !assembler.token_usage.is_zero() {
             turn_pipeline.state_mut().token_usage = assembler.token_usage.clone();
         }
 
@@ -1307,6 +1307,7 @@ impl LashRuntime {
                     self.state.effective_policy().clone(),
                     Default::default(),
                 ),
+                // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
                 turn_index: self.state.turn_index + 1,
                 trace_turn_id,
             },
@@ -1486,6 +1487,7 @@ impl LashRuntime {
                     &self.host.core.tracing.trace_context,
                     lash_trace::TraceContext::default()
                         .for_session(self.state.session_id.clone())
+                        // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
                         .for_turn_index(self.state.turn_index + 1)
                         .for_turn(turn_id.clone()),
                     lash_trace::TraceEvent::Custom {
@@ -1584,6 +1586,7 @@ impl LashRuntime {
             &self.host.core.tracing.trace_context,
             lash_trace::TraceContext::default()
                 .for_session(self.state.session_id.clone())
+                // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
                 .for_turn_index(self.state.turn_index + 1)
                 .for_turn(turn_id.clone()),
             lash_trace::TraceEvent::Custom {
@@ -1867,6 +1870,7 @@ impl LashRuntime {
                 emit_session_event_to_sink(events, outcome_event).await;
                 assembler.push(&SessionStreamEvent::Done);
                 emit_session_event_to_sink(events, SessionStreamEvent::Done).await;
+                // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
                 let turn_index = self.state.turn_index + 1;
                 let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
                 let turn_control_resolver =
@@ -1908,6 +1912,7 @@ impl LashRuntime {
                 .await;
             }
         };
+        // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
         let turn_index = self.state.turn_index + 1;
         let trace_turn_id = input
             .trace_turn_id

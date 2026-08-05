@@ -233,10 +233,12 @@ fn export_observation_state(
         .shared_token_ledger
         .lock()
         .expect("token ledger lock");
+    let mut saturated = false;
     for entry in shared_ledger.iter().cloned() {
-        super::merge_ledger_entry(&mut state.token_ledger, entry.entry);
+        saturated |= super::merge_ledger_entry_saturating(&mut state.token_ledger, entry.entry);
     }
-    let usage_report = super::SessionUsageReport::from_entries(&state.token_ledger);
+    let usage_report =
+        super::SessionUsageReport::from_entries_with_saturation(&state.token_ledger, saturated);
     (state, read_view, usage_report)
 }
 

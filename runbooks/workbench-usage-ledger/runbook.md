@@ -29,6 +29,25 @@ provider-reported counters, canonical arithmetic, and equality between surfaces.
 5. **Restart equality is exact.** After `agent-workbench-restart`, require the full
    `/api/state.usage` JSON object and rendered total/input/output strings to equal the
    pre-restart values. Monotonic-but-different is a failure when no new call ran.
+6. **A saturated report is an operator signal.** `/api/state.usage.saturated == true`
+   means display aggregation clamped at least one counter. Preserve the raw report and
+   durable rows for RCA; do not treat the displayed maximum as an exact billable total.
+
+## Token-usage overflow triage
+
+`token usage counter ... overflowed while accumulating` is deliberately fail closed. An
+overflowing, unconfirmed row remains in the resident session's process-local
+`shared_token_ledger`, so the next turn on that same resident session re-fails. Do not
+retry the turn in place and do not edit the durable token ledger.
+
+Operator remediation is to replace the resident Lash session/runtime and reconstruct it
+from the last committed `RuntimePersistence` state (for Workbench, use
+`just agent-workbench-restart <port>` with the same data directory and store). Cold
+reconstruction clears only the non-durable `shared_token_ledger`; the committed
+`RuntimeSessionState.token_ledger`, graph, checkpoint, and session identity remain the
+store-authoritative state. If cold reconstruction itself reports an overflow, the bad
+rows are already durable: stop, retain the database evidence, and escalate for data
+repair rather than looping restarts.
 
 ## Working material
 

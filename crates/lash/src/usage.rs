@@ -10,8 +10,9 @@
 //!   model call; `ChildUsage` carries `session_id` + `source` so a UI can
 //!   group child traffic (e.g. by subagent). Right for live counters.
 //! - **[`TurnResult::usage`] / [`TurnResult::children_usage`]**: per-turn
-//!   snapshot at completion. `usage` is parent-only; `children_usage` is a
-//!   per-`(source, model)` breakdown. [`TurnResult::total_usage`] sums both.
+//!   snapshot at completion. `usage` is parent-only; `children_usage` retains
+//!   one row per `(session, source, model)`. [`TurnResult::total_usage`] sums
+//!   both.
 //!   Right for "what did this message cost."
 //! - **[`SessionUsageReport`]** (`session.usage_report()`): aggregate
 //!   across the whole session, broken down by `source` × `model`. Right for
@@ -32,7 +33,7 @@
 //! [`TurnResult::total_usage`]: crate::TurnResult::total_usage
 
 pub use lash_core::{
-    TokenLedgerEntry, TokenUsage, facade_support::SessionUsageReport,
+    TokenLedgerEntry, TokenUsage, TokenUsageOverflow, facade_support::SessionUsageReport,
     facade_support::UsageReportRow, facade_support::UsageTotals, facade_support::diff_token_ledger,
     facade_support::diff_usage_reports,
 };

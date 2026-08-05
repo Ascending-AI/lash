@@ -11,7 +11,6 @@ use crate::facade_support::SessionGraphFacadeOps;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use super::usage::merge_usage_delta_entries;
 use super::{SessionStoreCreateRequest, SessionStoreFactory};
 use crate::store::RuntimePersistence;
 mod attachments;
@@ -759,14 +758,14 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             graph,
             checkpoint_ref: meta.checkpoint_ref,
             checkpoint: self.checkpoint.lock().expect("lock checkpoint").clone(),
-            token_ledger: merge_usage_delta_entries(
+            token_ledger: crate::store::merge_token_ledger_entries_checked(
                 self.usage_deltas
                     .lock()
                     .expect("lock usage deltas")
                     .iter()
                     .map(|delta| delta.entry.clone())
                     .collect(),
-            ),
+            )?,
         }))
     }
 

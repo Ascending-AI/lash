@@ -978,9 +978,10 @@ pub struct TurnResult {
     /// sessions; see [`children_usage`](Self::children_usage) and
     /// [`total_usage`](Self::total_usage).
     pub usage: TokenUsage,
-    /// Per-`(source, model)` ledger entries for child sessions whose LLM
-    /// calls completed during this turn (subagents, compaction, observers,
-    /// etc.). Empty unless the turn spawned children.
+    /// Per-`(session, source, model)` ledger entries for child sessions whose
+    /// LLM calls completed during this turn (subagents, compaction, observers,
+    /// etc.). Two child sessions using the same source and model remain two
+    /// rows. Empty unless the turn spawned children.
     #[serde(default)]
     pub children_usage: Vec<TokenLedgerEntry>,
     /// Provider calls made by the parent session during this turn, in protocol
@@ -1016,7 +1017,19 @@ impl TurnResult {
     pub fn total_usage(&self) -> TokenUsage {
         let mut total = self.usage.clone();
         for entry in &self.children_usage {
-            total.add(&entry.usage);
+            total.input_tokens = total.input_tokens.saturating_add(entry.usage.input_tokens);
+            total.output_tokens = total
+                .output_tokens
+                .saturating_add(entry.usage.output_tokens);
+            total.cache_read_input_tokens = total
+                .cache_read_input_tokens
+                .saturating_add(entry.usage.cache_read_input_tokens);
+            total.cache_write_input_tokens = total
+                .cache_write_input_tokens
+                .saturating_add(entry.usage.cache_write_input_tokens);
+            total.reasoning_output_tokens = total
+                .reasoning_output_tokens
+                .saturating_add(entry.usage.reasoning_output_tokens);
         }
         total
     }

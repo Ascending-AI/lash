@@ -1,4 +1,5 @@
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum StoreError {
     /// Capturing dirty executor state failed before any store commit was
     /// attempted. The current execution must abort, but no publication is
@@ -76,10 +77,11 @@ pub enum StoreError {
         /// Count carried by the retry, or `None` when corruptly absent.
         attempted: Option<u64>,
     },
-    /// Token usage counters overflowed while an in-memory batch was projected
-    /// for persistence. The batch remains staged and may be inspected or
-    /// corrected; no usage row is discarded.
-    #[error("token usage counter `{counter}` overflowed while staging ({usage_source}, {model})")]
+    /// Token usage counters overflowed while durable usage rows were
+    /// accumulated for staging, commit, or load.
+    #[error(
+        "token usage counter `{counter}` overflowed while accumulating ({usage_source}, {model})"
+    )]
     TokenUsageAccountingOverflow {
         /// Caller-defined usage source whose accumulated counter overflowed.
         usage_source: String,
@@ -87,6 +89,21 @@ pub enum StoreError {
         model: String,
         /// Name of the overflowing [`crate::TokenUsage`] counter.
         counter: &'static str,
+    },
+    /// A checkpoint carried a turn index too close to the platform limit for
+    /// the runtime's bare next-turn increments to remain safe after restore.
+    ///
+    /// Integrator class (ADR 0051): **runtime embedders** surface this restore
+    /// failure and reconstruct or repair the affected session; store
+    /// implementors preserve the checkpoint value without reinterpreting it.
+    #[error(
+        "checkpoint turn index {turn_index} is outside the restorable range (must be below {max_exclusive})"
+    )]
+    CheckpointTurnIndexOutOfRange {
+        /// Turn index decoded from the durable checkpoint.
+        turn_index: usize,
+        /// First turn index excluded by the runtime's restore invariant.
+        max_exclusive: usize,
     },
     /// A fresh append named an ancestor outside the durable active path.
     ///
@@ -199,4 +216,53 @@ pub enum StoreError {
     },
     #[error("store backend error: {0}")]
     Backend(String),
+}
+
+impl StoreError {
+    /// Stable name of this error's enum variant.
+    ///
+    /// The match is deliberately exhaustive inside `lash-core` so adding a
+    /// variant cannot silently collapse distinct errors in external
+    /// diagnostics that must use a wildcard for this non-exhaustive enum.
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            Self::ExecutionStateCaptureFailed { .. } => "ExecutionStateCaptureFailed",
+            Self::Contended => "Contended",
+            Self::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded",
+            Self::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded",
+            Self::SessionBindingMismatch { .. } => "SessionBindingMismatch",
+            Self::SessionBindingNotMaterialized { .. } => "SessionBindingNotMaterialized",
+            Self::InvalidSessionId { .. } => "InvalidSessionId",
+            Self::SessionDeleted { .. } => "SessionDeleted",
+            Self::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation",
+            Self::HeadRevisionConflict { .. } => "HeadRevisionConflict",
+            Self::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict",
+            Self::AppendOperationIdentityConflict { .. } => "AppendOperationIdentityConflict",
+            Self::AppendReceiptRequestedNodeCountCorrupt { .. } => {
+                "AppendReceiptRequestedNodeCountCorrupt"
+            }
+            Self::TokenUsageAccountingOverflow { .. } => "TokenUsageAccountingOverflow",
+            Self::CheckpointTurnIndexOutOfRange { .. } => "CheckpointTurnIndexOutOfRange",
+            Self::AppendAncestorNotActive { .. } => "AppendAncestorNotActive",
+            Self::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch",
+            Self::NodeIdCollision { .. } => "NodeIdCollision",
+            Self::InvalidGraphLeaf { .. } => "InvalidGraphLeaf",
+            Self::ForkPointNotRetained { .. } => "ForkPointNotRetained",
+            Self::ForkSessionAlreadyExists { .. } => "ForkSessionAlreadyExists",
+            Self::InvalidGraphParent { .. } => "InvalidGraphParent",
+            Self::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor",
+            Self::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded",
+            Self::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded",
+            Self::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim",
+            Self::UnsettledTurnInputClaim { .. } => "UnsettledTurnInputClaim",
+            Self::PendingTurnInputSourceKeyConflict { .. } => "PendingTurnInputSourceKeyConflict",
+            Self::ProcessWakeSequenceRewound { .. } => "ProcessWakeSequenceRewound",
+            Self::SessionExecutionLeaseExpired { .. } => "SessionExecutionLeaseExpired",
+            Self::UnsupportedRecordSchemaVersion { .. } => "UnsupportedRecordSchemaVersion",
+            Self::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion",
+            Self::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion",
+            Self::CheckpointComponentMissing { .. } => "CheckpointComponentMissing",
+            Self::Backend(_) => "Backend",
+        }
+    }
 }

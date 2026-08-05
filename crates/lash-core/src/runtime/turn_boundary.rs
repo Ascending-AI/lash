@@ -10,9 +10,7 @@ use crate::{
     ToolCallRecord, TurnOutcome,
 };
 
-use super::{
-    RuntimeError, RuntimeErrorCode, RuntimeSessionState, TurnCommitDraft, merge_ledger_entry,
-};
+use super::{RuntimeError, RuntimeErrorCode, RuntimeSessionState, TurnCommitDraft};
 
 mod materialize;
 use materialize::*;
@@ -424,7 +422,10 @@ impl TurnBoundary {
         let state = self.final_state_mut();
         state.apply_snapshot(returned_state);
         for delta in usage_deltas {
-            merge_ledger_entry(&mut state.token_ledger, delta.entry.clone());
+            crate::store::merge_token_ledger_entry_checked(
+                &mut state.token_ledger,
+                delta.entry.clone(),
+            )?;
         }
         if let Some(plugins) = plugins {
             state.refresh_plugin_snapshots(plugins);

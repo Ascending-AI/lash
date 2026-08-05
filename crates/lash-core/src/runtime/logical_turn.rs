@@ -347,6 +347,7 @@ impl LashRuntime {
                     &self.host.core.tracing.trace_context,
                     lash_trace::TraceContext::default()
                         .for_session(self.state.session_id.clone())
+                        // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
                         .for_turn_index(self.state.turn_index + 1)
                         .for_turn(follow_turn_id),
                     lash_trace::TraceEvent::Custom {

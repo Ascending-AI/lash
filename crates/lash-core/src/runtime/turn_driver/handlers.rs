@@ -1,6 +1,22 @@
 use super::*;
 
 impl RuntimeTurnDriver<'_> {
+    fn handle_machine_response(
+        &self,
+        machine: &mut TurnMachine,
+        response: Response,
+    ) -> Result<(), RuntimeError> {
+        machine.try_handle_response(response).map_err(|overflow| {
+            crate::runtime::runtime_error_from_store_commit(
+                crate::StoreError::TokenUsageAccountingOverflow {
+                    usage_source: "turn".to_string(),
+                    model: self.policy.model.id.clone(),
+                    counter: overflow.counter(),
+                },
+            )
+        })
+    }
+
     pub(super) async fn handle_llm_call_effect(
         &mut self,
         machine: &mut TurnMachine,
@@ -85,11 +101,14 @@ impl RuntimeTurnDriver<'_> {
                 emit_semantic_response_parts(event_tx, response, prose_projector.as_deref()).await;
             }
         }
-        machine.handle_response(Response::LlmComplete {
-            id,
-            result,
-            text_streamed,
-        });
+        self.handle_machine_response(
+            machine,
+            Response::LlmComplete {
+                id,
+                result,
+                text_streamed,
+            },
+        )?;
         Ok(())
     }
 
@@ -107,7 +126,7 @@ impl RuntimeTurnDriver<'_> {
         match result {
             Ok(delivery) => {
                 let committed_user_messages = delivery.committed_user_messages.clone();
-                machine.handle_response(Response::Checkpoint { id, delivery });
+                self.handle_machine_response(machine, Response::Checkpoint { id, delivery })?;
                 if let Some(mut claim) = self.pending_checkpoint_turn_input_claim.take() {
                     claim.record_checkpoint_applications(
                         &self.turn_id,
@@ -169,7 +188,7 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
         };
-        machine.handle_response(Response::ExecutionEnvironmentSynced { id, result });
+        self.handle_machine_response(machine, Response::ExecutionEnvironmentSynced { id, result })?;
         Ok(())
     }
 
@@ -218,7 +237,7 @@ impl RuntimeTurnDriver<'_> {
                 }
             }
         }
-        machine.handle_response(Response::ToolResults { id, results });
+        self.handle_machine_response(machine, Response::ToolResults { id, results })?;
         Ok(())
     }
 
@@ -421,16 +440,19 @@ impl RuntimeTurnDriver<'_> {
                 serde_json::json!({ "error": error }),
             );
         }
-        machine.handle_response(match result {
-            Ok(output) => Response::ExecResult {
-                id,
-                result: Ok(output),
+        self.handle_machine_response(
+            machine,
+            match result {
+                Ok(output) => Response::ExecResult {
+                    id,
+                    result: Ok(output),
+                },
+                Err(error) => Response::ExecResult {
+                    id,
+                    result: Err(error),
+                },
             },
-            Err(error) => Response::ExecResult {
-                id,
-                result: Err(error),
-            },
-        });
+        )?;
         Ok(())
     }
 }

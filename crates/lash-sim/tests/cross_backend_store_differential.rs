@@ -2080,6 +2080,9 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::TokenUsageAccountingOverflow { .. } => {
             "TokenUsageAccountingOverflow".to_string()
         }
+        StoreError::CheckpointTurnIndexOutOfRange { .. } => {
+            "CheckpointTurnIndexOutOfRange".to_string()
+        }
         StoreError::AppendAncestorNotActive { .. } => "AppendAncestorNotActive".to_string(),
         StoreError::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded".to_string(),
         StoreError::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded".to_string(),
@@ -2106,7 +2109,26 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::InvalidGraphParent { .. } => "InvalidGraphParent".to_string(),
         StoreError::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor".to_string(),
         StoreError::Backend(message) => normalized_backend_error(backend, message),
+        other => unmapped_store_error_key(other),
     }
+}
+
+fn unmapped_store_error_key(error: &StoreError) -> String {
+    format!("Unmapped:{}", error.variant_name())
+}
+
+#[test]
+fn unmapped_store_error_keys_remain_variant_distinct() {
+    assert_eq!(
+        (
+            unmapped_store_error_key(&StoreError::Contended),
+            unmapped_store_error_key(&StoreError::Backend("failure".to_string())),
+        ),
+        (
+            "Unmapped:Contended".to_string(),
+            "Unmapped:Backend".to_string(),
+        )
+    );
 }
 
 fn normalized_backend_error(backend: &str, message: &str) -> String {

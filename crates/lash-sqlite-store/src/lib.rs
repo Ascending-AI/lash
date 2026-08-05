@@ -1030,30 +1030,6 @@ fn decode_msgpack<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Option<T> {
     rmp_serde::from_slice(bytes).ok()
 }
 
-fn merge_token_ledger_entries(
-    entries: Vec<lash_core::TokenLedgerEntry>,
-) -> Vec<lash_core::TokenLedgerEntry> {
-    let mut merged: Vec<lash_core::TokenLedgerEntry> = Vec::new();
-    for entry in entries {
-        if entry.usage.total() == 0 {
-            continue;
-        }
-        if let Some(existing) = merged
-            .iter_mut()
-            .find(|existing| existing.source == entry.source && existing.model == entry.model)
-        {
-            existing.usage.input_tokens += entry.usage.input_tokens;
-            existing.usage.output_tokens += entry.usage.output_tokens;
-            existing.usage.cache_read_input_tokens += entry.usage.cache_read_input_tokens;
-            existing.usage.cache_write_input_tokens += entry.usage.cache_write_input_tokens;
-            existing.usage.reasoning_output_tokens += entry.usage.reasoning_output_tokens;
-        } else {
-            merged.push(entry);
-        }
-    }
-    merged
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
