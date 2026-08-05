@@ -505,23 +505,22 @@ async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reload() {
         .expect("committed session");
     assert_eq!(durable.head_revision, 1);
 
-    let ((refusal, reload_error, exported), capture) =
-        super::session_lease_observability::capturing(|| async {
-            let refusal = runtime
-                .tool_state()
-                .expect_err("a synchronous accessor refuses invalidated resident state");
-            protocol.fail_next.store(true, Ordering::SeqCst);
-            let reload_error = runtime
-                .export_persisted_state()
-                .await
-                .expect_err("the injected protocol restore fault denies reload");
-            let exported = runtime
-                .export_persisted_state()
-                .await
-                .expect("persisted export retries reload from the durable head");
-            (refusal, reload_error, exported)
-        })
-        .await;
+    let ((refusal, reload_error, exported), capture) = super::trace_capture::capturing(|| async {
+        let refusal = runtime
+            .tool_state()
+            .expect_err("a synchronous accessor refuses invalidated resident state");
+        protocol.fail_next.store(true, Ordering::SeqCst);
+        let reload_error = runtime
+            .export_persisted_state()
+            .await
+            .expect_err("the injected protocol restore fault denies reload");
+        let exported = runtime
+            .export_persisted_state()
+            .await
+            .expect("persisted export retries reload from the durable head");
+        (refusal, reload_error, exported)
+    })
+    .await;
     assert!(refusal.to_string().contains("durable reload is required"));
     assert_eq!(
         reload_error.code,

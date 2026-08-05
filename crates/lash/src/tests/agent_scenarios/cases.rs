@@ -12,6 +12,7 @@ use super::harness::{
     run_agent_turn_scenario_without_success_assertions,
 };
 use super::transcript::agent_scenario_transcript;
+use lash_core::llm::types::LlmUsage;
 use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug)]
@@ -178,6 +179,13 @@ handle = start lookup(tools: tools)
 result = (await handle)?
 finish result"#,
             ))
+            .response_usage(LlmUsage {
+                input_tokens: 11,
+                output_tokens: 7,
+                cache_read_input_tokens: 3,
+                cache_write_input_tokens: 2,
+                reasoning_output_tokens: 4,
+            })
             .expected_final_value(serde_json::json!({ "ok": true }))
             .tool_provider(Arc::new(AppTools))
             .labeled_resource("Lookup app state in process")
@@ -192,8 +200,8 @@ finish result"#,
         root         exec      cell.ok                 calls=1
         root         outcome   turn.final_value        value={"ok":true}
         root         commit    checkpoint.commit       rev=0->1
-        root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        root                     turn_state            stored logical=284B
+        root                     usage                 entries=1 input=11 output=7 cache_read=3 cache_write=2 reasoning=4 total=23
+        root                     turn_state            stored logical=436B
         root                     tool_state            stored logical=3.6KB
         root                     plugin_snapshot       stored logical=433B
         root                     execution_state       stored logical=unknown

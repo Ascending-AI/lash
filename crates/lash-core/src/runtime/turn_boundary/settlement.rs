@@ -39,6 +39,7 @@ pub(super) fn drop_superseded_recovered_queue_settlement(
     originating_claims: &mut Vec<crate::QueuedWorkCompletion>,
 ) -> bool {
     let crate::StoreError::QueuedWorkClaimSuperseded {
+        session_id,
         claim_id,
         row_id: Some(row_id),
         superseding_claim_id,
@@ -55,15 +56,18 @@ pub(super) fn drop_superseded_recovered_queue_settlement(
             && drop_queue_settlement_row(completed_claims, claim_id, row_id)
             && drop_queue_settlement_row(originating_claims, claim_id, row_id);
         if removed {
-            tracing::info!(
-                target: "lash::claim_settlement",
+            tracing::warn!(
+                target: "lash_core::claim_settlement",
+                event = "claim_settlement.recovered_row_dropped",
                 decision_basis = "superseded_recovered_claim",
+                session_id,
                 row_kind = "queued_work",
                 row_id,
                 stale_claim_id = claim_id,
                 stale_session_lease_generation = *stale_generation,
-                superseding_claim_id = superseding_claim_id.as_deref().unwrap_or("settled_by_peer"),
-                superseding_session_lease_generation = ?superseding_session_lease_generation,
+                current_session_lease_generation,
+                superseding_claim_id,
+                superseding_session_lease_generation,
                 outcome = "drop_stale_settlement",
                 "recovered final commit dropped a queued-work row no longer owned by its restored claim"
             );
@@ -80,6 +84,7 @@ pub(super) fn drop_superseded_recovered_turn_input_settlement(
     originating_claims: &mut Vec<crate::TurnInputCompletion>,
 ) -> bool {
     let crate::StoreError::TurnInputClaimSuperseded {
+        session_id,
         claim_id,
         row_id: Some(row_id),
         superseding_claim_id,
@@ -96,15 +101,18 @@ pub(super) fn drop_superseded_recovered_turn_input_settlement(
             && drop_turn_input_settlement_row(completed_claims, claim_id, row_id)
             && drop_turn_input_settlement_row(originating_claims, claim_id, row_id);
         if removed {
-            tracing::info!(
-                target: "lash::claim_settlement",
+            tracing::warn!(
+                target: "lash_core::claim_settlement",
+                event = "claim_settlement.recovered_row_dropped",
                 decision_basis = "superseded_recovered_claim",
+                session_id,
                 row_kind = "turn_input",
                 row_id,
                 stale_claim_id = claim_id,
                 stale_session_lease_generation = *stale_generation,
-                superseding_claim_id = superseding_claim_id.as_deref().unwrap_or("settled_by_peer"),
-                superseding_session_lease_generation = ?superseding_session_lease_generation,
+                current_session_lease_generation,
+                superseding_claim_id,
+                superseding_session_lease_generation,
                 outcome = "drop_stale_settlement",
                 "recovered final commit dropped a turn-input row no longer owned by its restored claim"
             );
@@ -116,6 +124,7 @@ pub(super) fn drop_superseded_recovered_turn_input_settlement(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::tests::trace_capture::{CapturedFieldKind, EventCapture, capturing_sync};
 
     fn completion() -> crate::QueuedWorkCompletion {
         crate::QueuedWorkCompletion {
@@ -133,6 +142,28 @@ mod tests {
             session_id: "fig905".to_string(),
             claim_id: "stale-claim".to_string(),
             row_id,
+            superseding_claim_id: Some("live-claim".into()),
+            superseding_session_lease_generation: Some(Box::new(2)),
+        }
+    }
+
+    fn turn_input_completion() -> crate::TurnInputCompletion {
+        crate::TurnInputCompletion {
+            session_id: "fig905".to_string(),
+            claim_id: "stale-claim".to_string(),
+            lease_token: "stale-token".to_string(),
+            data: crate::TurnInputCompletionData {
+                input_ids: vec!["fig905-row".to_string()],
+                applications: Vec::new(),
+            },
+        }
+    }
+
+    fn turn_input_superseded_error() -> crate::StoreError {
+        crate::StoreError::TurnInputClaimSuperseded {
+            session_id: "fig905".to_string(),
+            claim_id: "stale-claim".to_string(),
+            row_id: Some("fig905-row".into()),
             superseding_claim_id: Some("live-claim".into()),
             superseding_session_lease_generation: Some(Box::new(2)),
         }
@@ -170,5 +201,108 @@ mod tests {
         ));
         assert_eq!(completed, vec![completion()]);
         assert_eq!(originating, vec![completion()]);
+    }
+
+    fn assert_recovered_drop_event(capture: &EventCapture, row_kind: &str, message: &str) {
+        let event = capture.exactly_one("claim_settlement.recovered_row_dropped");
+        assert_eq!(event.level, "WARN");
+        assert_eq!(event.target, "lash_core::claim_settlement");
+        let expected = [
+            (
+                "event",
+                "claim_settlement.recovered_row_dropped",
+                CapturedFieldKind::Str,
+            ),
+            (
+                "decision_basis",
+                "superseded_recovered_claim",
+                CapturedFieldKind::Str,
+            ),
+            ("session_id", "fig905", CapturedFieldKind::Str),
+            ("row_kind", row_kind, CapturedFieldKind::Str),
+            ("row_id", "fig905-row", CapturedFieldKind::Str),
+            ("stale_claim_id", "stale-claim", CapturedFieldKind::Str),
+            (
+                "stale_session_lease_generation",
+                "1",
+                CapturedFieldKind::U64,
+            ),
+            (
+                "current_session_lease_generation",
+                "2",
+                CapturedFieldKind::U64,
+            ),
+            ("superseding_claim_id", "live-claim", CapturedFieldKind::Str),
+            (
+                "superseding_session_lease_generation",
+                "2",
+                CapturedFieldKind::U64,
+            ),
+            ("outcome", "drop_stale_settlement", CapturedFieldKind::Str),
+            ("message", message, CapturedFieldKind::Debug),
+        ];
+        assert_eq!(
+            event.field_count(),
+            expected.len(),
+            "event field set changed: {event:?}"
+        );
+        for (field, value, kind) in expected {
+            assert_eq!(
+                event.field_kind(field),
+                kind,
+                "settlement event field `{field}` encoding changed: {event:?}"
+            );
+            assert_eq!(
+                event.field(field),
+                value,
+                "settlement event field `{field}` changed: {event:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn recovered_queue_settlement_drop_warns_with_typed_decision_basis() {
+        let mut completed = vec![completion()];
+        let mut originating = vec![completion()];
+        let generations = std::iter::once(("stale-claim".to_string(), 1)).collect();
+
+        let (removed, capture) = capturing_sync(|| {
+            drop_superseded_recovered_queue_settlement(
+                &superseded_error(Some("fig905-row".into())),
+                &generations,
+                Some(2),
+                &mut completed,
+                &mut originating,
+            )
+        });
+        assert!(removed);
+        assert_recovered_drop_event(
+            &capture,
+            "queued_work",
+            "recovered final commit dropped a queued-work row no longer owned by its restored claim",
+        );
+    }
+
+    #[test]
+    fn recovered_turn_input_settlement_drop_warns_with_typed_decision_basis() {
+        let mut completed = vec![turn_input_completion()];
+        let mut originating = vec![turn_input_completion()];
+        let generations = std::iter::once(("stale-claim".to_string(), 1)).collect();
+
+        let (removed, capture) = capturing_sync(|| {
+            drop_superseded_recovered_turn_input_settlement(
+                &turn_input_superseded_error(),
+                &generations,
+                Some(2),
+                &mut completed,
+                &mut originating,
+            )
+        });
+        assert!(removed);
+        assert_recovered_drop_event(
+            &capture,
+            "turn_input",
+            "recovered final commit dropped a turn-input row no longer owned by its restored claim",
+        );
     }
 }
