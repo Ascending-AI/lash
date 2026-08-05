@@ -341,7 +341,8 @@ impl WakeDeliveryDriver {
                                 "process wake delivery marked terminal"
                             );
                             if let Some(driver) = queued_work_driver.as_ref() {
-                                driver.wake_pending(Some(&target_session_id), "process_wake");
+                                driver
+                                    .notify_pending_work(Some(&target_session_id), "process_wake");
                             }
                             report.enqueued += 1;
                         }

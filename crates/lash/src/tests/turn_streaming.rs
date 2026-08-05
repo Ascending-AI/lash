@@ -3,6 +3,42 @@ use crate::rlm::RlmTurnBuilderExt as _;
 use futures_util::StreamExt as _;
 use std::collections::BTreeSet;
 
+struct QueuedWorkHydrationProbeFactory {
+    builds: Arc<AtomicUsize>,
+}
+
+impl lash_core::facade_support::PluginFactory for QueuedWorkHydrationProbeFactory {
+    fn id(&self) -> &'static str {
+        "queued-work-hydration-probe"
+    }
+
+    fn build(
+        &self,
+        _ctx: &lash_core::facade_support::PluginSessionContext,
+    ) -> std::result::Result<
+        Arc<dyn lash_core::facade_support::SessionPlugin>,
+        lash_core::PluginError,
+    > {
+        self.builds.fetch_add(1, Ordering::SeqCst);
+        Ok(Arc::new(QueuedWorkHydrationProbePlugin))
+    }
+}
+
+struct QueuedWorkHydrationProbePlugin;
+
+impl lash_core::facade_support::SessionPlugin for QueuedWorkHydrationProbePlugin {
+    fn id(&self) -> &'static str {
+        "queued-work-hydration-probe"
+    }
+
+    fn register(
+        &self,
+        _reg: &mut lash_core::facade_support::PluginRegistrar,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug)]
 struct DurableEffectInvocation {
     kind: lash_core::RuntimeEffectKind,
@@ -2359,6 +2395,147 @@ fn hang_on_signal_provider(started_tx: Arc<StdMutex<Vec<oneshot::Sender<()>>>>) 
         })
         .build()
         .into_handle()
+}
+
+#[tokio::test]
+async fn inline_queued_work_burst_reuses_one_hydrated_runtime() -> Result<()> {
+    const INPUTS: usize = 8;
+    let builds = Arc::new(AtomicUsize::new(0));
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let seen_inputs = Arc::new(StdMutex::new(Vec::<String>::new()));
+    let first_entered = Arc::new(tokio::sync::Notify::new());
+    let release_first = Arc::new(tokio::sync::Semaphore::new(0));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("embed-test")
+        .complete({
+            let provider_calls = Arc::clone(&provider_calls);
+            let seen_inputs = Arc::clone(&seen_inputs);
+            let first_entered = Arc::clone(&first_entered);
+            let release_first = Arc::clone(&release_first);
+            move |request| {
+                let provider_calls = Arc::clone(&provider_calls);
+                let seen_inputs = Arc::clone(&seen_inputs);
+                let first_entered = Arc::clone(&first_entered);
+                let release_first = Arc::clone(&release_first);
+                async move {
+                    seen_inputs
+                        .lock()
+                        .expect("queued-work input observations")
+                        .push(last_user_text(&request));
+                    if provider_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                        first_entered.notify_one();
+                        release_first
+                            .acquire()
+                            .await
+                            .expect("release semaphore remains open")
+                            .forget();
+                    }
+                    Ok(text_response("queued work complete"))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .plugin(Arc::new(QueuedWorkHydrationProbeFactory {
+            builds: Arc::clone(&builds),
+        }))
+        .build()?;
+    assert_eq!(builds.load(Ordering::SeqCst), 1, "build-time validation");
+
+    let entered = first_entered.notified();
+    core.enqueue_turn_input(
+        "queued-work-hydration-burst",
+        TurnInput::text("queued input 0"),
+        lash_core::TurnInputIngress::NextTurn,
+        Some("queued-input-0".to_string()),
+    )
+    .await?;
+    tokio::time::timeout(std::time::Duration::from_secs(1), entered)
+        .await
+        .expect("the first queued turn reaches the provider");
+    for index in 1..INPUTS {
+        core.enqueue_turn_input(
+            "queued-work-hydration-burst",
+            TurnInput::text(format!("queued input {index}")),
+            lash_core::TurnInputIngress::NextTurn,
+            Some(format!("queued-input-{index}")),
+        )
+        .await?;
+    }
+
+    assert_eq!(
+        builds.load(Ordering::SeqCst),
+        2,
+        "the blocked run must be the only runtime hydration admitted for the session burst"
+    );
+    release_first.add_permits(1);
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let observed = seen_inputs
+                .lock()
+                .expect("queued-work input observations")
+                .join("\n");
+            if (0..INPUTS).all(|index| observed.contains(&format!("queued input {index}"))) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the hydrated runtime drains every queued input");
+    let request = lash_core::SessionStoreCreateRequest {
+        session_id: "queued-work-hydration-burst".to_string(),
+        relation: lash_core::SessionRelation::Root,
+        policy: lash_core::SessionPolicy::default(),
+    };
+    let store =
+        lash_core::SessionStoreFactory::open_existing_store(store_factory.as_ref(), &request)
+            .await
+            .expect("open the queued-work burst store")
+            .expect("the queued-work burst store exists");
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let read = store
+                .load_session()
+                .await
+                .expect("load queued-work burst state")
+                .expect("queued-work burst state exists");
+            if read
+                .checkpoint
+                .as_ref()
+                .is_some_and(|checkpoint| checkpoint.turn_state.turn_index >= 2)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the hydrated runtime durably commits the full burst");
+
+    let observed = seen_inputs
+        .lock()
+        .expect("queued-work input observations")
+        .join("\n");
+    let mut previous = 0;
+    for index in 0..INPUTS {
+        let position = observed
+            .find(&format!("queued input {index}"))
+            .expect("every queued input reached the provider");
+        assert!(position >= previous, "queued input order changed");
+        previous = position;
+    }
+    assert_eq!(
+        builds.load(Ordering::SeqCst),
+        2,
+        "one hydrated runtime must serve the whole ordered burst"
+    );
+    Ok(())
 }
 
 #[tokio::test]

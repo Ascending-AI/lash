@@ -19,6 +19,7 @@ where
     session_store_factory_open_missing_returns_none(make()).await;
     session_store_factory_create_seeds_and_reopens_meta(make()).await;
     session_store_factory_create_is_idempotent(make()).await;
+    session_store_factory_claimable_queued_work_peek(make()).await;
     session_store_factory_never_used_delete_is_noop(make()).await;
     session_store_factory_rejects_writes_after_delete(make()).await;
     attachment_ownership_isolation(make()).await;
@@ -27,6 +28,113 @@ where
     session_store_factory_vacuums_organic_retained_tombstone(make()).await;
     session_store_factory_delete_removes_store_and_is_idempotent(make()).await;
     session_store_factory_delete_fences_stale_handles(make()).await;
+}
+
+/// The notification fast path reads durable claimable work without creating a
+/// session or hydrating runtime state. Future-only and empty queues are idle.
+async fn session_store_factory_claimable_queued_work_peek(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    const NOW_MS: u64 = 100;
+    let request = session_store_request(
+        "claimable-queued-work-peek",
+        "claimable-queued-work-model",
+        crate::SessionRelation::Root,
+    );
+    assert!(
+        !factory
+            .has_claimable_queued_work(&request, NOW_MS)
+            .await
+            .expect("peek a missing session"),
+        "a missing session must not report claimable queued work"
+    );
+    let store = factory
+        .create_store(&request)
+        .await
+        .expect("create peek conformance store");
+    assert!(
+        !factory
+            .has_claimable_queued_work(&request, NOW_MS)
+            .await
+            .expect("peek an empty queue"),
+        "an empty queue must not report claimable queued work"
+    );
+
+    store
+        .enqueue_queued_work(
+            crate::QueuedWorkBatchDraft::new(
+                &request.session_id,
+                crate::DeliveryPolicy::EarliestSafeBoundary,
+                crate::SlotPolicy::Exclusive,
+                vec![crate::QueuedWorkPayload::session_command(
+                    crate::SessionCommand::RefreshToolCatalog {
+                        reason: "future".to_string(),
+                    },
+                )],
+            )
+            .with_available_at_ms(NOW_MS + 1),
+        )
+        .await
+        .expect("enqueue future queued work");
+    assert!(
+        !factory
+            .has_claimable_queued_work(&request, NOW_MS)
+            .await
+            .expect("peek a future-only queue"),
+        "future queued work is not yet claimable"
+    );
+
+    let ready = store
+        .enqueue_queued_work(
+            crate::QueuedWorkBatchDraft::new(
+                &request.session_id,
+                crate::DeliveryPolicy::EarliestSafeBoundary,
+                crate::SlotPolicy::Exclusive,
+                vec![crate::QueuedWorkPayload::session_command(
+                    crate::SessionCommand::RefreshToolCatalog {
+                        reason: "ready".to_string(),
+                    },
+                )],
+            )
+            .with_available_at_ms(NOW_MS),
+        )
+        .await
+        .expect("enqueue ready queued work");
+    assert!(
+        factory
+            .has_claimable_queued_work(&request, NOW_MS)
+            .await
+            .expect("peek a ready queue"),
+        "ready queued work must be visible through the factory peek"
+    );
+    store
+        .cancel_queued_work_batch(&request.session_id, &ready.batch_id)
+        .await
+        .expect("cancel ready queued work")
+        .expect("ready batch remains cancellable");
+    assert!(
+        !factory
+            .has_claimable_queued_work(&request, NOW_MS)
+            .await
+            .expect("peek after cancelling the only ready batch"),
+        "future-only work must remain idle after the ready batch is removed"
+    );
+
+    store
+        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+            &request.session_id,
+            crate::TurnInputIngress::NextTurn,
+            crate::TurnInput::text("claimable next-turn input"),
+        ))
+        .await
+        .expect("enqueue claimable next-turn input");
+    assert!(
+        factory
+            .has_claimable_queued_work(&request, NOW_MS)
+            .await
+            .expect("peek a claimable next-turn input"),
+        "deferred next-turn input must be visible through the factory peek"
+    );
 }
 
 /// Deleting a session must erase readable state and fence handles that were

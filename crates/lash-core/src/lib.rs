@@ -155,6 +155,7 @@ pub mod facade_support {
     pub use crate::runtime::AssistantOutput;
     pub use crate::runtime::CanonicalRuntimeEffectEnvelope;
     pub use crate::runtime::DEFAULT_PROCESS_EXECUTION_CONCURRENCY;
+    pub use crate::runtime::DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY;
     pub use crate::runtime::DirectCompletionClient;
     pub use crate::runtime::DurableProcessWorker;
     pub use crate::runtime::DurableProcessWorkerConfig;
@@ -202,10 +203,13 @@ pub mod facade_support {
     pub use crate::runtime::ProcessWorkDriver;
     pub use crate::runtime::ProcessWorkObserver;
     pub use crate::runtime::ProcessWorkSnapshot;
+    pub use crate::runtime::QUEUED_WORK_SLOW_WAKE_THRESHOLD;
     pub use crate::runtime::QueuedWorkDriver;
+    pub use crate::runtime::QueuedWorkExecutionConcurrencyError;
     pub use crate::runtime::QueuedWorkRunError;
     pub use crate::runtime::QueuedWorkRunHandle;
     pub use crate::runtime::QueuedWorkRunRequest;
+    pub use crate::runtime::QueuedWorkSlowWake;
     pub use crate::runtime::QueuedWorkWakeDisposition;
     pub use crate::runtime::QueuedWorkWakeFailure;
     pub use crate::runtime::RuntimeAwaitEventOptions;

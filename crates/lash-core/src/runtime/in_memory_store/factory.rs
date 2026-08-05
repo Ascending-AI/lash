@@ -1,5 +1,7 @@
 use super::*;
 use crate::facade_support::SessionGraphFacadeOps;
+use crate::store::QueuedWorkStore;
+use crate::store::TurnInputStore;
 
 /// Session-id-keyed factory: the same in-memory store is returned for a given
 /// session across opens (so a worker rebuild sees the session's state), and a
@@ -123,6 +125,35 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .get(&request.session_id)
             .cloned()
             .map(|store| store as Arc<dyn RuntimePersistence>))
+    }
+
+    async fn has_claimable_queued_work(
+        &self,
+        request: &SessionStoreCreateRequest,
+        now_epoch_ms: u64,
+    ) -> Result<bool, crate::StoreError> {
+        let store = self
+            .stores
+            .lock()
+            .expect("in-memory store factory")
+            .get(&request.session_id)
+            .cloned();
+        let Some(store) = store else {
+            return Ok(false);
+        };
+        if store
+            .list_pending_queued_work(&request.session_id)
+            .await?
+            .into_iter()
+            .any(|batch| batch.available_at_ms <= now_epoch_ms)
+        {
+            return Ok(true);
+        }
+        Ok(store
+            .list_pending_turn_inputs(&request.session_id)
+            .await?
+            .into_iter()
+            .any(|input| input.state == crate::TurnInputState::DeferredNextTurn))
     }
 
     async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {

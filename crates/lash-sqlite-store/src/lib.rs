@@ -564,6 +564,60 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         Ok(Some(store as Arc<dyn RuntimePersistence>))
     }
 
+    async fn has_claimable_queued_work(
+        &self,
+        request: &SessionStoreCreateRequest,
+        now_epoch_ms: u64,
+    ) -> Result<bool, StoreError> {
+        let path = self.catalog_path();
+        if !path.exists() {
+            return Ok(false);
+        }
+        let conn = SqliteConnection::open_readonly(&path)
+            .await
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        let session_id = request.session_id.clone();
+        conn.call(move |conn| {
+            conn.query_row(
+                "SELECT EXISTS(
+                    SELECT 1
+                    FROM queued_work_batches qwb
+                    WHERE qwb.session_id = ?1
+                      AND qwb.available_at_ms <= ?2
+                      AND (qwb.claim_token IS NULL OR NOT EXISTS (
+                          SELECT 1 FROM session_execution_leases sel
+                          WHERE sel.session_id = ?1
+                            AND sel.lease_token IS NOT NULL
+                            AND sel.lease_expires_at_ms > ?2
+                            AND sel.lease_fencing_token
+                                = qwb.claim_session_lease_generation
+                      ))
+                ) OR EXISTS(
+                    SELECT 1
+                    FROM pending_turn_inputs pti
+                    WHERE pti.session_id = ?1
+                      AND pti.state = ?3
+                      AND (pti.claim_token IS NULL OR NOT EXISTS (
+                          SELECT 1 FROM session_execution_leases sel
+                          WHERE sel.session_id = ?1
+                            AND sel.lease_token IS NOT NULL
+                            AND sel.lease_expires_at_ms > ?2
+                            AND sel.lease_fencing_token
+                                = pti.claim_session_lease_generation
+                      ))
+                )",
+                params![
+                    session_id,
+                    now_epoch_ms as i64,
+                    lash_core::TurnInputState::DeferredNextTurn.as_str()
+                ],
+                |row| row.get(0),
+            )
+        })
+        .await
+        .map_err(sqlite_error)
+    }
+
     async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
         let path = self.catalog_path();
         if !path.exists() {

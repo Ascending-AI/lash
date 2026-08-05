@@ -301,6 +301,10 @@ impl EmbeddedRuntimeBuilder {
     }
 
     pub async fn build(self) -> Result<LashRuntime, SessionError> {
+        Box::pin(self.build_inner()).await
+    }
+
+    async fn build_inner(self) -> Result<LashRuntime, SessionError> {
         let state = self.resolve_state().await?;
         let plugins = self.resolve_plugins(&state)?;
         let mut persistence = super::lifecycle::RuntimePersistenceBindings::new(self.store);

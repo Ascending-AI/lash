@@ -268,8 +268,10 @@ pub use process_worker::{
     ProcessRecoveryAttemptDisposition, ProcessRecoveryOperation,
 };
 pub use queued_work_driver::{
-    QueuedWorkDriver, QueuedWorkRunError, QueuedWorkRunErrorClass, QueuedWorkRunHandle,
-    QueuedWorkRunRequest, QueuedWorkWakeDisposition, QueuedWorkWakeFailure,
+    DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, QUEUED_WORK_SLOW_WAKE_THRESHOLD, QueuedWorkDriver,
+    QueuedWorkExecutionConcurrencyError, QueuedWorkRunError, QueuedWorkRunErrorClass,
+    QueuedWorkRunHandle, QueuedWorkRunRequest, QueuedWorkSlowWake, QueuedWorkWakeDisposition,
+    QueuedWorkWakeFailure,
 };
 pub use scenario_contracts::{RUNTIME_SCENARIO_CONTRACTS, ScenarioContractSpec};
 pub use session_manager::DirectCompletionClient;
@@ -1286,6 +1288,39 @@ pub trait SessionStoreFactory: Send + Sync {
         _request: &SessionStoreCreateRequest,
     ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, String> {
         Ok(None)
+    }
+
+    /// Cheap durable read used to reject an idle queued-work notification
+    /// before session state, plugins, and a runtime are hydrated.
+    ///
+    /// First-party factories override this at their database seam. The
+    /// fallback remains correct for host factories by opening only an existing
+    /// store and reading its pending queue; it never creates a session.
+    async fn has_claimable_queued_work(
+        &self,
+        request: &SessionStoreCreateRequest,
+        now_epoch_ms: u64,
+    ) -> Result<bool, crate::StoreError> {
+        let Some(store) = self
+            .open_existing_store(request)
+            .await
+            .map_err(crate::StoreError::Backend)?
+        else {
+            return Ok(false);
+        };
+        if store
+            .list_pending_queued_work(&request.session_id)
+            .await?
+            .into_iter()
+            .any(|batch| batch.available_at_ms <= now_epoch_ms)
+        {
+            return Ok(true);
+        }
+        Ok(store
+            .list_pending_turn_inputs(&request.session_id)
+            .await?
+            .into_iter()
+            .any(|input| input.state == crate::TurnInputState::DeferredNextTurn))
     }
 
     /// Report whether the permanent host-facing session tombstone exists.
