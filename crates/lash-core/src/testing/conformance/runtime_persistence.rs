@@ -2137,6 +2137,76 @@ async fn claim_session_execution_lease_until_acquired(
     }
 }
 
+async fn claim_queued_work_under_short_lease(
+    store: &Arc<dyn RuntimePersistence>,
+    session_id: &str,
+    owner: &crate::LeaseOwnerIdentity,
+    lease_timing: &RuntimePersistenceLeaseTiming,
+) -> (crate::SessionExecutionLease, crate::QueuedWorkClaim) {
+    let deadline = std::time::Instant::now() + REALTIME_LEASE_STALL_ALLOWANCE;
+    loop {
+        let lease = store
+            .try_claim_session_execution_lease(
+                session_id,
+                owner,
+                lease_timing.scaffolding_lease_ttl_ms(),
+            )
+            .await
+            .expect("claim dead-owner lease")
+            .acquired()
+            .expect("dead-owner lease acquired");
+        match store
+            .claim_ready_queued_work(
+                session_id,
+                &lease.fence(),
+                owner,
+                QueuedWorkClaimBoundary::Idle,
+                10,
+            )
+            .await
+        {
+            Ok(Some(claim)) => return (lease, claim),
+            Err(StoreError::SessionExecutionLeaseExpired { .. })
+                if matches!(lease_timing, RuntimePersistenceLeaseTiming::Realtime)
+                    && std::time::Instant::now() < deadline => {}
+            Ok(None) => panic!("dead-owner queued-work claim must exist"),
+            Err(error) => panic!("dead-owner queued-work claim: {error}"),
+        }
+    }
+}
+
+async fn claim_turn_input_under_short_lease(
+    store: &Arc<dyn RuntimePersistence>,
+    session_id: &str,
+    owner: &crate::LeaseOwnerIdentity,
+    lease_timing: &RuntimePersistenceLeaseTiming,
+) -> (crate::SessionExecutionLease, crate::TurnInputClaim) {
+    let deadline = std::time::Instant::now() + REALTIME_LEASE_STALL_ALLOWANCE;
+    loop {
+        let lease = store
+            .try_claim_session_execution_lease(
+                session_id,
+                owner,
+                lease_timing.scaffolding_lease_ttl_ms(),
+            )
+            .await
+            .expect("claim dead-owner lease")
+            .acquired()
+            .expect("dead-owner lease acquired");
+        match store
+            .claim_next_turn_inputs(session_id, &lease.fence(), owner, 10)
+            .await
+        {
+            Ok(Some(claim)) => return (lease, claim),
+            Err(StoreError::SessionExecutionLeaseExpired { .. })
+                if matches!(lease_timing, RuntimePersistenceLeaseTiming::Realtime)
+                    && std::time::Instant::now() < deadline => {}
+            Ok(None) => panic!("dead-owner next-turn claim must exist"),
+            Err(error) => panic!("dead-owner next-turn claim: {error}"),
+        }
+    }
+}
+
 /// The diagnostic read reports the durable lease row as a raw fact and never
 /// mutates it: unknown sessions and released rows read as absent, a held row
 /// reports the exact holder facts, a lapsed row is still reported (expiry is not
@@ -3312,27 +3382,8 @@ async fn queued_work_claims_supersede_across_session_lease_generations_with_timi
     // (c) A TTL takeover mints a new generation without any release. The
     // successor's re-claim below is what supersedes the pre-takeover claim.
     let dead_owner = lease_owner("gen-stale");
-    let dead_lease = store
-        .try_claim_session_execution_lease(
-            "root",
-            &dead_owner,
-            lease_timing.scaffolding_lease_ttl_ms(),
-        )
-        .await
-        .expect("claim dead-owner lease")
-        .acquired()
-        .expect("dead-owner lease acquired");
-    let claim_dead = store
-        .claim_ready_queued_work(
-            "root",
-            &dead_lease.fence(),
-            &dead_owner,
-            QueuedWorkClaimBoundary::Idle,
-            10,
-        )
-        .await
-        .expect("dead-owner claim")
-        .expect("dead-owner claim exists");
+    let (dead_lease, claim_dead) =
+        claim_queued_work_under_short_lease(&store, "root", &dead_owner, lease_timing).await;
     let taker = lease_owner("gen-taker");
     let taker_lease = claim_session_execution_lease_after_expiry(
         &store,
@@ -4975,21 +5026,8 @@ async fn turn_input_claims_supersede_across_session_lease_generations_with_timin
 
     // (c) TTL takeover mints a new generation without a release.
     let dead_owner = lease_owner("tin-stale");
-    let dead_lease = store
-        .try_claim_session_execution_lease(
-            "root",
-            &dead_owner,
-            lease_timing.scaffolding_lease_ttl_ms(),
-        )
-        .await
-        .expect("claim dead-owner lease")
-        .acquired()
-        .expect("dead-owner lease acquired");
-    let claim_dead = store
-        .claim_next_turn_inputs("root", &dead_lease.fence(), &dead_owner, 10)
-        .await
-        .expect("dead-owner next-turn claim")
-        .expect("dead-owner next-turn claim exists");
+    let (_dead_lease, claim_dead) =
+        claim_turn_input_under_short_lease(&store, "root", &dead_owner, lease_timing).await;
     let taker = lease_owner("tin-taker");
     let taker_lease = claim_session_execution_lease_after_expiry(
         &store,

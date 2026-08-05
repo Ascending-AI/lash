@@ -961,10 +961,9 @@ pub(crate) fn phase_name(phase: RuntimeTurnPhase) -> &'static str {
         RuntimeTurnPhase::BeforeTurnHooks => "before_turn_hooks",
         RuntimeTurnPhase::PromptBuild => "prompt_build",
         RuntimeTurnPhase::EffectLoop => "effect_loop",
-        RuntimeTurnPhase::FinalizeTurn => "finalize_turn",
-        RuntimeTurnPhase::PersistTurn => "persist_turn",
-        RuntimeTurnPhase::FinalCommit => "final_commit",
-        RuntimeTurnPhase::PostPersistHooks => "post_persist_hooks",
+        RuntimeTurnPhase::PreparedTurn => "prepared_turn",
+        RuntimeTurnPhase::CommittedTurn => "committed_turn",
+        RuntimeTurnPhase::PostCommitDelivery => "post_commit_delivery",
     }
 }
 

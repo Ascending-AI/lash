@@ -194,7 +194,7 @@ fn record_turn_metrics(output: &TurnOutput, session: &LashSession) {
     // docs:start:monitoring
     // Per-turn timing, straight off the runtime clock.
     let started_at = output.result.started_at(); // SystemTime the turn was claimed
-    let elapsed = output.result.duration(); // claim -> commit + post-persist hooks
+    let elapsed = output.result.duration(); // claim -> Committed Turn + Post-Commit Delivery
     let _ = (started_at, elapsed);
 
     // Cumulative token usage for the session, split by source and by model.

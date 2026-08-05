@@ -24,7 +24,8 @@ pub(crate) use usage::{
 };
 #[cfg(not(any(test, feature = "testing")))]
 pub(in crate::runtime) use usage::{
-    PendingTokenLedgerEntry, record_token_usage_shared, stage_token_ledger_shared,
+    PendingTokenLedgerEntry, StagedTokenLedger, record_token_usage_shared,
+    stage_token_ledger_shared,
 };
 
 #[derive(Clone)]
@@ -188,7 +189,7 @@ impl CurrentSessionCapability {
         Self {
             session_id: runtime.state.session_id.clone(),
             snapshot: if persist_usage_to_store {
-                CurrentSnapshot::Owned(runtime.export_graph_first_state())
+                CurrentSnapshot::Owned(runtime.export_persistence_state())
             } else {
                 let read_model = runtime.state.read_model();
                 CurrentSnapshot::ReadModel {

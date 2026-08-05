@@ -4,6 +4,183 @@ use crate::facade_support::{RuntimeSessionStateFacadeOps, ToolStateFacadeOps};
 use lash_sansio::core_support::*;
 use std::sync::atomic::AtomicUsize;
 
+struct FailNextProtocolRestore {
+    fail_next: AtomicBool,
+    restore_count: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl crate::plugin::ProtocolSessionPlugin for FailNextProtocolRestore {
+    async fn restore_session(
+        &self,
+        _ctx: crate::plugin::ProtocolSessionContext<'_>,
+        _state: &crate::RuntimeSessionState,
+    ) -> Result<(), crate::SessionError> {
+        self.restore_count.fetch_add(1, Ordering::SeqCst);
+        if self.fail_next.swap(false, Ordering::SeqCst) {
+            return Err(crate::SessionError::Protocol(
+                "injected post-commit restore failure".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+struct RecordPostCommitDelivery {
+    entered: Arc<AtomicBool>,
+}
+
+struct FailCaptureAfterFirstCommittedTurn {
+    executor: Arc<FailingCaptureExecutor>,
+    committed_turns: AtomicUsize,
+}
+
+struct FailCaptureAfterCommittedTurns {
+    executor: Arc<FailingCaptureExecutor>,
+    committed_turns: AtomicUsize,
+    fail_after: usize,
+}
+
+struct FailCaptureAfterEffectLoop {
+    executor: Arc<FailingCaptureExecutor>,
+}
+
+impl crate::runtime::RuntimeTurnPhaseProbe for FailCaptureAfterEffectLoop {
+    fn begin(&self, _phase: crate::runtime::RuntimeTurnPhase) {}
+
+    fn end(&self, phase: crate::runtime::RuntimeTurnPhase) {
+        if phase == crate::runtime::RuntimeTurnPhase::EffectLoop {
+            self.executor.dirty.store(true, Ordering::SeqCst);
+            self.executor.fail_capture.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+impl crate::runtime::RuntimeTurnPhaseProbe for FailCaptureAfterFirstCommittedTurn {
+    fn begin(&self, _phase: crate::runtime::RuntimeTurnPhase) {}
+
+    fn end(&self, phase: crate::runtime::RuntimeTurnPhase) {
+        if phase == crate::runtime::RuntimeTurnPhase::CommittedTurn
+            && self.committed_turns.fetch_add(1, Ordering::SeqCst) == 0
+        {
+            self.executor.dirty.store(true, Ordering::SeqCst);
+            self.executor.fail_capture.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+impl crate::runtime::RuntimeTurnPhaseProbe for FailCaptureAfterCommittedTurns {
+    fn begin(&self, _phase: crate::runtime::RuntimeTurnPhase) {}
+
+    fn end(&self, phase: crate::runtime::RuntimeTurnPhase) {
+        if phase == crate::runtime::RuntimeTurnPhase::CommittedTurn
+            && self.committed_turns.fetch_add(1, Ordering::SeqCst) + 1 == self.fail_after
+        {
+            self.executor.dirty.store(true, Ordering::SeqCst);
+            self.executor.fail_capture.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+impl crate::runtime::RuntimeTurnPhaseProbe for RecordPostCommitDelivery {
+    fn begin(&self, phase: crate::runtime::RuntimeTurnPhase) {
+        if phase == crate::runtime::RuntimeTurnPhase::PostCommitDelivery {
+            self.entered.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn end(&self, _phase: crate::runtime::RuntimeTurnPhase) {}
+}
+
+struct SuspendingPostCommitSink {
+    adopted: Arc<AtomicBool>,
+    entered: tokio::sync::mpsc::Sender<()>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+struct FailingCaptureExecutor {
+    dirty: AtomicBool,
+    fail_capture: AtomicBool,
+    snapshot: std::sync::Mutex<Vec<u8>>,
+    restored: std::sync::Mutex<Vec<Vec<u8>>>,
+}
+
+#[async_trait::async_trait]
+impl crate::plugin::CodeExecutorPlugin for FailingCaptureExecutor {
+    async fn execute_code(
+        &self,
+        _ctx: crate::RuntimeExecutionContext<'_>,
+        _request: crate::ExecRequest,
+    ) -> Result<crate::ExecResponse, crate::SessionError> {
+        unreachable!("execution-state capture regression does not execute code")
+    }
+
+    fn execution_state_dirty(&self) -> bool {
+        self.dirty.load(Ordering::SeqCst)
+    }
+
+    async fn snapshot_execution_state(
+        &self,
+        _ctx: crate::plugin::ProtocolSessionContext<'_>,
+    ) -> Result<Option<Vec<u8>>, crate::SessionError> {
+        if self.fail_capture.load(Ordering::SeqCst) {
+            return Err(crate::SessionError::Protocol(
+                "injected dirty execution-state capture failure".to_string(),
+            ));
+        }
+        Ok(Some(self.snapshot.lock().expect("snapshot bytes").clone()))
+    }
+
+    async fn restore_execution_state(
+        &self,
+        _ctx: crate::plugin::ProtocolSessionContext<'_>,
+        data: &[u8],
+    ) -> Result<(), crate::SessionError> {
+        self.restored
+            .lock()
+            .expect("restored snapshots")
+            .push(data.to_vec());
+        Ok(())
+    }
+}
+
+struct RestoreExecutorFromRuntimeState {
+    executor: Arc<FailingCaptureExecutor>,
+}
+
+#[async_trait::async_trait]
+impl crate::plugin::ProtocolSessionPlugin for RestoreExecutorFromRuntimeState {
+    async fn restore_session(
+        &self,
+        ctx: crate::plugin::ProtocolSessionContext<'_>,
+        state: &crate::RuntimeSessionState,
+    ) -> Result<(), crate::SessionError> {
+        if let Some(snapshot) = state.execution_state_snapshot.as_deref() {
+            crate::plugin::CodeExecutorPlugin::restore_execution_state(
+                self.executor.as_ref(),
+                ctx,
+                snapshot,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::EventSink for SuspendingPostCommitSink {
+    async fn emit(&self, event: crate::SessionStreamEvent) {
+        if matches!(event, crate::SessionStreamEvent::PluginEvent { .. }) {
+            assert!(
+                self.adopted.load(Ordering::SeqCst),
+                "resident state must be adopted before host event delivery"
+            );
+            let _ = self.entered.send(()).await;
+            self.release.notified().await;
+        }
+    }
+}
+
 struct AttachmentPutTool;
 
 fn attachment_put_tool_definition() -> crate::ToolDefinition {
@@ -140,6 +317,617 @@ impl crate::Clock for ManualClock {
     async fn sleep_until(&self, deadline: std::time::Instant) {
         tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
     }
+}
+
+#[tokio::test]
+async fn dropping_suspended_host_delivery_keeps_committed_state_adopted() {
+    let post_commit_entered = Arc::new(AtomicBool::new(false));
+    let plugin: Arc<dyn crate::PluginFactory> = Arc::new(RuntimeTestPluginFactory {
+        build: Arc::new(|_| {
+            Ok(Arc::new(RuntimeTestPlugin {
+                before_turn: None,
+                checkpoint: None,
+                tool_result_projector: None,
+                runtime_event: None,
+                external_registrar: Some(Arc::new(|reg| {
+                    reg.turn().after(Arc::new(|_| {
+                        Box::pin(async {
+                            Ok(vec![crate::PluginDirective::emit_runtime_events(vec![
+                                crate::PluginRuntimeEvent::Custom {
+                                    name: "post_commit_suspend".to_string(),
+                                    payload: serde_json::json!({"test": true}),
+                                },
+                            ])])
+                        })
+                    }));
+                    Ok(())
+                })),
+            }))
+        }),
+    });
+    let store = Arc::new(RecordingStore::default());
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![plugin],
+        Arc::new(EmptyTools),
+        mock_provider(vec![
+            MockCall {
+                stream_events: Vec::new(),
+                response: Ok(LlmResponse {
+                    full_text: "committed before delivery".to_string(),
+                    parts: vec![LlmOutputPart::Text {
+                        text: "committed before delivery".to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                }),
+            },
+            MockCall {
+                stream_events: Vec::new(),
+                response: Ok(LlmResponse {
+                    full_text: "resident commit survived drop".to_string(),
+                    parts: vec![LlmOutputPart::Text {
+                        text: "resident commit survived drop".to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                }),
+            },
+        ]),
+        test_host_config(),
+        store.clone() as Arc<dyn crate::RuntimePersistence>,
+    )
+    .await;
+    runtime.set_turn_phase_probe(Arc::new(RecordPostCommitDelivery {
+        entered: Arc::clone(&post_commit_entered),
+    }));
+    let (entered_tx, mut entered_rx) = tokio::sync::mpsc::channel(1);
+    let release = Arc::new(tokio::sync::Notify::new());
+    let sink = SuspendingPostCommitSink {
+        adopted: Arc::clone(&post_commit_entered),
+        entered: entered_tx,
+        release: Arc::clone(&release),
+    };
+
+    let mut turn = Box::pin(
+        runtime.stream_turn(
+            TurnInput::text("commit before delivering"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", "commit-before-delivery"),
+            )
+            .with_events(&sink),
+        ),
+    );
+    tokio::select! {
+        entered = entered_rx.recv() => assert!(entered.is_some(), "sink entered"),
+        result = turn.as_mut() => panic!("turn must suspend in host delivery: {result:?}"),
+    }
+    let durable = crate::store::SessionCommitStore::load_session(store.as_ref())
+        .await
+        .expect("load committed head")
+        .expect("committed session");
+    assert_eq!(durable.head_revision, 1);
+    drop(turn);
+    assert_eq!(runtime.state.turn_index, 1);
+    assert!(runtime.resident_session_state_valid);
+    let recovered = runtime
+        .run_turn_assembled(
+            TurnInput::text("continue after dropped host delivery"),
+            CancellationToken::new(),
+            named_turn_scope("root", "after-dropped-host-delivery"),
+        )
+        .await
+        .expect("the adopted resident state remains usable");
+    assert_eq!(
+        recovered.assistant_output.safe_text,
+        "resident commit survived drop"
+    );
+}
+
+#[tokio::test]
+async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reload() {
+    let protocol = Arc::new(FailNextProtocolRestore {
+        fail_next: AtomicBool::new(false),
+        restore_count: AtomicUsize::new(0),
+    });
+    let protocol_factory =
+        crate::testing::test_standard_protocol_factory_with_runtime_state(protocol.clone(), None);
+    let store = Arc::new(RecordingStore::default());
+    let call_index = Arc::new(AtomicUsize::new(0));
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |_| {
+            let call_index = Arc::clone(&call_index);
+            async move {
+                Ok(match call_index.fetch_add(1, Ordering::SeqCst) {
+                    0 => LlmResponse {
+                        parts: vec![LlmOutputPart::ToolCall {
+                            call_id: "switch".to_string(),
+                            tool_name: "terminal_tool_0".to_string(),
+                            input_json: "{}".to_string(),
+                            replay: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    },
+                    1 => LlmResponse {
+                        full_text: "resident state reloaded".to_string(),
+                        parts: vec![LlmOutputPart::Text {
+                            text: "resident state reloaded".to_string(),
+                            response_meta: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    },
+                    index => panic!("unexpected provider call {index}"),
+                })
+            }
+        })
+        .build();
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![protocol_factory],
+        Arc::new(TerminalControlTool {
+            controls: vec![crate::ToolControl::SwitchAgentFrame {
+                frame_id: "restore-failure-frame".to_string(),
+                initial_nodes: Vec::new(),
+                task: Some("continue after restore".to_string()),
+            }],
+        }),
+        transport,
+        test_host_config(),
+        store.clone() as Arc<dyn crate::RuntimePersistence>,
+    )
+    .await;
+    protocol.fail_next.store(true, Ordering::SeqCst);
+
+    let committed = runtime
+        .run_turn_assembled(
+            TurnInput::text("switch frames"),
+            CancellationToken::new(),
+            named_turn_scope("root", "post-commit-restore-failure"),
+        )
+        .await
+        .expect("a published commit must not become a whole-turn error");
+    assert!(matches!(
+        committed.outcome,
+        TurnOutcome::AgentFrameSwitch { .. }
+    ));
+    assert!(committed.errors.iter().any(|issue| {
+        issue.code.as_deref() == Some("protocol_restore_session") && issue.retryable == Some(false)
+    }));
+    assert!(!runtime.resident_session_state_valid);
+    let durable = crate::store::SessionCommitStore::load_session(store.as_ref())
+        .await
+        .expect("load committed frame switch")
+        .expect("committed session");
+    assert_eq!(durable.head_revision, 1);
+
+    let ((refusal, reload_error, exported), capture) =
+        super::session_lease_observability::capturing(|| async {
+            let refusal = runtime
+                .tool_state()
+                .expect_err("a synchronous accessor refuses invalidated resident state");
+            protocol.fail_next.store(true, Ordering::SeqCst);
+            let reload_error = runtime
+                .export_persisted_state()
+                .await
+                .expect_err("the injected protocol restore fault denies reload");
+            let exported = runtime
+                .export_persisted_state()
+                .await
+                .expect("persisted export retries reload from the durable head");
+            (refusal, reload_error, exported)
+        })
+        .await;
+    assert!(refusal.to_string().contains("durable reload is required"));
+    assert_eq!(
+        reload_error.code,
+        crate::RuntimeErrorCode::ResidentSessionReloadFailed
+    );
+    assert_eq!(exported.head_revision, 1);
+    assert!(runtime.resident_session_state_valid);
+    assert_eq!(protocol.restore_count.load(Ordering::SeqCst), 4);
+
+    let refusal_event = capture.exactly_one("resident_session_state.sync_refusal");
+    assert_eq!(refusal_event.field("consumer"), "tool_state");
+    assert_eq!(refusal_event.field("consulted_validity"), "false");
+    assert_eq!(refusal_event.field("outcome"), "refused");
+    assert_eq!(
+        refusal_event.field("error_classification"),
+        "resident_session_reload_failed"
+    );
+    let reload_decisions = capture.named("resident_session_state.reload_decision");
+    assert_eq!(
+        reload_decisions.len(),
+        2,
+        "one decision event is required for each reload attempt"
+    );
+    let denied = &reload_decisions[0];
+    assert_eq!(denied.field("consulted_validity"), "false");
+    assert_eq!(denied.field("durable_source"), "history_store");
+    assert_eq!(
+        denied.field("durable_head_freshness"),
+        "reloaded_from_store"
+    );
+    assert_eq!(denied.field("resident_head_revision"), "1");
+    assert_eq!(denied.field("durable_head_revision"), "1");
+    assert_eq!(
+        denied.field("failing_restore_stage"),
+        "protocol_session_restore"
+    );
+    assert_eq!(denied.field("outcome"), "denied");
+    assert_eq!(
+        denied.field("error_classification"),
+        "resident_session_reload_failed"
+    );
+    let restored = &reload_decisions[1];
+    assert_eq!(restored.field("failing_restore_stage"), "none");
+    assert_eq!(restored.field("outcome"), "restored");
+    assert_eq!(restored.field("error_classification"), "none");
+    assert_eq!(
+        refusal_event.field("decision_id"),
+        denied.field("decision_id"),
+        "synchronous refusal must reference the reload decision identity"
+    );
+    assert_eq!(
+        denied.field("decision_id"),
+        restored.field("decision_id"),
+        "retrying one invalidation incident preserves its decision identity"
+    );
+
+    let recovered = runtime
+        .run_turn_assembled(
+            TurnInput::text("use the reloaded state"),
+            CancellationToken::new(),
+            named_turn_scope("root", "after-post-commit-restore-failure"),
+        )
+        .await
+        .expect("next use reloads durable resident state");
+    assert_eq!(
+        recovered.assistant_output.safe_text,
+        "resident state reloaded"
+    );
+    assert!(runtime.resident_session_state_valid);
+    assert_eq!(protocol.restore_count.load(Ordering::SeqCst), 4);
+}
+
+#[tokio::test]
+async fn dirty_execution_state_capture_failure_aborts_commit_and_cold_reopens_prior_state() {
+    let executor = Arc::new(FailingCaptureExecutor {
+        dirty: AtomicBool::new(true),
+        fail_capture: AtomicBool::new(false),
+        snapshot: std::sync::Mutex::new(b"committed-before-failure".to_vec()),
+        restored: std::sync::Mutex::new(Vec::new()),
+    });
+    let protocol: Arc<dyn crate::plugin::ProtocolSessionPlugin> =
+        Arc::new(RestoreExecutorFromRuntimeState {
+            executor: Arc::clone(&executor),
+        });
+    let code_executor: Arc<dyn crate::plugin::CodeExecutorPlugin> = executor.clone();
+    let protocol_factory = crate::testing::test_standard_protocol_factory_with_runtime_state(
+        protocol,
+        Some(code_executor),
+    );
+    let store = Arc::new(RecordingStore::default());
+    let runtime_store: Arc<dyn crate::RuntimePersistence> = store.clone();
+    let provider_executor = Arc::clone(&executor);
+    let provider_call = Arc::new(AtomicUsize::new(0));
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |_| {
+            let executor = Arc::clone(&provider_executor);
+            let call = provider_call.fetch_add(1, Ordering::SeqCst);
+            async move {
+                let text = match call {
+                    0 => "first committed turn",
+                    1 => {
+                        *executor.snapshot.lock().expect("snapshot bytes") =
+                            b"dirty-after-baseline".to_vec();
+                        executor.dirty.store(true, Ordering::SeqCst);
+                        executor.fail_capture.store(true, Ordering::SeqCst);
+                        "must not commit"
+                    }
+                    index => panic!("unexpected provider call {index}"),
+                };
+                Ok(LlmResponse {
+                    full_text: text.to_string(),
+                    parts: vec![LlmOutputPart::Text {
+                        text: text.to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build();
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![protocol_factory],
+        Arc::new(EmptyTools),
+        transport,
+        test_host_config(),
+        Arc::clone(&runtime_store),
+    )
+    .await;
+
+    runtime
+        .run_turn_assembled(
+            TurnInput::text("commit the baseline"),
+            CancellationToken::new(),
+            named_turn_scope("root", "execution-state-baseline"),
+        )
+        .await
+        .expect("baseline turn commits its execution state");
+    executor.dirty.store(false, Ordering::SeqCst);
+
+    let error = runtime
+        .run_turn_assembled(
+            TurnInput::text("capture must fail"),
+            CancellationToken::new(),
+            named_turn_scope("root", "execution-state-capture-failure"),
+        )
+        .await
+        .expect_err("dirty capture failure must abort before the turn commit");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::ExecutionStateCaptureFailed
+    );
+    assert!(
+        error
+            .message
+            .contains("failed to snapshot dirty execution state")
+    );
+    let durable = crate::store::load_persisted_session_state(store.as_ref())
+        .await
+        .expect("load baseline state")
+        .expect("baseline state exists");
+    assert_eq!(durable.head_revision, 1);
+    assert_eq!(
+        durable.execution_state_snapshot.as_deref(),
+        Some(b"committed-before-failure".as_slice())
+    );
+
+    drop(runtime);
+    executor.fail_capture.store(false, Ordering::SeqCst);
+    executor.dirty.store(false, Ordering::SeqCst);
+    let reopen_protocol: Arc<dyn crate::plugin::ProtocolSessionPlugin> =
+        Arc::new(RestoreExecutorFromRuntimeState {
+            executor: Arc::clone(&executor),
+        });
+    let reopen_executor: Arc<dyn crate::plugin::CodeExecutorPlugin> = executor.clone();
+    let reopen_factory = crate::testing::test_standard_protocol_factory_with_runtime_state(
+        reopen_protocol,
+        Some(reopen_executor),
+    );
+    let plugins = crate::PluginHost::new(vec![reopen_factory])
+        .build_session("root", None)
+        .expect("reopen plugins");
+    let _reopened = LashRuntime::from_persistent_embedded_state(
+        standard_test_policy(),
+        test_host_config(),
+        crate::PersistentRuntimeServices::new(plugins, runtime_store),
+        durable,
+    )
+    .await
+    .expect("cold reopen restores the last committed execution state");
+    assert_eq!(
+        executor
+            .restored
+            .lock()
+            .expect("restored snapshots")
+            .last()
+            .map(Vec::as_slice),
+        Some(b"committed-before-failure".as_slice())
+    );
+}
+
+#[tokio::test]
+async fn capture_abort_releases_lease_and_claim_for_prompt_peer_reclaim() {
+    let executor = Arc::new(FailingCaptureExecutor {
+        dirty: AtomicBool::new(false),
+        fail_capture: AtomicBool::new(false),
+        snapshot: std::sync::Mutex::new(Vec::new()),
+        restored: std::sync::Mutex::new(Vec::new()),
+    });
+    let protocol: Arc<dyn crate::plugin::ProtocolSessionPlugin> =
+        Arc::new(RestoreExecutorFromRuntimeState {
+            executor: Arc::clone(&executor),
+        });
+    let code_executor: Arc<dyn crate::plugin::CodeExecutorPlugin> = executor.clone();
+    let protocol_factory = crate::testing::test_standard_protocol_factory_with_runtime_state(
+        protocol,
+        Some(code_executor),
+    );
+    let store = Arc::new(RecordingStore::default());
+    let failing_transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |_| async move {
+            Ok(LlmResponse {
+                full_text: "must not commit".to_string(),
+                parts: vec![LlmOutputPart::Text {
+                    text: "must not commit".to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            })
+        })
+        .build();
+    let mut first = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![Arc::clone(&protocol_factory)],
+        Arc::new(EmptyTools),
+        failing_transport,
+        test_host_config(),
+        store.clone() as Arc<dyn crate::RuntimePersistence>,
+    )
+    .await;
+    first.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
+    first.set_turn_phase_probe(Arc::new(FailCaptureAfterEffectLoop {
+        executor: Arc::clone(&executor),
+    }));
+    enqueue_idle_turn_input(store.as_ref(), "root", "peer must reclaim this input").await;
+
+    let error = first
+        .stream_next_queued_work(TurnOptions::new(
+            CancellationToken::new(),
+            named_turn_scope("root", "capture-abort-owner"),
+        ))
+        .await
+        .expect_err("dirty capture aborts before commit");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::ExecutionStateCaptureFailed
+    );
+
+    executor.fail_capture.store(false, Ordering::SeqCst);
+    executor.dirty.store(false, Ordering::SeqCst);
+    let mut peer = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![protocol_factory],
+        Arc::new(EmptyTools),
+        mock_provider(vec![MockCall {
+            stream_events: Vec::new(),
+            response: Ok(LlmResponse {
+                full_text: "peer reclaimed".to_string(),
+                parts: vec![LlmOutputPart::Text {
+                    text: "peer reclaimed".to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        }]),
+        test_host_config(),
+        store.clone() as Arc<dyn crate::RuntimePersistence>,
+    )
+    .await;
+    peer.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
+
+    let reclaimed = peer
+        .stream_next_queued_work(TurnOptions::new(
+            CancellationToken::new(),
+            named_turn_scope("root", "capture-abort-peer"),
+        ))
+        .await
+        .expect("peer reclaim must not wait for the lease TTL")
+        .expect("peer immediately receives the abandoned input");
+    assert_eq!(reclaimed.assistant_output.safe_text, "peer reclaimed");
+}
+
+#[tokio::test]
+async fn follow_on_capture_failure_returns_the_committed_frame_and_handoff_is_retry_safe() {
+    let executor = Arc::new(FailingCaptureExecutor {
+        dirty: AtomicBool::new(false),
+        fail_capture: AtomicBool::new(false),
+        snapshot: std::sync::Mutex::new(Vec::new()),
+        restored: std::sync::Mutex::new(Vec::new()),
+    });
+    let protocol: Arc<dyn crate::plugin::ProtocolSessionPlugin> =
+        Arc::new(RestoreExecutorFromRuntimeState {
+            executor: Arc::clone(&executor),
+        });
+    let code_executor: Arc<dyn crate::plugin::CodeExecutorPlugin> = executor.clone();
+    let protocol_factory = crate::testing::test_standard_protocol_factory_with_runtime_state(
+        protocol,
+        Some(code_executor),
+    );
+    let store = Arc::new(RecordingStore::default());
+    let call_index = Arc::new(AtomicUsize::new(0));
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |_| {
+            let call_index = Arc::clone(&call_index);
+            async move {
+                Ok(match call_index.fetch_add(1, Ordering::SeqCst) {
+                    0 => LlmResponse {
+                        parts: vec![LlmOutputPart::ToolCall {
+                            call_id: "switch".to_string(),
+                            tool_name: "terminal_tool_0".to_string(),
+                            input_json: "{}".to_string(),
+                            replay: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    },
+                    1 => LlmResponse {
+                        full_text: "recovered follow-on".to_string(),
+                        parts: vec![LlmOutputPart::Text {
+                            text: "recovered follow-on".to_string(),
+                            response_meta: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    },
+                    index => panic!("unexpected provider call {index}"),
+                })
+            }
+        })
+        .build();
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![protocol_factory],
+        Arc::new(TerminalControlTool {
+            controls: vec![crate::ToolControl::SwitchAgentFrame {
+                frame_id: "capture-failure-frame".to_string(),
+                initial_nodes: Vec::new(),
+                task: Some("recover committed handoff".to_string()),
+            }],
+        }),
+        transport,
+        test_host_config(),
+        store.clone() as Arc<dyn crate::RuntimePersistence>,
+    )
+    .await;
+    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
+    runtime.set_turn_phase_probe(Arc::new(FailCaptureAfterFirstCommittedTurn {
+        executor: Arc::clone(&executor),
+        committed_turns: AtomicUsize::new(0),
+    }));
+    enqueue_idle_turn_input(store.as_ref(), "root", "switch then fail capture").await;
+
+    let committed = runtime
+        .stream_next_queued_work(TurnOptions::new(
+            CancellationToken::new(),
+            named_turn_scope("root", "follow-on-capture-failure"),
+        ))
+        .await
+        .expect("a follow-on pre-commit failure must not erase the committed frame")
+        .expect("the committed frame is returned");
+    assert!(matches!(
+        committed.outcome,
+        TurnOutcome::AgentFrameSwitch { .. }
+    ));
+    assert!(committed.errors.iter().any(|issue| {
+        issue.code.as_deref() == Some("execution_state_capture_failed")
+            && issue.retryable == Some(false)
+    }));
+    let durable = crate::store::SessionCommitStore::load_session(store.as_ref())
+        .await
+        .expect("load committed frame")
+        .expect("committed frame exists");
+    assert_eq!(durable.head_revision, 1);
+
+    executor.fail_capture.store(false, Ordering::SeqCst);
+    executor.dirty.store(false, Ordering::SeqCst);
+    let recovered = runtime
+        .stream_next_queued_work(TurnOptions::new(
+            CancellationToken::new(),
+            named_turn_scope("root", "retry-safe-committed-handoff"),
+        ))
+        .await
+        .expect("retrying the logical queue call is safe")
+        .expect("the durable handoff is reclaimed");
+    assert_eq!(recovered.assistant_output.safe_text, "recovered follow-on");
+    assert!(
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+            .await
+            .expect("queue after recovered handoff")
+            .is_empty()
+    );
 }
 
 #[derive(Debug)]
@@ -408,12 +1196,12 @@ async fn continue_as_frame_rotation_reconciles_newly_advertised_tool() {
     );
 }
 
-struct ExpireLeaseAtFinalCommit {
+struct ExpireLeaseAtPreparedTurn {
     clock: Arc<ManualClock>,
     expired: AtomicBool,
 }
 
-impl ExpireLeaseAtFinalCommit {
+impl ExpireLeaseAtPreparedTurn {
     fn new(clock: Arc<ManualClock>) -> Self {
         Self {
             clock,
@@ -422,9 +1210,9 @@ impl ExpireLeaseAtFinalCommit {
     }
 }
 
-impl crate::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAtFinalCommit {
+impl crate::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAtPreparedTurn {
     fn begin(&self, phase: crate::runtime::RuntimeTurnPhase) {
-        if phase == crate::runtime::RuntimeTurnPhase::FinalCommit
+        if phase == crate::runtime::RuntimeTurnPhase::PreparedTurn
             && !self.expired.swap(true, Ordering::SeqCst)
         {
             self.clock
@@ -467,14 +1255,14 @@ struct ExpireLeaseAfterRetainedCommit {
     expired: AtomicBool,
 }
 
-struct PauseAtFinalizeTurn {
+struct PauseAtPreparedTurn {
     entered: Arc<AtomicBool>,
     release: Arc<AtomicBool>,
 }
 
-impl crate::runtime::RuntimeTurnPhaseProbe for PauseAtFinalizeTurn {
+impl crate::runtime::RuntimeTurnPhaseProbe for PauseAtPreparedTurn {
     fn begin(&self, phase: crate::runtime::RuntimeTurnPhase) {
-        if phase != crate::runtime::RuntimeTurnPhase::FinalizeTurn {
+        if phase != crate::runtime::RuntimeTurnPhase::PreparedTurn {
             return;
         }
         self.entered.store(true, Ordering::SeqCst);
@@ -516,7 +1304,7 @@ impl ExpireLeaseAfterRetainedCommit {
 
 impl crate::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAfterRetainedCommit {
     fn begin(&self, phase: crate::runtime::RuntimeTurnPhase) {
-        if phase == crate::runtime::RuntimeTurnPhase::PostPersistHooks
+        if phase == crate::runtime::RuntimeTurnPhase::PostCommitDelivery
             && !self.expired.swap(true, Ordering::SeqCst)
         {
             self.clock
@@ -1662,7 +2450,7 @@ async fn active_input_after_last_call_is_first_admitted_on_next_turn() {
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
     let entered = Arc::new(AtomicBool::new(false));
     let release = Arc::new(AtomicBool::new(false));
-    runtime.set_turn_phase_probe(Arc::new(PauseAtFinalizeTurn {
+    runtime.set_turn_phase_probe(Arc::new(PauseAtPreparedTurn {
         entered: Arc::clone(&entered),
         release: Arc::clone(&release),
     }));
@@ -2472,11 +3260,17 @@ async fn committed_frame_handoff_survives_before_inline_claim_and_pump_recovers_
             CancellationToken::new(),
             named_turn_scope("root", "handoff-crash-window"),
         ))
-        .await;
-    assert!(
-        first.is_err(),
-        "simulated post-commit claim failure must surface"
-    );
+        .await
+        .expect("the committed frame switch remains a successful public call")
+        .expect("the committed frame switch is returned");
+    assert!(matches!(
+        first.outcome,
+        TurnOutcome::AgentFrameSwitch { .. }
+    ));
+    assert!(first.errors.iter().any(|issue| {
+        issue.code.as_deref() == Some("store_commit_failed") && issue.retryable == Some(false)
+    }));
+    assert!(!runtime.resident_session_state_valid);
 
     let inputs = crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
         .await
@@ -3036,7 +3830,7 @@ async fn lost_lease_and_reacquisition_force_graph_reloads() {
         &clock,
     ))));
 
-    let err = runtime
+    let frame_run = runtime
         .stream_turn_with_agent_frames(
             TurnInput::text("lose the retained lease"),
             TurnOptions::new(
@@ -3045,8 +3839,21 @@ async fn lost_lease_and_reacquisition_force_graph_reloads() {
             ),
         )
         .await
-        .expect_err("the follow-on commit must observe the lost lease");
-    assert_eq!(err.code, crate::RuntimeErrorCode::SessionExecutionLeaseLost);
+        .expect("the committed frame must survive the follow-on lease loss");
+    assert_eq!(frame_run.turns.len(), 1);
+    assert!(matches!(
+        frame_run.turns[0].outcome,
+        TurnOutcome::AgentFrameSwitch { .. }
+    ));
+    let issue = frame_run.turns[0]
+        .errors
+        .iter()
+        .find(|issue| {
+            issue.code.as_deref()
+                == Some(crate::RuntimeErrorCode::SessionExecutionLeaseLost.as_str())
+        })
+        .expect("the committed frame reports the follow-on lease loss");
+    assert_eq!(issue.retryable, Some(false));
     assert_eq!(
         store.load_session_count(),
         1,
@@ -3065,8 +3872,8 @@ async fn lost_lease_and_reacquisition_force_graph_reloads() {
         .expect("turn after lease loss and reacquisition succeeds");
     assert_eq!(
         store.load_session_count(),
-        2,
-        "a lease acquired after loss must reload the graph again"
+        3,
+        "a lease acquired after loss must reload both invalidated resident state and the graph"
     );
 }
 
@@ -3147,6 +3954,100 @@ async fn frame_switch_limit_commits_terminal_error_and_settles_claim() {
         inputs
             .iter()
             .all(|input| input.input_id != inbound.input_id)
+    );
+}
+
+#[tokio::test]
+async fn frame_switch_limit_capture_abort_abandons_prompt_claim_before_returning_diagnostic() {
+    let switch_count = crate::runtime::logical_turn::MAX_AGENT_FRAME_SWITCHES;
+    let executor = Arc::new(FailingCaptureExecutor {
+        dirty: AtomicBool::new(false),
+        fail_capture: AtomicBool::new(false),
+        snapshot: std::sync::Mutex::new(Vec::new()),
+        restored: std::sync::Mutex::new(Vec::new()),
+    });
+    let protocol: Arc<dyn crate::plugin::ProtocolSessionPlugin> =
+        Arc::new(RestoreExecutorFromRuntimeState {
+            executor: Arc::clone(&executor),
+        });
+    let code_executor: Arc<dyn crate::plugin::CodeExecutorPlugin> = executor.clone();
+    let protocol_factory = crate::testing::test_standard_protocol_factory_with_runtime_state(
+        protocol,
+        Some(code_executor),
+    );
+    let call_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let captured_call_index = Arc::clone(&call_index);
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |_| {
+            let call_index = Arc::clone(&captured_call_index);
+            async move {
+                let index = call_index.fetch_add(1, Ordering::SeqCst);
+                Ok(LlmResponse {
+                    parts: vec![LlmOutputPart::ToolCall {
+                        call_id: format!("switch-{index}"),
+                        tool_name: format!("terminal_tool_{index}"),
+                        input_json: "{}".to_string(),
+                        replay: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build();
+    let controls = (0..switch_count)
+        .map(|index| crate::ToolControl::SwitchAgentFrame {
+            frame_id: format!("capture-abort-frame-{index}"),
+            initial_nodes: Vec::new(),
+            task: Some(format!("continue capture-abort chain {index}")),
+        })
+        .collect();
+    let store = Arc::new(RecordingStore::default());
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![protocol_factory],
+        Arc::new(TerminalControlTool { controls }),
+        transport,
+        test_host_config(),
+        store.clone() as Arc<dyn crate::RuntimePersistence>,
+    )
+    .await;
+    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
+    runtime.set_turn_phase_probe(Arc::new(FailCaptureAfterCommittedTurns {
+        executor,
+        committed_turns: AtomicUsize::new(0),
+        fail_after: switch_count,
+    }));
+    enqueue_idle_turn_input(store.as_ref(), "root", "start capture-abort chain").await;
+
+    let committed = runtime
+        .stream_next_queued_work(TurnOptions::new(
+            CancellationToken::new(),
+            named_turn_scope("root", "bounded-frame-capture-abort"),
+        ))
+        .await
+        .expect("a failed terminal capture preserves the last committed frame")
+        .expect("the last committed frame is returned");
+
+    assert!(matches!(
+        committed.outcome,
+        TurnOutcome::AgentFrameSwitch { .. }
+    ));
+    assert!(committed.errors.iter().any(|issue| {
+        issue.code.as_deref() == Some("execution_state_capture_failed")
+            && issue.retryable == Some(false)
+    }));
+    assert_eq!(
+        store.abandoned_claim_counts(),
+        (1, 0),
+        "the claimed handoff must pass through ordinary local-abort cleanup"
+    );
+    let queued = store.raw_queued_work_for_testing();
+    assert_eq!(queued.len(), 1, "only the uncommitted handoff remains");
+    assert!(
+        queued[0].1.is_none() && !queued[0].3,
+        "the remaining handoff must have no claim identity or token: {queued:?}"
     );
 }
 
@@ -4364,7 +5265,7 @@ async fn finish_turn_commit_uses_head_cas_after_advisory_lease_expiry() {
         runtime_store,
     )
     .await;
-    runtime.set_turn_phase_probe(Arc::new(ExpireLeaseAtFinalCommit::new(Arc::clone(&clock))));
+    runtime.set_turn_phase_probe(Arc::new(ExpireLeaseAtPreparedTurn::new(Arc::clone(&clock))));
 
     let assembled = runtime
         .run_turn_assembled(

@@ -130,6 +130,7 @@ fn backend_fault_store_error(operation: &str, attempt: usize, retryable: bool) -
 
 fn store_error_variant(error: &StoreError) -> &'static str {
     match error {
+        StoreError::ExecutionStateCaptureFailed { .. } => "ExecutionStateCaptureFailed",
         StoreError::Contended => "Contended",
         StoreError::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded",
         StoreError::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded",

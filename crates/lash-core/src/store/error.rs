@@ -1,5 +1,10 @@
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
+    /// Capturing dirty executor state failed before any store commit was
+    /// attempted. The current execution must abort, but no publication is
+    /// ambiguous and all live lease/claim ownership can be handed back.
+    #[error("failed to snapshot dirty execution state: {message}")]
+    ExecutionStateCaptureFailed { message: String },
     /// The backend could not acquire its transactional write authority because
     /// another writer currently holds it. Retry the identical commit unchanged;
     /// do not reload, rebase, or alter its semantic content.

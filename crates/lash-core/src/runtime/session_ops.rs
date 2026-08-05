@@ -59,6 +59,8 @@ impl LashRuntime {
         &mut self,
         request: crate::AppendSessionNodesRequest,
     ) -> Result<crate::AppendSessionNodesResult, SessionError> {
+        self.reload_invalidated_resident_session_state_for_session()
+            .await?;
         if request.operation_id.trim().is_empty() {
             return Err(SessionError::Protocol(
                 "session graph append requires a non-empty stable operation_id".to_string(),
@@ -284,6 +286,8 @@ impl LashRuntime {
         &mut self,
         extension: crate::ProtocolSessionExtensionHandle,
     ) -> Result<(), SessionError> {
+        self.reload_invalidated_resident_session_state_for_session()
+            .await?;
         let Some(session) = self.session.as_ref() else {
             return Err(SessionError::Protocol(
                 "runtime session is not available".to_string(),
@@ -297,6 +301,8 @@ impl LashRuntime {
         &mut self,
         extension: &crate::ProtocolTurnExtensionHandle,
     ) -> Result<(), SessionError> {
+        self.reload_invalidated_resident_session_state_for_session()
+            .await?;
         let Some(session) = self.session.as_ref() else {
             return Err(SessionError::Protocol(
                 "runtime session is not available".to_string(),
@@ -376,6 +382,8 @@ impl LashRuntime {
 
     /// Explicitly snapshot protocol-local execution state, if any.
     pub async fn snapshot_execution_state(&mut self) -> Result<Option<Vec<u8>>, SessionError> {
+        self.reload_invalidated_resident_session_state_for_session()
+            .await?;
         let Some(session) = self.session.as_mut() else {
             return Err(SessionError::Protocol(
                 "runtime session not available".to_string(),
@@ -398,6 +406,8 @@ impl LashRuntime {
 
     /// Explicitly restore protocol-local execution state from an opaque snapshot blob.
     pub async fn restore_execution_state(&mut self, snapshot: &[u8]) -> Result<(), SessionError> {
+        self.reload_invalidated_resident_session_state_for_session()
+            .await?;
         let Some(session) = self.session.as_mut() else {
             return Err(SessionError::Protocol(
                 "runtime session not available".to_string(),
@@ -457,11 +467,14 @@ impl LashRuntime {
     }
 
     pub async fn query_plugin(
-        &self,
+        &mut self,
         name: &str,
         args: serde_json::Value,
         session_id: Option<String>,
     ) -> Result<(String, serde_json::Value), PluginOperationInvokeError> {
+        self.reload_invalidated_resident_session_state()
+            .await
+            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         let manager = self.runtime_session_services()?;
         let Some(session) = self.session.as_ref() else {
             return Err(PluginOperationInvokeError::Unknown(
@@ -488,6 +501,9 @@ impl LashRuntime {
         session_id: Option<String>,
         operation_scope: crate::ExecutionScope,
     ) -> Result<crate::PluginCommandReceipt<serde_json::Value>, PluginOperationInvokeError> {
+        self.reload_invalidated_resident_session_state()
+            .await
+            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         let manager = self.runtime_session_services()?;
         let Some(session) = self.session.as_ref() else {
             return Err(PluginOperationInvokeError::Unknown(
@@ -530,6 +546,9 @@ impl LashRuntime {
         scoped_effect_controller: crate::ScopedEffectController<'static>,
         cancellation_token: tokio_util::sync::CancellationToken,
     ) -> Result<crate::PluginTaskReceipt<serde_json::Value>, PluginOperationInvokeError> {
+        self.reload_invalidated_resident_session_state()
+            .await
+            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         let manager = self.runtime_session_services()?;
         let Some(session) = self.session.as_ref() else {
             return Err(PluginOperationInvokeError::Unknown(

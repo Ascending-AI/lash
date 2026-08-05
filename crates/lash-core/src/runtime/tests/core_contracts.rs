@@ -81,9 +81,9 @@ fn runtime_phase_probe_slot_routes_session_fallback_and_scope_override() {
     let scoped_probe = slot
         .get_for_scope(&frame_scope)
         .expect("specific frame scope should override the session probe");
-    scoped_probe.end(RuntimeTurnPhase::FinalizeTurn);
+    scoped_probe.end(RuntimeTurnPhase::PreparedTurn);
 
-    assert_eq!(frame_probe.events(), vec!["end:FinalizeTurn"]);
+    assert_eq!(frame_probe.events(), vec!["end:PreparedTurn"]);
     assert_eq!(session_probe.events(), vec!["begin:PromptBuild"]);
 }
 

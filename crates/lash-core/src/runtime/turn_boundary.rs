@@ -10,10 +10,14 @@ use crate::{
     ToolCallRecord, TurnOutcome,
 };
 
-use super::{RuntimeError, RuntimeSessionState, TurnCommitDraft, merge_ledger_entry};
+use super::{
+    RuntimeError, RuntimeErrorCode, RuntimeSessionState, TurnCommitDraft, merge_ledger_entry,
+};
 
 mod materialize;
 use materialize::*;
+mod accepted_commit;
+pub(super) use accepted_commit::AcceptedTurnCommit;
 mod settlement;
 use settlement::*;
 
@@ -27,7 +31,7 @@ struct ProgressBoundarySnapshot<'a> {
     turn_index: usize,
     messages: MessageSequence,
     event_delta: Vec<SessionHistoryRecord>,
-    execution_state_snapshot: Option<Option<Vec<u8>>>,
+    execution_state_update: ExecutionStateUpdate,
     plugins: Option<&'a PluginSession>,
 }
 
@@ -65,7 +69,7 @@ struct FinalCommitInput<'a> {
     returned_state: &'a crate::SessionSnapshot,
     tool_calls: &'a [ToolCallRecord],
     plugins: Option<&'a PluginSession>,
-    execution_state_snapshot: Option<Option<Vec<u8>>>,
+    execution_state_update: ExecutionStateUpdate,
     store: Option<&'a (dyn RuntimePersistence + 'a)>,
     usage_deltas: &'a [crate::store::RuntimeUsageDelta],
     outcome: &'a TurnOutcome,
@@ -79,6 +83,23 @@ struct FinalCommitInput<'a> {
     enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
     interrupted_turn_input_turn_id: Option<String>,
     session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ExecutionStateUpdate {
+    Clean,
+    Replace(Vec<u8>),
+    Clear,
+}
+
+impl ExecutionStateUpdate {
+    fn apply(self, state: &mut RuntimeSessionState) {
+        match self {
+            Self::Clean => {}
+            Self::Replace(snapshot) => state.set_execution_state_snapshot(Some(snapshot)),
+            Self::Clear => state.set_execution_state_snapshot(None),
+        }
+    }
 }
 
 impl TurnBoundary {
@@ -166,16 +187,16 @@ impl TurnBoundary {
         let plugins = session
             .as_deref()
             .map(|session| Arc::clone(session.plugins()));
-        let execution_state_snapshot = match session {
-            Some(session) => Self::snapshot_dirty_execution_state(session).await,
-            None => None,
+        let execution_state_update = match session {
+            Some(session) => Self::capture_execution_state_update(session)
+                .await
+                .map_err(accepted_commit::execution_state_capture_error)?,
+            None => ExecutionStateUpdate::Clean,
         };
         let state = self.draft_mut().state_mut();
         state.policy = policy;
         state.turn_index = turn_index;
-        if let Some(execution_state_snapshot) = execution_state_snapshot {
-            state.set_execution_state_snapshot(execution_state_snapshot);
-        }
+        execution_state_update.apply(state);
         if let Some(plugins) = plugins.as_ref() {
             state.refresh_plugin_snapshots(plugins.as_ref());
         }
@@ -196,14 +217,21 @@ impl TurnBoundary {
             });
         }
 
-        let execution_state_snapshot = Self::snapshot_dirty_execution_state(session).await;
+        let execution_state_update = Self::capture_execution_state_update(session)
+            .await
+            .map_err(|err| {
+                RuntimeError::new(
+                    RuntimeErrorCode::ExecutionStateCaptureFailed,
+                    format!("failed to snapshot dirty execution state: {err}"),
+                )
+            })?;
         let plugins = Arc::clone(session.plugins());
         self.progress_boundary_with_snapshot(ProgressBoundarySnapshot {
             policy,
             turn_index,
             messages,
             event_delta,
-            execution_state_snapshot,
+            execution_state_update,
             plugins: Some(plugins.as_ref()),
         })
         .await
@@ -218,7 +246,7 @@ impl TurnBoundary {
             turn_index,
             messages,
             event_delta,
-            execution_state_snapshot,
+            execution_state_update,
             plugins,
         } = snapshot;
         if !crate::messages_are_prompt_resume_safe(messages.iter()) {
@@ -233,9 +261,7 @@ impl TurnBoundary {
             let state = draft.state_mut();
             state.policy = policy;
             state.turn_index = turn_index;
-            if let Some(execution_state_snapshot) = execution_state_snapshot {
-                state.set_execution_state_snapshot(execution_state_snapshot);
-            }
+            execution_state_update.apply(state);
             if let Some(plugins) = plugins {
                 state.refresh_plugin_snapshots(plugins);
             }
@@ -284,28 +310,24 @@ impl TurnBoundary {
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<String>,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
-    ) -> Result<
-        (
-            Vec<crate::QueuedWorkBatch>,
-            Vec<crate::store::RuntimeUsageDeltaIdentity>,
-        ),
-        StoreError,
-    > {
-        let (store, plugins, execution_state_snapshot) = match session {
+    ) -> Result<AcceptedTurnCommit, StoreError> {
+        let (store, plugins, execution_state_update) = match session {
             Some(session) => {
                 let store = session.history_store();
-                let execution_state_snapshot = Self::snapshot_dirty_execution_state(session).await;
+                let execution_state_update = Self::capture_execution_state_update(session)
+                    .await
+                    .map_err(accepted_commit::execution_state_capture_error)?;
                 let plugins = Arc::clone(session.plugins());
-                (store, Some(plugins), execution_state_snapshot)
+                (store, Some(plugins), execution_state_update)
             }
-            None => (None, None, None),
+            None => (None, None, ExecutionStateUpdate::Clean),
         };
         let enqueued_queue_batches = self
             .final_commit_with_snapshots(FinalCommitInput {
                 returned_state: &returned_turn.state,
                 tool_calls: &returned_turn.tool_calls,
                 plugins: plugins.as_deref(),
-                execution_state_snapshot,
+                execution_state_update,
                 store: store.as_ref().map(|store| store.as_ref()),
                 usage_deltas,
                 outcome: &returned_turn.outcome,
@@ -322,7 +344,10 @@ impl TurnBoundary {
             })
             .await?;
         returned_turn.state = self.final_state_mut().to_snapshot();
-        Ok(enqueued_queue_batches)
+        Ok(AcceptedTurnCommit::new(
+            enqueued_queue_batches.0,
+            enqueued_queue_batches.1,
+        ))
     }
 
     pub(super) fn into_final_state(self) -> RuntimeSessionState {
@@ -379,7 +404,7 @@ impl TurnBoundary {
             returned_state,
             tool_calls,
             plugins,
-            execution_state_snapshot,
+            execution_state_update,
             store,
             usage_deltas,
             outcome,
@@ -404,9 +429,7 @@ impl TurnBoundary {
         if let Some(plugins) = plugins {
             state.refresh_plugin_snapshots(plugins);
         }
-        if let Some(execution_state_snapshot) = execution_state_snapshot {
-            state.set_execution_state_snapshot(execution_state_snapshot);
-        }
+        execution_state_update.apply(state);
         materialize_terminal_output(state, outcome, clock.as_ref(), &terminal_message_id);
         materialize_agent_frame_switch(state, outcome, clock.as_ref());
         let state = self.final_state_mut();
@@ -562,25 +585,26 @@ impl TurnBoundary {
         Ok((enqueued_queue_batches, committed_usage_delta_identities))
     }
 
-    async fn snapshot_dirty_execution_state(session: &mut Session) -> Option<Option<Vec<u8>>> {
-        let code_executor = session.plugins().code_executor()?;
+    async fn capture_execution_state_update(
+        session: &mut Session,
+    ) -> Result<ExecutionStateUpdate, crate::SessionError> {
+        let Some(code_executor) = session.plugins().code_executor() else {
+            return Ok(ExecutionStateUpdate::Clean);
+        };
         if !code_executor.execution_state_dirty() {
-            return None;
+            return Ok(ExecutionStateUpdate::Clean);
         }
         let session_id = session.session_id().to_string();
-        match code_executor
+        let snapshot = code_executor
             .snapshot_execution_state(crate::plugin::ProtocolSessionContext::new(
                 session,
                 &session_id,
             ))
-            .await
-        {
-            Ok(snapshot) => Some(snapshot),
-            Err(err) => {
-                tracing::warn!("failed to snapshot dirty execution state: {err}");
-                None
-            }
-        }
+            .await?;
+        Ok(match snapshot {
+            Some(snapshot) => ExecutionStateUpdate::Replace(snapshot),
+            None => ExecutionStateUpdate::Clear,
+        })
     }
 }
 
@@ -1034,7 +1058,7 @@ mod tests {
                 turn_index: 1,
                 messages: MessageSequence::from_base(vec![user, assistant].into()),
                 event_delta,
-                execution_state_snapshot: None,
+                execution_state_update: ExecutionStateUpdate::Clean,
                 plugins: None,
             })
             .await
@@ -1073,7 +1097,7 @@ mod tests {
                     )),
                     crate::SessionHistoryRecord::Protocol(trajectory),
                 ],
-                execution_state_snapshot: None,
+                execution_state_update: ExecutionStateUpdate::Clean,
                 plugins: None,
             })
             .await
@@ -1092,7 +1116,7 @@ mod tests {
                 returned_state: &returned_state,
                 tool_calls: &[],
                 plugins: None,
-                execution_state_snapshot: None,
+                execution_state_update: ExecutionStateUpdate::Clean,
                 store: Some(&store),
                 usage_deltas: &[],
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
@@ -1143,7 +1167,7 @@ mod tests {
                 turn_index: 1,
                 messages: MessageSequence::from_base(messages.into()),
                 event_delta: Vec::new(),
-                execution_state_snapshot: None,
+                execution_state_update: ExecutionStateUpdate::Clean,
                 plugins: None,
             })
             .await
@@ -1155,7 +1179,7 @@ mod tests {
                 returned_state: &returned_state,
                 tool_calls: &[],
                 plugins: None,
-                execution_state_snapshot: None,
+                execution_state_update: ExecutionStateUpdate::Clean,
                 store: Some(&store),
                 usage_deltas: &[],
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
@@ -1294,7 +1318,7 @@ mod tests {
             .final_commit_with_snapshots(FinalCommitInput {
                 returned_state: &returned_state,
                 plugins: None,
-                execution_state_snapshot: Some(Some(b"runtime".to_vec())),
+                execution_state_update: ExecutionStateUpdate::Replace(b"runtime".to_vec()),
                 store: Some(&store),
                 usage_deltas: &usage,
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
@@ -1400,7 +1424,7 @@ mod tests {
                 returned_state: &returned_state,
                 tool_calls: &[],
                 plugins: None,
-                execution_state_snapshot: None,
+                execution_state_update: ExecutionStateUpdate::Clean,
                 store: Some(&store),
                 usage_deltas: &[],
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
@@ -1464,7 +1488,7 @@ mod tests {
             .final_commit_with_snapshots(FinalCommitInput {
                 returned_state: &queue_state,
                 plugins: None,
-                execution_state_snapshot: None,
+                execution_state_update: ExecutionStateUpdate::Clean,
                 store: Some(&store),
                 usage_deltas: &[],
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
@@ -1494,7 +1518,7 @@ mod tests {
             .final_commit_with_snapshots(FinalCommitInput {
                 returned_state: &input_state,
                 plugins: None,
-                execution_state_snapshot: None,
+                execution_state_update: ExecutionStateUpdate::Clean,
                 store: Some(&store),
                 usage_deltas: &[],
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
@@ -1544,7 +1568,7 @@ mod tests {
             .final_commit_with_snapshots(FinalCommitInput {
                 returned_state: &returned_state,
                 plugins: None,
-                execution_state_snapshot: None,
+                execution_state_update: ExecutionStateUpdate::Clean,
                 store: None,
                 usage_deltas: &[],
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),

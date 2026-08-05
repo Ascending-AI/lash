@@ -107,6 +107,10 @@ pub(super) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> 
             RuntimeErrorCode::SessionExecutionLeaseLost,
             format!("session execution lease for session `{session_id}` was lost before commit"),
         ),
+        crate::store::StoreError::ExecutionStateCaptureFailed { message } => RuntimeError::new(
+            RuntimeErrorCode::ExecutionStateCaptureFailed,
+            format!("failed to snapshot dirty execution state: {message}"),
+        ),
         err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
     }
 }
@@ -310,10 +314,9 @@ pub enum RuntimeTurnPhase {
     BeforeTurnHooks,
     PromptBuild,
     EffectLoop,
-    FinalizeTurn,
-    PersistTurn,
-    FinalCommit,
-    PostPersistHooks,
+    PreparedTurn,
+    CommittedTurn,
+    PostCommitDelivery,
 }
 
 #[doc(hidden)]
@@ -1391,4 +1394,11 @@ pub struct LashRuntime {
     pub(in crate::runtime) last_committed_observation_turn: Option<(u64, String)>,
     /// Set only after this handle itself has attempted a durable graph load.
     pub(in crate::runtime) graph_loaded_from_store: bool,
+    /// False after a committed turn encounters a post-commit delivery failure.
+    /// The next turn must rebuild all resident/plugin state from the durable
+    /// head before it can execute.
+    pub(in crate::runtime) resident_session_state_valid: bool,
+    /// Stable identity for the invalidation incident consulted by async reload
+    /// decisions and synchronous refusal gates.
+    pub(in crate::runtime) resident_session_reload_decision_id: Option<String>,
 }

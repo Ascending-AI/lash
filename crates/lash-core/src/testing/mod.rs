@@ -848,6 +848,8 @@ impl crate::ProcessService for MockSessionManager {
 // crates can wire a minimal fake protocol plugin into integration tests
 // without depending on concrete protocol crates.
 // ─────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+pub(crate) use test_protocol_fakes::test_standard_protocol_factory_with_runtime_state;
 pub use test_protocol_fakes::{test_code_protocol_factories, test_standard_protocol_factories};
 
 mod test_protocol_fakes {
@@ -874,7 +876,23 @@ mod test_protocol_fakes {
             id: "protocol_standard",
             include_batch: true,
             decode_code_create_options: false,
+            session_override: None,
+            code_executor: None,
         })]
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_standard_protocol_factory_with_runtime_state(
+        session: Arc<dyn ProtocolSessionPlugin>,
+        code_executor: Option<Arc<dyn crate::plugin::CodeExecutorPlugin>>,
+    ) -> Arc<dyn PluginFactory> {
+        Arc::new(TestProtocolFactory {
+            id: "protocol_standard",
+            include_batch: true,
+            decode_code_create_options: false,
+            session_override: Some(session),
+            code_executor,
+        })
     }
 
     pub fn test_code_protocol_factories() -> Vec<Arc<dyn PluginFactory>> {
@@ -882,6 +900,8 @@ mod test_protocol_fakes {
             id: "protocol_code",
             include_batch: false,
             decode_code_create_options: true,
+            session_override: None,
+            code_executor: None,
         })]
     }
 
@@ -889,6 +909,8 @@ mod test_protocol_fakes {
         id: &'static str,
         include_batch: bool,
         decode_code_create_options: bool,
+        session_override: Option<Arc<dyn ProtocolSessionPlugin>>,
+        code_executor: Option<Arc<dyn crate::plugin::CodeExecutorPlugin>>,
     }
 
     impl PluginFactory for TestProtocolFactory {
@@ -904,6 +926,8 @@ mod test_protocol_fakes {
                 id: self.id,
                 include_batch: self.include_batch,
                 decode_code_create_options: self.decode_code_create_options,
+                session_override: self.session_override.clone(),
+                code_executor: self.code_executor.clone(),
             }))
         }
     }
@@ -912,6 +936,8 @@ mod test_protocol_fakes {
         id: &'static str,
         include_batch: bool,
         decode_code_create_options: bool,
+        session_override: Option<Arc<dyn ProtocolSessionPlugin>>,
+        code_executor: Option<Arc<dyn crate::plugin::CodeExecutorPlugin>>,
     }
 
     impl SessionPlugin for TestProtocolPlugin {
@@ -920,9 +946,15 @@ mod test_protocol_fakes {
         }
 
         fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-            reg.protocol().session(Arc::new(TestProtocolSession {
-                decode_code_create_options: self.decode_code_create_options,
-            }))?;
+            reg.protocol()
+                .session(self.session_override.clone().unwrap_or_else(|| {
+                    Arc::new(TestProtocolSession {
+                        decode_code_create_options: self.decode_code_create_options,
+                    })
+                }))?;
+            if let Some(code_executor) = self.code_executor.as_ref() {
+                reg.execution().code_executor(code_executor.clone())?;
+            }
             if self.include_batch {
                 reg.tools().provider(Arc::new(TestProtocolTools))?;
             }

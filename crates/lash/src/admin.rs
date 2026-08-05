@@ -568,7 +568,7 @@ impl SessionAdmin {
     async fn persist_current_state(&self) -> Result<RuntimeSessionState> {
         self.with_writer(async |runtime: &mut LashRuntime| {
             runtime.await_background_work().await?;
-            Ok(runtime.export_persisted_state())
+            runtime.export_persisted_state().await.map_err(Into::into)
         })
         .await
     }

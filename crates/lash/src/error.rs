@@ -88,16 +88,15 @@ impl EmbedError {
     ///   another executor currently holds the session-execution lease; the
     ///   turn was rejected before any state changed, so retrying after a
     ///   backoff is safe.
-    /// - [`SessionExecutionLeaseLost`](lash_core::RuntimeErrorCode::SessionExecutionLeaseLost):
-    ///   an operation observed lease handoff. Lease loss alone neither proves
-    ///   that no current-head commit landed nor releases queued-work/turn-input
-    ///   claims; reload durable state before retrying under the head CAS and
-    ///   claim-ownership checks.
     /// - [`StoreCommitContended`](lash_core::RuntimeErrorCode::StoreCommitContended):
     ///   the backend aborted before publication because transactional write
     ///   authority was unavailable; retry the identical operation unchanged.
     ///
     /// Everything else is `false`. Notably
+    /// [`SessionExecutionLeaseLost`](lash_core::RuntimeErrorCode::SessionExecutionLeaseLost)
+    /// is non-retryable as-is: reload durable state and re-establish lease and
+    /// claim authority before deciding whether to issue new work.
+    ///
     /// [`StoreCommitFailed`](lash_core::RuntimeErrorCode::StoreCommitFailed)
     /// stays `false`: the code does not distinguish transient store I/O from
     /// conflicts, so there is no typed signal that a retry is safe.
@@ -107,12 +106,8 @@ impl EmbedError {
     /// their typed retryability is carried on
     /// [`TurnIssue::retryable`](crate::turn::TurnIssue) instead.
     pub fn is_retryable(&self) -> bool {
-        use lash_core::RuntimeErrorCode;
         match self {
-            Self::Runtime(err) => matches!(
-                err.code,
-                RuntimeErrorCode::SessionExecutionBusy | RuntimeErrorCode::StoreCommitContended
-            ),
+            Self::Runtime(err) => err.code.is_retryable(),
             _ => false,
         }
     }
@@ -230,6 +225,13 @@ mod tests {
     #[test]
     fn store_commit_failed_is_neither_retryable_nor_terminal() {
         let err = runtime_error(RuntimeErrorCode::StoreCommitFailed);
+        assert!(!err.is_retryable(), "{err}");
+        assert!(!err.is_terminal(), "{err}");
+    }
+
+    #[test]
+    fn execution_state_capture_failed_is_non_retryable_and_non_terminal() {
+        let err = runtime_error(RuntimeErrorCode::ExecutionStateCaptureFailed);
         assert!(!err.is_retryable(), "{err}");
         assert!(!err.is_terminal(), "{err}");
     }
