@@ -203,6 +203,20 @@ async fn sqlite_process_registry_satisfies_conformance() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_process_prune_batch_tombstones_are_ordered() {
+    let dir = tempfile::tempdir().expect("batch prune tempdir");
+    let registry = Arc::new(
+        SqliteProcessRegistry::open(
+            &dir.path().join("processes.db"),
+            dir.path().join("sessions"),
+        )
+        .await
+        .expect("open batch prune registry"),
+    );
+    lash_core::testing::conformance::process_prune_batch_tombstones(registry).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_leased_completion_replay_repairs_projection() {
     let dir = tempfile::tempdir().expect("leased replay repair tempdir");
     let path = dir.path().join("processes.db");

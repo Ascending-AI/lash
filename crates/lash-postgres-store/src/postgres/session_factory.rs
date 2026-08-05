@@ -138,7 +138,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
 
     async fn delete_session(&self, session_id: &str) -> Result<(), String> {
         let mut tx = self.pool.begin().await.map_err(|err| err.to_string())?;
-        delete_session_tx(&mut tx, session_id, true)
+        delete_session_tx(&mut tx, session_id)
             .await
             .map_err(|err| err.to_string())?;
         tx.commit().await.map_err(|err| err.to_string())
@@ -526,7 +526,6 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
 pub(crate) async fn delete_session_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
-    tombstone_host_facing_id: bool,
 ) -> Result<(), StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
     let materialized = sqlx::query_scalar::<_, bool>(
@@ -540,9 +539,8 @@ pub(crate) async fn delete_session_tx(
     .fetch_one(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    if tombstone_host_facing_id && materialized {
-        // Permanent identity evidence for host-facing ids only. Runtime-internal
-        // process session ids are lash-minted and reclaimed without a tombstone.
+    if materialized {
+        // Permanent identity evidence for host-facing session ids.
         sqlx::query(
             "INSERT INTO lash_deleted_sessions (session_id)
              VALUES ($1)
@@ -553,10 +551,8 @@ pub(crate) async fn delete_session_tx(
         .await
         .map_err(store_sqlx_error)?;
     }
-    // Attachment intents are released before the rest of the process-owned
-    // store. Process pruning calls this while its terminal row is still locked
-    // and deletes that row last, so any failure leaves a process leak instead
-    // of making live-looking session state ownerless.
+    // Attachment intents are released before the rest of the session store so
+    // a failed transaction cannot leave live-looking state without its owner.
     let leaf_node_id = sqlx::query_scalar::<_, String>(
         "SELECT leaf_node_id FROM lash_sessions
          WHERE session_id = $1 AND leaf_node_id IS NOT NULL
@@ -633,6 +629,186 @@ pub(crate) async fn delete_session_tx(
     .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
+    Ok(())
+}
+
+/// Deletes process-owned runtime sessions as one batch inside the process
+/// prune transaction. Process runtime session ids are internal, so they never
+/// receive host-facing deletion tombstones.
+pub(crate) async fn delete_process_sessions_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_ids: &[String],
+) -> Result<(), StoreError> {
+    if session_ids.is_empty() {
+        return Ok(());
+    }
+
+    // Take every session-history mutation fence in a standalone statement
+    // before deleting heads or deciding whether graph cleanup is required.
+    // The ordered subquery gives overlapping batches one lock-request order.
+    sqlx::query(
+        "SELECT pg_advisory_xact_lock(hashtextextended(ordered.session_id, 1::BIGINT))
+         FROM (
+             SELECT session_id
+             FROM unnest($1::TEXT[]) AS target(session_id)
+             ORDER BY session_id
+         ) AS ordered",
+    )
+    .bind(session_ids)
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+
+    let (deleted_leaf_node_ids, has_graph_candidates) = sqlx::query_as::<_, (Vec<String>, bool)>(
+        "WITH deleted_sessions AS (
+                 DELETE FROM lash_sessions AS session
+                 WHERE session.session_id = ANY($1)
+                 RETURNING session.session_id, session.leaf_node_id
+             )
+             SELECT COALESCE(
+                        array_agg(leaf_node_id ORDER BY session_id)
+                            FILTER (WHERE leaf_node_id IS NOT NULL),
+                        ARRAY[]::TEXT[]
+                    ),
+                    EXISTS (
+                        SELECT 1
+                        FROM lash_graph_nodes AS graph
+                        WHERE graph.tombstoned = FALSE
+                          AND (
+                              graph.session_id = ANY($1)
+                              OR graph.node_id IN (
+                                  SELECT leaf_node_id FROM deleted_sessions
+                                  WHERE leaf_node_id IS NOT NULL
+                              )
+                          )
+                    )
+             FROM deleted_sessions",
+    )
+    .bind(session_ids)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+
+    if has_graph_candidates {
+        for leaf_node_id in deleted_leaf_node_ids {
+            crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &leaf_node_id).await?;
+        }
+        let unreachable_candidates = sqlx::query_scalar::<_, String>(
+            "SELECT graph.node_id FROM lash_graph_nodes AS graph
+             WHERE graph.session_id = ANY($1) AND graph.tombstoned = FALSE
+               AND NOT EXISTS (
+                   SELECT 1 FROM lash_graph_nodes AS child
+                   WHERE child.parent_node_id = graph.node_id
+                     AND child.tombstoned = FALSE
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM lash_sessions AS head
+                   WHERE head.leaf_node_id = graph.node_id
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM lash_node_anchors AS anchor
+                   WHERE anchor.node_id = graph.node_id
+               )
+             ORDER BY graph.seq DESC",
+        )
+        .bind(session_ids)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        for node_id in unreachable_candidates {
+            crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &node_id).await?;
+        }
+    }
+
+    let trigger_owner_namespaces = session_ids
+        .iter()
+        .map(|session_id| lash_core::TriggerOwnerScope::session(session_id).namespace())
+        .collect::<Vec<_>>();
+    sqlx::query(
+        "WITH deleted_graph_nodes AS (
+             DELETE FROM lash_graph_nodes WHERE tombstoned = TRUE
+             RETURNING node_id
+         ),
+         deleted_attachment_manifest AS (
+             DELETE FROM lash_attachment_manifest
+             WHERE session_id = ANY($1)
+             RETURNING attachment_id
+         ),
+         deleted_queued_work_items AS (
+             DELETE FROM lash_queued_work_items AS item
+             WHERE EXISTS (
+                 SELECT 1 FROM lash_queued_work_batches AS batch
+                 WHERE batch.batch_id = item.batch_id
+                   AND batch.session_id = ANY($1)
+             )
+             RETURNING item.batch_id
+         ),
+         deleted_queued_work_batches AS (
+             DELETE FROM lash_queued_work_batches
+             WHERE session_id = ANY($1)
+               AND (SELECT count(*) FROM deleted_queued_work_items) >= 0
+             RETURNING batch_id
+         ),
+         deleted_wake_redelivery_fences AS (
+             DELETE FROM lash_wake_redelivery_fences
+             WHERE session_id = ANY($1)
+             RETURNING session_id
+         ),
+         deleted_wake_allocation_floors AS (
+             DELETE FROM lash_wake_allocation_floors
+             WHERE target_session_id = ANY($1)
+             RETURNING target_session_id
+         ),
+         deleted_pending_turn_inputs AS (
+             DELETE FROM lash_pending_turn_inputs
+             WHERE session_id = ANY($1)
+             RETURNING session_id
+         ),
+         deleted_session_execution_leases AS (
+             DELETE FROM lash_session_execution_leases
+             WHERE session_id = ANY($1)
+             RETURNING session_id
+         ),
+         deleted_usage_deltas AS (
+             DELETE FROM lash_usage_deltas
+             WHERE session_id = ANY($1)
+             RETURNING session_id
+         ),
+         deleted_runtime_turn_commits AS (
+             DELETE FROM lash_runtime_turn_commits
+             WHERE session_id = ANY($1)
+             RETURNING session_id
+         ),
+         deleted_session_meta AS (
+             DELETE FROM lash_session_meta
+             WHERE session_id = ANY($1)
+             RETURNING session_id
+         ),
+         deleted_trigger_manifests AS (
+             DELETE FROM lash_lashlang_artifacts
+             WHERE namespace = $2
+               AND artifact_ref = ANY($3)
+             RETURNING artifact_ref
+         )
+         SELECT (SELECT count(*) FROM deleted_graph_nodes)
+              + (SELECT count(*) FROM deleted_attachment_manifest)
+              + (SELECT count(*) FROM deleted_queued_work_batches)
+              + (SELECT count(*) FROM deleted_wake_redelivery_fences)
+              + (SELECT count(*) FROM deleted_wake_allocation_floors)
+              + (SELECT count(*) FROM deleted_pending_turn_inputs)
+              + (SELECT count(*) FROM deleted_session_execution_leases)
+              + (SELECT count(*) FROM deleted_usage_deltas)
+              + (SELECT count(*) FROM deleted_runtime_turn_commits)
+              + (SELECT count(*) FROM deleted_session_meta)
+              + (SELECT count(*) FROM deleted_trigger_manifests)",
+    )
+    .bind(session_ids)
+    .bind(crate::artifact_store::CURRENT_TRIGGER_MANIFEST_NAMESPACE)
+    .bind(&trigger_owner_namespaces)
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+
     Ok(())
 }
 

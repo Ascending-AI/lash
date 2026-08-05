@@ -93,59 +93,94 @@ pub(crate) fn prune_terminal_processes_conn(
     max_change_seq: Option<u64>,
 ) -> Result<ProcessPruneReport, lash_core::PluginError> {
     let prunable = prunable_terminal_process_ids_conn(conn, cutoff, filter, max_change_seq)?;
-
-    let mut pruned_events = 0;
-    let mut pruned_processes = 0;
-    for process_id in prunable {
-        let process_id = process_id.as_str();
-        pruned_events += conn
-            .execute(
-                "DELETE FROM process_events WHERE process_id = ?1",
-                params![process_id],
-            )
-            .map_err(process_sqlite_error)?;
-        conn.execute(
-            "DELETE FROM process_observers WHERE process_id = ?1",
-            params![process_id],
-        )
-        .map_err(process_sqlite_error)?;
-        conn.execute(
-            "DELETE FROM process_leases WHERE process_id = ?1",
-            params![process_id],
-        )
-        .map_err(process_sqlite_error)?;
-        conn.execute(
-            "DELETE FROM process_segment_handovers WHERE process_id = ?1",
-            params![process_id],
-        )
-        .map_err(process_sqlite_error)?;
-        let terminal_label: String = conn
-            .query_row(
-                "SELECT status FROM processes WHERE process_id = ?1",
-                params![process_id],
-                |row| row.get(0),
-            )
-            .map_err(process_sqlite_error)?;
-        let pruned_change_seq = SqliteProcessRegistry::next_change_seq_conn(conn)?;
-        conn.execute(
-            "INSERT INTO process_tombstones (
-                process_id, terminal_label, pruned_at_ms, pruned_change_seq
-             ) VALUES (?1, ?2, ?3, ?4)",
-            params![
-                process_id,
-                terminal_label,
-                pruned_at_ms,
-                pruned_change_seq as i64
-            ],
-        )
-        .map_err(process_sqlite_error)?;
-        pruned_processes += conn
-            .execute(
-                "DELETE FROM processes WHERE process_id = ?1",
-                params![process_id],
-            )
-            .map_err(process_sqlite_error)?;
+    if prunable.is_empty() {
+        return Ok(ProcessPruneReport {
+            pruned_processes: 0,
+            pruned_events: 0,
+            pruned_trigger_deliveries: 0,
+        });
     }
+
+    prune_process_rows_conn(conn, &prunable, pruned_at_ms)
+}
+
+fn prune_process_rows_conn(
+    conn: &Connection,
+    prunable: &[String],
+    pruned_at_ms: i64,
+) -> Result<ProcessPruneReport, lash_core::PluginError> {
+    let process_ids_json = serde_json::to_string(&prunable).map_err(process_decode_error)?;
+    let process_count = prunable.len() as i64;
+    conn.execute(
+        "UPDATE process_change_clock
+         SET current_seq = current_seq + ?1
+         WHERE singleton = 1",
+        params![process_count],
+    )
+    .map_err(process_sqlite_error)?;
+    let final_change_seq = conn
+        .query_row(
+            "SELECT current_seq FROM process_change_clock WHERE singleton = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(process_sqlite_error)?;
+    let first_change_seq = final_change_seq - process_count + 1;
+
+    // json_each preserves the sorted candidate array's zero-based order, so
+    // tombstone change sequences retain process-id ordering without one clock
+    // update and insert per process.
+    conn.execute(
+        "INSERT INTO process_tombstones (
+             process_id, terminal_label, pruned_at_ms, pruned_change_seq
+         )
+         SELECT process.process_id,
+                process.status,
+                ?2,
+                ?3 + CAST(candidate.key AS INTEGER)
+         FROM json_each(?1) AS candidate
+         JOIN processes AS process ON process.process_id = candidate.value
+         ORDER BY CAST(candidate.key AS INTEGER)",
+        params![process_ids_json, pruned_at_ms, first_change_seq],
+    )
+    .map_err(process_sqlite_error)?;
+
+    let pruned_events = conn
+        .execute(
+            "DELETE FROM process_events
+             WHERE process_id IN (SELECT value FROM json_each(?1))",
+            params![process_ids_json],
+        )
+        .map_err(process_sqlite_error)?;
+    for table in [
+        "process_observers",
+        "process_leases",
+        "process_segment_handovers",
+    ] {
+        conn.execute(
+            &format!(
+                "DELETE FROM {table}
+                 WHERE process_id IN (SELECT value FROM json_each(?1))"
+            ),
+            params![process_ids_json],
+        )
+        .map_err(process_sqlite_error)?;
+    }
+    let pruned_processes = conn
+        .execute(
+            "DELETE FROM processes
+             WHERE process_id IN (SELECT value FROM json_each(?1))",
+            params![process_ids_json],
+        )
+        .map_err(process_sqlite_error)?;
+
+    if pruned_processes != prunable.len() {
+        return Err(lash_core::PluginError::Session(format!(
+            "process prune candidate/tombstone divergence: expected {}, deleted {pruned_processes}",
+            prunable.len()
+        )));
+    }
+
     Ok(ProcessPruneReport {
         pruned_processes,
         pruned_events,
@@ -193,4 +228,128 @@ pub(crate) fn prunable_terminal_process_ids_conn(
     }
 
     Ok(prunable)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::process_registry::tx_outcome;
+
+    #[tokio::test]
+    async fn candidate_tombstone_divergence_rolls_back_all_prune_mutations() {
+        let registry = SqliteProcessRegistry::memory()
+            .await
+            .expect("open prune rollback registry");
+        let process_id = format!("prune-rollback:{}", uuid::Uuid::new_v4());
+        let ghost_id = format!("prune-rollback-ghost:{}", uuid::Uuid::new_v4());
+        registry
+            .register_process(ProcessRegistration::new(
+                &process_id,
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            ))
+            .await
+            .expect("register rollback process");
+        registry
+            .complete_process(
+                &process_id,
+                ProcessAwaitOutput::Success {
+                    value: serde_json::Value::Null,
+                    control: None,
+                },
+                lash_core::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete rollback process");
+        let events_before = serde_json::to_value(
+            registry
+                .events_after(&process_id, 0)
+                .await
+                .expect("read events before divergent prune"),
+        )
+        .expect("encode events before divergent prune");
+        let clock_before = registry
+            .conn
+            .call(|conn| {
+                conn.query_row(
+                    "SELECT current_seq FROM process_change_clock WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+            })
+            .await
+            .expect("read process clock before divergent prune");
+
+        let divergent_process_id = process_id.clone();
+        let error = registry
+            .conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome(prune_process_rows_conn(
+                    tx,
+                    &[divergent_process_id, ghost_id],
+                    123_456,
+                )))
+            })
+            .await
+            .expect("run divergent prune")
+            .expect_err("candidate/tombstone divergence must abort the prune transaction");
+        assert!(
+            error.to_string().contains("candidate/tombstone divergence"),
+            "unexpected divergence error: {error}"
+        );
+
+        assert!(
+            registry
+                .get_process(&process_id)
+                .await
+                .expect("read process after divergent prune")
+                .is_some(),
+            "divergent prune must retain the process row"
+        );
+        assert_eq!(
+            serde_json::to_value(
+                registry
+                    .events_after(&process_id, 0)
+                    .await
+                    .expect("read events after divergent prune"),
+            )
+            .expect("encode events after divergent prune"),
+            events_before,
+            "divergent prune must retain the event journal"
+        );
+        let tombstone_process_id = process_id.clone();
+        let tombstone_count = registry
+            .conn
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT count(*) FROM process_tombstones WHERE process_id = ?1",
+                    params![tombstone_process_id],
+                    |row| row.get::<_, i64>(0),
+                )
+            })
+            .await
+            .expect("count tombstones after divergent prune");
+        assert_eq!(
+            tombstone_count, 0,
+            "divergent prune must not leave a tombstone"
+        );
+        let clock_after = registry
+            .conn
+            .call(|conn| {
+                conn.query_row(
+                    "SELECT current_seq FROM process_change_clock WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+            })
+            .await
+            .expect("read process clock after divergent prune");
+        assert_eq!(
+            clock_after, clock_before,
+            "divergent prune must roll back the clock"
+        );
+    }
 }

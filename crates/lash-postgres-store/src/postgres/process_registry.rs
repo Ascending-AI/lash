@@ -1,8 +1,10 @@
 use crate::*;
 use lash_core::facade_support;
+mod prune;
 mod retention;
 mod wake_delivery;
 
+use prune::prune_process_rows_tx;
 use retention::{filter_tombstoned_process_ids, filter_unregistered_process_ids};
 use wake_delivery::{
     claim_pending_wake_deliveries, decode_wake_delivery_row, load_wake_delivery_tx,
@@ -1433,67 +1435,27 @@ impl ProcessRegistry for PostgresProcessRegistry {
             }
         }
 
-        let mut pruned_events = 0;
-        let mut pruned_processes = 0;
-        for process_id in prunable {
-            for session_id in facade_support::process_runtime_session_ids(&process_id) {
-                delete_session_tx(&mut tx, &session_id, false)
-                    .await
-                    .map_err(|err| PluginError::Session(err.to_string()))?;
-            }
-            pruned_events += sqlx::query("DELETE FROM lash_process_events WHERE process_id = $1")
-                .bind(&process_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(plugin_sqlx_error)?
-                .rows_affected() as usize;
-            sqlx::query("DELETE FROM lash_process_observers WHERE process_id = $1")
-                .bind(&process_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(plugin_sqlx_error)?;
-            sqlx::query("DELETE FROM lash_process_leases WHERE process_id = $1")
-                .bind(&process_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(plugin_sqlx_error)?;
-            sqlx::query("DELETE FROM lash_process_segment_handovers WHERE process_id = $1")
-                .bind(&process_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(plugin_sqlx_error)?;
-            let terminal_label: String =
-                sqlx::query_scalar("SELECT status FROM lash_processes WHERE process_id = $1")
-                    .bind(&process_id)
-                    .fetch_one(&mut *tx)
-                    .await
-                    .map_err(plugin_sqlx_error)?;
-            let pruned_change_seq = next_process_change_seq_tx(&mut tx).await?;
-            sqlx::query(
-                "INSERT INTO lash_process_tombstones (
-                    process_id, terminal_label, pruned_at_ms, pruned_change_seq
-                 ) VALUES ($1, $2, $3, $4)",
-            )
-            .bind(&process_id)
-            .bind(terminal_label)
-            .bind(pruned_at_ms)
-            .bind(pruned_change_seq as i64)
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
-            pruned_processes += sqlx::query("DELETE FROM lash_processes WHERE process_id = $1")
-                .bind(&process_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(plugin_sqlx_error)?
-                .rows_affected() as usize;
+        if prunable.is_empty() {
+            tx.commit().await.map_err(plugin_sqlx_error)?;
+            return Ok(ProcessPruneReport {
+                pruned_processes: 0,
+                pruned_events: 0,
+                pruned_trigger_deliveries: 0,
+            });
         }
+
+        let process_ids = prunable;
+        let session_ids = process_ids
+            .iter()
+            .flat_map(|process_id| facade_support::process_runtime_session_ids(process_id))
+            .collect::<Vec<_>>();
+        delete_process_sessions_tx(&mut tx, &session_ids)
+            .await
+            .map_err(|err| PluginError::Session(err.to_string()))?;
+
+        let report = prune_process_rows_tx(&mut tx, &process_ids, pruned_at_ms).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(ProcessPruneReport {
-            pruned_processes,
-            pruned_events,
-            pruned_trigger_deliveries: 0,
-        })
+        Ok(report)
     }
 }
 

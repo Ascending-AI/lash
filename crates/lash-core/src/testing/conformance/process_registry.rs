@@ -108,6 +108,104 @@ pub async fn leased_completion_replay_repairs_projection<C, Fut>(
     );
 }
 
+/// Prove that one SQL prune batch allocates complete, process-id-ordered
+/// tombstone sequences and reports every removed process event.
+pub async fn process_prune_batch_tombstones(registry: Arc<dyn ProcessRegistry>) {
+    let cases = [
+        (
+            "batch-prune-a",
+            ProcessAwaitOutput::Success {
+                value: serde_json::Value::Null,
+                control: None,
+            },
+            "completed",
+        ),
+        (
+            "batch-prune-b",
+            ProcessAwaitOutput::Failure {
+                class: crate::ToolFailureClass::External,
+                code: "batch_failure".to_string(),
+                message: "batch failure".to_string(),
+                raw: None,
+                control: None,
+            },
+            "failed",
+        ),
+        (
+            "batch-prune-c",
+            ProcessAwaitOutput::Cancelled {
+                message: "batch cancellation".to_string(),
+                raw: None,
+                control: None,
+            },
+            "cancelled",
+        ),
+    ];
+    for (process_id, output, _) in &cases {
+        registry
+            .register_process(registration(process_id))
+            .await
+            .expect("register batch-prune process");
+        registry
+            .complete_process(
+                process_id,
+                output.clone(),
+                ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete batch-prune process");
+    }
+    registry
+        .register_process(registration("batch-prune-live-sentinel"))
+        .await
+        .expect("register live sequence sentinel");
+
+    let (_, projection_cursor) = registry
+        .processes_changed_since(crate::ProcessChangeCursor::initial(), 100)
+        .await
+        .expect("project batch terminals before pruning");
+    assert_eq!(
+        projection_cursor.store_sequence(),
+        7,
+        "three registrations, three completions, and the live sentinel must advance the clock to 7"
+    );
+
+    let report = registry
+        .prune_terminal_processes(
+            u64::MAX,
+            None,
+            crate::ProjectionWatermark::UpTo(projection_cursor),
+        )
+        .await
+        .expect("prune three terminal processes in one batch");
+    assert_eq!(report.pruned_processes, 3);
+    assert_eq!(report.pruned_events, 3);
+    assert_eq!(report.pruned_trigger_deliveries, 0);
+
+    let mut cursor = projection_cursor;
+    let mut sequences = Vec::new();
+    for ((expected_id, _, expected_label), expected_sequence) in cases.iter().zip([8_u64, 9, 10]) {
+        let (changes, next_cursor) = registry
+            .processes_changed_since(cursor, 1)
+            .await
+            .expect("page one batch tombstone");
+        let [crate::ProcessChange::Deleted { tombstone }] = changes.as_slice() else {
+            panic!("expected exactly one tombstone page, got {changes:?}");
+        };
+        assert_eq!(tombstone.process_id, *expected_id);
+        assert_eq!(tombstone.terminal_label, *expected_label);
+        assert_eq!(tombstone.pruned_change_seq, expected_sequence);
+        sequences.push(tombstone.pruned_change_seq);
+        cursor = next_cursor;
+    }
+    assert_eq!(sequences, [8, 9, 10]);
+    let (remaining, _) = registry
+        .processes_changed_since(cursor, 1)
+        .await
+        .expect("read after complete batch tombstone feed");
+    assert!(remaining.is_empty(), "batch deletion feed must be complete");
+}
+
 pub(super) fn registration(id: &str) -> ProcessRegistration {
     ProcessRegistration::new(
         id,
