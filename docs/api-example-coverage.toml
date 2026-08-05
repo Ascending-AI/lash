@@ -95443,3 +95443,19 @@ availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
 reason = "Reachable-only core surface: `lash_core::ToolContext::processes` hands `ToolSessionProcessAdmin` to hosts, so this member is part of the contract without a root export naming it. Concrete integrator class: plugin and tool implementers. The host-nameable path `lash::process::ToolSessionProcessAdmin::cancel_all` carries the exercise-or-remove decision."
+
+[[api]]
+symbol = "lash::tools::ToolContract::matches_manifest_identity"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::tools::ToolContract::matches_manifest_identity to the docs-snippets plugins/tools example and assert its externally observable result."
+
+[[api]]
+symbol = "lash_core::ToolContract::matches_manifest_identity"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class: tool providers verify a group-indexed manifest still names the same contract identity before trusting a cached resolution."

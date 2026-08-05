@@ -125,7 +125,7 @@ fn materially_different_shared_phases_use_scenario_budgets() {
     );
     assert_eq!(
         phase_wall_clock_budget_ms(RuntimePerfScenario::RlmLargeToolCatalog, "effect_loop"),
-        Some(6_000.0)
+        Some(1_000.0)
     );
 }
 
