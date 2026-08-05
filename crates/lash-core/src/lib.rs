@@ -259,6 +259,8 @@ pub mod facade_support {
     pub use crate::runtime::WakeDeliveryDriver;
     pub use crate::runtime::WakeTurnMode;
     pub use crate::runtime::WakeTurnPolicy;
+    #[doc(hidden)]
+    pub use crate::runtime::await_event_coordinator;
     pub use crate::runtime::current_epoch_ms;
     pub use crate::runtime::diff_token_ledger;
     pub use crate::runtime::diff_usage_reports;

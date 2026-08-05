@@ -1,96 +1,114 @@
-//! Durable PostgreSQL AwaitEvent promises.
+//! PostgreSQL storage atoms for durable AwaitEvent promises.
 //!
-//! PostgreSQL rows are the source of truth. The local notifier map is only a
-//! latency hint; every waiter also polls persisted state with bounded backoff.
+//! The promise state machine lives in [`AwaitEventCoordinator`]; this module is
+//! only the PostgreSQL half of its backend port. Every atom runs in a server
+//! transaction that first takes a per-session advisory lock, so the tombstone
+//! check, the identity comparison, and the write they guard cannot interleave
+//! under `READ COMMITTED`.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
 
-use hmac::{Hmac, Mac};
-use lash_core::facade_support::promise_semantics;
-use lash_core::{
-    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome, RuntimeError,
+use lash_core::RuntimeError;
+use lash_core::facade_support::await_event_coordinator::{
+    AwaitEventBackend, AwaitEventCoordinator, AwaitEventRowIdentity, AwaitEventVocabulary,
+    PersistedPromise, TerminalCas,
 };
 use sqlx::postgres::{PgPool, PgRow};
 use sqlx::{Executor, Row as _};
-use tokio::sync::Notify;
-use tokio_util::sync::CancellationToken;
 
-type HmacSha256 = Hmac<sha2::Sha256>;
-
-const INITIAL_POLL: Duration = Duration::from_millis(25);
-const MAX_POLL: Duration = Duration::from_secs(1);
 const SESSION_LOCK_NAMESPACE: i64 = 562;
 
-#[derive(Clone)]
-pub(crate) struct PostgresAwaitEvents {
+const VOCABULARY: AwaitEventVocabulary = AwaitEventVocabulary {
+    code_prefix: "postgres",
+    display_name: "PostgreSQL",
+};
+
+/// The PostgreSQL promise coordinator: one shared state machine over
+/// [`PostgresAwaitEventBackend`].
+pub(crate) type PostgresAwaitEvents = AwaitEventCoordinator<PostgresAwaitEventBackend>;
+
+/// Build the PostgreSQL await-event coordinator over `pool`.
+///
+/// PostgreSQL await-event rows are stamped from `clock`, which the sole call
+/// site hardwires to the wall clock because `PostgresStorage` carries no
+/// injectable time source. These stamps are records, not decision inputs: lease
+/// and claim decisions that must survive host clock skew read the server clock
+/// instead (ADR 0044, pinned by `postgres_clock_contract`).
+pub(crate) fn postgres_await_events(
     pool: PgPool,
     signing_secret: Arc<[u8]>,
-    notifiers: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
-}
-
-enum StoredPromise {
-    Missing,
-    Pending,
-    Resolved(Resolution),
-    UnknownOrRevoked,
+    clock: Arc<dyn lash_core::Clock>,
+) -> PostgresAwaitEvents {
+    AwaitEventCoordinator::new(PostgresAwaitEventBackend { pool }, signing_secret, clock)
 }
 
 #[derive(Clone)]
-struct StoredIdentity {
-    scope_json: String,
-    wait_json: String,
-    session_id: Option<String>,
-    turn_control: bool,
+pub(crate) struct PostgresAwaitEventBackend {
+    pool: PgPool,
 }
 
-impl PostgresAwaitEvents {
-    pub(crate) fn new(pool: PgPool, signing_secret: Arc<[u8]>) -> Self {
-        Self {
-            pool,
-            signing_secret,
-            notifiers: Arc::new(Mutex::new(HashMap::new())),
-        }
+#[async_trait::async_trait]
+impl AwaitEventBackend for PostgresAwaitEventBackend {
+    fn vocabulary(&self) -> AwaitEventVocabulary {
+        VOCABULARY
     }
 
-    pub(crate) async fn key_for(
-        &self,
-        scope: &ExecutionScope,
-        wait: AwaitEventWaitIdentity,
-    ) -> Result<AwaitEventKey, RuntimeError> {
-        let key_id = promise_semantics::derive_key_id(scope, &wait)?;
-        if let Some(session_id) = scope.session_id()
-            && self.session_is_revoked(session_id).await?
-        {
-            return Err(unknown_or_revoked());
-        }
-        let signature = self.signature(scope, &wait, &key_id)?;
-        Ok(AwaitEventKey {
-            scope: scope.clone(),
-            wait,
-            key_id,
-            signature,
-        })
+    async fn session_is_revoked(&self, session_id: &str) -> Result<bool, RuntimeError> {
+        session_is_revoked(&self.pool, session_id).await
     }
 
-    pub(crate) async fn resolve(
+    async fn ensure_pending(
         &self,
-        key: &AwaitEventKey,
-        resolution: Resolution,
-    ) -> Result<ResolveOutcome, RuntimeError> {
-        if !self.authenticates(key)? {
-            return Ok(ResolveOutcome::UnknownOrRevoked);
-        }
-        let identity = stored_identity(key)?;
-        let proposed_json = encode_resolution(&resolution)?;
-        let now = current_epoch_ms() as i64;
+        key_id: &str,
+        identity: &AwaitEventRowIdentity,
+        now_ms: u64,
+    ) -> Result<bool, RuntimeError> {
+        let now = now_ms as i64;
         let mut tx = self.pool.begin().await.map_err(store_error)?;
         lock_session(&mut tx, identity.session_id.as_deref()).await?;
         if let Some(session_id) = identity.session_id.as_deref()
             && session_is_revoked(&mut *tx, session_id).await?
         {
-            return Ok(ResolveOutcome::UnknownOrRevoked);
+            return Ok(false);
+        }
+        sqlx::query(
+            "INSERT INTO lash_await_event_waits (
+                key_id, scope_json, wait_json, session_id, turn_control,
+                terminal_json, created_at_ms, resolved_at_ms
+             )
+             VALUES ($1, $2, $3, $4, $5, NULL, $6, NULL)
+             ON CONFLICT (key_id) DO NOTHING",
+        )
+        .bind(key_id)
+        .bind(&identity.scope_json)
+        .bind(&identity.wait_json)
+        .bind(&identity.session_id)
+        .bind(identity.turn_control)
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .map_err(store_error)?;
+        let accepted = select_wait_row(&mut *tx, key_id)
+            .await?
+            .is_some_and(|row| row.matches(identity));
+        tx.commit().await.map_err(store_error)?;
+        Ok(accepted)
+    }
+
+    async fn store_terminal(
+        &self,
+        key_id: &str,
+        identity: &AwaitEventRowIdentity,
+        terminal_json: &str,
+        now_ms: u64,
+    ) -> Result<TerminalCas, RuntimeError> {
+        let now = now_ms as i64;
+        let mut tx = self.pool.begin().await.map_err(store_error)?;
+        lock_session(&mut tx, identity.session_id.as_deref()).await?;
+        if let Some(session_id) = identity.session_id.as_deref()
+            && session_is_revoked(&mut *tx, session_id).await?
+        {
+            return Ok(TerminalCas::UnknownOrRevoked);
         }
 
         let inserted: Option<String> = sqlx::query_scalar(
@@ -102,18 +120,18 @@ impl PostgresAwaitEvents {
              ON CONFLICT (key_id) DO NOTHING
              RETURNING key_id",
         )
-        .bind(&key.key_id)
+        .bind(key_id)
         .bind(&identity.scope_json)
         .bind(&identity.wait_json)
         .bind(&identity.session_id)
         .bind(identity.turn_control)
-        .bind(&proposed_json)
+        .bind(terminal_json)
         .bind(now)
         .fetch_optional(&mut *tx)
         .await
         .map_err(store_error)?;
-        let outcome = if inserted.is_some() {
-            ResolveOutcome::Accepted
+        let cas = if inserted.is_some() {
+            TerminalCas::Stored
         } else {
             let updated: Option<String> = sqlx::query_scalar(
                 "UPDATE lash_await_event_waits
@@ -126,25 +144,22 @@ impl PostgresAwaitEvents {
                    AND terminal_json IS NULL
                  RETURNING terminal_json",
             )
-            .bind(&key.key_id)
+            .bind(key_id)
             .bind(&identity.scope_json)
             .bind(&identity.wait_json)
             .bind(&identity.session_id)
             .bind(identity.turn_control)
-            .bind(&proposed_json)
+            .bind(terminal_json)
             .bind(now)
             .fetch_optional(&mut *tx)
             .await
             .map_err(store_error)?;
             if updated.is_some() {
-                ResolveOutcome::Accepted
+                TerminalCas::Stored
             } else {
-                let stored = select_wait_row(&mut *tx, &key.key_id).await?;
-                match stored {
-                    Some(row) if row.matches(&identity) => match row.terminal_json {
-                        Some(terminal_json) => ResolveOutcome::AlreadyResolved {
-                            terminal: decode_resolution(&terminal_json)?,
-                        },
+                match select_wait_row(&mut *tx, key_id).await? {
+                    Some(row) if row.matches(identity) => match row.terminal_json {
+                        Some(terminal_json) => TerminalCas::AlreadyResolved { terminal_json },
                         None => {
                             return Err(RuntimeError::new(
                                 "postgres_await_event_store",
@@ -152,113 +167,45 @@ impl PostgresAwaitEvents {
                             ));
                         }
                     },
-                    _ => ResolveOutcome::UnknownOrRevoked,
+                    _ => TerminalCas::UnknownOrRevoked,
                 }
             }
         };
         tx.commit().await.map_err(store_error)?;
-        if outcome == ResolveOutcome::Accepted {
-            self.notify_key(&key.key_id)?;
-        }
-        Ok(outcome)
+        Ok(cas)
     }
 
-    pub(crate) async fn peek(
+    async fn inspect(
         &self,
-        key: &AwaitEventKey,
-    ) -> Result<Option<Resolution>, RuntimeError> {
-        match self.inspect(key).await? {
-            StoredPromise::Missing | StoredPromise::Pending => Ok(None),
-            StoredPromise::Resolved(terminal) => Ok(Some(terminal)),
-            StoredPromise::UnknownOrRevoked => Err(unknown_or_revoked()),
+        key_id: &str,
+        identity: &AwaitEventRowIdentity,
+    ) -> Result<PersistedPromise, RuntimeError> {
+        let mut tx = self.pool.begin().await.map_err(store_error)?;
+        lock_session(&mut tx, identity.session_id.as_deref()).await?;
+        let revoked = match identity.session_id.as_deref() {
+            Some(session_id) => session_is_revoked(&mut *tx, session_id).await?,
+            None => false,
+        };
+        let stored = select_wait_row(&mut *tx, key_id).await?;
+        tx.commit().await.map_err(store_error)?;
+        if revoked {
+            return Ok(PersistedPromise::UnknownOrRevoked);
         }
-    }
-
-    pub(crate) async fn await_resolution(
-        &self,
-        key: &AwaitEventKey,
-        cancel: CancellationToken,
-        deadline: Option<Instant>,
-    ) -> Result<Resolution, RuntimeError> {
-        self.await_resolution_with_clock(
-            key,
-            cancel,
-            deadline,
-            &lash_core::facade_support::SystemClock,
-        )
-        .await
-    }
-
-    pub(crate) async fn await_resolution_with_clock(
-        &self,
-        key: &AwaitEventKey,
-        cancel: CancellationToken,
-        deadline: Option<Instant>,
-        clock: &dyn lash_core::Clock,
-    ) -> Result<Resolution, RuntimeError> {
-        let notify = self.notifier_for(&key.key_id)?;
-        self.ensure_pending(key).await?;
-        let mut backoff = INITIAL_POLL;
-        loop {
-            match self.inspect(key).await? {
-                StoredPromise::Resolved(terminal) => return Ok(terminal),
-                StoredPromise::UnknownOrRevoked => return Err(unknown_or_revoked()),
-                StoredPromise::Missing | StoredPromise::Pending => {}
-            }
-
-            let poll = clock.sleep(backoff);
-            tokio::pin!(poll);
-            if let Some(deadline) = deadline {
-                tokio::select! {
-                    _ = cancel.cancelled() => {
-                        if key.wait.is_turn_control() {
-                            return Err(RuntimeError::new(
-                                "turn_control_wait_cancelled",
-                                "turn-control waiter stopped without resolving its keyed promise",
-                            ));
-                        }
-                        let _ = self.resolve(key, Resolution::Cancelled).await?;
-                    }
-                    _ = clock.sleep_until(deadline) => {
-                        if key.wait.is_turn_control() {
-                            return Err(RuntimeError::new(
-                                "turn_control_wait_timeout",
-                                "turn-control waiter timed out without resolving its keyed promise",
-                            ));
-                        }
-                        let _ = self.resolve(key, Resolution::Timeout).await?;
-                    }
-                    _ = notify.notified() => {
-                        backoff = INITIAL_POLL;
-                        continue;
-                    }
-                    _ = &mut poll => {}
-                }
-            } else {
-                tokio::select! {
-                    _ = cancel.cancelled() => {
-                        if key.wait.is_turn_control() {
-                            return Err(RuntimeError::new(
-                                "turn_control_wait_cancelled",
-                                "turn-control waiter stopped without resolving its keyed promise",
-                            ));
-                        }
-                        let _ = self.resolve(key, Resolution::Cancelled).await?;
-                    }
-                    _ = notify.notified() => {
-                        backoff = INITIAL_POLL;
-                        continue;
-                    }
-                    _ = &mut poll => {}
-                }
-            }
-            backoff = (backoff * 2).min(MAX_POLL);
+        let Some(stored) = stored else {
+            return Ok(PersistedPromise::Missing);
+        };
+        if !stored.matches(identity) {
+            return Ok(PersistedPromise::UnknownOrRevoked);
         }
+        Ok(stored
+            .terminal_json
+            .map_or(PersistedPromise::Pending, |terminal_json| {
+                PersistedPromise::Resolved { terminal_json }
+            }))
     }
 
-    pub(crate) async fn revoke_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        validate_session_id(session_id)?;
-        let now = current_epoch_ms() as i64;
+    async fn revoke_session(&self, session_id: &str, now_ms: u64) -> Result<(), RuntimeError> {
+        let now = now_ms as i64;
         let mut tx = self.pool.begin().await.map_err(store_error)?;
         lock_session(&mut tx, Some(session_id)).await?;
         sqlx::query(
@@ -276,15 +223,16 @@ impl PostgresAwaitEvents {
             .execute(&mut *tx)
             .await
             .map_err(store_error)?;
-        tx.commit().await.map_err(store_error)?;
-        self.notify_all()?;
-        Ok(())
+        tx.commit().await.map_err(store_error)
     }
 
-    pub(crate) async fn cancel_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        validate_session_id(session_id)?;
-        let terminal_json = encode_resolution(&Resolution::Cancelled)?;
-        let now = current_epoch_ms() as i64;
+    async fn cancel_session_promises(
+        &self,
+        session_id: &str,
+        terminal_json: &str,
+        now_ms: u64,
+    ) -> Result<(), RuntimeError> {
+        let now = now_ms as i64;
         let mut tx = self.pool.begin().await.map_err(store_error)?;
         lock_session(&mut tx, Some(session_id)).await?;
         sqlx::query(
@@ -300,145 +248,7 @@ impl PostgresAwaitEvents {
         .execute(&mut *tx)
         .await
         .map_err(store_error)?;
-        tx.commit().await.map_err(store_error)?;
-        self.notify_all()?;
-        Ok(())
-    }
-
-    async fn ensure_pending(&self, key: &AwaitEventKey) -> Result<(), RuntimeError> {
-        if !self.authenticates(key)? {
-            return Err(unknown_or_revoked());
-        }
-        let identity = stored_identity(key)?;
-        let now = current_epoch_ms() as i64;
-        let mut tx = self.pool.begin().await.map_err(store_error)?;
-        lock_session(&mut tx, identity.session_id.as_deref()).await?;
-        if let Some(session_id) = identity.session_id.as_deref()
-            && session_is_revoked(&mut *tx, session_id).await?
-        {
-            return Err(unknown_or_revoked());
-        }
-        sqlx::query(
-            "INSERT INTO lash_await_event_waits (
-                key_id, scope_json, wait_json, session_id, turn_control,
-                terminal_json, created_at_ms, resolved_at_ms
-             )
-             VALUES ($1, $2, $3, $4, $5, NULL, $6, NULL)
-             ON CONFLICT (key_id) DO NOTHING",
-        )
-        .bind(&key.key_id)
-        .bind(&identity.scope_json)
-        .bind(&identity.wait_json)
-        .bind(&identity.session_id)
-        .bind(identity.turn_control)
-        .bind(now)
-        .execute(&mut *tx)
-        .await
-        .map_err(store_error)?;
-        let accepted = select_wait_row(&mut *tx, &key.key_id)
-            .await?
-            .is_some_and(|row| row.matches(&identity));
-        tx.commit().await.map_err(store_error)?;
-        if accepted {
-            Ok(())
-        } else {
-            Err(unknown_or_revoked())
-        }
-    }
-
-    async fn inspect(&self, key: &AwaitEventKey) -> Result<StoredPromise, RuntimeError> {
-        if !self.authenticates(key)? {
-            return Ok(StoredPromise::UnknownOrRevoked);
-        }
-        let identity = stored_identity(key)?;
-        let mut tx = self.pool.begin().await.map_err(store_error)?;
-        lock_session(&mut tx, identity.session_id.as_deref()).await?;
-        let revoked = match identity.session_id.as_deref() {
-            Some(session_id) => session_is_revoked(&mut *tx, session_id).await?,
-            None => false,
-        };
-        let stored = select_wait_row(&mut *tx, &key.key_id).await?;
-        tx.commit().await.map_err(store_error)?;
-        if revoked {
-            return Ok(StoredPromise::UnknownOrRevoked);
-        }
-        let Some(stored) = stored else {
-            return Ok(StoredPromise::Missing);
-        };
-        if !stored.matches(&identity) {
-            return Ok(StoredPromise::UnknownOrRevoked);
-        }
-        stored.terminal_json.map_or_else(
-            || Ok(StoredPromise::Pending),
-            |json| decode_resolution(&json).map(StoredPromise::Resolved),
-        )
-    }
-
-    async fn session_is_revoked(&self, session_id: &str) -> Result<bool, RuntimeError> {
-        session_is_revoked(&self.pool, session_id).await
-    }
-
-    fn signature(
-        &self,
-        scope: &ExecutionScope,
-        wait: &AwaitEventWaitIdentity,
-        key_id: &str,
-    ) -> Result<String, RuntimeError> {
-        let mut mac = HmacSha256::new_from_slice(&self.signing_secret).map_err(|err| {
-            RuntimeError::new(
-                "postgres_await_event_sign",
-                format!("failed to initialize PostgreSQL await-event signer: {err}"),
-            )
-        })?;
-        mac.update(&promise_semantics::sign_material(scope, wait, key_id));
-        Ok(format!("{:x}", mac.finalize().into_bytes()))
-    }
-
-    fn authenticates(&self, key: &AwaitEventKey) -> Result<bool, RuntimeError> {
-        let Ok(derived_key_id) = promise_semantics::derive_key_id(&key.scope, &key.wait) else {
-            return Ok(false);
-        };
-        let expected_signature = self.signature(&key.scope, &key.wait, &key.key_id)?;
-        let key_id_matches =
-            promise_semantics::constant_time_eq(derived_key_id.as_bytes(), key.key_id.as_bytes());
-        let signature_matches = promise_semantics::constant_time_eq(
-            expected_signature.as_bytes(),
-            key.signature.as_bytes(),
-        );
-        Ok(key_id_matches & signature_matches)
-    }
-
-    fn notifier_for(&self, key_id: &str) -> Result<Arc<Notify>, RuntimeError> {
-        let mut notifiers = self.notifiers.lock().map_err(|_| notifier_error())?;
-        Ok(Arc::clone(
-            notifiers
-                .entry(key_id.to_string())
-                .or_insert_with(|| Arc::new(Notify::new())),
-        ))
-    }
-
-    fn notify_key(&self, key_id: &str) -> Result<(), RuntimeError> {
-        if let Some(notify) = self
-            .notifiers
-            .lock()
-            .map_err(|_| notifier_error())?
-            .get(key_id)
-        {
-            notify.notify_waiters();
-        }
-        Ok(())
-    }
-
-    fn notify_all(&self) -> Result<(), RuntimeError> {
-        for notify in self
-            .notifiers
-            .lock()
-            .map_err(|_| notifier_error())?
-            .values()
-        {
-            notify.notify_waiters();
-        }
-        Ok(())
+        tx.commit().await.map_err(store_error)
     }
 }
 
@@ -451,7 +261,7 @@ struct WaitRow {
 }
 
 impl WaitRow {
-    fn matches(&self, identity: &StoredIdentity) -> bool {
+    fn matches(&self, identity: &AwaitEventRowIdentity) -> bool {
         self.scope_json == identity.scope_json
             && self.wait_json == identity.wait_json
             && self.session_id == identity.session_id
@@ -500,6 +310,12 @@ where
     .map_err(store_error)
 }
 
+/// Serialize every promise atom for one session against its peers.
+///
+/// `READ COMMITTED` cannot make "check the tombstone, then write the row"
+/// atomic on its own: a concurrent revocation would commit between the two
+/// statements and the write would survive its own session's deletion. Session-free
+/// scopes have no tombstone to race with, so they take no lock.
 async fn lock_session(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: Option<&str>,
@@ -516,66 +332,6 @@ async fn lock_session(
     Ok(())
 }
 
-fn stored_identity(key: &AwaitEventKey) -> Result<StoredIdentity, RuntimeError> {
-    Ok(StoredIdentity {
-        scope_json: serde_json::to_string(&key.scope).map_err(encode_error)?,
-        wait_json: serde_json::to_string(&key.wait).map_err(encode_error)?,
-        session_id: key.scope.session_id().map(ToOwned::to_owned),
-        turn_control: key.wait.is_turn_control(),
-    })
-}
-
-fn encode_resolution(resolution: &Resolution) -> Result<String, RuntimeError> {
-    serde_json::to_string(resolution).map_err(encode_error)
-}
-
-fn decode_resolution(encoded: &str) -> Result<Resolution, RuntimeError> {
-    serde_json::from_str(encoded).map_err(|err| {
-        RuntimeError::new(
-            "postgres_await_event_decode",
-            format!("failed to decode PostgreSQL await-event terminal: {err}"),
-        )
-    })
-}
-
-fn validate_session_id(session_id: &str) -> Result<(), RuntimeError> {
-    if session_id.trim().is_empty() {
-        return Err(RuntimeError::new(
-            "invalid_await_event_session_id",
-            "await-event session id must be non-empty",
-        ));
-    }
-    Ok(())
-}
-
-fn unknown_or_revoked() -> RuntimeError {
-    RuntimeError::new(
-        "await_event_unknown_or_revoked",
-        "await-event key is invalid or revoked",
-    )
-}
-
 fn store_error(err: sqlx::Error) -> RuntimeError {
     RuntimeError::new("postgres_await_event_store", err.to_string())
-}
-
-fn encode_error(err: serde_json::Error) -> RuntimeError {
-    RuntimeError::new(
-        "postgres_await_event_encode",
-        format!("failed to encode PostgreSQL await-event state: {err}"),
-    )
-}
-
-fn notifier_error() -> RuntimeError {
-    RuntimeError::new(
-        "postgres_await_event_notify",
-        "PostgreSQL await-event notifier lock poisoned",
-    )
-}
-
-fn current_epoch_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system clock must be after Unix epoch")
-        .as_millis() as u64
 }

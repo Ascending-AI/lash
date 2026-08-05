@@ -1238,6 +1238,56 @@ async fn postgres_await_event_key_mint_is_pure_and_signatures_match_sqlite_when_
     );
 }
 
+/// The PostgreSQL half of the shared decode vocabulary.
+///
+/// Both backends decode the persisted terminal in the coordinator, so a corrupt
+/// row is a `{backend}_await_event_decode` failure on every promise path. The
+/// SQLite twin is
+/// `sqlite_await_event_terminal_decode_failures_report_the_decode_vocabulary`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_await_event_terminal_decode_failures_report_the_decode_vocabulary_when_configured()
+ {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres await-event decode vocabulary test: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    let host = storage.effect_host();
+    let key = host
+        .await_event_key(
+            &durable_turn_scope("corrupt-terminal-session", "corrupt-terminal-turn"),
+            AwaitEventWaitIdentity::tool_completion("call"),
+        )
+        .await
+        .expect("mint key");
+    assert_eq!(
+        host.resolve_await_event(&key, Resolution::Ok(serde_json::json!("winner")))
+            .await
+            .expect("resolve promise"),
+        ResolveOutcome::Accepted
+    );
+    sqlx::query("UPDATE lash_await_event_waits SET terminal_json = $2 WHERE key_id = $1")
+        .bind(&key.key_id)
+        .bind("not-json")
+        .execute(storage.pool())
+        .await
+        .expect("corrupt the persisted terminal");
+
+    let peek_error = host
+        .peek_await_event(&key)
+        .await
+        .expect_err("corrupt terminal must fail the peek");
+    let resolve_error = host
+        .resolve_await_event(&key, Resolution::Cancelled)
+        .await
+        .expect_err("corrupt terminal must fail the duplicate resolve");
+    for error in [peek_error, resolve_error] {
+        assert_eq!(error.code.as_str(), "postgres_await_event_decode");
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_effect_host_satisfies_cold_process_await_event_conformance_when_configured() {
     use tokio::io::{AsyncBufReadExt as _, BufReader};

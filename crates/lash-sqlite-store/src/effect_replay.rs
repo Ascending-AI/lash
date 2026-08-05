@@ -903,7 +903,11 @@ impl SqliteEffectReplayInner {
     ) -> Self {
         let sequence = EFFECT_OWNER_COUNTER.fetch_add(1, Ordering::SeqCst);
         let timestamp_ms = clock.timestamp_ms();
-        let await_events = SqliteAwaitEvents::new(conn.clone(), signing_secret, Arc::clone(&clock));
+        let await_events = crate::await_event::sqlite_await_events(
+            conn.clone(),
+            signing_secret,
+            Arc::clone(&clock),
+        );
         Self {
             conn,
             clock,

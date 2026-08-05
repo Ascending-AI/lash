@@ -5,6 +5,8 @@ mod clock;
 mod config_ops;
 pub use config_ops::SessionConfigPatch;
 pub(crate) mod effect;
+#[doc(hidden)]
+pub use effect::await_event_coordinator;
 pub use effect::promise_semantics;
 mod environment;
 mod error;
