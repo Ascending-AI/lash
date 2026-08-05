@@ -6,121 +6,15 @@
 //! per-attempt telemetry, not session history), so the oracle here is a capture
 //! layer over the `tracing` dispatcher rather than an event sink.
 
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
+use super::trace_capture::{EventCapture, capturing};
 use crate::runtime::session_execution_lease::{
     SessionExecutionLeaseCommitEvidence, SessionExecutionLeaseGuard, trace_commit_cas_rejected,
 };
 use crate::store::StoreError;
 use crate::{LeaseOwnerIdentity, LeaseTimings, SystemClock};
-use tracing_subscriber::layer::{Context, SubscriberExt};
-use tracing_subscriber::{Layer, Registry};
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct CapturedEvent {
-    level: String,
-    fields: BTreeMap<String, String>,
-}
-
-impl CapturedEvent {
-    pub(super) fn field(&self, name: &str) -> &str {
-        self.fields
-            .get(name)
-            .map(String::as_str)
-            .unwrap_or_else(|| panic!("event is missing field `{name}`: {self:?}"))
-    }
-}
-
-#[derive(Clone, Default)]
-pub(super) struct EventCapture {
-    events: Arc<Mutex<Vec<CapturedEvent>>>,
-}
-
-impl EventCapture {
-    /// Every captured event whose `event` field names this lease transition.
-    pub(super) fn named(&self, event: &str) -> Vec<CapturedEvent> {
-        self.events
-            .lock()
-            .expect("lock captured events")
-            .iter()
-            .filter(|captured| captured.fields.get("event").map(String::as_str) == Some(event))
-            .cloned()
-            .collect()
-    }
-
-    pub(super) fn exactly_one(&self, event: &str) -> CapturedEvent {
-        let matched = self.named(event);
-        assert_eq!(
-            matched.len(),
-            1,
-            "expected exactly one `{event}` trace event, captured: {:?}",
-            self.events.lock().expect("lock captured events")
-        );
-        matched.into_iter().next().expect("checked one event")
-    }
-}
-
-struct FieldVisitor(BTreeMap<String, String>);
-
-impl tracing::field::Visit for FieldVisitor {
-    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        // `Option` fields render as `Some("x")` / `None`; unwrap the payload so
-        // an assertion reads the value rather than the wrapper.
-        let rendered = format!("{value:?}");
-        let unwrapped = rendered
-            .strip_prefix("Some(")
-            .and_then(|rest| rest.strip_suffix(')'))
-            .map(|inner| inner.trim_matches('"').to_string())
-            .unwrap_or_else(|| rendered.trim_matches('"').to_string());
-        self.0.insert(field.name().to_string(), unwrapped);
-    }
-
-    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-        self.0.insert(field.name().to_string(), value.to_string());
-    }
-
-    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
-        self.0.insert(field.name().to_string(), value.to_string());
-    }
-
-    fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
-        self.0.insert(field.name().to_string(), value.to_string());
-    }
-}
-
-impl<S: tracing::Subscriber> Layer<S> for EventCapture {
-    fn on_event(&self, event: &tracing::Event<'_>, _context: Context<'_, S>) {
-        let mut visitor = FieldVisitor(BTreeMap::new());
-        event.record(&mut visitor);
-        self.events
-            .lock()
-            .expect("lock captured events")
-            .push(CapturedEvent {
-                level: event.metadata().level().to_string(),
-                fields: visitor.0,
-            });
-    }
-}
-
-/// Run `body` with a capture layer installed as the thread-local dispatcher.
-///
-/// `#[tokio::test]` builds a current-thread runtime, so the lease renewal task
-/// is polled on this same thread and its events land in the same capture.
-pub(super) async fn capturing<F, Fut, T>(body: F) -> (T, EventCapture)
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = T>,
-{
-    let capture = EventCapture::default();
-    let subscriber = Registry::default().with(capture.clone());
-    let guard = tracing::subscriber::set_default(subscriber);
-    let value = body().await;
-    drop(guard);
-    (value, capture)
-}
-
 /// Several renewal intervals, so the loop has provably run and failed.
 const TRANSIENT_SETTLE: Duration = Duration::from_millis(400);
 
@@ -376,7 +270,7 @@ async fn a_live_holder_that_is_swept_reports_only_its_own_renewal_failure() {
     );
     for absent in ["superseding_owner_id", "displaced_owner_id"] {
         assert!(
-            !lease_lost.fields.contains_key(absent),
+            !lease_lost.contains_field(absent),
             "the lost event must not claim to know who took the lane: {lease_lost:?}"
         );
     }
@@ -509,7 +403,7 @@ async fn a_lane_less_writer_that_loses_the_cas_is_still_attributable() {
     );
     assert_eq!(rejected.field("incarnation_id"), "worker-b:boot-1");
     assert!(
-        !rejected.fields.contains_key("fencing_token"),
+        !rejected.contains_field("fencing_token"),
         "a lane-less writer held no generation, so it must not claim one: {rejected:?}"
     );
     assert_eq!(

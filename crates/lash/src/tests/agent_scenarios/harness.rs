@@ -6,6 +6,7 @@ use super::contracts::{
     assert_no_duplicate_label_step, assert_session_turn_child_graph,
     assert_successful_agent_scenario,
 };
+use lash_core::llm::types::LlmUsage;
 use std::collections::VecDeque;
 
 #[derive(Default)]
@@ -21,6 +22,7 @@ pub(super) struct AgentScenario {
     pub(super) name: &'static str,
     pub(super) session_id: String,
     pub(super) scripted_provider_responses: Vec<String>,
+    pub(super) scripted_provider_usage: LlmUsage,
     pub(super) root_prompt: &'static str,
     pub(super) expected_final_value: Option<serde_json::Value>,
     pub(super) tool_provider: Option<Arc<dyn ToolProvider>>,
@@ -35,6 +37,7 @@ impl AgentScenario {
             name,
             session_id: agent_scenario_session_id(name),
             scripted_provider_responses: Vec::new(),
+            scripted_provider_usage: LlmUsage::default(),
             root_prompt,
             expected_final_value: None,
             tool_provider: None,
@@ -60,6 +63,11 @@ impl AgentScenario {
 
     pub(super) fn expected_final_value(mut self, value: serde_json::Value) -> Self {
         self.expected_final_value = Some(value);
+        self
+    }
+
+    pub(super) fn response_usage(mut self, usage: LlmUsage) -> Self {
+        self.scripted_provider_usage = usage;
         self
     }
 
@@ -145,6 +153,7 @@ pub(super) struct AgentScenarioRun {
 
 struct AgentScenarioSetup {
     scripted_provider_responses: Vec<String>,
+    scripted_provider_usage: LlmUsage,
     tool_provider: Option<Arc<dyn ToolProvider>>,
     install_subagents: bool,
     install_llm_tools: bool,
@@ -155,6 +164,7 @@ impl AgentScenarioSetup {
     fn new(scripted_provider_responses: Vec<String>) -> Self {
         Self {
             scripted_provider_responses,
+            scripted_provider_usage: LlmUsage::default(),
             tool_provider: None,
             install_subagents: false,
             install_llm_tools: false,
@@ -164,6 +174,11 @@ impl AgentScenarioSetup {
 
     fn tool_provider(mut self, tool_provider: Arc<dyn ToolProvider>) -> Self {
         self.tool_provider = Some(tool_provider);
+        self
+    }
+
+    fn response_usage(mut self, usage: LlmUsage) -> Self {
+        self.scripted_provider_usage = usage;
         self
     }
 
@@ -195,6 +210,7 @@ impl AgentScenarioSetup {
         let prompt_captures = Arc::new(StdMutex::new(Vec::new()));
         let provider = scripted_provider(
             self.scripted_provider_responses,
+            self.scripted_provider_usage,
             Arc::clone(&prompt_captures),
         );
         let factory = rlm_factory().with_lashlang_execution_sink(
@@ -267,6 +283,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
     case: AgentScenario,
 ) -> Result<AgentScenarioRun> {
     let runtime = AgentScenarioSetup::new(case.scripted_provider_responses.clone())
+        .response_usage(case.scripted_provider_usage.clone())
         .maybe_tool_provider(case.tool_provider.clone())
         .install_subagents(case.install_subagents)
         .max_turns(case.max_turns)
@@ -889,6 +906,7 @@ finish (await handle)?"#,
 
 fn scripted_provider(
     responses: Vec<String>,
+    usage: LlmUsage,
     prompt_captures: Arc<StdMutex<Vec<LlmRequest>>>,
 ) -> ProviderHandle {
     let responses = Arc::new(TokioMutex::new(VecDeque::from(responses)));
@@ -896,6 +914,7 @@ fn scripted_provider(
         .kind("agent-scenario")
         .complete(move |request| {
             let responses = Arc::clone(&responses);
+            let usage = usage.clone();
             let prompt_captures = Arc::clone(&prompt_captures);
             async move {
                 prompt_captures
@@ -913,6 +932,7 @@ fn scripted_provider(
                         text,
                         response_meta: None,
                     }],
+                    usage,
                     response_metadata: Default::default(),
                     ..LlmResponse::default()
                 })

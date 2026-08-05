@@ -25,6 +25,7 @@ mod runtime_scenarios;
 mod session_lease_observability;
 mod stream_accumulator;
 mod tool_surface_lifecycle;
+pub(crate) mod trace_capture;
 mod tracing;
 mod turns;
 mod usage;

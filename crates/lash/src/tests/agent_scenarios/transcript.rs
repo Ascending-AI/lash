@@ -9,9 +9,10 @@
 //! Two deliberate omissions, both documented so a reviewer knows what a diff
 //! here cannot tell them:
 //!
-//! - Prose / reasoning deltas and token-usage events are dropped. They are
+//! - Prose / reasoning deltas and live token-usage events are dropped. They are
 //!   provider-wire volume, not behavior, and they would push every transcript
-//!   past its review budget.
+//!   past its review budget. Settled usage remains pinned on each observed
+//!   checkpoint commit.
 //! - Durable commits are appended in commit order rather than interleaved with
 //!   the activity stream. The harness observes the store seam and the activity
 //!   sink separately and has no shared ordering between them, so pretending to

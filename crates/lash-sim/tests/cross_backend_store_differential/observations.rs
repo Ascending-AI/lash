@@ -306,6 +306,9 @@ pub(super) fn assert_claim_id_spelling(
     enqueue_seq: u64,
     fencing_token: u64,
 ) {
+    // This raw-durable dialect guard is reached only by the cross-backend test,
+    // whose entrypoint is Postgres-gated. A SQLite-only lane does not run it;
+    // lash-sqlite-store therefore pins its `qwc` and `tic` spellings locally too.
     if let Some(claim_id) = claim_id {
         assert_eq!(
             claim_id,

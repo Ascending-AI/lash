@@ -18,9 +18,10 @@ use lash_core::runtime::{
     RuntimeSubject,
 };
 use lash_core::{
-    LeaseOwnerIdentity, PluginSessionSnapshot, QueuedWorkStore, RuntimeCommit, RuntimeInvocation,
-    RuntimeSessionState, SessionCommitStore, SessionExecutionLeaseStore, SessionStoreFactory,
-    StoreError, ToolState,
+    LeaseOwnerIdentity, PendingTurnInputDraft, PluginSessionSnapshot, QueuedWorkStore,
+    RuntimeCommit, RuntimeInvocation, RuntimeSessionState, SessionCommitStore,
+    SessionExecutionLeaseStore, SessionStoreFactory, StoreError, ToolState, TurnInput,
+    TurnInputIngress, TurnInputStore,
 };
 use lash_sqlite_store::{SqliteSessionStoreFactory, Store};
 
@@ -240,6 +241,59 @@ fn exclusive_draft(session_id: &str, text: &str) -> QueuedWorkBatchDraft {
         created_at_ms: 0,
     };
     lash_core::runtime::process_wake_batch_draft(wake)
+}
+
+// The raw cross-backend dialect assertion is Postgres-gated. Keep the ordinary
+// SQLite lane independently sensitive to both production claim-id spellings.
+#[tokio::test]
+async fn sqlite_claims_pin_both_production_claim_id_spellings() {
+    let store = Store::memory().await.expect("store");
+    let session_id = "sqlite-claim-id-dialects";
+    let queued = store
+        .enqueue_queued_work(exclusive_draft(session_id, "work"))
+        .await
+        .expect("enqueue queued work");
+    let pending = store
+        .enqueue_pending_turn_input(PendingTurnInputDraft::new(
+            session_id,
+            TurnInputIngress::next_turn(),
+            TurnInput::text("input"),
+        ))
+        .await
+        .expect("enqueue turn input");
+    let owner = lease_owner("sqlite-claim-id-owner");
+    let lease = store
+        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .await
+        .expect("claim session execution lease")
+        .acquired()
+        .expect("session execution lease");
+
+    let queued_claim = store
+        .claim_ready_queued_work(
+            session_id,
+            &lease.fence(),
+            &owner,
+            QueuedWorkClaimBoundary::Idle,
+            1,
+        )
+        .await
+        .expect("claim queued work")
+        .expect("queued work claim");
+    let turn_input_claim = store
+        .claim_next_turn_inputs(session_id, &lease.fence(), &owner, 1)
+        .await
+        .expect("claim turn input")
+        .expect("turn-input claim");
+
+    assert_eq!(
+        queued_claim.claim_id,
+        format!("qwc:{}:1", queued.enqueue_seq)
+    );
+    assert_eq!(
+        turn_input_claim.claim_id,
+        format!("tic:{}:1", pending.enqueue_seq)
+    );
 }
 
 // Finding 2 (sequential): when a batch is already held by a live claim, a
