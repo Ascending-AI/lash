@@ -1,3 +1,10 @@
+//! Provider stream assembly and host forwarding are deliberately separate.
+//!
+//! Committed blocks and checkpoints are authoritative. Deltas describe
+//! provider-wire volume, so hosts may observe fewer, larger delta events under
+//! delivery lag without changing transcript content. Pending deltas therefore
+//! coalesce losslessly by correlation; they are never committed state.
+
 use std::sync::Arc;
 
 use lash_trace::{
@@ -6,6 +13,10 @@ use lash_trace::{
 };
 
 use super::*;
+
+mod host_forwarder;
+
+use host_forwarder::{ProviderDeltaClass, ProviderHostForwarder};
 
 /// Largest exact provider request body retained as structured JSON in a trace.
 /// Larger bodies keep their byte length and wire-byte digest without inflating
@@ -24,12 +35,12 @@ pub(super) struct StreamChunkOutcome {
 }
 
 async fn emit_plugin_runtime_events_runtime(
-    event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+    forwarder: &mut ProviderHostForwarder<'_>,
     plugin_id: &str,
     events: Vec<crate::PluginRuntimeEvent>,
 ) {
     for event in crate::plugin::plugin_runtime_session_events(plugin_id, events) {
-        send_session_event(event_tx, event).await;
+        forwarder.send_semantic_session_event(event).await;
     }
 }
 
@@ -103,7 +114,7 @@ impl RuntimeTurnDriver<'_> {
 
     async fn transform_assistant_stream_chunk(
         &mut self,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        forwarder: &mut ProviderHostForwarder<'_>,
         chunk: String,
     ) -> Result<StreamChunkOutcome, LlmCallError> {
         if !self.session.plugins().has_assistant_stream_hooks() {
@@ -143,7 +154,7 @@ impl RuntimeTurnDriver<'_> {
             if emitted.value.abort_stream {
                 abort_requested = true;
             }
-            emit_plugin_runtime_events_runtime(event_tx, &emitted.plugin_id, emitted.value.events)
+            emit_plugin_runtime_events_runtime(forwarder, &emitted.plugin_id, emitted.value.events)
                 .await;
         }
         let chunk = if first { original } else { current };
@@ -156,7 +167,7 @@ impl RuntimeTurnDriver<'_> {
 
     async fn transform_assistant_response(
         &mut self,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        forwarder: &mut ProviderHostForwarder<'_>,
         response: LlmResponse,
     ) -> Result<LlmResponse, LlmCallError> {
         let original = response.clone();
@@ -177,7 +188,7 @@ impl RuntimeTurnDriver<'_> {
             })?;
         let mut current: Option<LlmResponse> = None;
         for emitted in transforms {
-            emit_plugin_runtime_events_runtime(event_tx, &emitted.plugin_id, emitted.value.events)
+            emit_plugin_runtime_events_runtime(forwarder, &emitted.plugin_id, emitted.value.events)
                 .await;
             current = Some(emitted.value.response);
         }
@@ -284,6 +295,7 @@ impl RuntimeTurnDriver<'_> {
             reasoning_attempt_correlations: &mut reasoning_attempt_correlations,
             abort_requested: &mut abort_requested,
         };
+        let mut host_forwarder = ProviderHostForwarder::new(event_tx);
         let mut call_record = None;
         let result = loop {
             tokio::select! {
@@ -302,7 +314,11 @@ impl RuntimeTurnDriver<'_> {
                 }
                 Some(stream_event) = llm_stream_rx.recv() => {
                     if let Err(err) = self
-                        .forward_provider_stream_event(event_tx, stream_event, &mut stream_state)
+                        .forward_provider_stream_event(
+                            &mut host_forwarder,
+                            stream_event,
+                            &mut stream_state,
+                        )
                         .await
                     {
                         break Err(err);
@@ -317,7 +333,11 @@ impl RuntimeTurnDriver<'_> {
                         // driver seeing that accounting before the next
                         // protocol_iteration starts.
                         if let Err(err) = self
-                            .drain_provider_stream_queue(event_tx, &mut llm_stream_rx, &mut stream_state)
+                            .drain_provider_stream_queue(
+                                &mut host_forwarder,
+                                &mut llm_stream_rx,
+                                &mut stream_state,
+                            )
                             .await
                         {
                             break Err(err);
@@ -344,7 +364,10 @@ impl RuntimeTurnDriver<'_> {
                             response_metadata: Default::default(),
                         };
                         stream_accumulator.apply_to_response(&mut resp);
-                        let resp = match self.transform_assistant_response(event_tx, resp).await {
+                        let resp = match self
+                            .transform_assistant_response(&mut host_forwarder, resp)
+                            .await
+                        {
                             Ok(resp) => resp,
                             Err(err) => break Err(err),
                         };
@@ -386,7 +409,11 @@ impl RuntimeTurnDriver<'_> {
                         }),
                     };
                     if let Err(err) = self
-                        .drain_provider_stream_queue(event_tx, &mut llm_stream_rx, &mut stream_state)
+                        .drain_provider_stream_queue(
+                            &mut host_forwarder,
+                            &mut llm_stream_rx,
+                            &mut stream_state,
+                        )
                         .await
                     {
                         break Err(err);
@@ -402,7 +429,10 @@ impl RuntimeTurnDriver<'_> {
                                 resp.usage = streamed_usage.clone();
                             }
                             stream_accumulator.apply_to_response(&mut resp);
-                            let resp = match self.transform_assistant_response(event_tx, resp).await {
+                            let resp = match self
+                                .transform_assistant_response(&mut host_forwarder, resp)
+                                .await
+                            {
                                 Ok(resp) => resp,
                                 Err(err) => break Err(err),
                             };
@@ -431,6 +461,11 @@ impl RuntimeTurnDriver<'_> {
         };
 
         let mut result = result;
+        let cancelled = matches!(
+            &result,
+            Err(err) if err.terminal_reason == crate::LlmTerminalReason::Cancelled
+        );
+        host_forwarder.finish(cancelled).await;
         if clamped_output_token_cap {
             record_clamped_output_token_cap(&mut result, call_record.as_mut());
         }
@@ -725,7 +760,7 @@ impl RuntimeTurnDriver<'_> {
     /// event, and emits the visible prose deltas.
     async fn emit_visible_assistant_text(
         &mut self,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        forwarder: &mut ProviderHostForwarder<'_>,
         text: String,
         item_id: Option<&str>,
         event_type: &'static str,
@@ -743,36 +778,25 @@ impl RuntimeTurnDriver<'_> {
             .as_ref()
             .map(|_| text.clone());
         let outcome = self
-            .transform_assistant_stream_chunk(event_tx, text)
+            .transform_assistant_stream_chunk(forwarder, text)
             .await?;
         if outcome.abort_requested {
             *state.abort_requested = true;
         }
         for reasoning_delta in outcome.reasoning_deltas {
-            let reasoning_delta: Arc<str> = reasoning_delta.into();
             state.stream_accumulator.push_reasoning(
-                reasoning_delta.to_string(),
+                reasoning_delta.clone(),
                 None,
                 Vec::new(),
                 None,
             );
-            send_session_event(
-                event_tx,
-                SessionStreamEvent::ReasoningDelta {
-                    content: reasoning_delta.to_string(),
-                },
-            )
-            .await;
             let correlation_id = stream_correlation_id(state.reasoning_correlation, None);
             remember_attempt_correlation(state.reasoning_attempt_correlations, &correlation_id);
-            send_turn_activity(
-                event_tx,
+            forwarder.forward_delta(
+                ProviderDeltaClass::Reasoning,
                 correlation_id,
-                TurnEvent::ReasoningDelta {
-                    text: reasoning_delta,
-                },
-            )
-            .await;
+                reasoning_delta,
+            );
         }
         let text = outcome.chunk;
         self.log_llm_stream_event(
@@ -791,32 +815,19 @@ impl RuntimeTurnDriver<'_> {
         );
         if !text.is_empty() {
             state.stream_accumulator.push_text(&text);
-            let text: Arc<str> = text.into();
-            send_session_event(
-                event_tx,
-                SessionStreamEvent::TextDelta {
-                    content: text.to_string(),
-                },
-            )
-            .await;
             let correlation_id = stream_correlation_id(state.assistant_prose_correlation, item_id);
             remember_attempt_correlation(
                 state.assistant_prose_attempt_correlations,
                 &correlation_id,
             );
-            send_turn_activity(
-                event_tx,
-                correlation_id,
-                TurnEvent::AssistantProseDelta { text },
-            )
-            .await;
+            forwarder.forward_delta(ProviderDeltaClass::AssistantProse, correlation_id, text);
         }
         Ok(())
     }
 
     async fn forward_provider_stream_event(
         &mut self,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        forwarder: &mut ProviderHostForwarder<'_>,
         stream_event: LlmStreamEvent,
         state: &mut LlmStreamState<'_>,
     ) -> Result<(), LlmCallError> {
@@ -833,15 +844,15 @@ impl RuntimeTurnDriver<'_> {
                 if !assistant_prose_correlation_ids.is_empty()
                     || !reasoning_correlation_ids.is_empty()
                 {
-                    send_turn_activity(
-                        event_tx,
-                        TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
-                        TurnEvent::ModelAttemptReset {
-                            assistant_prose_correlation_ids,
-                            reasoning_correlation_ids,
-                        },
-                    )
-                    .await;
+                    forwarder
+                        .send_semantic_turn_activity(
+                            TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
+                            TurnEvent::ModelAttemptReset {
+                                assistant_prose_correlation_ids,
+                                reasoning_correlation_ids,
+                            },
+                        )
+                        .await;
                 }
                 *state.stream_accumulator = LlmStreamAccumulator::default();
                 *state.streamed_usage = LlmUsage::default();
@@ -850,7 +861,7 @@ impl RuntimeTurnDriver<'_> {
                 *state.reasoning_correlation = None;
             }
             LlmStreamEvent::Delta(delta) => {
-                self.emit_visible_assistant_text(event_tx, delta, None, "delta", state)
+                self.emit_visible_assistant_text(forwarder, delta, None, "delta", state)
                     .await?;
             }
             LlmStreamEvent::ReasoningDelta(delta) => {
@@ -875,24 +886,12 @@ impl RuntimeTurnDriver<'_> {
                     state
                         .stream_accumulator
                         .push_reasoning(delta.clone(), None, Vec::new(), None);
-                    send_session_event(
-                        event_tx,
-                        SessionStreamEvent::ReasoningDelta {
-                            content: delta.clone(),
-                        },
-                    )
-                    .await;
                     let correlation_id = stream_correlation_id(state.reasoning_correlation, None);
                     remember_attempt_correlation(
                         state.reasoning_attempt_correlations,
                         &correlation_id,
                     );
-                    send_turn_activity(
-                        event_tx,
-                        correlation_id,
-                        TurnEvent::ReasoningDelta { text: delta.into() },
-                    )
-                    .await;
+                    forwarder.forward_delta(ProviderDeltaClass::Reasoning, correlation_id, delta);
                 }
             }
             LlmStreamEvent::Part(LlmOutputPart::Text {
@@ -962,27 +961,17 @@ impl RuntimeTurnDriver<'_> {
                             tool_call: None,
                         },
                     );
-                    send_session_event(
-                        event_tx,
-                        SessionStreamEvent::ReasoningDelta {
-                            content: text.clone(),
-                        },
-                    )
-                    .await;
                     let correlation_id =
                         stream_correlation_id(state.reasoning_correlation, item_id);
                     remember_attempt_correlation(
                         state.reasoning_attempt_correlations,
                         &correlation_id,
                     );
-                    send_turn_activity(
-                        event_tx,
+                    forwarder.forward_delta(
+                        ProviderDeltaClass::Reasoning,
                         correlation_id,
-                        TurnEvent::ReasoningDelta {
-                            text: text.clone().into(),
-                        },
-                    )
-                    .await;
+                        text.clone(),
+                    );
                 }
                 state
                     .stream_accumulator
@@ -1011,17 +1000,15 @@ impl RuntimeTurnDriver<'_> {
                 max_attempts,
                 reason,
             } => {
-                send_session_event(
-                    event_tx,
-                    SessionStreamEvent::RetryStatus {
+                forwarder
+                    .send_semantic_session_event(SessionStreamEvent::RetryStatus {
                         wait_seconds,
                         attempt,
                         max_attempts,
                         reason,
                         envelope: None,
-                    },
-                )
-                .await;
+                    })
+                    .await;
             }
         }
         Ok(())
@@ -1029,12 +1016,12 @@ impl RuntimeTurnDriver<'_> {
 
     async fn drain_provider_stream_queue(
         &mut self,
-        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        forwarder: &mut ProviderHostForwarder<'_>,
         llm_stream_rx: &mut tokio::sync::mpsc::UnboundedReceiver<LlmStreamEvent>,
         state: &mut LlmStreamState<'_>,
     ) -> Result<(), LlmCallError> {
         while let Ok(stream_event) = llm_stream_rx.try_recv() {
-            self.forward_provider_stream_event(event_tx, stream_event, state)
+            self.forward_provider_stream_event(forwarder, stream_event, state)
                 .await?;
         }
         Ok(())
@@ -1134,6 +1121,10 @@ fn remember_attempt_correlation(
         correlations.push(correlation_id.clone());
     }
 }
+
+#[cfg(test)]
+#[path = "streaming/tests.rs"]
+mod provider_host_forwarding_tests;
 
 /// Wait up to 2s for a late `Usage` event from the provider after an
 /// a plugin stream-mask abort. The usage is returned on the response itself so
