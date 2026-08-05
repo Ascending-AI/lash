@@ -7,6 +7,7 @@ pub(super) const MAX_AGENT_FRAME_SWITCHES: usize = 16;
 pub(super) struct PhysicalTurnExecution {
     pub(super) turn: AssembledTurn,
     pub(super) enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
+    pub(super) post_commit_delivery_failed: bool,
 }
 
 pub(super) struct LogicalTurnClaims {
@@ -155,17 +156,31 @@ impl LashRuntime {
         } else {
             supplied_trace_turn_id
         };
-        let mut turns = Vec::new();
+        let mut turns: Vec<AssembledTurn> = Vec::new();
 
         loop {
             let turn_trace_turn_id = agent_frame_follow_turn_id(&root_trace_turn_id, turns.len());
             let turn_effect_controller = if turns.is_empty() {
                 scoped_effect_controller.clone()
             } else {
-                ScopedEffectController::borrowed(
+                match ScopedEffectController::borrowed(
                     scoped_effect_controller.controller(),
                     self.state.turn_scope(&turn_trace_turn_id),
-                )?
+                ) {
+                    Ok(controller) => controller,
+                    Err(err) => {
+                        self.invalidate_resident_session_state();
+                        turns
+                            .last_mut()
+                            .expect("a follow-on scope is created only after a committed turn")
+                            .errors
+                            .push(super::turn_loop::post_commit_delivery_issue(
+                                err.code.as_str(),
+                                err.message,
+                            ));
+                        return Ok(AgentFrameRun { turns });
+                    }
+                }
             };
             let frame_stopwatch = if turns.is_empty() {
                 stopwatch
@@ -225,6 +240,7 @@ impl LashRuntime {
             let PhysicalTurnExecution {
                 mut turn,
                 enqueued_queue_batches,
+                post_commit_delivery_failed,
             } = execution;
             frame_stopwatch.stamp(&mut turn, self.host.core.clock.as_ref());
             let switched_frame = match &turn.outcome {
@@ -234,16 +250,20 @@ impl LashRuntime {
                 _ => None,
             };
             turns.push(turn);
+            if post_commit_delivery_failed {
+                return Ok(AgentFrameRun { turns });
+            }
             let Some((frame_id, task)) = switched_frame else {
                 return Ok(AgentFrameRun { turns });
             };
 
-            let (mut input, next_claims) = if enqueued_queue_batches.is_empty() {
-                let mut input = turn_input_from_text(task);
-                input.protocol_turn_options = follow_protocol_turn_options.clone();
-                input.turn_context = follow_turn_context.clone();
-                (input, LogicalTurnClaims::new(Vec::new(), Vec::new()))
-            } else {
+            let next = async {
+                if enqueued_queue_batches.is_empty() {
+                    let mut input = turn_input_from_text(task);
+                    input.protocol_turn_options = follow_protocol_turn_options.clone();
+                    input.turn_context = follow_turn_context.clone();
+                    return Ok((input, LogicalTurnClaims::new(Vec::new(), Vec::new())));
+                }
                 let lease = session_execution_lease.ok_or_else(|| {
                     RuntimeError::new(
                         RuntimeErrorCode::StoreCommitFailed,
@@ -319,10 +339,26 @@ impl LashRuntime {
                     },
                     self.host.core.clock.as_ref(),
                 );
-                (
+                Ok((
                     materialized.input,
                     LogicalTurnClaims::new(vec![claim], Vec::new()),
-                )
+                ))
+            }
+            .await;
+            let (mut input, next_claims) = match next {
+                Ok(next) => next,
+                Err(err) => {
+                    self.invalidate_resident_session_state();
+                    turns
+                        .last_mut()
+                        .expect("handoff delivery follows a committed turn")
+                        .errors
+                        .push(super::turn_loop::post_commit_delivery_issue(
+                            err.code.as_str(),
+                            err.message,
+                        ));
+                    return Ok(AgentFrameRun { turns });
+                }
             };
             input.protocol_turn_options = follow_protocol_turn_options.clone();
             input.turn_context = follow_turn_context.clone();
@@ -335,8 +371,7 @@ impl LashRuntime {
                     self.state.turn_scope(&terminal_trace_turn_id),
                 )?;
                 let terminal_stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
-                let mut terminal = self
-                    .finish_logical_turn_error(
+                let mut terminal = Box::pin(self.finish_logical_turn_error(
                         format!(
                             "logical turn exceeded the limit of {MAX_AGENT_FRAME_SWITCHES} agent frame switches"
                         ),
@@ -347,7 +382,7 @@ impl LashRuntime {
                         cancel.clone(),
                         next_claims,
                         session_execution_lease,
-                    )
+                    ))
                     .await?;
                 terminal_stopwatch.stamp(&mut terminal.turn, self.host.core.clock.as_ref());
                 turns.push(terminal.turn);

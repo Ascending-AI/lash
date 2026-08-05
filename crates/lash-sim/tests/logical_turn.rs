@@ -38,14 +38,14 @@ impl TraceSink for RecordingTraceSink {
     }
 }
 
-struct PauseAfterFirstFinalCommit {
+struct PauseAfterFirstCommittedTurn {
     reached: Mutex<Option<std::sync::mpsc::Sender<()>>>,
     released: Mutex<bool>,
     release: Condvar,
     used: AtomicBool,
 }
 
-impl PauseAfterFirstFinalCommit {
+impl PauseAfterFirstCommittedTurn {
     fn new(reached: std::sync::mpsc::Sender<()>) -> Self {
         Self {
             reached: Mutex::new(Some(reached)),
@@ -61,11 +61,11 @@ impl PauseAfterFirstFinalCommit {
     }
 }
 
-impl RuntimeTurnPhaseProbe for PauseAfterFirstFinalCommit {
+impl RuntimeTurnPhaseProbe for PauseAfterFirstCommittedTurn {
     fn begin(&self, _phase: RuntimeTurnPhase) {}
 
     fn end(&self, phase: RuntimeTurnPhase) {
-        if phase != RuntimeTurnPhase::FinalCommit || self.used.swap(true, Ordering::SeqCst) {
+        if phase != RuntimeTurnPhase::CommittedTurn || self.used.swap(true, Ordering::SeqCst) {
             return;
         }
         if let Some(reached) = self.reached.lock().expect("commit signal").take() {
@@ -317,7 +317,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         .await
         .expect("enqueue first turn");
     let (reached_tx, reached_rx) = std::sync::mpsc::channel();
-    let pause = Arc::new(PauseAfterFirstFinalCommit::new(reached_tx));
+    let pause = Arc::new(PauseAfterFirstCommittedTurn::new(reached_tx));
     session.set_turn_phase_probe(pause.clone()).await;
     let drain_session = session.clone();
     let first_drain = tokio::spawn(async move { drain_session.queued_turn().run().await });

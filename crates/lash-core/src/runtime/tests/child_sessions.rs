@@ -1076,6 +1076,19 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
                 ..LlmResponse::default()
             }),
         },
+        // Follow-up on the same child whose first turn future was dropped.
+        MockCall {
+            stream_events: vec![child_turn_usage_event()],
+            response: Ok(LlmResponse {
+                full_text: "cancelled child recovered".to_string(),
+                parts: vec![LlmOutputPart::Text {
+                    text: "cancelled child recovered".to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        },
     ]);
     let (started_tx, mut started_rx) = tokio::sync::mpsc::channel::<()>(1);
     let tools: Arc<dyn crate::ToolProvider> = Arc::new(ParkedTool {
@@ -1166,19 +1179,18 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
         "the retried turn's live usage must be reported against a reclaimed entry"
     );
 
-    // Registration no longer rejects further work on the cancelled session. The
-    // turn itself still fails, because the dropped turn future also loses the
-    // child runtime's `Session` loan (`turn_loop`'s `self.session =
-    // Some(session)` restore sites sit after the run await) — that hazard
-    // belongs to the turn-lifecycle restructuring tracked as FIG-872, not to
-    // this registration guard.
-    let residual = lifecycle
+    let recovered = lifecycle
         .start_turn(request("cancelled-child", "cancelled-child-turn-2"))
         .await
-        .expect_err("the child runtime's session loan is lost with the dropped future");
-    assert!(
-        !residual.to_string().contains("already has a running turn"),
-        "a cancelled child turn must not reject later turns on its session: {residual}"
+        .expect("the dropped turn future returns the child runtime's session loan");
+    assert_eq!(
+        recovered.assistant_output.safe_text,
+        "cancelled child recovered"
+    );
+    assert_eq!(
+        child_source_input_tokens(&runtime),
+        15,
+        "the recovered child's turn must report usage normally"
     );
 
     lifecycle

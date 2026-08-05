@@ -250,6 +250,7 @@ impl LashRuntime {
             last_committed_lease_continuity: None,
             last_committed_observation_turn: None,
             graph_loaded_from_store: false,
+            resident_session_state_valid: true,
         })
     }
 

@@ -310,10 +310,9 @@ pub enum RuntimeTurnPhase {
     BeforeTurnHooks,
     PromptBuild,
     EffectLoop,
-    FinalizeTurn,
-    PersistTurn,
-    FinalCommit,
-    PostPersistHooks,
+    PreparedTurn,
+    CommittedTurn,
+    PostCommitDelivery,
 }
 
 #[doc(hidden)]
@@ -1391,4 +1390,8 @@ pub struct LashRuntime {
     pub(in crate::runtime) last_committed_observation_turn: Option<(u64, String)>,
     /// Set only after this handle itself has attempted a durable graph load.
     pub(in crate::runtime) graph_loaded_from_store: bool,
+    /// False after a committed turn encounters a post-commit delivery failure.
+    /// The next turn must rebuild all resident/plugin state from the durable
+    /// head before it can execute.
+    pub(in crate::runtime) resident_session_state_valid: bool,
 }

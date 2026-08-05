@@ -35,7 +35,8 @@ impl RuntimeTurnPhaseProbe for ExitProbe {
     }
 
     fn end(&self, phase: RuntimeTurnPhase) {
-        if matches!(self.0, KillPoint::AfterSwitchCommit) && phase == RuntimeTurnPhase::FinalCommit
+        if matches!(self.0, KillPoint::AfterSwitchCommit)
+            && phase == RuntimeTurnPhase::CommittedTurn
         {
             std::process::exit(76);
         }

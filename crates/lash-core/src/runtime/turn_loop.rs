@@ -50,6 +50,21 @@ fn trace_stop_reason(stop: &TurnStop) -> &'static str {
     }
 }
 
+pub(super) fn post_commit_delivery_issue(
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> TurnIssue {
+    TurnIssue {
+        kind: "runtime".to_string(),
+        code: Some(code.into()),
+        terminal_reason: None,
+        message: message.into(),
+        raw: None,
+        retryable: Some(false),
+        provider_failure_kind: None,
+    }
+}
+
 fn session_head_refresh_error(err: SessionError) -> RuntimeError {
     RuntimeError::new(
         RuntimeErrorCode::Other("session_head_refresh".to_string()),
@@ -243,7 +258,188 @@ struct TurnFinishInput {
     trace_turn_id: String,
 }
 
+trait TypedTurnPhase {
+    const RUNTIME_PHASE: RuntimeTurnPhase;
+}
+
+struct PreparedTurn {
+    turn_pipeline: TurnBoundary,
+    turn: AssembledTurn,
+    events: Vec<SessionStreamEvent>,
+}
+
+impl TypedTurnPhase for PreparedTurn {
+    const RUNTIME_PHASE: RuntimeTurnPhase = RuntimeTurnPhase::PreparedTurn;
+}
+
+struct CommittedTurn {
+    turn: AssembledTurn,
+    events: Vec<SessionStreamEvent>,
+    resident_state: RuntimeSessionState,
+    enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
+}
+
+impl TypedTurnPhase for CommittedTurn {
+    const RUNTIME_PHASE: RuntimeTurnPhase = RuntimeTurnPhase::CommittedTurn;
+}
+
+impl CommittedTurn {
+    /// Synchronize the accepted durable commit into the resident runtime.
+    /// This transition intentionally cannot await; consuming `self` is the
+    /// only way to obtain the post-commit delivery phase.
+    fn adopt(self, runtime: &mut LashRuntime, trace_turn_id: &str) -> PostCommitDelivery {
+        runtime.state = self.resident_state;
+        let observation_revision = if runtime.state.checkpoint_ref.is_some() {
+            runtime.state.head_revision
+        } else {
+            runtime.state.turn_index as u64
+        };
+        runtime.last_committed_observation_turn =
+            Some((observation_revision, trace_turn_id.to_string()));
+        PostCommitDelivery {
+            turn: self.turn,
+            events: self.events,
+            enqueued_queue_batches: self.enqueued_queue_batches,
+            post_commit_delivery_failed: false,
+        }
+    }
+}
+
+struct PostCommitDelivery {
+    turn: AssembledTurn,
+    events: Vec<SessionStreamEvent>,
+    enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
+    post_commit_delivery_failed: bool,
+}
+
+impl TypedTurnPhase for PostCommitDelivery {
+    const RUNTIME_PHASE: RuntimeTurnPhase = RuntimeTurnPhase::PostCommitDelivery;
+}
+
+struct TurnDriverSessionLoan<'slot, 'run> {
+    slot: &'slot mut Option<Session>,
+    driver: Option<Box<RuntimeTurnDriver<'run>>>,
+}
+
+impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
+    fn new(slot: &'slot mut Option<Session>, driver: Box<RuntimeTurnDriver<'run>>) -> Self {
+        Self {
+            slot,
+            driver: Some(driver),
+        }
+    }
+
+    fn into_inner(mut self) -> Box<RuntimeTurnDriver<'run>> {
+        self.driver.take().expect("turn driver loan is present")
+    }
+}
+
+impl<'slot, 'run> std::ops::Deref for TurnDriverSessionLoan<'slot, 'run> {
+    type Target = RuntimeTurnDriver<'run>;
+
+    fn deref(&self) -> &Self::Target {
+        self.driver.as_deref().expect("turn driver loan is present")
+    }
+}
+
+impl std::ops::DerefMut for TurnDriverSessionLoan<'_, '_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.driver
+            .as_deref_mut()
+            .expect("turn driver loan is present")
+    }
+}
+
+impl Drop for TurnDriverSessionLoan<'_, '_> {
+    fn drop(&mut self) {
+        if let Some(driver) = self.driver.take() {
+            *self.slot = Some(driver.session);
+        }
+    }
+}
+
 impl LashRuntime {
+    pub(super) fn invalidate_resident_session_state(&mut self) {
+        self.resident_session_state_valid = false;
+        self.graph_loaded_from_store = false;
+        self.last_committed_lease_continuity = None;
+        if let Some(session) = self.session.as_ref() {
+            session.invalidate_runtime_caches();
+        }
+    }
+
+    async fn reload_invalidated_resident_session_state(&mut self) -> Result<(), RuntimeError> {
+        if self.resident_session_state_valid {
+            return Ok(());
+        }
+
+        let store = self
+            .session
+            .as_ref()
+            .and_then(|session| session.history_store());
+        let mut durable_state = self.state.clone();
+        if let Some(store) = store.as_ref() {
+            crate::store::refresh_persisted_session_state(store.as_ref(), &mut durable_state)
+                .await
+                .map_err(|err| {
+                    RuntimeError::new(
+                        "resident_session_reload_failed",
+                        format!("failed to reload invalidated resident session state: {err}"),
+                    )
+                })?;
+        }
+
+        let session = self.session.as_mut().ok_or_else(|| {
+            RuntimeError::new(
+                "resident_session_reload_failed",
+                "runtime session is unavailable while reloading invalidated resident state",
+            )
+        })?;
+        session.invalidate_runtime_caches();
+        if let Some(tool_state) = durable_state.tool_state_snapshot.clone() {
+            session
+                .plugins()
+                .tool_registry()
+                .restore_state(tool_state)
+                .map_err(|err| {
+                    RuntimeError::new("resident_session_reload_failed", err.to_string())
+                })?;
+        }
+        session
+            .refresh_tool_catalog()
+            .await
+            .map_err(|err| RuntimeError::new("resident_session_reload_failed", err.to_string()))?;
+        if let Some(snapshot) = durable_state.plugin_snapshot.as_ref() {
+            session.plugins().restore(snapshot).map_err(|err| {
+                RuntimeError::new("resident_session_reload_failed", err.to_string())
+            })?;
+        }
+        let protocol_session = Arc::clone(session.plugins().protocol_session());
+        let session_id = durable_state.session_id.clone();
+        protocol_session
+            .restore_session(
+                crate::plugin::ProtocolSessionContext::new(session, &session_id),
+                &durable_state,
+            )
+            .await
+            .map_err(|err| RuntimeError::new("resident_session_reload_failed", err.to_string()))?;
+
+        durable_state.discard_runtime_snapshots();
+        session
+            .plugins()
+            .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(
+                crate::SessionReadView::from_persisted_state(&durable_state),
+            ))
+            .await
+            .map_err(|err| RuntimeError::new("resident_session_reload_failed", err.to_string()))?;
+        self.policy = durable_state.effective_policy().clone();
+        self.protocol_turn_options = durable_state.effective_protocol_turn_options().clone();
+        self.state = durable_state;
+        self.graph_loaded_from_store = store.is_some();
+        self.resident_session_state_valid = true;
+        Ok(())
+    }
+
     fn max_context_tokens(&self) -> usize {
         self.state.effective_policy().context_window_tokens()
     }
@@ -489,6 +685,7 @@ impl LashRuntime {
             return Ok(PhysicalTurnExecution {
                 turn: assembled,
                 enqueued_queue_batches: Vec::new(),
+                post_commit_delivery_failed: false,
             });
         };
 
@@ -503,7 +700,7 @@ impl LashRuntime {
             }
         };
 
-        self.mark_phase_begin(RuntimeTurnPhase::FinalizeTurn);
+        self.mark_phase_begin(PreparedTurn::RUNTIME_PHASE);
         let finalized = match plugins
             .finalize_turn_with_phase_probe(
                 assembled,
@@ -516,14 +713,14 @@ impl LashRuntime {
         {
             Ok(finalized) => finalized,
             Err(err) => {
-                self.mark_phase_end(RuntimeTurnPhase::FinalizeTurn);
+                self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
                 return Err(RuntimeError::new(
                     RuntimeErrorCode::PluginFinalizeTurn,
                     err.to_string(),
                 ));
             }
         };
-        self.mark_phase_end(RuntimeTurnPhase::FinalizeTurn);
+        self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
         let mut returned_turn = finalized.turn;
         if returned_turn.cancellation.is_some()
             && !matches!(
@@ -543,6 +740,16 @@ impl LashRuntime {
                 "cancelled turns must carry cancellation evidence",
             ));
         }
+        let prepared = PreparedTurn {
+            turn_pipeline,
+            turn: returned_turn,
+            events: finalized.events,
+        };
+        let PreparedTurn {
+            mut turn_pipeline,
+            turn: mut returned_turn,
+            events: finalized_events,
+        } = prepared;
         let release_session_execution_lease =
             session_execution_lease_release_policy.should_release(&returned_turn.outcome);
         let commit_effects = claims.commit_effects(
@@ -551,8 +758,7 @@ impl LashRuntime {
             &trace_turn_id,
             Some(self.state.effective_protocol_turn_options().clone()),
         );
-        self.mark_phase_begin(RuntimeTurnPhase::PersistTurn);
-        self.mark_phase_begin(RuntimeTurnPhase::FinalCommit);
+        self.mark_phase_begin(CommittedTurn::RUNTIME_PHASE);
         let queued_work_completion_trace = commit_effects.completed_queue_claims.clone();
         let turn_input_completion_trace = commit_effects.completed_turn_input_claims.clone();
         let staged_usage = session_manager::stage_token_ledger_shared(
@@ -599,8 +805,7 @@ impl LashRuntime {
                     &self.runtime_lease_owner,
                     &err,
                 );
-                self.mark_phase_end(RuntimeTurnPhase::FinalCommit);
-                self.mark_phase_end(RuntimeTurnPhase::PersistTurn);
+                self.mark_phase_end(CommittedTurn::RUNTIME_PHASE);
                 return Err(runtime_error_from_store_commit(err));
             }
         };
@@ -613,53 +818,57 @@ impl LashRuntime {
         } else {
             session_execution_lease.and_then(SessionExecutionLeaseGuard::continuity)
         };
-        self.mark_phase_end(RuntimeTurnPhase::FinalCommit);
-
-        emit_session_events_to_sink(events, finalized.events).await;
-        self.state = turn_pipeline.into_final_state();
-        let observation_revision = if self.state.checkpoint_ref.is_some() {
-            self.state.head_revision
-        } else {
-            self.state.turn_index as u64
+        let committed = CommittedTurn {
+            turn: returned_turn,
+            events: finalized_events,
+            resident_state: turn_pipeline.into_final_state(),
+            enqueued_queue_batches,
         };
-        self.last_committed_observation_turn = Some((observation_revision, trace_turn_id.clone()));
+
+        let mut delivery = committed.adopt(self, &trace_turn_id);
+        self.mark_phase_end(CommittedTurn::RUNTIME_PHASE);
+        self.mark_phase_begin(PostCommitDelivery::RUNTIME_PHASE);
+
+        emit_session_events_to_sink(events, delivery.events).await;
         publish_terminal_after_commit(
             turn_control,
             turn_control_resolver,
             &TurnTerminal::Committed {
-                outcome: returned_turn.outcome.clone(),
-                cancellation: returned_turn.cancellation.clone(),
+                outcome: delivery.turn.outcome.clone(),
+                cancellation: delivery.turn.cancellation.clone(),
                 session_revision: None,
             },
             &self.state.session_id,
             &trace_turn_id,
         )
         .await;
-        if matches!(returned_turn.outcome, TurnOutcome::AgentFrameSwitch { .. })
+        if matches!(delivery.turn.outcome, TurnOutcome::AgentFrameSwitch { .. })
             && let Some(session) = self.session.as_mut()
         {
             let protocol_session = Arc::clone(session.plugins().protocol_session());
             let session_id = self.state.session_id.clone();
-            protocol_session
+            if let Err(err) = protocol_session
                 .restore_session(
                     crate::plugin::ProtocolSessionContext::new(session, &session_id),
                     &self.state,
                 )
                 .await
-                .map_err(|err| {
-                    RuntimeError::new(
-                        RuntimeErrorCode::Other("protocol_restore_session".to_string()),
-                        err.to_string(),
-                    )
-                })?;
+            {
+                delivery.turn.errors.push(post_commit_delivery_issue(
+                    "protocol_restore_session",
+                    err.to_string(),
+                ));
+                delivery.post_commit_delivery_failed = true;
+                self.invalidate_resident_session_state();
+            }
         }
         if !queued_work_completion_trace.is_empty() {
             crate::trace::emit_trace(
                 &self.host.core.tracing.trace_sink,
                 &self.host.core.tracing.trace_context,
                 lash_trace::TraceContext::default()
-                    .for_session(returned_turn.state.session_id.clone())
-                    .for_turn_index(returned_turn.state.turn_index)
+                    .for_session(delivery.turn.state.session_id.clone())
+                    .for_turn_index(delivery.turn.state.turn_index)
                     .for_turn(trace_turn_id.clone()),
                 lash_trace::TraceEvent::Custom {
                     name: "queued_work.completed".to_string(),
@@ -673,8 +882,8 @@ impl LashRuntime {
                 &self.host.core.tracing.trace_sink,
                 &self.host.core.tracing.trace_context,
                 lash_trace::TraceContext::default()
-                    .for_session(returned_turn.state.session_id.clone())
-                    .for_turn_index(returned_turn.state.turn_index)
+                    .for_session(delivery.turn.state.session_id.clone())
+                    .for_turn_index(delivery.turn.state.turn_index)
                     .for_turn(trace_turn_id.clone()),
                 lash_trace::TraceEvent::Custom {
                     name: "turn_input.completed".to_string(),
@@ -683,26 +892,39 @@ impl LashRuntime {
                 self.host.core.clock.as_ref(),
             );
         }
-        self.mark_phase_begin(RuntimeTurnPhase::PostPersistHooks);
-        if let Some(error) = self
-            .emit_turn_persisted_event(&returned_turn, scoped_effect_controller, &trace_turn_id)
-            .await?
+        match self
+            .emit_turn_persisted_event(&delivery.turn, scoped_effect_controller, &trace_turn_id)
+            .await
         {
-            returned_turn
-                .errors
-                .push(crate::plugin::plugin_lifecycle_hook_issue(error));
+            Ok(Some(error)) => {
+                delivery
+                    .turn
+                    .errors
+                    .push(crate::plugin::plugin_lifecycle_hook_issue(error));
+                delivery.post_commit_delivery_failed = true;
+                self.invalidate_resident_session_state();
+            }
+            Ok(None) => {}
+            Err(err) => {
+                delivery
+                    .turn
+                    .errors
+                    .push(post_commit_delivery_issue(err.code.as_str(), err.message));
+                delivery.post_commit_delivery_failed = true;
+                self.invalidate_resident_session_state();
+            }
         }
-        self.mark_phase_end(RuntimeTurnPhase::PostPersistHooks);
-        self.mark_phase_end(RuntimeTurnPhase::PersistTurn);
+        self.mark_phase_end(PostCommitDelivery::RUNTIME_PHASE);
 
         self.emit_completed_turn_trace(
-            &returned_turn.state,
-            &returned_turn.outcome,
+            &delivery.turn.state,
+            &delivery.turn.outcome,
             &trace_turn_id,
         );
         Ok(PhysicalTurnExecution {
-            turn: returned_turn,
-            enqueued_queue_batches,
+            turn: delivery.turn,
+            enqueued_queue_batches: delivery.enqueued_queue_batches,
+            post_commit_delivery_failed: delivery.post_commit_delivery_failed,
         })
     }
 
@@ -877,9 +1099,9 @@ impl LashRuntime {
         let Some(session) = self.session.as_ref() else {
             return Ok(None);
         };
-        let Ok(manager) = self.runtime_session_services() else {
-            return Ok(None);
-        };
+        let manager = self.runtime_session_services().map_err(|err| {
+            RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
+        })?;
         let phase_turn_id = turn_phase_id(trace_turn_id, "turn-persisted");
         let phase_controller = scoped_child_turn_controller(
             scoped_effect_controller,
@@ -1305,6 +1527,7 @@ impl LashRuntime {
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
         session_execution_lease_release_policy: SessionExecutionLeaseReleasePolicy,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
+        self.reload_invalidated_resident_session_state().await?;
         let lease_continuity =
             session_execution_lease.and_then(SessionExecutionLeaseGuard::continuity);
         let may_reuse_resident_graph = self.graph_loaded_from_store
@@ -1967,24 +2190,23 @@ impl LashRuntime {
         }
         emit_session_events_to_sink(events, std::mem::take(&mut prepared.events)).await;
         if prepared.abort.is_some() {
-            return self
-                .finish_prepared_turn_abort(
-                    prepared,
-                    event_tx,
-                    assembler,
-                    turn_index,
-                    trace_turn_id,
-                    &initial_claims,
-                    events,
-                    turn_events,
-                    &scoped_effect_controller,
-                    &cancel,
-                    session_execution_lease,
-                    session_execution_lease_release_policy,
-                    session_execution_fence,
-                    turn_control.as_ref(),
-                )
-                .await;
+            return Box::pin(self.finish_prepared_turn_abort(
+                prepared,
+                event_tx,
+                assembler,
+                turn_index,
+                trace_turn_id,
+                &initial_claims,
+                events,
+                turn_events,
+                &scoped_effect_controller,
+                &cancel,
+                session_execution_lease,
+                session_execution_lease_release_policy,
+                session_execution_fence,
+                turn_control.as_ref(),
+            ))
+            .await;
         }
         // `prepare_turn_preamble` has returned and dropped its read-view frame
         // before this clone, avoiding a transient second graph owner.
@@ -2034,7 +2256,7 @@ impl LashRuntime {
             .session
             .take()
             .expect("lash runtime session must be available");
-        let mut driver = Box::new(RuntimeTurnDriver {
+        let driver = Box::new(RuntimeTurnDriver {
             session,
             policy: resolved_turn_policy,
             host: self.host.clone(),
@@ -2063,6 +2285,7 @@ impl LashRuntime {
         });
         let protocol_run_offset = 0;
         self.mark_phase_begin(RuntimeTurnPhase::EffectLoop);
+        let mut driver = TurnDriverSessionLoan::new(&mut self.session, driver);
         let run_result = Box::pin(run_turn_effect_loop(
             &mut driver,
             prepared.messages,
@@ -2091,6 +2314,7 @@ impl LashRuntime {
                         .await?;
                 }
                 if turn_control.evidence().is_some() {
+                    let driver = driver.into_inner();
                     self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
                     let cancellation_messages = driver.turn_pipeline.message_sequence();
                     return Box::pin(self.finish_cancelled_turn_after_effect_abort(
@@ -2108,6 +2332,7 @@ impl LashRuntime {
                     ))
                     .await;
                 }
+                let driver = driver.into_inner();
                 self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
                 let RuntimeTurnDriver {
                     session,
@@ -2123,6 +2348,7 @@ impl LashRuntime {
                 return Err(err);
             }
             Err(err) => {
+                let driver = driver.into_inner();
                 self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
                 let RuntimeTurnDriver {
                     session,
@@ -2138,6 +2364,7 @@ impl LashRuntime {
                 return Err(err);
             }
         };
+        let driver = driver.into_inner();
         self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
         tracing::debug!(
             new_message_count = new_messages.len(),
