@@ -521,6 +521,9 @@ pub mod durability {
     /// itself; a host that accepts turn input at its own edge calls it there to
     /// fail the request instead of the turn.
     pub use lash_core::facade_support::ensure_durable_effect_input;
+    pub use lash_core::facade_support::{
+        ProcessDrainDeferred, ProcessRecoveryAttemptDisposition, ProcessRecoveryOperation,
+    };
     pub use lash_core::{
         EffectHost, facade_support::DurableProcessWorker,
         facade_support::DurableProcessWorkerConfig, facade_support::InlineEffectHost,

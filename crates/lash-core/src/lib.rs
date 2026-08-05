@@ -182,12 +182,15 @@ pub mod facade_support {
     pub use crate::runtime::ProcessAttach;
     pub use crate::runtime::ProcessAwaiter;
     pub use crate::runtime::ProcessChangeHub;
+    pub use crate::runtime::ProcessDrainDeferred;
     pub use crate::runtime::ProcessDrainReport;
     pub use crate::runtime::ProcessEngineProcessContext;
     pub use crate::runtime::ProcessEngineRegistry;
     pub use crate::runtime::ProcessEventAppendPlan;
     pub use crate::runtime::ProcessEventSink;
     pub use crate::runtime::ProcessExecutionConcurrencyError;
+    pub use crate::runtime::ProcessRecoveryAttemptDisposition;
+    pub use crate::runtime::ProcessRecoveryOperation;
     pub use crate::runtime::ProcessRunHandle;
     pub use crate::runtime::ProcessRuntimeHost;
     pub use crate::runtime::ProcessStartPlan;

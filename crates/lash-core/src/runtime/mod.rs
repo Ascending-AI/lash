@@ -264,7 +264,8 @@ pub use process::{TestLocalProcessRegistry, TestProcessRegistryWriteExt};
 pub use process_work_driver::{InlineProcessRunHandle, ProcessRunHandle, ProcessWorkDriver};
 pub use process_worker::{
     DEFAULT_PROCESS_EXECUTION_CONCURRENCY, DurableProcessWorker, DurableProcessWorkerConfig,
-    ProcessDrainReport, ProcessExecutionConcurrencyError,
+    ProcessDrainDeferred, ProcessDrainReport, ProcessExecutionConcurrencyError,
+    ProcessRecoveryAttemptDisposition, ProcessRecoveryOperation,
 };
 pub use queued_work_driver::{
     QueuedWorkDriver, QueuedWorkRunError, QueuedWorkRunErrorClass, QueuedWorkRunHandle,

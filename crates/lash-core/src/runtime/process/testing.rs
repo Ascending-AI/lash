@@ -41,6 +41,10 @@ pub struct TestLocalProcessRegistry {
     transaction: Arc<Mutex<()>>,
     managed: Arc<Mutex<ManagedProcessMap>>,
     process_read_error: Arc<Mutex<Option<PluginError>>>,
+    process_read_absent: Arc<Mutex<bool>>,
+    process_lease_claim_error: Arc<Mutex<Option<PluginError>>>,
+    process_lease_renew_error: Arc<Mutex<Option<PluginError>>>,
+    process_terminal_write_error: Arc<Mutex<Option<PluginError>>>,
     next_change_seq: Arc<Mutex<u64>>,
     observers: Arc<Mutex<HashMap<SessionId, HashSet<String>>>>,
     wake_targets: Arc<Mutex<HashMap<String, SessionId>>>,
@@ -90,6 +94,26 @@ impl TestLocalProcessRegistry {
     /// and coordinating durable process execution.
     pub async fn set_process_read_error(&self, error: Option<PluginError>) {
         *self.process_read_error.lock().await = error;
+    }
+
+    /// Controls deterministic read-as-absent injection for recovery tests.
+    pub async fn set_process_read_absent(&self, absent: bool) {
+        *self.process_read_absent.lock().await = absent;
+    }
+
+    /// Updates process-lease claim error injection for recovery tests.
+    pub async fn set_process_lease_claim_error(&self, error: Option<PluginError>) {
+        *self.process_lease_claim_error.lock().await = error;
+    }
+
+    /// Updates process-lease renewal error injection for recovery tests.
+    pub async fn set_process_lease_renew_error(&self, error: Option<PluginError>) {
+        *self.process_lease_renew_error.lock().await = error;
+    }
+
+    /// Updates process terminal-write error injection for recovery tests.
+    pub async fn set_process_terminal_write_error(&self, error: Option<PluginError>) {
+        *self.process_terminal_write_error.lock().await = error;
     }
 
     async fn next_change_seq(&self) -> u64 {
@@ -757,6 +781,9 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         lease: &ProcessLease,
         await_output: ProcessAwaitOutput,
     ) -> Result<ProcessCompletionOutcome, PluginError> {
+        if let Some(error) = self.process_terminal_write_error.lock().await.clone() {
+            return Err(error);
+        }
         let _transaction = self.transaction.lock().await;
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(&lease.process_id) else {
@@ -1000,6 +1027,9 @@ impl ProcessRegistry for TestLocalProcessRegistry {
     async fn get_process(&self, process_id: &str) -> Result<Option<ProcessRecord>, PluginError> {
         if let Some(error) = self.process_read_error.lock().await.clone() {
             return Err(error);
+        }
+        if *self.process_read_absent.lock().await {
+            return Ok(None);
         }
         if let Some(record) = self.managed.lock().await.get(process_id) {
             return Ok(Some(record.record.clone()));
@@ -1321,6 +1351,9 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         owner: &crate::LeaseOwnerIdentity,
         lease_ttl_ms: u64,
     ) -> Result<ProcessLeaseClaimOutcome, PluginError> {
+        if let Some(error) = self.process_lease_claim_error.lock().await.clone() {
+            return Err(error);
+        }
         let _transaction = self.transaction.lock().await;
         let mut leases = self.leases.lock().await;
         let now = self.clock.timestamp_ms();
@@ -1387,6 +1420,9 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         lease: &ProcessLease,
         lease_ttl_ms: u64,
     ) -> Result<ProcessLease, PluginError> {
+        if let Some(error) = self.process_lease_renew_error.lock().await.clone() {
+            return Err(error);
+        }
         let mut leases = self.leases.lock().await;
         let now = self.clock.timestamp_ms();
         let live = leases.get(&lease.process_id).filter(|current| {

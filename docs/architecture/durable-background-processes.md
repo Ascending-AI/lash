@@ -435,6 +435,16 @@ owner identity it was established against, and the timestamp — and
 it is immutable: an owner that reappears is fenced by its stale lease token, never
 healed back to running.
 
+The graceful-drain report follows the same evidence rule. Its `abandoned` ids
+are only rows whose fenced terminal write was acknowledged; a claim, registry
+read, renewal, or terminal-write failure instead leaves the row non-terminal and
+adds a typed `BackendError` entry to `deferred`. Legitimate contention and a row
+that disappeared after enumeration remain distinct `Busy` and `Absent`
+dispositions. Backend failures also emit the structured
+`process_recovery.backend_error` warn event on the
+`lash_core::process_recovery` target with the process id, failed operation,
+decision basis, error, and `deferred` outcome.
+
 There is exactly one legitimate writer per path:
 
 - **`OwnerDrain`** — the owner abandons its own started `OwnerBound` work inline at
