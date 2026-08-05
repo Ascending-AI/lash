@@ -339,6 +339,37 @@ impl PostgresStorage {
         })
     }
 
+    /// Construct storage after the caller has already verified this exact pool.
+    ///
+    /// This testing-only seam exists so the performance harness can subtract the
+    /// cost of an otherwise identical open from the enforced schema-gate open.
+    /// Production builds expose no unchecked construction path.
+    #[cfg(feature = "testing")]
+    pub async fn from_preverified_pool_for_testing(pool: PgPool) -> Result<Self, StoreError> {
+        let signing_secret: Option<Vec<u8>> = sqlx::query_scalar(
+            "SELECT signing_secret FROM lash_await_event_meta WHERE singleton = TRUE",
+        )
+        .fetch_optional(&pool)
+        .await
+        .map_err(store_sqlx_error)?;
+        let signing_secret = signing_secret.ok_or_else(|| {
+            StoreError::Backend(
+                "Postgres await-event signing secret row is missing from pre-verified pool"
+                    .to_string(),
+            )
+        })?;
+        if signing_secret.len() != AWAIT_EVENT_SIGNING_SECRET_BYTES {
+            return Err(StoreError::Backend(format!(
+                "Postgres await-event signing secret has {} bytes, expected {AWAIT_EVENT_SIGNING_SECRET_BYTES}",
+                signing_secret.len()
+            )));
+        }
+        Ok(Self {
+            pool,
+            await_event_signing_secret: signing_secret.into(),
+        })
+    }
+
     /// The exact DDL this build provisions, including the seed rows every open
     /// mode requires.
     ///

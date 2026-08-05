@@ -17,6 +17,12 @@ use crate::perf_support::time::round3;
 use super::measurement::*;
 use super::scenarios::{RuntimePerfScenario, ScenarioHarnessKind};
 
+mod budgets;
+use budgets::{
+    allocation_budget_bytes, phase_wall_clock_budget_ms, steady_state_turn_allocation_budget_bytes,
+    wall_clock_budget_ms,
+};
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RuntimePerfReport {
     created_at: String,
@@ -491,21 +497,28 @@ fn evaluate_budgets(
             });
         }
 
-        for (phase, budget_ms) in phase_wall_clock_budgets_ms(*scenario) {
-            if let Some(actual) = summary
-                .phase_summary
-                .get(*phase)
-                .map(|metrics| metrics.duration_ms.median)
-            {
-                push_max_budget(
-                    &mut budgets,
-                    summary,
-                    &format!("phase:{phase}:duration_ms"),
-                    "median",
-                    actual,
-                    *budget_ms,
-                );
-            }
+        for (phase, metrics) in &summary.phase_summary {
+            let Some(budget_ms) = phase_wall_clock_budget_ms(phase) else {
+                budgets.push(RuntimePerfBudgetResult {
+                    scenario: summary.scenario.clone(),
+                    scenario_harness: summary.scenario_harness.clone(),
+                    metric: format!("phase:{phase}:duration_ms"),
+                    statistic: "median".to_string(),
+                    actual: Some(metrics.duration_ms.median),
+                    budget: None,
+                    passed: false,
+                    reason: Some("emitted phase has no checked-in wall-clock budget".to_string()),
+                });
+                continue;
+            };
+            push_max_budget(
+                &mut budgets,
+                summary,
+                &format!("phase:{phase}:duration_ms"),
+                "median",
+                metrics.duration_ms.median,
+                budget_ms,
+            );
         }
 
         push_max_budget(
@@ -637,6 +650,37 @@ fn required_phases(scenario: RuntimePerfScenario) -> &'static [&'static str] {
             "live_replay.trim_by_capacity",
             "live_replay.gap_handling",
         ],
+        RuntimePerfScenario::StoreHardeningHotPaths => &[
+            "store_hardening.identity.process_registration",
+            "store_hardening.identity.trigger_occurrence",
+            "store_hardening.identity.usage_delta",
+            "store_hardening.postgres.open_preverified",
+            "store_hardening.postgres.open_enforce",
+            "store_hardening.memory.claim_session_lease",
+            "store_hardening.memory.claim_queued_work",
+            "store_hardening.memory.complete_queued_work",
+            "store_hardening.memory.attachment_intent",
+            "store_hardening.memory.attachment_adopt",
+            "store_hardening.memory.append_receipt_usage_fresh",
+            "store_hardening.memory.append_receipt_replay",
+            "store_hardening.sqlite.claim_session_lease",
+            "store_hardening.sqlite.claim_queued_work",
+            "store_hardening.sqlite.complete_queued_work",
+            "store_hardening.sqlite.attachment_intent",
+            "store_hardening.sqlite.attachment_adopt",
+            "store_hardening.sqlite.append_receipt_usage_fresh",
+            "store_hardening.sqlite.append_receipt_replay",
+            "store_hardening.postgres.claim_session_lease",
+            "store_hardening.postgres.claim_queued_work",
+            "store_hardening.postgres.complete_queued_work",
+            "store_hardening.postgres.attachment_intent",
+            "store_hardening.postgres.attachment_adopt",
+            "store_hardening.postgres.append_receipt_usage_fresh",
+            "store_hardening.postgres.append_receipt_replay",
+            "store_hardening.memory.prune_terminal_processes",
+            "store_hardening.sqlite.prune_terminal_processes",
+            "store_hardening.postgres.prune_terminal_processes",
+        ],
         RuntimePerfScenario::RlmAsyncToolCompletion => &[
             "context_transform",
             "before_turn_hooks",
@@ -741,49 +785,6 @@ fn required_phases(scenario: RuntimePerfScenario) -> &'static [&'static str] {
     }
 }
 
-fn allocation_budget_bytes(scenario: RuntimePerfScenario) -> f64 {
-    match scenario {
-        RuntimePerfScenario::RlmAsyncToolCompletion => 145_000_000.0,
-        RuntimePerfScenario::RlmTriggerMailPipeline => 260_000_000.0,
-        RuntimePerfScenario::RlmProcessAsyncToolCompletion => 290_000_000.0,
-        RuntimePerfScenario::TurnStartGate => 90_000_000.0,
-        RuntimePerfScenario::TurnCancelRoundTrip => 85_000_000.0,
-        RuntimePerfScenario::IngressClaimProjection => 180_000_000.0,
-        RuntimePerfScenario::ToolDiscoverySearch => 2_300_000_000.0,
-        RuntimePerfScenario::RlmLargeToolCatalog => 5_600_000_000.0,
-        RuntimePerfScenario::RlmLargePrint => 1_000_000_000.0,
-        RuntimePerfScenario::RlmObliqueStackMix => 1_950_000_000.0,
-        RuntimePerfScenario::RlmStreamedPairedLashlang => 128_000_000.0,
-        RuntimePerfScenario::LiveReplayPressure => 128_000_000.0,
-        RuntimePerfScenario::OpenAiResponsesSseParse
-        | RuntimePerfScenario::DirectLlmClient
-        | RuntimePerfScenario::TurnCheckpoint => 256_000_000.0,
-        _ => 1_000_000_000.0,
-    }
-}
-
-fn steady_state_turn_allocation_budget_bytes(scenario: RuntimePerfScenario) -> f64 {
-    match scenario {
-        RuntimePerfScenario::RlmAsyncToolCompletion => 11_000_000.0,
-        RuntimePerfScenario::RlmTriggerMailPipeline => 20_000_000.0,
-        RuntimePerfScenario::RlmProcessAsyncToolCompletion => 23_000_000.0,
-        RuntimePerfScenario::TurnStartGate | RuntimePerfScenario::TurnCancelRoundTrip => {
-            6_000_000.0
-        }
-        RuntimePerfScenario::IngressClaimProjection => 14_000_000.0,
-        RuntimePerfScenario::ToolDiscoverySearch => 170_000_000.0,
-        RuntimePerfScenario::RlmLargeToolCatalog => 430_000_000.0,
-        RuntimePerfScenario::RlmLargePrint => 750_000_000.0,
-        RuntimePerfScenario::RlmObliqueStackMix => 165_000_000.0,
-        RuntimePerfScenario::RlmStreamedPairedLashlang => 64_000_000.0,
-        RuntimePerfScenario::LiveReplayPressure => 96_000_000.0,
-        RuntimePerfScenario::OpenAiResponsesSseParse
-        | RuntimePerfScenario::DirectLlmClient
-        | RuntimePerfScenario::TurnCheckpoint => 192_000_000.0,
-        _ => 750_000_000.0,
-    }
-}
-
 fn steady_state_turn_alloc_bytes(summary: &RuntimePerfScenarioSummary) -> f64 {
     summary
         .steady_state_turn
@@ -791,36 +792,6 @@ fn steady_state_turn_alloc_bytes(summary: &RuntimePerfScenarioSummary) -> f64 {
         .unwrap_or(&summary.last_turn)
         .total_alloc_bytes
         .median
-}
-
-fn wall_clock_budget_ms(scenario: RuntimePerfScenario) -> f64 {
-    match scenario {
-        RuntimePerfScenario::RlmAsyncToolCompletion => 1_000.0,
-        RuntimePerfScenario::RlmTriggerMailPipeline => 520.0,
-        RuntimePerfScenario::RlmProcessAsyncToolCompletion => 2_000.0,
-        RuntimePerfScenario::TurnStartGate => 1_600.0,
-        RuntimePerfScenario::TurnCancelRoundTrip => 310.0,
-        RuntimePerfScenario::IngressClaimProjection => 460.0,
-        RuntimePerfScenario::ToolDiscoverySearch
-        | RuntimePerfScenario::RlmLargeToolCatalog
-        | RuntimePerfScenario::RlmObliqueStackMix => 20_000.0,
-        RuntimePerfScenario::LiveReplayPressure => 5_000.0,
-        _ => 10_000.0,
-    }
-}
-
-fn phase_wall_clock_budgets_ms(scenario: RuntimePerfScenario) -> &'static [(&'static str, f64)] {
-    match scenario {
-        RuntimePerfScenario::TurnStartGate => &[("turn_cancel.start_gate", 1_200.0)],
-        RuntimePerfScenario::TurnCancelRoundTrip => {
-            &[("turn_cancel.request_to_token_to_seal", 60.0)]
-        }
-        RuntimePerfScenario::IngressClaimProjection => {
-            &[("turn_input_ingress.enqueue_to_claim_to_projection", 195.0)]
-        }
-        RuntimePerfScenario::RlmTriggerMailPipeline => &[("trigger.occurrence_to_delivery", 55.0)],
-        _ => &[],
-    }
 }
 
 fn summarize_phase_profiles(
@@ -1370,10 +1341,13 @@ mod tests {
     }
 
     #[test]
-    fn default_scenarios_cover_all_synthetic_runtime_paths() {
+    fn defaults_are_database_free_and_all_covers_every_runtime_path() {
         assert_eq!(
             resolve_scenarios(&[]).unwrap(),
-            RuntimePerfScenario::KNOWN.to_vec()
+            RuntimePerfScenario::DEFAULTS.to_vec()
+        );
+        assert!(
+            !RuntimePerfScenario::DEFAULTS.contains(&RuntimePerfScenario::StoreHardeningHotPaths)
         );
         assert_eq!(
             resolve_scenarios(&["all".to_string()]).unwrap(),
@@ -1464,8 +1438,8 @@ mod tests {
             520.0
         );
         assert_eq!(
-            phase_wall_clock_budgets_ms(RuntimePerfScenario::RlmTriggerMailPipeline),
-            &[("trigger.occurrence_to_delivery", 55.0)]
+            phase_wall_clock_budget_ms("trigger.occurrence_to_delivery"),
+            Some(55.0)
         );
     }
 
@@ -1489,7 +1463,7 @@ mod tests {
             ),
         ] {
             assert!(required_phases(scenario).contains(&phase));
-            assert_eq!(phase_wall_clock_budgets_ms(scenario), &[(phase, budget_ms)]);
+            assert_eq!(phase_wall_clock_budget_ms(phase), Some(budget_ms));
         }
     }
 

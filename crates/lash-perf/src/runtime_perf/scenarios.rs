@@ -85,6 +85,7 @@ pub(crate) enum RuntimePerfScenario {
     TurnStartGate,
     TurnCancelRoundTrip,
     IngressClaimProjection,
+    StoreHardeningHotPaths,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -114,7 +115,7 @@ macro_rules! runtime_perf_metadata {
 }
 
 impl RuntimePerfScenario {
-    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 37] = [
+    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 38] = [
         runtime_perf_metadata!(
             Standard,
             "standard",
@@ -387,9 +388,19 @@ impl RuntimePerfScenario {
             RlmProtocolScenario,
             "Measures active-turn input enqueue, checkpoint claim, and next-request RLM projection."
         ),
+        runtime_perf_metadata!(
+            StoreHardeningHotPaths,
+            "store_hardening_hot_paths",
+            Standard,
+            RuntimeScenario,
+            "Measures hardening-era identity, schema-open, claim settlement, receipt, usage, and attachment-manifest costs on the real in-memory, SQLite, and PostgreSQL backends."
+        ),
     ];
-    pub(crate) const KNOWN: [Self; 37] = runtime_perf_known_scenarios();
-    pub(crate) const DEFAULTS: [Self; 37] = Self::KNOWN;
+    pub(crate) const KNOWN: [Self; 38] = runtime_perf_known_scenarios();
+    // The external PostgreSQL scenario is enforced by the full perf/release
+    // workflows with an explicit `all`; local and push-CI smoke defaults remain
+    // provider/database free.
+    pub(crate) const DEFAULTS: [Self; 37] = runtime_perf_default_scenarios();
 
     pub(crate) fn parse(value: &str) -> Option<Self> {
         Self::METADATA
@@ -436,7 +447,50 @@ impl RuntimePerfScenario {
     }
 }
 
-const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 37] {
+const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 38] {
+    [
+        RuntimePerfScenario::METADATA[0].scenario,
+        RuntimePerfScenario::METADATA[1].scenario,
+        RuntimePerfScenario::METADATA[2].scenario,
+        RuntimePerfScenario::METADATA[3].scenario,
+        RuntimePerfScenario::METADATA[4].scenario,
+        RuntimePerfScenario::METADATA[5].scenario,
+        RuntimePerfScenario::METADATA[6].scenario,
+        RuntimePerfScenario::METADATA[7].scenario,
+        RuntimePerfScenario::METADATA[8].scenario,
+        RuntimePerfScenario::METADATA[9].scenario,
+        RuntimePerfScenario::METADATA[10].scenario,
+        RuntimePerfScenario::METADATA[11].scenario,
+        RuntimePerfScenario::METADATA[12].scenario,
+        RuntimePerfScenario::METADATA[13].scenario,
+        RuntimePerfScenario::METADATA[14].scenario,
+        RuntimePerfScenario::METADATA[15].scenario,
+        RuntimePerfScenario::METADATA[16].scenario,
+        RuntimePerfScenario::METADATA[17].scenario,
+        RuntimePerfScenario::METADATA[18].scenario,
+        RuntimePerfScenario::METADATA[19].scenario,
+        RuntimePerfScenario::METADATA[20].scenario,
+        RuntimePerfScenario::METADATA[21].scenario,
+        RuntimePerfScenario::METADATA[22].scenario,
+        RuntimePerfScenario::METADATA[23].scenario,
+        RuntimePerfScenario::METADATA[24].scenario,
+        RuntimePerfScenario::METADATA[25].scenario,
+        RuntimePerfScenario::METADATA[26].scenario,
+        RuntimePerfScenario::METADATA[27].scenario,
+        RuntimePerfScenario::METADATA[28].scenario,
+        RuntimePerfScenario::METADATA[29].scenario,
+        RuntimePerfScenario::METADATA[30].scenario,
+        RuntimePerfScenario::METADATA[31].scenario,
+        RuntimePerfScenario::METADATA[32].scenario,
+        RuntimePerfScenario::METADATA[33].scenario,
+        RuntimePerfScenario::METADATA[34].scenario,
+        RuntimePerfScenario::METADATA[35].scenario,
+        RuntimePerfScenario::METADATA[36].scenario,
+        RuntimePerfScenario::METADATA[37].scenario,
+    ]
+}
+
+const fn runtime_perf_default_scenarios() -> [RuntimePerfScenario; 37] {
     [
         RuntimePerfScenario::METADATA[0].scenario,
         RuntimePerfScenario::METADATA[1].scenario,

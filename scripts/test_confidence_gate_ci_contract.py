@@ -518,7 +518,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertNotIn("\n  push:\n", workflow)
         self.assertLess(
             workflow.index(
-                "profile_runtime.py --profile full --release --enforce-budgets"
+                "profile_runtime.py --profile full --release --scenario all "
+                "--enforce-budgets"
             ),
             workflow.index('git tag "${RELEASE_TAG}" "${RELEASE_SHA}"'),
         )
@@ -545,7 +546,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn('head_sha="$(git rev-parse HEAD)"', publish_crates)
         self.assertIn('head_sha="$(git rev-parse HEAD)"', publish)
         self.assertIn(
-            "profile_runtime.py --profile full --release --enforce-budgets",
+            "profile_runtime.py --profile full --release --scenario all "
+            "--enforce-budgets",
             validate_release,
         )
         self.assertIn(
@@ -567,12 +569,17 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn("cargo build --locked --release --workspace", release_cache)
         self.assertNotIn("--target x86_64-unknown-linux-gnu", release_cache)
         for command in (
-            "profile_runtime.py --profile full --release --enforce-budgets",
+            "profile_runtime.py --profile full --release --scenario all "
+            "--enforce-budgets",
             "profile_lashlang.py --iterations 2500 --profile-iterations 2500 "
             "--enforce-budgets",
         ):
             self.assertIn(command, perf)
             self.assertIn(command, release)
+
+        for workflow_with_postgres in (perf, release):
+            self.assertIn("image: postgres:16-alpine", workflow_with_postgres)
+            self.assertIn("LASH_POSTGRES_DATABASE_URL:", workflow_with_postgres)
 
     def test_all_confidence_fast_shards_use_blacksmith(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
