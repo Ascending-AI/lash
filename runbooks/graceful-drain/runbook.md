@@ -108,7 +108,8 @@ Read `graceful_drain_observed` and require:
 - `journal_active` is empty and `journal_completed` is non-empty;
 - the parked session id equals the seeded session;
 - provider close and trace flush completed; and
-- `drain_report_abandoned` contains only `drain-owner-bound-mine`.
+- `drain_report_abandoned` contains only `drain-owner-bound-mine`; and
+- `drain_report_deferred` is empty (including no peer-settled or backend-error row).
 
 **Fail if:** the host admits work after quiesce, drops the in-flight effect, parks before it
 commits, declares an empty journal without a completed key, or invokes a substitute
@@ -144,7 +145,7 @@ procedure and worker-specific paragraph visible.
 | An admitted turn may finish before shutdown | completed turn and controller journal fields |
 | Parking flushes and releases an idle session | `parked_session_id` after turn completion |
 | Provider close and trace flush are explicit ordered levers | `provider_closed`, `trace_flushed` |
-| Worker drain is separate from facade/session drain | explicit `drain_report_abandoned` after park |
+| Worker drain is separate from facade/session drain | explicit `drain_report_abandoned` and empty `drain_report_deferred` after park |
 | This worker's started OwnerBound rows become `Abandoned{OwnerDrain}` | final mine row and observer terminal |
 | Rerunnable work receives no terminal | final rerunnable row |
 | Other-owner, unstarted OwnerBound, and ExternallyOwned rows remain untouched | final process array |

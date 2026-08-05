@@ -21,8 +21,8 @@ case "$scenario" in
     ;;
 esac
 
-if ! [[ "$port" =~ ^[0-9]+$ ]] || ((10#$port < 5540 || 10#$port > 5549)); then
-  echo "${runbook_name} PostgreSQL port must be an integer in 5540..5549, got '${port}'." >&2
+if ! [[ "$port" =~ ^[0-9]+$ ]] || ((10#$port < 5540 || 10#$port > 5599)); then
+  echo "${runbook_name} PostgreSQL port must be an integer in 5540..5599, got '${port}'." >&2
   exit 2
 fi
 
@@ -39,7 +39,7 @@ else
 fi
 mkdir -p "$artifact_dir"
 test_output="$artifact_dir/${runbook_name}-e2e.log"
-container="lash-fig897-${runbook_name}-postgres"
+container="${LASH_PROCESS_OPERATOR_POSTGRES_CONTAINER:-lash-fig897-${runbook_name}-postgres}"
 
 cleanup() {
   status=$?
@@ -130,6 +130,8 @@ if scenario == "drain":
         fail(f"no completed effect evidence was recorded: {observed}")
     if observed["drain_report_abandoned"] != ["drain-owner-bound-mine"]:
         fail(f"drain touched the wrong rows: {observed}")
+    if observed["drain_report_deferred"] != []:
+        fail(f"drain left rows deferred: {observed}")
     if observed["observer_abandon_writer"] != "OwnerDrain":
         fail(f"drain terminal carried the wrong writer: {observed}")
     rows = {row["process_id"]: row for row in observed["processes"]}

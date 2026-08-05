@@ -12,6 +12,8 @@ use crate::{
 };
 
 mod attachment_owner_tests;
+#[path = "recovery_disposition_tests.rs"]
+mod recovery_disposition_tests;
 
 const TEST_PROCESS_EXECUTION_CONCURRENCY: usize = 4;
 
@@ -107,7 +109,39 @@ async fn worker_with_engine(
     Arc<LateBoundProcessRunHandle>,
     ProcessExecutionEnvRef,
 ) {
-    let raw_registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
+    let (worker, registry, run_handle, env_ref, _) =
+        worker_with_engine_and_registry(concurrency, engine, run_handle).await;
+    (worker, registry, run_handle, env_ref)
+}
+
+async fn worker_with_engine_and_registry(
+    concurrency: usize,
+    engine: Arc<dyn crate::ProcessEngine>,
+    run_handle: Arc<LateBoundProcessRunHandle>,
+) -> (
+    DurableProcessWorker,
+    Arc<dyn ProcessRegistry>,
+    Arc<LateBoundProcessRunHandle>,
+    ProcessExecutionEnvRef,
+    Arc<TestLocalProcessRegistry>,
+) {
+    worker_with_engine_registry_and_timings(concurrency, engine, run_handle, None).await
+}
+
+async fn worker_with_engine_registry_and_timings(
+    concurrency: usize,
+    engine: Arc<dyn crate::ProcessEngine>,
+    run_handle: Arc<LateBoundProcessRunHandle>,
+    lease_timings: Option<crate::LeaseTimings>,
+) -> (
+    DurableProcessWorker,
+    Arc<dyn ProcessRegistry>,
+    Arc<LateBoundProcessRunHandle>,
+    ProcessExecutionEnvRef,
+    Arc<TestLocalProcessRegistry>,
+) {
+    let test_registry = Arc::new(TestLocalProcessRegistry::default());
+    let raw_registry: Arc<dyn ProcessRegistry> = test_registry.clone();
     let driver = crate::ProcessWorkDriver::new(
         Arc::clone(&raw_registry),
         Arc::clone(&run_handle) as Arc<dyn crate::ProcessRunHandle>,
@@ -115,6 +149,9 @@ async fn worker_with_engine(
     let registry = driver.process_registry();
     let mut runtime_host = RuntimeHostConfig::in_memory();
     runtime_host.process_engines = crate::ProcessEngineRegistry::new().with_engine(engine);
+    if let Some(lease_timings) = lease_timings {
+        runtime_host = runtime_host.with_lease_timings(lease_timings);
+    }
     let policy = crate::SessionPolicy {
         provider_id: "test".to_string(),
         model: crate::ModelSpec::from_token_limits("test-model", Default::default(), 16_384, None)
@@ -145,7 +182,7 @@ async fn worker_with_engine(
         .worker
         .set(worker.clone())
         .unwrap_or_else(|_| panic!("test process worker is bound exactly once"));
-    (worker, registry, run_handle, env_ref)
+    (worker, registry, run_handle, env_ref, test_registry)
 }
 
 fn engine_registration(
@@ -253,8 +290,7 @@ fn inline_worker_with_trigger_store(
     )
 }
 
-/// A registration with an explicit disposition. Uses an External input as a
-/// convenient no-env placeholder; the disposition-driven sweep keys off the
+/// A registration with an explicit disposition; the disposition-driven sweep keys off the
 /// declared disposition, not the input kind, so these unit tests exercise the
 /// verdict without standing up execution infrastructure.
 fn registration_with_disposition(
@@ -307,7 +343,7 @@ fn assert_recovery_backend_error_event(
         ("process_id", process_id, CapturedFieldKind::Str),
         ("operation", operation, CapturedFieldKind::Str),
         ("outcome", "deferred", CapturedFieldKind::Str),
-        ("error", error, CapturedFieldKind::Debug),
+        ("error", error, CapturedFieldKind::Str),
         (
             "message",
             "process recovery backend operation failed; row deferred",

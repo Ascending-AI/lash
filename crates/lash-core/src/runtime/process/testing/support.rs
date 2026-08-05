@@ -18,10 +18,14 @@ impl Default for TestLocalProcessRegistry {
             transaction: Arc::new(Mutex::new(())),
             managed: Arc::new(Mutex::new(HashMap::new())),
             process_read_error: Arc::new(Mutex::new(None)),
+            process_read_error_after: Arc::new(Mutex::new(None)),
             process_read_absent: Arc::new(Mutex::new(false)),
+            process_read_override: Arc::new(Mutex::new(None)),
             process_lease_claim_error: Arc::new(Mutex::new(None)),
             process_lease_renew_error: Arc::new(Mutex::new(None)),
             process_terminal_write_error: Arc::new(Mutex::new(None)),
+            process_terminal_write_outcome: Arc::new(Mutex::new(None)),
+            process_lease_release_error: Arc::new(Mutex::new(None)),
             next_change_seq: Arc::new(Mutex::new(0)),
             observers: Arc::new(Mutex::new(HashMap::<_, HashSet<_>>::new())),
             wake_targets: Arc::new(Mutex::new(HashMap::new())),
@@ -42,6 +46,55 @@ impl Default for TestLocalProcessRegistry {
 }
 
 impl TestLocalProcessRegistry {
+    /// Updates process read error state for store and process-engine implementors while persisting
+    /// and coordinating durable process execution.
+    pub async fn set_process_read_error(&self, error: Option<PluginError>) {
+        *self.process_read_error.lock().await = error;
+    }
+
+    /// Injects one process-read error after `successful_reads` successful reads.
+    pub async fn set_process_read_error_after(&self, successful_reads: usize, error: PluginError) {
+        *self.process_read_error_after.lock().await = Some((successful_reads, error));
+    }
+
+    /// Controls deterministic read-as-absent injection for recovery tests.
+    pub async fn set_process_read_absent(&self, absent: bool) {
+        *self.process_read_absent.lock().await = absent;
+    }
+
+    /// Overrides the next process read with a supplied production read-model row.
+    pub async fn set_process_read_override(&self, record: ProcessRecord) {
+        *self.process_read_override.lock().await = Some(record);
+    }
+
+    /// Updates process-lease claim error injection for recovery tests.
+    pub async fn set_process_lease_claim_error(&self, error: Option<PluginError>) {
+        *self.process_lease_claim_error.lock().await = error;
+    }
+
+    /// Updates process-lease renewal error injection for recovery tests.
+    pub async fn set_process_lease_renew_error(&self, error: Option<PluginError>) {
+        *self.process_lease_renew_error.lock().await = error;
+    }
+
+    /// Updates process terminal-write error injection for recovery tests.
+    pub async fn set_process_terminal_write_error(&self, error: Option<PluginError>) {
+        *self.process_terminal_write_error.lock().await = error;
+    }
+
+    /// Overrides the next fenced terminal-write outcome.
+    pub async fn set_process_terminal_write_outcome(
+        &self,
+        outcome: super::super::ProcessCompletionOutcome,
+    ) {
+        *self.process_terminal_write_outcome.lock().await = Some(outcome);
+    }
+
+    /// Updates process-lease release error injection for recovery tests.
+    pub async fn set_process_lease_release_error(&self, error: Option<PluginError>) {
+        *self.process_lease_release_error.lock().await = error;
+    }
+
     /// Sets the wake delivery config carried by a `TestLocalProcessRegistry` for store and
     /// process-engine implementors while persisting and coordinating durable process execution.
     pub fn with_wake_delivery_config(mut self, config: super::super::WakeDeliveryConfig) -> Self {
