@@ -480,7 +480,7 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
 
     let source_type = "timer.tick";
     let source_key =
-        lash_core::facade_support::default_trigger_source_key(source_type, &serde_json::json!({}))?;
+        lash_core::facade_support::default_trigger_source_key(source_type, &serde_json::json!({}));
     let env_ref = persist_process_env_ref(process_env_store.as_ref()).await;
     trigger_store
         .execute_command(

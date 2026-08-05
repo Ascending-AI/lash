@@ -82,7 +82,7 @@ struct ManagedProcessRecord {
     record: ProcessRecord,
     change_seq: u64,
     events: Vec<ProcessEvent>,
-    keyed_events: HashMap<String, (String, ProcessEvent)>,
+    keyed_events: HashMap<String, ProcessEvent>,
 }
 
 impl TestLocalProcessRegistry {
@@ -169,7 +169,7 @@ impl TestLocalProcessRegistry {
             .replay
             .as_ref()
             .and_then(|replay| record.keyed_events.get(replay.key.as_str()))
-            .map(|(hash, event)| (hash.clone(), event.clone()));
+            .cloned();
         let last_sequence = record.events.last().map(|event| event.sequence);
         let wake_session_id = self
             .wake_targets
@@ -217,7 +217,6 @@ impl TestLocalProcessRegistry {
             }
             super::ProcessEventAppendPlan::Insert {
                 event,
-                payload_hash,
                 projected_record,
                 wake_delivery,
                 ..
@@ -234,9 +233,7 @@ impl TestLocalProcessRegistry {
                 record.change_seq = self.next_change_seq().await;
                 record.events.push(event.clone());
                 if let Some(replay) = event.invocation.replay.clone() {
-                    record
-                        .keyed_events
-                        .insert(replay.key, (payload_hash, event.clone()));
+                    record.keyed_events.insert(replay.key, event.clone());
                 }
                 Ok(ProcessEventAppendResult {
                     event,
@@ -692,7 +689,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .replay
             .as_ref()
             .and_then(|replay| record.keyed_events.get(replay.key.as_str()))
-            .map(|(hash, event)| (hash.clone(), event.clone()));
+            .cloned();
         let last_sequence = record.events.last().map(|event| event.sequence);
         let wake_session_id = self.wake_targets.lock().await.get(process_id).cloned();
         let sender_floor = match wake_session_id.as_ref() {
@@ -732,7 +729,6 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             }
             super::ProcessEventAppendPlan::Insert {
                 event,
-                payload_hash,
                 projected_record,
                 wake_delivery,
                 ..
@@ -747,9 +743,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 record.record = projected_record;
                 record.change_seq = self.next_change_seq().await;
                 if let Some(replay) = event.invocation.replay.clone() {
-                    record
-                        .keyed_events
-                        .insert(replay.key, (payload_hash, event.clone()));
+                    record.keyed_events.insert(replay.key, event.clone());
                 }
                 record.events.push(event);
                 ProcessCompletionOutcome::Committed(record.record.clone())
@@ -780,7 +774,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .replay
             .as_ref()
             .and_then(|replay| record.keyed_events.get(replay.key.as_str()))
-            .map(|(hash, event)| (hash.clone(), event.clone()));
+            .cloned();
         let last_sequence = record.events.last().map(|event| event.sequence);
         let wake_session_id = self
             .wake_targets
@@ -838,7 +832,6 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             super::ProcessEventAppendPlan::Replay { .. } => unreachable!("replay returned above"),
             super::ProcessEventAppendPlan::Insert {
                 event,
-                payload_hash,
                 projected_record,
                 wake_delivery,
                 ..
@@ -852,9 +845,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 .await;
                 record.record = projected_record;
                 if let Some(replay) = event.invocation.replay.clone() {
-                    record
-                        .keyed_events
-                        .insert(replay.key, (payload_hash, event.clone()));
+                    record.keyed_events.insert(replay.key, event.clone());
                 }
                 record.events.push(event);
             }

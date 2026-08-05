@@ -12,6 +12,8 @@ use crate::{
 use lash_sansio::core_support::*;
 use std::collections::HashMap;
 
+const TOOL_BATCH_FAMILY_VERSION: u8 = 1;
+
 #[derive(Clone)]
 pub struct ToolInvocation {
     pub id: String,
@@ -86,12 +88,75 @@ mod tests {
         let first = deterministic_tool_invocation_batch_id(&calls);
         let retry = deterministic_tool_invocation_batch_id(&calls);
         assert_eq!(first, retry);
-        assert!(first.starts_with("tool-batch:"));
+        assert_eq!(
+            first,
+            "tool-batch:v1:sha256:47f870096a63c5c1b8cdb75f172f2f46b7b9831dc40c303b0b136c4d483d0a40"
+        );
+        assert_eq!(
+            hex(&tool_invocation_batch_preimage(&calls)),
+            "6c6173682d737461626c652d6964656e746974790101000000000000001a6c6173682e746f6f6c2d696e766f636174696f6e2d626174636800000000000000020000000000000001610000000000000009746f6f6c3a74657374000000000000000b7b2276616c7565223a317d000000000000000001620000000000000009746f6f6c3a74657374000000000000000b7b2276616c7565223a327d00"
+        );
 
         let changed_args = vec![invocation("a", 1), invocation("b", 3)];
         let reordered = vec![invocation("b", 2), invocation("a", 1)];
         assert_ne!(first, deterministic_tool_invocation_batch_id(&changed_args));
         assert_ne!(first, deterministic_tool_invocation_batch_id(&reordered));
+    }
+
+    #[test]
+    fn granted_batch_identity_pins_present_grant_routing_grammar() {
+        let grant = crate::ToolExecutionGrant::from_definition(crate::ToolDefinition::raw(
+            "tool:granted",
+            "granted",
+            "golden",
+            serde_json::json!({"type": "object"}),
+            serde_json::json!({"type": "string"}),
+        ))
+        .with_source_id("plugin\0route")
+        .with_execution_binding(serde_json::json!({"route": ["λ", -0.0]}));
+        let calls = vec![
+            ToolInvocation::new(
+                "grant\0call",
+                crate::ToolId::from("tool:granted"),
+                serde_json::json!({"value": true}),
+            )
+            .with_execution_grant(grant),
+        ];
+        assert_eq!(
+            hex(&tool_invocation_batch_preimage(&calls)),
+            "6c6173682d737461626c652d6964656e746974790101000000000000001a6c6173682e746f6f6c2d696e766f636174696f6e2d62617463680000000000000001000000000000000a6772616e740063616c6c000000000000000c746f6f6c3a6772616e746564000000000000000e7b2276616c7565223a747275657d01000000000000000c746f6f6c3a6772616e74656401000000000000000c706c7567696e00726f75746500000000000000147b22726f757465223a5b22cebb222c302e305d7d"
+        );
+        assert_eq!(
+            deterministic_tool_invocation_batch_id(&calls),
+            "tool-batch:v1:sha256:8dc1ae656a595d07d81f6102921438b6efd4af0b6db58d58a334d182fcef2ac7"
+        );
+
+        let without_source =
+            crate::ToolExecutionGrant::from_definition(crate::ToolDefinition::raw(
+                "tool:granted",
+                "granted",
+                "golden",
+                serde_json::json!({"type": "object"}),
+                serde_json::json!({"type": "string"}),
+            ))
+            .with_execution_binding(serde_json::json!({"route": ["λ", -0.0]}));
+        let without_source = vec![
+            ToolInvocation::new(
+                "grant\0call",
+                crate::ToolId::from("tool:granted"),
+                serde_json::json!({"value": true}),
+            )
+            .with_execution_grant(without_source),
+        ];
+        assert_ne!(
+            deterministic_tool_invocation_batch_id(&calls),
+            deterministic_tool_invocation_batch_id(&without_source),
+            "grant source presence must occupy a distinct option arm"
+        );
+    }
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
     }
 
     #[test]
@@ -205,25 +270,60 @@ fn cancelled_completed_tool_call(
     }
 }
 
+/// Permanent tag registry for tool-batch identities.
+///
+/// Grant presence uses the universal option tags 0/1. Grant manifest and
+/// contract fields outside the explicit execution-address allowlist are
+/// exhaustively ignored below. Retired tags remain burned.
+fn tool_invocation_batch_preimage(calls: &[ToolInvocation]) -> Vec<u8> {
+    let mut identity = crate::stable_identity::IdentityEncoder::new(
+        "lash.tool-invocation-batch",
+        TOOL_BATCH_FAMILY_VERSION,
+    );
+    identity.sequence(calls, |identity, call| {
+        let ToolInvocation {
+            id,
+            tool_id,
+            args,
+            execution_grant,
+            child_execution_trace_hook: _,
+        } = call;
+        identity.string(id);
+        identity.string(tool_id.as_str());
+        identity.bytes(&crate::identity_json::payload_leaf(args));
+        identity.optional(execution_grant.as_deref(), |identity, grant| {
+            let crate::ToolExecutionGrant {
+                manifest,
+                contract: _,
+                source_id,
+                execution_binding,
+            } = grant;
+            let crate::ToolManifest {
+                id,
+                name: _,
+                description: _,
+                compact_contract: _,
+                activation: _,
+                bindings: _,
+                argument_projection: _,
+                retry_policy: _,
+            } = manifest;
+            identity.string(id.as_str());
+            identity.optional(source_id.as_deref(), |identity, source_id| {
+                identity.string(source_id);
+            });
+            identity.bytes(&crate::identity_json::payload_leaf(execution_binding));
+        });
+    });
+    identity.finish()
+}
+
 fn deterministic_tool_invocation_batch_id(calls: &[ToolInvocation]) -> String {
-    let identity = calls
-        .iter()
-        .map(|call| {
-            serde_json::json!({
-                "id": call.id.clone(),
-                "tool_id": call.tool_id.to_string(),
-                "args": call.args.clone(),
-                "execution_grant": call.execution_grant.as_ref().map(|grant| serde_json::json!({
-                    "tool_id": grant.manifest.id.to_string(),
-                    "source_id": grant.source_id.clone(),
-                    "execution_binding": grant.execution_binding.clone(),
-                })),
-            })
-        })
-        .collect::<Vec<_>>();
-    let digest = crate::stable_hash::stable_json_sha256_hex(&identity)
-        .unwrap_or_else(|_| format!("len-{}", calls.len()));
-    format!("tool-batch:{digest}")
+    crate::stable_identity::rendered_hash(
+        "tool-batch",
+        TOOL_BATCH_FAMILY_VERSION,
+        &tool_invocation_batch_preimage(calls),
+    )
 }
 
 struct CoordinatedToolLaunch {

@@ -16,6 +16,28 @@ const MAGIC: &[u8] = b"lash-stable-identity";
 /// Scheme-wide salt folded into every framed family header.
 pub(crate) const GLOBAL_SALT: u8 = 1;
 
+/// Reserved durable identity family domains. Entries are append-only: retired
+/// families remain reserved so a later projection cannot silently reuse them.
+pub(crate) const FAMILY_DOMAINS: &[&str] = &[
+    "lash.await-event",
+    "lash.await-event-auth",
+    "lash.direct-effect-discriminator",
+    "lash.direct-effect-replay-key",
+    "lash.process-cancellation-request",
+    "lash.process-registration-definition",
+    "lash.process-transfer-set",
+    "lash.process-wake",
+    "lash.runtime-usage-payload",
+    "lash.tool-invocation-batch",
+    "lash.trigger-command",
+    "lash.trigger-delivery-process",
+    "lash.trigger-operation-address",
+    "lash.trigger-source",
+    "lash.trigger-subscription-address",
+    "lash.trigger-subscription-definition",
+    "lash.trigger-subscription-key",
+];
+
 /// Append-only builder for one family-owned durable identity preimage.
 pub(crate) struct IdentityEncoder {
     bytes: Vec<u8>,
@@ -24,6 +46,10 @@ pub(crate) struct IdentityEncoder {
 impl IdentityEncoder {
     /// Starts a preimage with `magic || salt || family-version || domain`.
     pub(crate) fn new(domain: &str, family_version: u8) -> Self {
+        debug_assert!(
+            domain == "test" || FAMILY_DOMAINS.contains(&domain),
+            "durable identity family domain `{domain}` is missing from FAMILY_DOMAINS"
+        );
         let mut encoder = Self { bytes: Vec::new() };
         encoder.raw_bytes(MAGIC);
         encoder.u8(GLOBAL_SALT);
@@ -47,6 +73,10 @@ impl IdentityEncoder {
     }
 
     pub(crate) fn u64(&mut self, value: u64) {
+        self.raw_bytes(&value.to_be_bytes());
+    }
+
+    pub(crate) fn i64(&mut self, value: i64) {
         self.raw_bytes(&value.to_be_bytes());
     }
 
@@ -115,6 +145,7 @@ mod tests {
         encoder.tag(3);
         encoder.u32(0x0102_0304);
         encoder.u64(0x0102_0304_0506_0708);
+        encoder.i64(-2);
         encoder.string("a:b");
         encoder.bytes(&[0, 1]);
         encoder.optional::<u8>(None, |_, _| unreachable!());
@@ -123,7 +154,20 @@ mod tests {
 
         assert_eq!(
             hex(&encoder.finish()),
-            "6c6173682d737461626c652d6964656e746974790107000000000000000474657374030102030401020304050607080000000000000003613a620000000000000002000100010900000000000000020405"
+            "6c6173682d737461626c652d6964656e74697479010700000000000000047465737403010203040102030405060708fffffffffffffffe0000000000000003613a620000000000000002000100010900000000000000020405"
+        );
+    }
+
+    #[test]
+    fn durable_identity_family_domains_are_unique() {
+        let unique = FAMILY_DOMAINS
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            unique.len(),
+            FAMILY_DOMAINS.len(),
+            "durable family domains are permanently reserved and must be unique"
         );
     }
 }

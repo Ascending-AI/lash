@@ -283,7 +283,9 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// recreate flow rather than an in-place migration.
 /// Version 25 also rejects session and artifact rows carrying pre-FIG-886
 /// identities as part of the coordinated cutover.
-pub(crate) const SCHEMA_VERSION: i32 = 25;
+/// Version 26 rejects pre-FIG-915 usage identities and session rows carrying
+/// the former tool-batch or plugin-message names.
+pub(crate) const SCHEMA_VERSION: i32 = 26;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -329,7 +331,6 @@ CREATE TABLE IF NOT EXISTS process_events (
     process_id        TEXT NOT NULL,
     sequence          INTEGER NOT NULL,
     event_type        TEXT NOT NULL,
-    payload_hash      TEXT NOT NULL,
     idempotency_key   TEXT,
     occurred_at_ms    INTEGER NOT NULL,
     event_json        TEXT NOT NULL,
@@ -440,7 +441,9 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
 /// Bumped to 18 for wake-delivery claims and raw session originator ids.
 // Version 20 stores separately versioned registration fingerprints and v2
 // process-environment content addresses.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 20;
+// Version 21 stores shared-framing wake identities and compares replayed event
+// payloads structurally instead of retaining a payload-hash column.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 21;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -469,7 +472,6 @@ CREATE INDEX IF NOT EXISTS idx_trigger_subscriptions_source
 CREATE TABLE IF NOT EXISTS trigger_occurrences (
     occurrence_id    TEXT PRIMARY KEY,
     idempotency_key  TEXT NOT NULL UNIQUE,
-    request_hash     TEXT NOT NULL,
     source_type      TEXT NOT NULL,
     source_key       TEXT NOT NULL,
     occurred_at_ms   INTEGER NOT NULL,
@@ -505,10 +507,10 @@ CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_subscription
     ON trigger_deliveries(subscription_id);
 ";
 
-// Version 3 rejects the live-serde subscription/command identities and stores
-// the FIG-886 v2 families. Occurrence request hashing is a separate family.
-// There is deliberately no compatibility read path.
-pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 3;
+// Version 4 stores FIG-915 trigger identities and compares occurrence requests
+// structurally instead of retaining a request-hash column. There is
+// deliberately no compatibility read path.
+pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 4;
 
 pub(crate) const EFFECT_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS runtime_effect_replay (
@@ -570,7 +572,9 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 // the incarnation join column. Effect databases follow the crate's alpha
 // reject-and-recreate convention rather than carrying a migration chain.
 // Version 7 rejects live-serde await-event and direct replay identities.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 7;
+// Version 8 rejects the former live-serde tool-batch and process-transfer
+// replay names.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 8;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

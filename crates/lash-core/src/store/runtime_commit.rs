@@ -5,23 +5,19 @@ use super::{
     SessionCheckpoint, SessionExecutionLeaseAuthority, StoreError, commit_identity,
 };
 
-pub(super) const USAGE_PAYLOAD_ENCODING_V1: u32 = 1;
-const USAGE_PAYLOAD_DOMAIN: &[u8] = b"lash.runtime-usage-payload";
+const USAGE_PAYLOAD_FAMILY_VERSION: u8 = 2;
+pub(super) const USAGE_PAYLOAD_ENCODING_V2: u32 = USAGE_PAYLOAD_FAMILY_VERSION as u32;
 
-fn push_usage_payload_frame(encoded: &mut Vec<u8>, bytes: &[u8]) {
-    encoded.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
-    encoded.extend_from_slice(bytes);
-}
-
-/// Version 1 canonical bytes, in order:
+/// Permanent tag registry for runtime-usage payload identities.
 ///
-/// 1. domain tag: `u64` big-endian byte length, then
-///    `lash.runtime-usage-payload`;
-/// 2. encoding version: `u32` big-endian [`USAGE_PAYLOAD_ENCODING_V1`];
-/// 3. source and model: each as a `u64` big-endian UTF-8 byte length followed
-///    by its bytes;
-/// 4. nested usage: `u64` big-endian byte length followed by the five signed
-///    counters in declaration order, each encoded as big-endian `i64`.
+/// Version 2 has no sum or optional variants: source, model, and the five
+/// counters form its complete sequence. Retired tags remain burned when
+/// variants are introduced in a later family version.
+/// Version 2 canonical bytes, in order:
+///
+/// The shared framing header owns the domain and family version. Source and
+/// model follow as length-prefixed strings, then the five signed counters in
+/// declaration order as big-endian `i64` values.
 ///
 /// The full destructures deliberately omit `..`: adding a semantic field to
 /// either durable DTO fails compilation until this projection is reconsidered.
@@ -39,29 +35,22 @@ fn usage_payload_identity_bytes(entry: &crate::TokenLedgerEntry) -> Vec<u8> {
         reasoning_output_tokens,
     } = usage;
 
-    let mut encoded = Vec::new();
-    push_usage_payload_frame(&mut encoded, USAGE_PAYLOAD_DOMAIN);
-    encoded.extend_from_slice(&USAGE_PAYLOAD_ENCODING_V1.to_be_bytes());
-    push_usage_payload_frame(&mut encoded, source.as_bytes());
-    push_usage_payload_frame(&mut encoded, model.as_bytes());
-
-    let mut encoded_usage = Vec::with_capacity(5 * std::mem::size_of::<i64>());
-    encoded_usage.extend_from_slice(&input_tokens.to_be_bytes());
-    encoded_usage.extend_from_slice(&output_tokens.to_be_bytes());
-    encoded_usage.extend_from_slice(&cache_read_input_tokens.to_be_bytes());
-    encoded_usage.extend_from_slice(&cache_write_input_tokens.to_be_bytes());
-    encoded_usage.extend_from_slice(&reasoning_output_tokens.to_be_bytes());
-    push_usage_payload_frame(&mut encoded, &encoded_usage);
-    encoded
+    let mut identity = crate::stable_identity::IdentityEncoder::new(
+        "lash.runtime-usage-payload",
+        USAGE_PAYLOAD_FAMILY_VERSION,
+    );
+    identity.string(source);
+    identity.string(model);
+    identity.i64(*input_tokens);
+    identity.i64(*output_tokens);
+    identity.i64(*cache_read_input_tokens);
+    identity.i64(*cache_write_input_tokens);
+    identity.i64(*reasoning_output_tokens);
+    identity.finish()
 }
 
 fn usage_payload_identity_hash(entry: &crate::TokenLedgerEntry) -> String {
-    use sha2::Digest;
-
-    format!(
-        "{:x}",
-        sha2::Sha256::digest(usage_payload_identity_bytes(entry))
-    )
+    crate::stable_hash::sha256_hex(&usage_payload_identity_bytes(entry))
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -137,7 +126,7 @@ impl RuntimeUsageDeltaIdentity {
         Self {
             operation_storage_key,
             entry_ordinal,
-            payload_encoding_version: USAGE_PAYLOAD_ENCODING_V1,
+            payload_encoding_version: USAGE_PAYLOAD_ENCODING_V2,
             payload_hash,
         }
     }
@@ -151,7 +140,7 @@ mod usage_payload_identity_tests {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
     }
 
-    macro_rules! define_usage_payload_v1_corpus {
+    macro_rules! define_usage_payload_v2_corpus {
         ($(
             $row:literal => crate::TokenLedgerEntry {
                 source: $source:expr,
@@ -165,7 +154,7 @@ mod usage_payload_identity_tests {
                 } $(,)?
             }
         ),+ $(,)?) => {
-            fn usage_payload_v1_corpus() -> Vec<(&'static str, crate::TokenLedgerEntry)> {
+            fn usage_payload_v2_corpus() -> Vec<(&'static str, crate::TokenLedgerEntry)> {
                 vec![$((
                     $row,
                     crate::TokenLedgerEntry {
@@ -187,9 +176,9 @@ mod usage_payload_identity_tests {
     // The macro repeats the complete TokenLedgerEntry and TokenUsage shapes in
     // every fixture. A field addition cannot compile until the corpus is
     // updated; any projection change then moves the exact golden bytes.
-    // Neither v1 DTO has an Option field, so empty/non-empty strings pin its
+    // Neither v2 DTO has an Option field, so empty/non-empty strings pin its
     // only absence/presence boundary instead of inventing None/Some semantics.
-    define_usage_payload_v1_corpus! {
+    define_usage_payload_v2_corpus! {
         "empty_strings_zero_usage" => crate::TokenLedgerEntry {
             source: String::new(),
             model: String::new(),
@@ -237,8 +226,8 @@ mod usage_payload_identity_tests {
     }
 
     #[test]
-    fn usage_payload_encoding_v1_golden_identity_corpus() {
-        let rendered = usage_payload_v1_corpus()
+    fn usage_payload_encoding_v2_golden_identity_corpus() {
+        let rendered = usage_payload_v2_corpus()
             .into_iter()
             .enumerate()
             .map(|(entry_ordinal, (name, entry))| {
@@ -264,7 +253,7 @@ mod usage_payload_identity_tests {
                 )
             })
             .collect::<std::collections::BTreeMap<_, _>>();
-        let expected = include_str!("testdata/usage_payload_encoding_v1.hex")
+        let expected = include_str!("testdata/usage_payload_encoding_v2.hex")
             .lines()
             .filter(|line| !line.trim().is_empty())
             .map(|line| {
@@ -289,16 +278,16 @@ mod usage_payload_identity_tests {
                 .expect("rendered golden corpus row was checked above");
             assert_eq!(
                 actual, **expected,
-                "v1 preimage, payload hash, or full identity moved for {name}"
+                "v2 preimage, payload hash, or full identity moved for {name}"
             );
         }
     }
 
     #[test]
     fn usage_identity_version_participates_in_equality() {
-        let entry = usage_payload_v1_corpus().pop().expect("usage fixture").1;
+        let entry = usage_payload_v2_corpus().pop().expect("usage fixture").1;
         let current = RuntimeUsageDeltaIdentity::for_entry("operation".to_string(), 0, &entry);
-        assert_eq!(current.payload_encoding_version, USAGE_PAYLOAD_ENCODING_V1);
+        assert_eq!(current.payload_encoding_version, USAGE_PAYLOAD_ENCODING_V2);
         let mut future = current.clone();
         future.payload_encoding_version += 1;
         assert_ne!(current, future);
@@ -306,7 +295,7 @@ mod usage_payload_identity_tests {
 
     #[test]
     fn runtime_commit_rejects_a_payload_version_hash_mismatch() {
-        let entry = usage_payload_v1_corpus().pop().expect("usage fixture").1;
+        let entry = usage_payload_v2_corpus().pop().expect("usage fixture").1;
         let state = crate::RuntimeSessionState {
             session_id: "usage-payload-version".to_string(),
             ..crate::RuntimeSessionState::default()
@@ -316,7 +305,7 @@ mod usage_payload_identity_tests {
 
         let error = commit
             .validate_operation_session()
-            .expect_err("future version with a v1 hash must be rejected");
+            .expect_err("future version with a v2 hash must be rejected");
         assert!(
             error
                 .to_string()

@@ -261,8 +261,7 @@ impl TriggerStore for PostgresTriggerStore {
         request: TriggerOccurrenceRequest,
     ) -> Result<lash_core::TriggerIngressResult, PluginError> {
         lash_core::facade_support::validate_trigger_occurrence_request(&request)?;
-        let request_hash = lash_core::facade_support::trigger_occurrence_request_hash(&request)?;
-        let occurrence_id = lash_core::facade_support::deterministic_occurrence_id(&request)?;
+        let occurrence_id = lash_core::facade_support::deterministic_occurrence_id(&request);
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
             .bind(&request.idempotency_key)
@@ -270,7 +269,7 @@ impl TriggerStore for PostgresTriggerStore {
             .await
             .map_err(plugin_sqlx_error)?;
         let existing = sqlx::query(
-            "SELECT request_hash, record_json FROM lash_trigger_occurrences
+            "SELECT record_json FROM lash_trigger_occurrences
              WHERE idempotency_key = $1 FOR UPDATE",
         )
         .bind(&request.idempotency_key)
@@ -278,18 +277,19 @@ impl TriggerStore for PostgresTriggerStore {
         .await
         .map_err(plugin_sqlx_error)?;
         let (occurrence, is_new) = if let Some(row) = existing {
-            let existing_hash: String = row.get(0);
-            if existing_hash != request_hash {
+            let json: String = row.get(0);
+            let occurrence: TriggerOccurrenceRecord =
+                serde_json::from_str(&json).map_err(process_decode_error)?;
+            if !lash_core::facade_support::trigger_occurrence_request_matches_record(
+                &request,
+                &occurrence,
+            ) {
                 return Err(PluginError::Session(format!(
                     "trigger occurrence idempotency conflict for `{}`",
                     request.idempotency_key
                 )));
             }
-            let json: String = row.get(1);
-            (
-                serde_json::from_str(&json).map_err(process_decode_error)?,
-                false,
-            )
+            (occurrence, false)
         } else {
             let occurrence = TriggerOccurrenceRecord {
                 occurrence_id,
@@ -303,13 +303,12 @@ impl TriggerStore for PostgresTriggerStore {
             };
             sqlx::query(
                 "INSERT INTO lash_trigger_occurrences (
-                    occurrence_id, idempotency_key, request_hash, source_type, source_key,
+                    occurrence_id, idempotency_key, source_type, source_key,
                     occurred_at_ms, record_json
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                 ) VALUES ($1, $2, $3, $4, $5, $6)",
             )
             .bind(&occurrence.occurrence_id)
             .bind(&occurrence.idempotency_key)
-            .bind(&request_hash)
             .bind(&occurrence.source_type)
             .bind(&occurrence.source_key)
             .bind(occurrence.occurred_at_ms as i64)

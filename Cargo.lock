@@ -2536,6 +2536,7 @@ dependencies = [
  "futures",
  "futures-executor",
  "insta",
+ "lash-core",
  "lash-sansio",
  "proptest",
  "rustc-hash 2.1.3",

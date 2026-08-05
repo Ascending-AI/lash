@@ -4,7 +4,6 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 
 use super::model::{ProcessId, ProcessObserverBy, ProcessStatus, RecoveryDisposition};
-use super::validation::process_event_payload_hash;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessEventType {
@@ -496,17 +495,16 @@ impl ProcessEventAppendRequest {
         self
     }
 
-    /// Builds a cancellation-request event for process-store implementors with a payload-derived
-    /// replay key, making repeated requests with the same reason idempotent.
+    /// Builds a cancellation-request event with a fixed-size, versioned replay
+    /// address. Repeating the same reason is idempotent; a distinct reason
+    /// retains the pre-cutover behavior of naming a distinct request without
+    /// copying unbounded caller text into an indexed store key.
     pub fn cancel_requested(process_id: &str, reason: Option<String>) -> Self {
+        let replay_key = cancellation_replay_key(process_id, reason.as_deref());
         let payload = serde_json::json!({
             "reason": reason,
         });
-        let replay_key = process_event_payload_hash("process.cancel_requested", &payload)
-            .unwrap_or_else(|_| format!("process:{process_id}:cancel_requested"));
-        Self::new("process.cancel_requested", payload).with_replay_key(format!(
-            "process:{process_id}:cancel_requested:{replay_key}"
-        ))
+        Self::new("process.cancel_requested", payload).with_replay_key(replay_key)
     }
 
     /// Builds a first-start event for process-store implementors keyed by attempt number so a retry
@@ -612,6 +610,31 @@ impl ProcessEventAppendRequest {
     }
 }
 
+const PROCESS_CANCELLATION_FAMILY_VERSION: u8 = 1;
+
+/// Permanent tag registry for cancellation replay addresses.
+///
+/// Reason presence uses the universal option tags 0/1. The present arm frames
+/// the complete UTF-8 reason; the rendered key hashes that exhaustive preimage
+/// to a backend-safe fixed size.
+fn cancellation_replay_preimage(process_id: &str, reason: Option<&str>) -> Vec<u8> {
+    let mut identity = crate::stable_identity::IdentityEncoder::new(
+        "lash.process-cancellation-request",
+        PROCESS_CANCELLATION_FAMILY_VERSION,
+    );
+    identity.string(process_id);
+    identity.optional(reason, |identity, reason| identity.string(reason));
+    identity.finish()
+}
+
+fn cancellation_replay_key(process_id: &str, reason: Option<&str>) -> String {
+    crate::stable_identity::rendered_hash(
+        "process-cancellation",
+        PROCESS_CANCELLATION_FAMILY_VERSION,
+        &cancellation_replay_preimage(process_id, reason),
+    )
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessWakeDelivery {
     pub wake_id: String,
@@ -707,5 +730,38 @@ fn terminal_event_type(name: &str, status: ProcessStatus) -> ProcessEventType {
             }),
             ..ProcessEventSemanticsSpec::default()
         },
+    }
+}
+
+#[cfg(test)]
+mod cancellation_identity_tests {
+    use super::*;
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    #[test]
+    fn cancellation_replay_identity_has_pinned_bounded_grammar() {
+        let reason = "λ".repeat(3_200);
+        let key = cancellation_replay_key("process\0id", Some(&reason));
+        assert_eq!(
+            key.len(),
+            95,
+            "rendered key length must be input-independent"
+        );
+        assert_eq!(
+            key,
+            "process-cancellation:v1:sha256:7425a370ae338e834838427bafeae1ecedd7a7e2ed75d2b69e53572e2fc556b2"
+        );
+        assert_eq!(
+            hex(&cancellation_replay_preimage("process\0id", None)),
+            "6c6173682d737461626c652d6964656e74697479010100000000000000216c6173682e70726f636573732d63616e63656c6c6174696f6e2d72657175657374000000000000000a70726f6365737300696400"
+        );
+        assert_ne!(
+            cancellation_replay_key("process\0id", None),
+            cancellation_replay_key("process\0id", Some("")),
+            "None and Some(empty) occupy different permanent option arms"
+        );
     }
 }

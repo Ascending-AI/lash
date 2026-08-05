@@ -32,6 +32,9 @@ pub use turn_input::*;
 pub use turn_result::*;
 pub use usage_activity::*;
 
+// Bumped to 25: residual process/trigger/effect identities use the FIG-915
+// structural and shared-framing families; older peers cannot safely replay
+// their durable names.
 // Bumped to 24: process env refs carry the v2 family prefix, session-turn
 // inputs carry their caller-owned definition key, and trigger records expose
 // definition fingerprints rather than unversioned hashes.
@@ -45,7 +48,7 @@ pub use usage_activity::*;
 // generation options, mirroring `SessionPolicy.generation`. A version 19 peer
 // would drop them on the way in and resume a session with uncontrolled
 // sampling instead of the caller's.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 24;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 25;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {

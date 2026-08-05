@@ -26,6 +26,20 @@ pub(crate) fn payload_leaf(value: &serde_json::Value) -> Vec<u8> {
     encode_leaf(normalize_payload(value))
 }
 
+pub(crate) fn payloads_equal(left: &serde_json::Value, right: &serde_json::Value) -> bool {
+    payload_leaf(left) == payload_leaf(right)
+}
+
+/// Compares optional JSON through the pre-cutover serialized semantics:
+/// absent, `None`, and an explicit JSON `null` are the same opaque leaf.
+pub(crate) fn optional_payloads_equal(
+    left: Option<&serde_json::Value>,
+    right: Option<&serde_json::Value>,
+) -> bool {
+    let null = serde_json::Value::Null;
+    payloads_equal(left.unwrap_or(&null), right.unwrap_or(&null))
+}
+
 pub(crate) fn schema_leaf(value: &serde_json::Value) -> Vec<u8> {
     encode_leaf(normalize_schema(value))
 }
@@ -172,6 +186,70 @@ mod tests {
             .expect("parse reordered payload leaf");
         assert_eq!(payload_leaf(&first), br#"{"a":[true,null],"b":0.0}"#);
         assert_eq!(payload_leaf(&first), payload_leaf(&second));
+        assert!(payloads_equal(&first, &second));
+        assert!(optional_payloads_equal(
+            None,
+            Some(&serde_json::Value::Null)
+        ));
+    }
+
+    #[test]
+    fn payload_equality_numeric_relationships_are_the_contract() {
+        let parse = |json: &str| serde_json::from_str(json).expect("parse contract payload");
+        let cases = vec![
+            ("signed zero", parse("-0.0"), parse("0.0"), true),
+            (
+                "integer and float",
+                serde_json::json!(1),
+                serde_json::json!(1.0),
+                false,
+            ),
+            (
+                "same signed and unsigned integer",
+                serde_json::Value::Number(serde_json::Number::from(i64::MAX)),
+                serde_json::Value::Number(serde_json::Number::from(i64::MAX as u64)),
+                true,
+            ),
+            (
+                "large unsigned integer and float",
+                serde_json::json!(u64::MAX),
+                serde_json::json!(u64::MAX as f64),
+                false,
+            ),
+            ("exponent and plain float", parse("1e0"), parse("1.0"), true),
+            (
+                "nested signed zero and object order",
+                parse(r#"{"outer":[{"zero":-0.0,"count":1}]}"#),
+                parse(r#"{"outer":[{"count":1,"zero":0.0}]}"#),
+                true,
+            ),
+            (
+                "nested integer and float",
+                parse(r#"{"outer":[1]}"#),
+                parse(r#"{"outer":[1.0]}"#),
+                false,
+            ),
+        ];
+
+        // This table is the durable canonical numeric equality contract. Any
+        // changed relationship requires a family version bump and new goldens.
+        for (name, left, right, expected) in cases {
+            assert_eq!(payloads_equal(&left, &right), expected, "{name}");
+            assert_eq!(payloads_equal(&right, &left), expected, "{name} reversed");
+        }
+        assert_eq!(payload_leaf(&parse("1e0")), b"1.0");
+
+        let null = serde_json::Value::Null;
+        let one = serde_json::json!(1);
+        let optional_cases = [
+            ("absent and absent", None, None, true),
+            ("absent and null", None, Some(&null), true),
+            ("null and absent", Some(&null), None, true),
+            ("null and value", Some(&null), Some(&one), false),
+        ];
+        for (name, left, right, expected) in optional_cases {
+            assert_eq!(optional_payloads_equal(left, right), expected, "{name}");
+        }
     }
 
     #[test]

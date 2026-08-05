@@ -1446,7 +1446,7 @@ mod tests {
             assert!(response.error.is_none(), "{:?}", response.error);
 
             let expected_key =
-                "derived/v1/5074e10b91f98f93621c4f48666f9f217808ce973aa6212d6f19bd34b15c4df8";
+                "derived/v2/b53772ec2996e72a7fc77c087803dc0dd3e127ccb946d6a9ab585c0a09fb7149";
             let (effect_owner_scope, effect_subscription_key) = {
                 let envelopes = controller
                     .envelopes

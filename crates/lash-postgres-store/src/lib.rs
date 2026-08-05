@@ -149,7 +149,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // was completed in place under the existing reject-and-recreate operator flow.
 // Version 37 is the coordinated FIG-886 reject-and-recreate identity cutover
 // layered over the complete version-36 append-receipt and usage schema.
-const SCHEMA_VERSION: i32 = 37;
+// Version 38 is the coordinated FIG-915 cutover: residual durable names and
+// usage payloads use shared framing, while redundant process/trigger hashes
+// are replaced by structural conflict checks.
+const SCHEMA_VERSION: i32 = 38;
 const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::facade_support::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]
