@@ -1,3 +1,4 @@
+pub mod await_event_coordinator;
 mod await_events;
 mod envelope;
 pub(crate) mod executor;

@@ -738,7 +738,16 @@ struct PostgresPrepareInputs {
 impl PostgresEffectReplayInner {
     fn new(pool: PgPool, signing_secret: Arc<[u8]>, options: PostgresEffectReplayOptions) -> Self {
         let sequence = POSTGRES_EFFECT_OWNER_COUNTER.fetch_add(1, Ordering::SeqCst);
-        let await_events = PostgresAwaitEvents::new(pool.clone(), signing_secret);
+        // Every timing decision in this host reads the real clock: PostgreSQL
+        // effect leases and sleeps are wall-clock driven and `PostgresStorage`
+        // carries no injectable time source. Handing the coordinator an explicit
+        // `SystemClock` keeps that choice visible in one place instead of hiding
+        // it behind a private `current_epoch_ms()` call per statement.
+        let await_events = crate::await_event::postgres_await_events(
+            pool.clone(),
+            signing_secret,
+            Arc::new(lash_core::facade_support::SystemClock),
+        );
         Self {
             pool,
             owner_id: format!(

@@ -1004,6 +1004,94 @@ async fn sqlite_await_event_key_mint_is_pure_and_store_secret_is_stable() {
     assert_eq!(secret_shape, (1, 32));
 }
 
+/// Every promise path reports one decode vocabulary.
+///
+/// The terminal used to be decoded twice in two places: inside the SQL layer on
+/// the resolve path, where a corrupt row surfaced as `sqlite_await_event_store`,
+/// and above it on the observe paths as `sqlite_await_event_decode`. One
+/// coordinator decodes once, so a corrupt row is a decode failure everywhere —
+/// which is also what PostgreSQL always reported.
+#[tokio::test]
+async fn sqlite_await_event_terminal_decode_failures_report_the_decode_vocabulary() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("corrupt-await-event-terminal.db");
+    let scope = durable_turn_scope("corrupt-terminal-session", "corrupt-terminal-turn");
+    let host = SqliteEffectHost::open(&path)
+        .await
+        .expect("SQLite effect host");
+    let key = host
+        .await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("call"))
+        .await
+        .expect("mint key");
+    assert_eq!(
+        host.resolve_await_event(&key, Resolution::Ok(serde_json::json!("winner")))
+            .await
+            .expect("resolve promise"),
+        ResolveOutcome::Accepted
+    );
+
+    let connection = rusqlite::Connection::open(&path).expect("open raw effect database");
+    connection
+        .execute(
+            "UPDATE await_event_waits SET terminal_json = ?2 WHERE key_id = ?1",
+            rusqlite::params![key.key_id.as_str(), "not-json"],
+        )
+        .expect("corrupt the persisted terminal");
+    drop(connection);
+
+    let peek_error = host
+        .peek_await_event(&key)
+        .await
+        .expect_err("corrupt terminal must fail the peek");
+    let resolve_error = host
+        .resolve_await_event(&key, Resolution::Cancelled)
+        .await
+        .expect_err("corrupt terminal must fail the duplicate resolve");
+    for error in [peek_error, resolve_error] {
+        assert_eq!(error.code.as_str(), "sqlite_await_event_decode");
+    }
+}
+
+/// SQLite promise rows are stamped by the host's injected clock.
+///
+/// The store runs in its host's clock domain, so durable await-event records are
+/// reproducible under an injected clock rather than reading the OS clock behind
+/// the host's back.
+#[tokio::test]
+async fn sqlite_await_event_rows_are_stamped_by_the_injected_clock() {
+    const INJECTED_MS: u64 = 1_234_567_890_000;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("injected-clock-await-event.db");
+    let clock = Arc::new(lash_core::testing::TestClock::new(INJECTED_MS));
+    let host =
+        SqliteEffectHost::open_with_clock(&path, Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
+            .await
+            .expect("SQLite effect host on an injected clock");
+    let key = host
+        .await_event_key(
+            &durable_turn_scope("injected-clock-session", "injected-clock-turn"),
+            AwaitEventWaitIdentity::tool_completion("call"),
+        )
+        .await
+        .expect("mint key");
+    assert_eq!(
+        host.resolve_await_event(&key, Resolution::Ok(serde_json::json!("stamped")))
+            .await
+            .expect("resolve promise"),
+        ResolveOutcome::Accepted
+    );
+
+    let connection = rusqlite::Connection::open(&path).expect("open raw effect database");
+    let stamps: (i64, i64) = connection
+        .query_row(
+            "SELECT created_at_ms, resolved_at_ms FROM await_event_waits WHERE key_id = ?1",
+            rusqlite::params![key.key_id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("read promise stamps");
+    assert_eq!(stamps, (INJECTED_MS as i64, INJECTED_MS as i64));
+}
+
 #[tokio::test]
 async fn sqlite_effect_host_satisfies_cold_process_await_event_conformance() {
     use tokio::io::{AsyncBufReadExt as _, BufReader};
