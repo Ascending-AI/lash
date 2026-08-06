@@ -78,12 +78,6 @@ impl std::ops::Deref for ProviderCompletion {
     }
 }
 
-impl ProviderCompletion {
-    pub fn into_response(self) -> LlmResponse {
-        self.response
-    }
-}
-
 /// Failed provider-handle outcome. The transport error is preserved intact,
 /// and `call_record` makes all sealed attempts observable at this seam.
 #[derive(Debug, thiserror::Error)]
@@ -109,14 +103,6 @@ impl ProviderHandle {
 
     pub fn unconfigured() -> Self {
         Self::new(UnconfiguredProvider::default().into_components())
-    }
-
-    pub fn components(&self) -> &ProviderComponents {
-        &self.components
-    }
-
-    pub fn components_mut(&mut self) -> &mut ProviderComponents {
-        &mut self.components
     }
 
     pub fn with_clock(mut self, clock: Arc<dyn crate::Clock>) -> Self {
@@ -331,18 +317,6 @@ impl ProviderHandle {
             kind: self.kind().to_string(),
             config: self.components.provider.serialize_config(),
         }
-    }
-
-    /// Validate model syntax only.
-    pub fn validate_model_name(&self, model: &str) -> Result<(), String> {
-        let m = model.trim();
-        if m.is_empty() {
-            return Err("model cannot be empty".to_string());
-        }
-        if m.contains(char::is_whitespace) {
-            return Err("model cannot contain whitespace".to_string());
-        }
-        Ok(())
     }
 }
 

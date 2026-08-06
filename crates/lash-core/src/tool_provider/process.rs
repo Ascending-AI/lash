@@ -86,34 +86,6 @@ impl ToolSessionProcessAdmin<'_> {
             .await
     }
 
-    pub async fn list_handles(&self) -> Result<Vec<crate::ProcessHandleSummary>, PluginError> {
-        Ok(self
-            .processes
-            .list_visible(
-                &self.session_id,
-                crate::ProcessListMode::Live,
-                self.process_scope(),
-            )
-            .await?
-            .into_iter()
-            .map(crate::ProcessHandleSummary::from_record)
-            .collect())
-    }
-
-    pub async fn list_all_handles(&self) -> Result<Vec<crate::ProcessHandleSummary>, PluginError> {
-        Ok(self
-            .processes
-            .list_visible(
-                &self.session_id,
-                crate::ProcessListMode::All,
-                self.process_scope(),
-            )
-            .await?
-            .into_iter()
-            .map(crate::ProcessHandleSummary::from_record)
-            .collect())
-    }
-
     pub async fn list_handles_filtered(
         &self,
         filter: &crate::ProcessListFilter,
@@ -126,12 +98,6 @@ impl ToolSessionProcessAdmin<'_> {
             .filter(|record| filter.matches_record(record))
             .map(crate::ProcessHandleSummary::from_record)
             .collect())
-    }
-
-    pub async fn validate_handles(&self, handle_ids: &[String]) -> Result<(), PluginError> {
-        self.processes
-            .validate_visible(&self.session_id, handle_ids, self.process_scope())
-            .await
     }
 
     pub async fn cancel(
@@ -161,27 +127,6 @@ impl ToolSessionProcessAdmin<'_> {
                 signal_name.to_string(),
                 signal_id,
                 payload,
-                self.process_scope(),
-            )
-            .await
-    }
-
-    pub async fn cancel_all(&self) -> Result<Vec<crate::ProcessCancelSummary>, PluginError> {
-        self.processes
-            .cancel_all_visible(&self.session_id, self.process_scope())
-            .await
-    }
-
-    pub async fn transfer_handles(
-        &self,
-        to_session_id: &str,
-        process_ids: Vec<String>,
-    ) -> Result<(), PluginError> {
-        self.processes
-            .transfer(
-                &self.session_id,
-                to_session_id,
-                process_ids,
                 self.process_scope(),
             )
             .await

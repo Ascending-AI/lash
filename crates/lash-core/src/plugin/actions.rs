@@ -196,15 +196,6 @@ pub enum PluginRuntimeDirective {
     },
 }
 
-impl PluginRuntimeDirective {
-    pub fn queue_turn(input: crate::TurnInput) -> Self {
-        Self::QueueTurn {
-            input,
-            source_key: None,
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct PluginCommandOutcome<T> {
     pub output: T,

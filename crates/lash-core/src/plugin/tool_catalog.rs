@@ -120,13 +120,6 @@ impl PluginDirective {
         }
     }
 
-    pub fn into_tool_result(self) -> Option<ToolResult> {
-        match self {
-            Self::ShortCircuitTool { output } => Some(ToolResult::from_output(output)),
-            _ => None,
-        }
-    }
-
     pub fn emit_runtime_events(events: Vec<PluginRuntimeEvent>) -> Self {
         Self::EmitRuntimeEvents { events }
     }
