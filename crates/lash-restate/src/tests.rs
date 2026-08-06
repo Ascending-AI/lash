@@ -1,21 +1,55 @@
 //! Tests for the Restate adapter (extracted from lib.rs).
 
 use super::*;
+use crate::controller::context::guard_restate_context_future;
+use crate::controller::{
+    RecordedRuntimeEffect, RestateEffectExecution, restate_await_event_turn_cancel_wait_request,
+    restate_effect_execution, restate_effect_name, restate_timer_turn_cancel_wait_request,
+    validate_recorded_effect_envelope,
+};
+use crate::durable_wait::{
+    DURABLE_WAIT_INDEX_IDENTITY_EPOCH, DURABLE_WAIT_INDEX_METADATA_KEY,
+    RestateDurableWaitAwakeableKind, RestateDurableWaitIndexMetadata, RestateDurableWaitIndexState,
+    RestateProcessAwaitWake, restate_await_event_key, split_cancellable_waits,
+    validate_durable_wait_index_epoch,
+};
+use crate::process::{
+    boundary_must_be_declined, missing_segment_is_superseded, process_segment_workflow_key,
+    restate_process_terminal_await_key, restate_process_terminal_output,
+    restate_process_terminal_resolution, retryable_registry_error, segment_execution_authority,
+    terminal_completion_workflow_key, validate_segment_program_hash, workflow_key_authority,
+};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
 use lash_core::TestProcessRegistryWriteExt;
+use lash_core::{
+    AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost,
+    ExecutionScope, PluginError, ProcessAwaitOutput, ProcessCommand, ProcessEffectOutcome,
+    ProcessExecutionContext, ProcessExternalRef, ProcessRegistry, Resolution, ResolveOutcome,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectKind,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, ScopedEffectController,
+    facade_support::DurableProcessWorker, facade_support::ProcessAttach,
+    facade_support::ProcessRunHandle,
+};
 use lash_core::{ProcessInput, ProcessRegistration, RuntimeScope, TriggerStore};
+use lash_http_transport::HttpRequest;
 use lash_http_transport::{HttpResponse, HttpResponseBody, HttpTransport, HttpTransportError};
 use lash_lashlang_runtime::{LashlangToolBinding, ToolDefinitionLashlangExt};
+use restate_sdk::context::{ContextClient, RequestTarget, RunRetryPolicy, WorkflowContext};
+use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::prelude::Endpoint;
+use restate_sdk::serde::Json;
 use restate_sdk::service::Discoverable;
+use serde::{Serialize, de::DeserializeOwned};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, RwLock};
 use std::task::{Context, Poll, Waker};
+use std::time::Duration;
 
 mod endpoint_protocol;
 mod process_tool_replay;

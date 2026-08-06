@@ -40,12 +40,10 @@ rust_line_limit_for() {
 declare -A allowlist=(
   ["crates/lash-sim/src/oracles.rs"]="cross-backend divergence oracle catalogue; split tracked separately"
   ["crates/lash-sim/src/provider.rs"]="scripted deterministic sim provider surface"
-  ["crates/lash-provider-openai/src/codex.rs"]="Codex OAuth WebSocket/HTTP provider (transport + reasoning replay)"
   ["crates/lash-sqlite-store/src/persistence.rs"]="SQLite RuntimePersistence implementation"
   ["crates/lash-postgres-store/src/postgres/runtime_persistence.rs"]="Postgres RuntimePersistence implementation"
   ["crates/lashlang/src/parser.rs"]="Lashlang recursive-descent parser"
   ["crates/lash-protocol-rlm/src/executor.rs"]="RLM protocol turn executor"
-  ["crates/lash-restate/src/lib.rs"]="Restate durable-execution backend adapter"
   ["crates/lash-remote-protocol/src/core_conversions/processes.rs"]="process DTO <-> core conversions"
   ["crates/lash-core/src/runtime/turn_loop.rs"]="core runtime turn loop"
   ["crates/lash-perf/src/runtime_perf/providers.rs"]="dev-only runtime perf provider harness"
