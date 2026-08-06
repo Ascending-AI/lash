@@ -1349,6 +1349,7 @@ mod tests {
     }
 
     mod final_regressions;
+    mod slow_wake_telemetry;
 
     struct FailOnceRunHandle {
         attempts: Arc<AtomicUsize>,
@@ -1492,89 +1493,5 @@ mod tests {
         })
         .await
         .expect("driver drop must cancel and drop the in-flight wake");
-    }
-
-    struct HungRunHandle {
-        entered: AtomicUsize,
-        dropped: Arc<AtomicUsize>,
-        changed: tokio::sync::Notify,
-    }
-
-    #[async_trait::async_trait]
-    impl QueuedWorkRunHandle for HungRunHandle {
-        async fn run_queued_work(
-            &self,
-            _request: QueuedWorkRunRequest,
-        ) -> Result<(), QueuedWorkRunError> {
-            struct DropProbe(Arc<AtomicUsize>);
-            impl Drop for DropProbe {
-                fn drop(&mut self) {
-                    self.0.fetch_add(1, Ordering::SeqCst);
-                }
-            }
-            let _probe = DropProbe(Arc::clone(&self.dropped));
-            self.entered.fetch_add(1, Ordering::SeqCst);
-            self.changed.notify_waiters();
-            std::future::pending().await
-        }
-    }
-
-    #[tokio::test]
-    async fn hung_executions_are_bounded_warn_when_slow_and_shutdown_cleanly() {
-        const CONCURRENCY: usize = 2;
-        const SIGNALS: usize = 8;
-        let handle = Arc::new(HungRunHandle {
-            entered: AtomicUsize::new(0),
-            dropped: Arc::new(AtomicUsize::new(0)),
-            changed: tokio::sync::Notify::new(),
-        });
-        let captured_handle = Arc::clone(&handle);
-        let ((), capture) = crate::runtime::tests::trace_capture::capturing(|| async move {
-            let driver = QueuedWorkDriver::from_parts(
-                captured_handle.clone(),
-                CancellationToken::new(),
-                Some(QueuedWorkExecutionConcurrency::new(CONCURRENCY).expect("valid concurrency")),
-                Duration::from_millis(10),
-            );
-            for index in 0..SIGNALS {
-                driver.notify_pending_work(Some(&format!("hung-{index}")), "process_wake");
-            }
-            tokio::time::timeout(Duration::from_secs(1), async {
-                loop {
-                    let changed = captured_handle.changed.notified();
-                    if captured_handle.entered.load(Ordering::SeqCst) == CONCURRENCY {
-                        break;
-                    }
-                    changed.await;
-                }
-            })
-            .await
-            .expect("only the bounded executions enter");
-            tokio::time::sleep(Duration::from_millis(30)).await;
-            assert_eq!(captured_handle.entered.load(Ordering::SeqCst), CONCURRENCY);
-            drop(driver);
-            tokio::time::timeout(Duration::from_secs(1), async {
-                while captured_handle.dropped.load(Ordering::SeqCst) < CONCURRENCY {
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .expect("shutdown drops every admitted hung execution");
-        })
-        .await;
-
-        let slow = capture.named("queued_work.wake_slow");
-        assert!(
-            slow.len() >= CONCURRENCY * 2,
-            "a wedged wake must emit repeating slow-wake heartbeats"
-        );
-        assert!(slow.iter().all(|event| {
-            event.level == "WARN"
-                && event.target == "lash_core::queued_work"
-                && event.field("threshold_ms") == "10"
-                && event.field("reason") == "process_wake"
-                && event.field("available_permits") == "Some(0)"
-                && event.field("admission_limit") == "Some(2)"
-        }));
     }
 }
