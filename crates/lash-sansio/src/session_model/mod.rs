@@ -173,6 +173,9 @@ impl TokenUsage {
             + self.cache_write_input_tokens
     }
 
+    /// Bare prompt-side sum, valid only for counters already admitted through
+    /// a checked seam. Use [`Self::checked_input_total`] on any value that
+    /// still carries raw provider or durable input.
     pub fn input_total(&self) -> i64 {
         self.input_tokens + self.cache_read_input_tokens + self.cache_write_input_tokens
     }
@@ -223,6 +226,22 @@ impl TokenUsage {
             .and_then(|total| total.checked_add(self.cache_write_input_tokens))
             .ok_or(TokenUsageOverflow {
                 counter: "total_tokens",
+            })
+    }
+
+    /// Checked prompt-side subtotal, the value context-window policy compares
+    /// against a model's window.
+    ///
+    /// [`Self::checked_total`] does not subsume it: counters are signed, so a
+    /// negative `output_tokens` can hold the canonical total in range while the
+    /// prompt-side counters alone overflow. Both aggregations are validated
+    /// wherever raw counters are admitted.
+    pub fn checked_input_total(&self) -> Result<i64, TokenUsageOverflow> {
+        self.input_tokens
+            .checked_add(self.cache_read_input_tokens)
+            .and_then(|total| total.checked_add(self.cache_write_input_tokens))
+            .ok_or(TokenUsageOverflow {
+                counter: "input_total_tokens",
             })
     }
 }
@@ -556,6 +575,35 @@ mod tests {
             ..TokenUsage::default()
         };
         assert_eq!(reasoning_subset.checked_total(), Ok(i64::MAX));
+    }
+
+    #[test]
+    fn checked_input_total_is_not_subsumed_by_the_canonical_total() {
+        // Counters are signed, so a negative `output_tokens` keeps the
+        // canonical total in range while the prompt-side counters overflow.
+        let prompt_overflow = TokenUsage {
+            input_tokens: i64::MAX,
+            output_tokens: i64::MIN,
+            cache_read_input_tokens: i64::MAX,
+            ..TokenUsage::default()
+        };
+        assert_eq!(prompt_overflow.checked_total(), Ok(i64::MAX - 1));
+        assert_eq!(
+            prompt_overflow
+                .checked_input_total()
+                .expect_err("the prompt-side subtotal must be checked separately")
+                .counter(),
+            "input_total_tokens"
+        );
+
+        let in_range = TokenUsage {
+            input_tokens: 7,
+            output_tokens: 3,
+            cache_read_input_tokens: 5,
+            cache_write_input_tokens: 2,
+            reasoning_output_tokens: 1,
+        };
+        assert_eq!(in_range.checked_input_total(), Ok(in_range.input_total()));
     }
 
     // ─── ErrorEnvelope durable-snapshot compatibility ──────────────────

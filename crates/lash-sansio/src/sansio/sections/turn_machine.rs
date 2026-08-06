@@ -671,14 +671,23 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 self.emit_llm_error(error);
             }
             Ok(mut llm_response) => {
+                // Admit the provider's raw counters once, before any consumer
+                // aggregates them.
+                let (usage, prompt_input_tokens) =
+                    checked_turn_usage_from_llm_usage(&llm_response.usage)?;
                 // Reclassify a zero-output `OutputLimit` as `ContextOverflow`
                 // when the prompt nearly filled the window, before the terminal
                 // reason drives the finish decision below.
                 refine_terminal_reason_for_context_window(
                     &mut llm_response,
+                    prompt_input_tokens,
                     self.config.max_context_tokens,
                 );
-                self.record_llm_usage(&llm_response, self.llm_response_text(&llm_response))?;
+                self.record_llm_usage(
+                    &llm_response,
+                    usage,
+                    self.llm_response_text(&llm_response),
+                )?;
                 if self.handle_terminal_llm_response(&llm_response, text_streamed) {
                     return Ok(());
                 }
@@ -786,12 +795,14 @@ impl<M: TurnProtocol> TurnMachine<M> {
         (!parts.is_empty()).then_some(Value::Array(parts))
     }
 
+    /// Accumulates the turn's usage from counters already admitted by
+    /// [`checked_turn_usage_from_llm_usage`].
     fn record_llm_usage(
         &mut self,
         llm_response: &LlmResponse,
+        usage: TokenUsage,
         response_text: &str,
     ) -> Result<(), TokenUsageOverflow> {
-        let usage = token_usage_from_llm_usage(&llm_response.usage);
         self.cumulative_usage = self.cumulative_usage.checked_add(&usage)?;
         self.emit(SessionStreamEvent::TokenUsage {
             protocol_iteration: self.protocol_iteration,

@@ -87554,6 +87554,22 @@ area = "processes"
 disposition = "unused-add"
 reason = "Add lash::durability::ProcessRecoveryOperation::WriteTerminal to the agent-workbench durable process flow example and assert its externally observable result."
 [[api]]
+symbol = "lash::persistence::StoreError::CheckpointTokenUsageOutOfRange"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add a corrupt-checkpoint restore case to the docs-snippets persistence example and assert this typed variant."
+
+[[api]]
+symbol = "lash::persistence::StoreError::CheckpointTokenUsageOutOfRange::counter"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-add"
+reason = "Add a corrupt-checkpoint restore case to the docs-snippets persistence example and assert the reported overflowing usage aggregation."
+
+[[api]]
 symbol = "lash::persistence::StoreError::CheckpointTurnIndexOutOfRange"
 kind = "variant"
 availability = "default+all-features"
@@ -87594,6 +87610,14 @@ disposition = "unused-add"
 reason = "Add checked multi-call usage accumulation to the agent-service recovery/operations example and assert overflow handling."
 
 [[api]]
+symbol = "lash::usage::TokenUsage::checked_input_total"
+kind = "function"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add checked prompt-subtotal reporting to the agent-service recovery/operations example and assert overflow handling."
+
+[[api]]
 symbol = "lash::usage::TokenUsage::checked_total"
 kind = "function"
 availability = "default+all-features"
@@ -87626,6 +87650,22 @@ disposition = "unused-add"
 reason = "Add typed checked-usage overflow handling to the agent-service recovery/operations example and assert the counter name."
 
 [[api]]
+symbol = "lash_core::StoreError::CheckpointTokenUsageOutOfRange"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class: custom durable-store and runtime-restore implementers surface corrupt checkpoint usage counters without string matching."
+
+[[api]]
+symbol = "lash_core::StoreError::CheckpointTokenUsageOutOfRange::counter"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class: custom durable-store and runtime-restore implementers identify which restored usage aggregation overflowed."
+
+[[api]]
 symbol = "lash_core::StoreError::CheckpointTurnIndexOutOfRange"
 kind = "variant"
 availability = "default+all-features"
@@ -87656,6 +87696,14 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "unused-justify"
 reason = "Concrete integrator class: provider adapters and protocol-runtime implementers accumulate multi-call usage before durable publication."
+
+[[api]]
+symbol = "lash_core::TokenUsage::checked_input_total"
+kind = "function"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete integrator class: provider adapters and protocol-runtime implementers validate prompt-side subtotals against a model's context window before durable publication."
 
 [[api]]
 symbol = "lash_core::TokenUsage::checked_total"

@@ -148,6 +148,7 @@ fn store_error_variant(error: &StoreError) -> String {
         }
         StoreError::TokenUsageAccountingOverflow { .. } => "TokenUsageAccountingOverflow",
         StoreError::CheckpointTurnIndexOutOfRange { .. } => "CheckpointTurnIndexOutOfRange",
+        StoreError::CheckpointTokenUsageOutOfRange { .. } => "CheckpointTokenUsageOutOfRange",
         StoreError::AppendAncestorNotActive { .. } => "AppendAncestorNotActive",
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch",
         StoreError::NodeIdCollision { .. } => "NodeIdCollision",

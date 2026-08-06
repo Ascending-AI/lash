@@ -2079,6 +2079,7 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         }
         error @ StoreError::TokenUsageAccountingOverflow { .. } => error.variant_name().to_string(),
         error @ StoreError::CheckpointTurnIndexOutOfRange { .. } => error.variant_name().into(),
+        error @ StoreError::CheckpointTokenUsageOutOfRange { .. } => error.variant_name().into(),
         StoreError::AppendAncestorNotActive { .. } => "AppendAncestorNotActive".to_string(),
         StoreError::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded".to_string(),
         StoreError::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded".to_string(),

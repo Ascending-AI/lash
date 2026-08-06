@@ -686,6 +686,25 @@ fn validate_restored_turn_index(turn_index: usize) -> Result<(), crate::StoreErr
     Ok(())
 }
 
+/// Admits durable turn usage before the runtime adopts it.
+///
+/// Restored usage feeds bare aggregations — `TokenUsage::total` in protocol
+/// budget policy, `input_total` in context-window policy — and it is the base
+/// the next turn's checked merge accumulates onto. Validating both aggregations
+/// once here keeps every one of those sites safe by invariant, the same
+/// contract [`validate_restored_turn_index`] gives the bare next-turn
+/// increments.
+fn validate_restored_token_usage(usage: &TokenUsage) -> Result<(), crate::StoreError> {
+    let checkpoint_overflow = |overflow: lash_sansio::session_model::TokenUsageOverflow| {
+        crate::StoreError::CheckpointTokenUsageOutOfRange {
+            counter: overflow.counter(),
+        }
+    };
+    usage.checked_total().map_err(checkpoint_overflow)?;
+    usage.checked_input_total().map_err(checkpoint_overflow)?;
+    Ok(())
+}
+
 pub(crate) fn apply_session_checkpoint(
     state: &mut RuntimeSessionState,
     checkpoint: Option<crate::store::HydratedSessionCheckpoint>,
@@ -702,9 +721,11 @@ pub(crate) fn apply_session_checkpoint(
         state.ensure_agent_frame_initialized();
         return Ok(());
     };
-    // All production next-turn sites rely on RESTORED_TURN_INDEX_HEADROOM.
-    // Validate the durable value once before adopting it.
+    // All production next-turn sites rely on RESTORED_TURN_INDEX_HEADROOM, and
+    // every usage consumer relies on the restored counters aggregating in
+    // range. Validate both durable values once before adopting them.
     validate_restored_turn_index(checkpoint.turn_state.turn_index)?;
+    validate_restored_token_usage(&checkpoint.turn_state.token_usage)?;
     state.turn_index = checkpoint.turn_state.turn_index;
     state.token_usage = checkpoint.turn_state.token_usage;
     state.last_prompt_usage = checkpoint.turn_state.last_prompt_usage;

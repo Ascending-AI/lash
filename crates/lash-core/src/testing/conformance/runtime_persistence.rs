@@ -227,6 +227,7 @@ where
     load_hydrates_checkpoint_and_usage(make()).await;
     load_retains_reasoning_only_usage(make()).await;
     checkpoint_restore_rejects_turn_index_without_increment_headroom(make()).await;
+    checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows(make()).await;
     load_rejects_token_usage_overflow(make()).await;
     usage_delta_identity_is_idempotent_across_commits(make()).await;
     usage_ordinal_reuse_with_different_payload_survives_receipt_replay(make()).await;
@@ -394,6 +395,49 @@ async fn checkpoint_restore_rejects_turn_index_without_increment_headroom(
             turn_index: actual,
             max_exclusive,
         } if actual == turn_index && max_exclusive == turn_index
+    ));
+}
+
+/// The prompt-side subtotal is not covered by the canonical total: signed
+/// counters let a negative `output_tokens` hold the canonical total in range
+/// while the prompt-side counters alone overflow. Restore must reject that
+/// checkpoint rather than hand a poisoned base to the next turn's merge and to
+/// the bare `total()`/`input_total()` policy readers.
+async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let token_usage = crate::TokenUsage {
+        input_tokens: i64::MAX,
+        output_tokens: i64::MIN,
+        cache_read_input_tokens: i64::MAX,
+        cache_write_input_tokens: 0,
+        reasoning_output_tokens: 0,
+    };
+    assert!(
+        token_usage.checked_total().is_ok(),
+        "the canonical total must stay in range so this pins the prompt subtotal check"
+    );
+    let state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        token_usage,
+        ..RuntimeSessionState::default()
+    };
+    commit_runtime_state_for_test(
+        &store,
+        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        "prompt subtotal overflow seed",
+    )
+    .await
+    .expect("seed corrupt checkpoint token usage");
+
+    let error = crate::store::load_persisted_session_state(store.as_ref())
+        .await
+        .expect_err("checkpoint usage whose prompt subtotal overflows must fail restore");
+    assert!(matches!(
+        error,
+        StoreError::CheckpointTokenUsageOutOfRange {
+            counter: "input_total_tokens"
+        }
     ));
 }
 
