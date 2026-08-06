@@ -105,6 +105,18 @@ pub enum StoreError {
         /// First turn index excluded by the runtime's restore invariant.
         max_exclusive: usize,
     },
+    /// A checkpoint carried session token usage whose aggregations do not fit
+    /// `i64`, so every restored consumer of a bare sum would be poisoned.
+    ///
+    /// Integrator class (ADR 0051): **runtime embedders** surface this restore
+    /// failure and reconstruct or repair the affected session; store
+    /// implementors preserve the checkpoint counters without reinterpreting
+    /// them.
+    #[error("checkpoint token usage counter `{counter}` is outside the restorable range")]
+    CheckpointTokenUsageOutOfRange {
+        /// Name of the aggregation that overflowed on the decoded checkpoint.
+        counter: &'static str,
+    },
     /// A fresh append named an ancestor outside the durable active path.
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**
@@ -251,6 +263,7 @@ impl StoreError {
             }
             Self::TokenUsageAccountingOverflow { .. } => "TokenUsageAccountingOverflow",
             Self::CheckpointTurnIndexOutOfRange { .. } => "CheckpointTurnIndexOutOfRange",
+            Self::CheckpointTokenUsageOutOfRange { .. } => "CheckpointTokenUsageOutOfRange",
             Self::AppendAncestorNotActive { .. } => "AppendAncestorNotActive",
             Self::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch",
             Self::NodeIdCollision { .. } => "NodeIdCollision",

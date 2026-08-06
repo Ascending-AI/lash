@@ -807,6 +807,105 @@ fn output_limit_stops_as_incomplete_without_assistant_message() {
 }
 
 #[test]
+fn zero_output_limit_with_a_full_prompt_refines_to_context_overflow() {
+    let mut config = test_config(Arc::new(ProseDriver));
+    config.max_context_tokens = Some(100);
+    let msgs = vec![user_message("hello")];
+    let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call").0;
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse {
+            terminal_reason: LlmTerminalReason::OutputLimit,
+            // The refinement reads the whole prompt-side subtotal, not just
+            // `input_tokens`: 60 + 30 + 8 = 98 of a 100-token window.
+            usage: crate::llm::types::LlmUsage {
+                input_tokens: 60,
+                output_tokens: 0,
+                cache_read_input_tokens: 30,
+                cache_write_input_tokens: 8,
+                reasoning_output_tokens: 0,
+            },
+            response_metadata: Default::default(),
+            ..LlmResponse::default()
+        }),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Emit(SessionStreamEvent::Error {
+            envelope: Some(envelope),
+            ..
+        }) if envelope.terminal_reason == Some(LlmTerminalReason::ContextOverflow)
+    )));
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Emit(SessionStreamEvent::TurnOutcome {
+            outcome: TurnOutcome::Stopped(TurnStop::ProviderError)
+        })
+    )));
+}
+
+/// Raw provider counters are admitted once, before the context-window
+/// refinement or the cumulative merge aggregates them. The prompt-side subtotal
+/// is checked separately from the canonical total because signed counters let a
+/// negative `output_tokens` hold the canonical total in range.
+#[test]
+fn provider_prompt_subtotal_overflow_fails_the_turn_at_ingress() {
+    let mut config = test_config(Arc::new(ProseDriver));
+    config.max_context_tokens = Some(100);
+    let msgs = vec![user_message("hello")];
+    let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call").0;
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse {
+            terminal_reason: LlmTerminalReason::OutputLimit,
+            usage: crate::llm::types::LlmUsage {
+                input_tokens: i64::MAX,
+                output_tokens: i64::MIN,
+                cache_read_input_tokens: i64::MAX,
+                cache_write_input_tokens: 0,
+                reasoning_output_tokens: 0,
+            },
+            response_metadata: Default::default(),
+            ..LlmResponse::default()
+        }),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(machine.is_done());
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Emit(SessionStreamEvent::Error {
+            envelope: Some(envelope),
+            ..
+        }) if envelope.kind == "token_usage_accounting"
+            && envelope.code.as_deref() == Some("token_usage_overflow")
+            && envelope.user_message.contains("input_total_tokens")
+    )));
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Emit(SessionStreamEvent::TurnOutcome {
+            outcome: TurnOutcome::Stopped(TurnStop::RuntimeError)
+        })
+    )));
+    // Nothing about the rejected response reaches a usage consumer.
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Emit(SessionStreamEvent::TokenUsage { .. })))
+    );
+}
+
+#[test]
 fn context_overflow_response_stops_as_provider_error() {
     let config = test_config(Arc::new(ProseDriver));
     let msgs = vec![user_message("hello")];
