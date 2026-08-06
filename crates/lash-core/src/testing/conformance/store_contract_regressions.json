@@ -57,5 +57,24 @@
         "stale": false
       }
     ]
+  },
+  {
+    "seed": 85201,
+    "operations": [{ "op": "claim_lease", "process": 1, "owner": 0 }]
+  },
+  {
+    "seed": 85202,
+    "operations": [
+      {
+        "op": "register",
+        "process": 1,
+        "disposition": 2,
+        "max_attempts": 1,
+        "wake_target": null
+      },
+      { "op": "terminal", "process": 1, "disposition": 0 },
+      { "op": "prune", "watermark": false },
+      { "op": "claim_lease", "process": 1, "owner": 0 }
+    ]
   }
 ]

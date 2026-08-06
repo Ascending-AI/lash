@@ -1350,6 +1350,14 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             return Err(error);
         }
         let _transaction = self.transaction.lock().await;
+        // A lease is authority over a retained process row, so a claim against a
+        // process this store never registered — or has already pruned — must be
+        // refused rather than materialized. The SQL backends gate every lease
+        // write on `require_process_conn`; without the same guard here the test
+        // double invented leases for unknown ids (FIG-953).
+        if !self.managed.lock().await.contains_key(process_id) {
+            return Err(self.process_miss(process_id).await);
+        }
         let mut leases = self.leases.lock().await;
         let now = self.clock.timestamp_ms();
         if let Some(current) = leases.get_mut(process_id)

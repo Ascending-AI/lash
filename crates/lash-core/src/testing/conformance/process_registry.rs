@@ -755,6 +755,33 @@ async fn claim_after_expiry(
 async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
     const SHORT_TTL_MS: u64 = 20;
 
+    // A lease is authority over a retained registry row, so a claim for a
+    // process the store never registered must be refused, never materialized.
+    // FIG-953: the in-memory registry used to invent a lease here, which the
+    // cross-backend differential caught at seed 852 as raw-state divergence
+    // from the SQL backends.
+    match registry
+        .claim_process_lease(
+            "lease-never-registered",
+            &process_lease_owner("owner-a"),
+            60_000,
+        )
+        .await
+    {
+        Err(crate::PluginError::Session(_)) => {}
+        other => {
+            panic!("claiming a lease for an unregistered process must be refused, got {other:?}")
+        }
+    }
+    assert!(
+        registry
+            .get_process_lease("lease-never-registered")
+            .await
+            .expect("read lease for unregistered process")
+            .is_none(),
+        "a refused claim must not persist a lease row"
+    );
+
     registry
         .register_process(registration("lease-active"))
         .await
@@ -1349,6 +1376,14 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
     ));
     assert!(matches!(
         registry.events_after(process_id, 0).await,
+        Err(crate::PluginError::ProcessNoLongerRetained { .. })
+    ));
+    // A pruned process has no row to hold authority over, so a lease claim must
+    // read as the tombstone rather than resurrecting a lease (FIG-953).
+    assert!(matches!(
+        registry
+            .claim_process_lease(process_id, &process_lease_owner("after-prune"), 60_000)
+            .await,
         Err(crate::PluginError::ProcessNoLongerRetained { .. })
     ));
     assert!(matches!(
