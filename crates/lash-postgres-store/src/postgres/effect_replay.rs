@@ -1,15 +1,38 @@
+//! PostgreSQL-backed runtime effect replay host.
+//!
+//! The claim/execute/renew/finalize state machine lives in
+//! [`EffectReplayDriver`]; this module is the PostgreSQL half of its
+//! persistence port plus the host and controller types that expose it. Every
+//! atom runs in a server transaction that takes the row's write lock
+//! (`SELECT … FOR UPDATE`, or a guarded `UPDATE`), so the read, the transition
+//! decision, and the write it guards cannot interleave with a competing
+//! claimant under `READ COMMITTED`.
+//!
+//! PostgreSQL's authoritative lease clock is the *server's*:
+//! `transaction_timestamp()` stamps and compares every lease here, so fencing
+//! survives skew between hosts — the database-authoritative lease boundary the
+//! `Clock` contract states, pinned by `postgres_clock_contract`.
+//! The driver's own clock is an explicit `SystemClock` because it only sleeps.
+
 use crate::*;
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use lash_core::facade_support::effect_replay_driver;
+use lash_core::facade_support::effect_replay_driver::{
+    EffectClaimDecision, EffectClaimObservation, EffectClaimRequest, EffectLeaseFence,
+    EffectLeaseStamp, EffectReplayDriver, EffectReplayPersistence, EffectReplayVocabulary,
+    EffectRowDefect, EffectRowStatus, EffectTerminal, StoredEffectRow, decide_effect_claim,
+};
 
-use crate::await_event::PostgresAwaitEvents;
+use crate::await_event::{PostgresAwaitEventBackend, postgres_await_events};
 
-const POSTGRES_EFFECT_STATUS_IN_PROGRESS: &str = "in_progress";
-const POSTGRES_EFFECT_STATUS_COMPLETED: &str = "completed";
-const POSTGRES_EFFECT_STATUS_FAILED: &str = "failed";
-const POSTGRES_EFFECT_BUSY_POLL: Duration = Duration::from_millis(25);
+const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary {
+    code_prefix: "postgres",
+};
 
-static POSTGRES_EFFECT_OWNER_COUNTER: AtomicU64 = AtomicU64::new(1);
+/// The PostgreSQL effect-replay driver: one shared state machine over
+/// [`PostgresEffectReplayPersistence`].
+type PostgresEffectReplay =
+    EffectReplayDriver<PostgresEffectReplayPersistence, PostgresAwaitEventBackend>;
 
 #[derive(Clone, Debug, Default)]
 pub struct PostgresEffectReplayOptions {
@@ -19,58 +42,15 @@ pub struct PostgresEffectReplayOptions {
     pub lease_timings: lash_core::facade_support::LeaseTimings,
 }
 
-struct PostgresEffectReplayInner {
-    pool: PgPool,
-    owner_id: String,
-    lease_counter: AtomicU64,
-    replay_mode: AtomicBool,
-    lease_timings: lash_core::facade_support::LeaseTimings,
-    await_events: PostgresAwaitEvents,
-}
-
 #[derive(Clone)]
 pub struct PostgresEffectHost {
-    inner: Arc<PostgresEffectReplayInner>,
+    inner: Arc<PostgresEffectReplay>,
 }
 
 #[derive(Clone)]
 pub struct PostgresRuntimeEffectController {
-    inner: Arc<PostgresEffectReplayInner>,
+    inner: Arc<PostgresEffectReplay>,
     scope: ExecutionScope,
-}
-
-struct PostgresClaimedEffect {
-    scope_id: String,
-    replay_key: String,
-    envelope_hash: String,
-    lease_token: String,
-    due_at_ms: Option<u64>,
-}
-
-enum PostgresPreparedEffect {
-    ReplayMismatch {
-        recorded_envelope: Box<CanonicalRuntimeEffectEnvelope>,
-        stored_envelope_hash: String,
-    },
-    ReplayOutcome {
-        outcome: Box<RuntimeEffectOutcome>,
-        due_at_ms: Option<u64>,
-    },
-    ReplayError(RuntimeEffectControllerError),
-    Claimed(PostgresClaimedEffect),
-    Busy {
-        retry_at_ms: u64,
-    },
-}
-
-struct PostgresEffectRow {
-    envelope_hash: String,
-    envelope_json: String,
-    status: String,
-    outcome_json: Option<String>,
-    error_json: Option<String>,
-    lease_expires_at_ms: i64,
-    due_at_ms: Option<i64>,
 }
 
 impl PostgresEffectHost {
@@ -80,16 +60,12 @@ impl PostgresEffectHost {
 
     pub fn with_options(storage: &PostgresStorage, options: PostgresEffectReplayOptions) -> Self {
         Self {
-            inner: Arc::new(PostgresEffectReplayInner::new(
-                storage.pool.clone(),
-                Arc::clone(&storage.await_event_signing_secret),
-                options,
-            )),
+            inner: Arc::new(build_effect_replay_driver(storage, options)),
         }
     }
 
     pub fn start_replay(&self) {
-        self.inner.replay_mode.store(true, Ordering::SeqCst);
+        self.inner.start_replay();
     }
 }
 
@@ -108,8 +84,7 @@ impl AwaitEventResolver for PostgresEffectHost {
         scope: &ExecutionScope,
         wait: lash_core::AwaitEventWaitIdentity,
     ) -> Result<lash_core::AwaitEventKey, RuntimeError> {
-        scope.validate()?;
-        self.inner.await_events.key_for(scope, wait).await
+        self.inner.await_event_key(scope, wait).await
     }
 
     async fn resolve_await_event(
@@ -117,14 +92,14 @@ impl AwaitEventResolver for PostgresEffectHost {
         key: &lash_core::AwaitEventKey,
         resolution: lash_core::Resolution,
     ) -> Result<lash_core::ResolveOutcome, RuntimeError> {
-        self.inner.await_events.resolve(key, resolution).await
+        self.inner.resolve_await_event(key, resolution).await
     }
 
     async fn peek_await_event(
         &self,
         key: &lash_core::AwaitEventKey,
     ) -> Result<Option<lash_core::Resolution>, RuntimeError> {
-        self.inner.await_events.peek(key).await
+        self.inner.peek_await_event(key).await
     }
 
     async fn await_await_event(
@@ -133,18 +108,15 @@ impl AwaitEventResolver for PostgresEffectHost {
         cancel: tokio_util::sync::CancellationToken,
         deadline: Option<std::time::Instant>,
     ) -> Result<lash_core::Resolution, RuntimeError> {
-        self.inner
-            .await_events
-            .await_resolution(key, cancel, deadline)
-            .await
+        self.inner.await_await_event(key, cancel, deadline).await
     }
 
     async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.inner.await_events.revoke_session(session_id).await
+        self.inner.revoke_await_events_for_session(session_id).await
     }
 
     async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.inner.await_events.cancel_session(session_id).await
+        self.inner.cancel_await_events_for_session(session_id).await
     }
 }
 
@@ -181,27 +153,7 @@ impl EffectHost for PostgresEffectHost {
         &self,
         retirement: lash_core::EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
-        let result = match retirement {
-            lash_core::EffectJournalRetirement::Session { session_id } => {
-                sqlx::query("DELETE FROM lash_runtime_effect_replay WHERE session_id = $1")
-                    .bind(session_id)
-                    .execute(&self.inner.pool)
-                    .await
-            }
-            lash_core::EffectJournalRetirement::Process { process_id } => {
-                let identity = ExecutionScope::process(process_id)
-                    .journal_identity()
-                    .expect("process scopes always form durable journal identities");
-                sqlx::query("DELETE FROM lash_runtime_effect_replay WHERE scope_id = $1")
-                    .bind(identity.key())
-                    .execute(&self.inner.pool)
-                    .await
-            }
-        }
-        .map_err(|error| {
-            RuntimeError::new("postgres_effect_journal_retirement", error.to_string())
-        })?;
-        Ok(result.rows_affected() as usize)
+        self.inner.retire_effect_journal(retirement).await
     }
 }
 
@@ -216,397 +168,13 @@ impl PostgresRuntimeEffectController {
         options: PostgresEffectReplayOptions,
     ) -> Self {
         Self {
-            inner: Arc::new(PostgresEffectReplayInner::new(
-                storage.pool.clone(),
-                Arc::clone(&storage.await_event_signing_secret),
-                options,
-            )),
+            inner: Arc::new(build_effect_replay_driver(storage, options)),
             scope,
         }
     }
 
     pub fn start_replay(&self) {
-        self.inner.replay_mode.store(true, Ordering::SeqCst);
-    }
-
-    async fn prepare_effect(
-        &self,
-        envelope: &RuntimeEffectEnvelope,
-        reconstructed_envelope: &CanonicalRuntimeEffectEnvelope,
-    ) -> Result<PostgresPreparedEffect, RuntimeEffectControllerError> {
-        let replay_key = envelope
-            .invocation
-            .replay_key()
-            .ok_or_else(|| {
-                RuntimeEffectControllerError::new(
-                    "postgres_effect_replay_key_missing",
-                    "runtime effect envelope requires replay.key",
-                )
-            })?
-            .to_string();
-        let envelope_hash = reconstructed_envelope.hash().to_string();
-        let envelope_json =
-            serde_json::to_string(reconstructed_envelope).map_err(postgres_effect_encode_error)?;
-        let journal_identity = self
-            .scope
-            .journal_identity()
-            .map_err(RuntimeEffectControllerError::from)?;
-        let scope_id = journal_identity.key().to_string();
-        let session_id = journal_identity.session_id().map(str::to_string);
-        let lease_token = self.inner.next_lease_token();
-        let replay_mode = self.inner.replay_mode.load(Ordering::SeqCst);
-        let owner_id = self.inner.owner_id.clone();
-
-        let mut tx = self
-            .inner
-            .pool
-            .begin()
-            .await
-            .map_err(postgres_effect_store_error)?;
-        let now = postgres_transaction_epoch_ms(&mut tx)
-            .await
-            .map_err(|err| postgres_effect_store_message(err.to_string()))?;
-        let due_at_ms = postgres_effect_sleep_due_at_ms(envelope, now);
-        let lease_expires_at_ms = now.saturating_add(self.inner.lease_timings.ttl_ms());
-        let outcome = match postgres_select_effect_row_for_update(&mut tx, &scope_id, &replay_key)
-            .await?
-        {
-            Some(row) => {
-                self.prepare_locked_effect_row(
-                    &mut tx,
-                    PostgresPrepareInputs {
-                        row,
-                        scope_id,
-                        replay_key,
-                        envelope_hash,
-                        owner_id,
-                        lease_token,
-                        due_at_ms,
-                        now,
-                    },
-                )
-                .await
-            }
-            None if replay_mode => Err(RuntimeEffectControllerError::new(
-                "postgres_effect_replay_missing",
-                format!(
-                    "no recorded runtime effect for scope `{scope_id}` and replay key `{replay_key}`"
-                ),
-            )),
-            None => {
-                let due_at_param = due_at_ms.map(|value| value as i64);
-                let inserted = sqlx::query(
-                    "INSERT INTO lash_runtime_effect_replay (
-                        scope_id, session_id, replay_key, envelope_hash,
-                        envelope_json, status, outcome_json, error_json, lease_owner_id,
-                        lease_token, lease_expires_at_ms, due_at_ms, created_at_ms, updated_at_ms
-                     )
-                     VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, $7, $8, $9, $10, $11, $12)
-                     ON CONFLICT (scope_id, replay_key) DO NOTHING",
-                )
-                .bind(&scope_id)
-                .bind(session_id)
-                .bind(&replay_key)
-                .bind(&envelope_hash)
-                .bind(&envelope_json)
-                .bind(POSTGRES_EFFECT_STATUS_IN_PROGRESS)
-                .bind(&owner_id)
-                .bind(&lease_token)
-                .bind(lease_expires_at_ms as i64)
-                .bind(due_at_param)
-                .bind(now as i64)
-                .bind(now as i64)
-                .execute(&mut *tx)
-                .await
-                .map_err(postgres_effect_store_error)?
-                .rows_affected();
-                if inserted == 1 {
-                    Ok(PostgresPreparedEffect::Claimed(PostgresClaimedEffect {
-                        scope_id,
-                        replay_key,
-                        envelope_hash,
-                        lease_token,
-                        due_at_ms,
-                    }))
-                } else {
-                    let row =
-                        postgres_select_effect_row_for_update(&mut tx, &scope_id, &replay_key)
-                            .await?
-                            .ok_or_else(|| {
-                                RuntimeEffectControllerError::new(
-                                    "postgres_effect_replay_corrupt_row",
-                                    "effect replay insert conflicted but no row could be selected",
-                                )
-                            })?;
-                    self.prepare_locked_effect_row(
-                        &mut tx,
-                        PostgresPrepareInputs {
-                            row,
-                            scope_id,
-                            replay_key,
-                            envelope_hash,
-                            owner_id,
-                            lease_token,
-                            due_at_ms,
-                            now,
-                        },
-                    )
-                    .await
-                }
-            }
-        };
-        tx.commit().await.map_err(postgres_effect_store_error)?;
-        outcome
-    }
-
-    async fn prepare_locked_effect_row(
-        &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        inputs: PostgresPrepareInputs,
-    ) -> Result<PostgresPreparedEffect, RuntimeEffectControllerError> {
-        let PostgresPrepareInputs {
-            row,
-            scope_id,
-            replay_key,
-            envelope_hash,
-            owner_id,
-            lease_token,
-            due_at_ms,
-            now,
-        } = inputs;
-        if row.envelope_hash != envelope_hash {
-            let recorded_envelope: CanonicalRuntimeEffectEnvelope =
-                serde_json::from_str(&row.envelope_json).map_err(postgres_effect_decode_error)?;
-            return Ok(PostgresPreparedEffect::ReplayMismatch {
-                recorded_envelope: Box::new(recorded_envelope),
-                stored_envelope_hash: row.envelope_hash,
-            });
-        }
-        let existing_due_at_ms = row.due_at_ms.map(|value| value as u64);
-        match row.status.as_str() {
-            POSTGRES_EFFECT_STATUS_COMPLETED => {
-                let Some(json) = row.outcome_json else {
-                    return Err(RuntimeEffectControllerError::new(
-                        "postgres_effect_replay_corrupt_row",
-                        "completed runtime effect row is missing outcome_json",
-                    ));
-                };
-                let outcome = serde_json::from_str(&json).map_err(postgres_effect_decode_error)?;
-                Ok(PostgresPreparedEffect::ReplayOutcome {
-                    outcome: Box::new(outcome),
-                    due_at_ms: existing_due_at_ms,
-                })
-            }
-            POSTGRES_EFFECT_STATUS_FAILED => {
-                let Some(json) = row.error_json else {
-                    return Err(RuntimeEffectControllerError::new(
-                        "postgres_effect_replay_corrupt_row",
-                        "failed runtime effect row is missing error_json",
-                    ));
-                };
-                let err = serde_json::from_str(&json).map_err(postgres_effect_decode_error)?;
-                Ok(PostgresPreparedEffect::ReplayError(err))
-            }
-            POSTGRES_EFFECT_STATUS_IN_PROGRESS if row.lease_expires_at_ms as u64 > now => {
-                Ok(PostgresPreparedEffect::Busy {
-                    retry_at_ms: row.lease_expires_at_ms as u64,
-                })
-            }
-            POSTGRES_EFFECT_STATUS_IN_PROGRESS => {
-                let due_at_ms = existing_due_at_ms.or(due_at_ms);
-                let due_at_param = due_at_ms.map(|value| value as i64);
-                sqlx::query(
-                    "UPDATE lash_runtime_effect_replay
-                     SET lease_owner_id = $3,
-                         lease_token = $4,
-                         lease_expires_at_ms = $5,
-                         due_at_ms = $6,
-                         updated_at_ms = $7
-                     WHERE scope_id = $1 AND replay_key = $2",
-                )
-                .bind(&scope_id)
-                .bind(&replay_key)
-                .bind(&owner_id)
-                .bind(&lease_token)
-                .bind(now.saturating_add(self.inner.lease_timings.ttl_ms()) as i64)
-                .bind(due_at_param)
-                .bind(now as i64)
-                .execute(&mut **tx)
-                .await
-                .map_err(postgres_effect_store_error)?;
-                Ok(PostgresPreparedEffect::Claimed(PostgresClaimedEffect {
-                    scope_id,
-                    replay_key,
-                    envelope_hash,
-                    lease_token,
-                    due_at_ms,
-                }))
-            }
-            other => Err(RuntimeEffectControllerError::new(
-                "postgres_effect_replay_corrupt_row",
-                format!("unknown runtime effect replay status `{other}`"),
-            )),
-        }
-    }
-
-    async fn finalize_effect(
-        &self,
-        claim: &PostgresClaimedEffect,
-        outcome: &Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        let (status, outcome_json, error_json) = match outcome {
-            Ok(outcome) => (
-                POSTGRES_EFFECT_STATUS_COMPLETED,
-                Some(serde_json::to_string(outcome).map_err(postgres_effect_encode_error)?),
-                None,
-            ),
-            Err(err) => (
-                POSTGRES_EFFECT_STATUS_FAILED,
-                None,
-                Some(serde_json::to_string(err).map_err(postgres_effect_encode_error)?),
-            ),
-        };
-        let changed = sqlx::query(
-            "UPDATE lash_runtime_effect_replay
-             SET status = $6,
-                 outcome_json = $7,
-                 error_json = $8,
-                 lease_owner_id = NULL,
-                 lease_token = NULL,
-                 lease_expires_at_ms = 0,
-                 updated_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
-             WHERE scope_id = $1
-               AND replay_key = $2
-               AND envelope_hash = $3
-               AND lease_owner_id = $4
-               AND lease_token = $5
-               AND status = 'in_progress'
-               AND lease_expires_at_ms > floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint",
-        )
-        .bind(&claim.scope_id)
-        .bind(&claim.replay_key)
-        .bind(&claim.envelope_hash)
-        .bind(&self.inner.owner_id)
-        .bind(&claim.lease_token)
-        .bind(status)
-        .bind(outcome_json)
-        .bind(error_json)
-        .execute(&self.inner.pool)
-        .await
-        .map_err(postgres_effect_store_error)?
-        .rows_affected();
-        if changed != 1 {
-            return Err(RuntimeEffectControllerError::new(
-                "postgres_effect_replay_lease_lost",
-                format!(
-                    "runtime effect replay lease was lost before finalizing scope `{}` replay key `{}`",
-                    claim.scope_id, claim.replay_key
-                ),
-            ));
-        }
-        Ok(())
-    }
-
-    async fn renew_effect_lease(
-        &self,
-        claim: &PostgresClaimedEffect,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        let changed = sqlx::query(
-            "UPDATE lash_runtime_effect_replay
-             SET lease_expires_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint + $6,
-                 updated_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
-             WHERE scope_id = $1
-               AND replay_key = $2
-               AND envelope_hash = $3
-               AND lease_owner_id = $4
-               AND lease_token = $5
-               AND status = 'in_progress'
-               AND lease_expires_at_ms > floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint",
-        )
-        .bind(&claim.scope_id)
-        .bind(&claim.replay_key)
-        .bind(&claim.envelope_hash)
-        .bind(&self.inner.owner_id)
-        .bind(&claim.lease_token)
-        .bind(self.inner.lease_timings.ttl_ms() as i64)
-        .execute(&self.inner.pool)
-        .await
-        .map_err(postgres_effect_store_error)?
-        .rows_affected();
-        if changed != 1 {
-            return Err(RuntimeEffectControllerError::new(
-                "postgres_effect_replay_lease_lost",
-                format!(
-                    "runtime effect replay lease was lost while executing scope `{}` replay key `{}`",
-                    claim.scope_id, claim.replay_key
-                ),
-            ));
-        }
-        Ok(())
-    }
-
-    async fn execute_claimed_effect_with_renewal(
-        &self,
-        claim: &PostgresClaimedEffect,
-        envelope: RuntimeEffectEnvelope,
-        local_executor: RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let renew_every = self.inner.lease_timings.renew_interval();
-        let effect = self.execute_claimed_effect(claim, envelope, local_executor);
-        tokio::pin!(effect);
-        let renew_sleep = tokio::time::sleep(renew_every);
-        tokio::pin!(renew_sleep);
-
-        loop {
-            tokio::select! {
-                result = &mut effect => return result,
-                _ = &mut renew_sleep => {
-                    self.renew_effect_lease(claim).await?;
-                    renew_sleep.as_mut().reset(tokio::time::Instant::now() + renew_every);
-                }
-            }
-        }
-    }
-
-    async fn execute_claimed_effect(
-        &self,
-        claim: &PostgresClaimedEffect,
-        envelope: RuntimeEffectEnvelope,
-        local_executor: RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        if matches!(envelope.command, RuntimeEffectCommand::Sleep { .. }) {
-            postgres_effect_sleep_until_due(claim.due_at_ms).await;
-            return Ok(RuntimeEffectOutcome::Sleep);
-        }
-        match envelope.command {
-            RuntimeEffectCommand::PeekAwaitEvent { key } => {
-                let resolution = self
-                    .peek_await_event(&key)
-                    .await
-                    .map_err(RuntimeEffectControllerError::from)?;
-                Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution })
-            }
-            RuntimeEffectCommand::AwaitEvent { key } => {
-                let lash_core::facade_support::RuntimeAwaitEventOptions {
-                    cancellation,
-                    deadline,
-                    clock,
-                    ..
-                } = local_executor.into_await_event_options()?;
-                let resolution = self
-                    .inner
-                    .await_events
-                    .await_resolution_with_clock(&key, cancellation, deadline, clock.as_ref())
-                    .await
-                    .map_err(RuntimeEffectControllerError::from)?;
-                Ok(RuntimeEffectOutcome::AwaitEvent { resolution })
-            }
-            RuntimeEffectCommand::Process { command } => {
-                let result = local_executor.into_process()?.execute(*command).await?;
-                Ok(RuntimeEffectOutcome::Process { result })
-            }
-            _ => local_executor.execute(envelope).await,
-        }
+        self.inner.start_replay();
     }
 }
 
@@ -625,8 +193,7 @@ impl AwaitEventResolver for PostgresRuntimeEffectController {
         scope: &ExecutionScope,
         wait: lash_core::AwaitEventWaitIdentity,
     ) -> Result<lash_core::AwaitEventKey, RuntimeError> {
-        scope.validate()?;
-        self.inner.await_events.key_for(scope, wait).await
+        self.inner.await_event_key(scope, wait).await
     }
 
     async fn resolve_await_event(
@@ -634,14 +201,14 @@ impl AwaitEventResolver for PostgresRuntimeEffectController {
         key: &lash_core::AwaitEventKey,
         resolution: lash_core::Resolution,
     ) -> Result<lash_core::ResolveOutcome, RuntimeError> {
-        self.inner.await_events.resolve(key, resolution).await
+        self.inner.resolve_await_event(key, resolution).await
     }
 
     async fn peek_await_event(
         &self,
         key: &lash_core::AwaitEventKey,
     ) -> Result<Option<lash_core::Resolution>, RuntimeError> {
-        self.inner.await_events.peek(key).await
+        self.inner.peek_await_event(key).await
     }
 
     async fn await_await_event(
@@ -650,18 +217,15 @@ impl AwaitEventResolver for PostgresRuntimeEffectController {
         cancel: tokio_util::sync::CancellationToken,
         deadline: Option<std::time::Instant>,
     ) -> Result<lash_core::Resolution, RuntimeError> {
-        self.inner
-            .await_events
-            .await_resolution(key, cancel, deadline)
-            .await
+        self.inner.await_await_event(key, cancel, deadline).await
     }
 
     async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.inner.await_events.revoke_session(session_id).await
+        self.inner.revoke_await_events_for_session(session_id).await
     }
 
     async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.inner.await_events.cancel_session(session_id).await
+        self.inner.cancel_await_events_for_session(session_id).await
     }
 }
 
@@ -672,107 +236,227 @@ impl RuntimeEffectController for PostgresRuntimeEffectController {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        self.scope
-            .validate()
-            .map_err(RuntimeEffectControllerError::from)?;
-        let reconstructed_envelope = envelope.canonical_form()?;
-        let replay_trace = local_executor.replay_validation_trace().cloned();
-        loop {
-            match self
-                .prepare_effect(&envelope, &reconstructed_envelope)
-                .await?
-            {
-                PostgresPreparedEffect::ReplayMismatch {
-                    recorded_envelope,
-                    stored_envelope_hash,
-                } => {
-                    validate_replayed_effect_envelope(
-                        recorded_envelope.as_ref(),
-                        &reconstructed_envelope,
-                        "postgres_effect_replay_hash_conflict",
-                        replay_trace.as_ref(),
-                    )?;
-                    return Err(RuntimeEffectControllerError::new(
-                        "runtime_effect_envelope_canonical_hash_invariant",
-                        format!(
-                            "stored envelope_hash {stored_envelope_hash} did not match the persisted canonical envelope hash {}",
-                            recorded_envelope.hash()
-                        ),
-                    ));
-                }
-                PostgresPreparedEffect::ReplayOutcome { outcome, due_at_ms } => {
-                    postgres_effect_sleep_until_due(due_at_ms).await;
-                    return Ok(*outcome);
-                }
-                PostgresPreparedEffect::ReplayError(err) => return Err(err),
-                PostgresPreparedEffect::Claimed(claim) => {
-                    let result = self
-                        .execute_claimed_effect_with_renewal(&claim, envelope, local_executor)
-                        .await;
-                    let finalize = self.finalize_effect(&claim, &result).await;
-                    return match (result, finalize) {
-                        (Ok(outcome), Ok(())) => Ok(outcome),
-                        (Err(err), Ok(())) => Err(err),
-                        (_, Err(err)) => Err(err),
-                    };
-                }
-                PostgresPreparedEffect::Busy { retry_at_ms } => {
-                    postgres_effect_sleep_until_retry(retry_at_ms).await;
-                }
+        self.inner
+            .execute_effect(&self.scope, envelope, local_executor)
+            .await
+    }
+}
+
+fn build_effect_replay_driver(
+    storage: &PostgresStorage,
+    options: PostgresEffectReplayOptions,
+) -> PostgresEffectReplay {
+    // The driver's clock only sleeps: `Sleep` effect due times, busy-retry
+    // backoff, and the lease renewal interval. Every lease stamp and comparison
+    // is the server's (`transaction_timestamp()`), so `PostgresStorage` needs no
+    // injectable time source and this `SystemClock` is deliberately explicit
+    // rather than a private `current_epoch_ms()` call per statement.
+    let clock: Arc<dyn lash_core::Clock> = Arc::new(lash_core::facade_support::SystemClock);
+    let await_events = postgres_await_events(
+        storage.pool.clone(),
+        Arc::clone(&storage.await_event_signing_secret),
+        Arc::clone(&clock),
+    );
+    EffectReplayDriver::new(
+        PostgresEffectReplayPersistence {
+            pool: storage.pool.clone(),
+        },
+        await_events,
+        clock,
+        options.lease_timings,
+    )
+}
+
+/// PostgreSQL storage atoms for the durable effect journal.
+struct PostgresEffectReplayPersistence {
+    pool: PgPool,
+}
+
+impl effect_replay_driver::sealed::EffectReplayBackend for PostgresEffectReplayPersistence {}
+
+#[async_trait::async_trait]
+impl EffectReplayPersistence for PostgresEffectReplayPersistence {
+    fn vocabulary(&self) -> EffectReplayVocabulary {
+        VOCABULARY
+    }
+
+    async fn claim(
+        &self,
+        request: &EffectClaimRequest,
+    ) -> Result<EffectClaimObservation, RuntimeEffectControllerError> {
+        let mut tx = self.pool.begin().await.map_err(effect_store_error)?;
+        // The server's transaction clock is the authoritative lease instant:
+        // one stable value for every comparison and derived expiry below.
+        let now_ms = postgres_transaction_epoch_ms(&mut tx)
+            .await
+            .map_err(|err| effect_store_message(err.to_string()))?;
+        let observation = self.claim_in_transaction(&mut tx, request, now_ms).await;
+        tx.commit().await.map_err(effect_store_error)?;
+        observation
+    }
+
+    async fn finalize(
+        &self,
+        fence: &EffectLeaseFence,
+        terminal: &EffectTerminal,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        let changed = sqlx::query(
+            "UPDATE lash_runtime_effect_replay
+             SET status = $6,
+                 outcome_json = $7,
+                 error_json = $8,
+                 lease_owner_id = NULL,
+                 lease_token = NULL,
+                 lease_expires_at_ms = 0,
+                 updated_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
+             WHERE scope_id = $1
+               AND replay_key = $2
+               AND envelope_hash = $3
+               AND lease_owner_id = $4
+               AND lease_token = $5
+               AND status = 'in_progress'
+               AND lease_expires_at_ms > floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint",
+        )
+        .bind(&fence.scope_id)
+        .bind(&fence.replay_key)
+        .bind(&fence.envelope_hash)
+        .bind(&fence.owner_id)
+        .bind(&fence.lease_token)
+        .bind(terminal.status().column())
+        .bind(terminal.outcome_json())
+        .bind(terminal.error_json())
+        .execute(&self.pool)
+        .await
+        .map_err(effect_store_error)?
+        .rows_affected();
+        Ok(changed == 1)
+    }
+
+    async fn renew(
+        &self,
+        fence: &EffectLeaseFence,
+        lease_ttl_ms: u64,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        let changed = sqlx::query(
+            "UPDATE lash_runtime_effect_replay
+             SET lease_expires_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint + $6,
+                 updated_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
+             WHERE scope_id = $1
+               AND replay_key = $2
+               AND envelope_hash = $3
+               AND lease_owner_id = $4
+               AND lease_token = $5
+               AND status = 'in_progress'
+               AND lease_expires_at_ms > floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint",
+        )
+        .bind(&fence.scope_id)
+        .bind(&fence.replay_key)
+        .bind(&fence.envelope_hash)
+        .bind(&fence.owner_id)
+        .bind(&fence.lease_token)
+        .bind(lease_ttl_ms as i64)
+        .execute(&self.pool)
+        .await
+        .map_err(effect_store_error)?
+        .rows_affected();
+        Ok(changed == 1)
+    }
+
+    async fn retire_journal(
+        &self,
+        retirement: &lash_core::EffectJournalRetirement,
+    ) -> Result<usize, RuntimeError> {
+        let result = match retirement {
+            lash_core::EffectJournalRetirement::Session { session_id } => {
+                sqlx::query("DELETE FROM lash_runtime_effect_replay WHERE session_id = $1")
+                    .bind(session_id)
+                    .execute(&self.pool)
+                    .await
+            }
+            lash_core::EffectJournalRetirement::Process { process_id } => {
+                let identity = ExecutionScope::process(process_id.clone())
+                    .journal_identity()
+                    .expect("process scopes always form durable journal identities");
+                sqlx::query("DELETE FROM lash_runtime_effect_replay WHERE scope_id = $1")
+                    .bind(identity.key())
+                    .execute(&self.pool)
+                    .await
             }
         }
+        .map_err(|error| {
+            RuntimeError::new("postgres_effect_journal_retirement", error.to_string())
+        })?;
+        Ok(result.rows_affected() as usize)
     }
 }
 
-struct PostgresPrepareInputs {
-    row: PostgresEffectRow,
-    scope_id: String,
-    replay_key: String,
-    envelope_hash: String,
-    owner_id: String,
-    lease_token: String,
-    due_at_ms: Option<u64>,
-    now: u64,
+impl PostgresEffectReplayPersistence {
+    /// Read the row under its write lock, ask the transition table, and apply
+    /// whatever write it prescribes.
+    ///
+    /// A fresh claim inserts with `ON CONFLICT DO NOTHING`: `FOR UPDATE` cannot
+    /// lock a row that does not exist yet, so a concurrent inserter is detected
+    /// by the conflict and the row is re-read under its lock. That re-read is
+    /// decided by the same table, so a racing claimant sees `Busy` (or the
+    /// terminal) rather than a second claim.
+    async fn claim_in_transaction(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        request: &EffectClaimRequest,
+        now_ms: u64,
+    ) -> Result<EffectClaimObservation, RuntimeEffectControllerError> {
+        let row = select_effect_row_for_update(tx, &request.scope_id, &request.replay_key).await?;
+        let decision = decide_effect_claim(row.as_ref(), request, now_ms);
+        let stamp = match decision {
+            EffectClaimDecision::Insert(stamp) => {
+                if insert_claimed_row(tx, request, &stamp).await? {
+                    return Ok(EffectClaimObservation::Claimed {
+                        due_at_ms: stamp.due_at_ms,
+                    });
+                }
+                // A concurrent claimant inserted the row `FOR UPDATE` could not
+                // lock because it did not exist yet. Re-read it under its lock
+                // and let the same table decide again; the second decision can
+                // no longer be `Insert`, so it settles as a takeover or a
+                // report — never a second claim of a live lease.
+                let Some(conflicted) =
+                    select_effect_row_for_update(tx, &request.scope_id, &request.replay_key)
+                        .await?
+                else {
+                    return Ok(EffectClaimObservation::CorruptRow {
+                        defect: EffectRowDefect::VanishedUnderClaim,
+                    });
+                };
+                match decide_effect_claim(Some(&conflicted), request, now_ms) {
+                    EffectClaimDecision::TakeOver(stamp) => stamp,
+                    EffectClaimDecision::Report(observation) => return Ok(observation),
+                    EffectClaimDecision::Insert(_) => {
+                        debug_assert!(
+                            false,
+                            "decide_effect_claim must never prescribe an insert for a row it \
+                             was given: `Insert` is the no-row arm"
+                        );
+                        return Ok(EffectClaimObservation::CorruptRow {
+                            defect: EffectRowDefect::VanishedUnderClaim,
+                        });
+                    }
+                }
+            }
+            EffectClaimDecision::TakeOver(stamp) => stamp,
+            EffectClaimDecision::Report(observation) => return Ok(observation),
+        };
+        take_over_expired_lease(tx, request, &stamp).await?;
+        Ok(EffectClaimObservation::Claimed {
+            due_at_ms: stamp.due_at_ms,
+        })
+    }
 }
 
-impl PostgresEffectReplayInner {
-    fn new(pool: PgPool, signing_secret: Arc<[u8]>, options: PostgresEffectReplayOptions) -> Self {
-        let sequence = POSTGRES_EFFECT_OWNER_COUNTER.fetch_add(1, Ordering::SeqCst);
-        // Every timing decision in this host reads the real clock: PostgreSQL
-        // effect leases and sleeps are wall-clock driven and `PostgresStorage`
-        // carries no injectable time source. Handing the coordinator an explicit
-        // `SystemClock` keeps that choice visible in one place instead of hiding
-        // it behind a private `current_epoch_ms()` call per statement.
-        let await_events = crate::await_event::postgres_await_events(
-            pool.clone(),
-            signing_secret,
-            Arc::new(lash_core::facade_support::SystemClock),
-        );
-        Self {
-            pool,
-            owner_id: format!(
-                "pid{}-{sequence}-{}",
-                std::process::id(),
-                current_epoch_ms()
-            ),
-            lease_counter: AtomicU64::new(1),
-            replay_mode: AtomicBool::new(false),
-            lease_timings: options.lease_timings,
-            await_events,
-        }
-    }
-
-    fn next_lease_token(&self) -> String {
-        let sequence = self.lease_counter.fetch_add(1, Ordering::SeqCst);
-        format!("{}:{sequence}", self.owner_id)
-    }
-}
-
-async fn postgres_select_effect_row_for_update(
+async fn select_effect_row_for_update(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     scope_id: &str,
     replay_key: &str,
-) -> Result<Option<PostgresEffectRow>, RuntimeEffectControllerError> {
+) -> Result<Option<StoredEffectRow>, RuntimeEffectControllerError> {
     let row = sqlx::query(
         "SELECT envelope_hash, envelope_json, status, outcome_json, error_json,
                 lease_expires_at_ms, due_at_ms
@@ -784,67 +468,89 @@ async fn postgres_select_effect_row_for_update(
     .bind(replay_key)
     .fetch_optional(&mut **tx)
     .await
-    .map_err(postgres_effect_store_error)?;
-    Ok(row.map(postgres_effect_row))
+    .map_err(effect_store_error)?;
+    Ok(row.map(stored_effect_row))
 }
 
-fn postgres_effect_row(row: PgRow) -> PostgresEffectRow {
-    PostgresEffectRow {
+fn stored_effect_row(row: PgRow) -> StoredEffectRow {
+    StoredEffectRow {
         envelope_hash: row.get("envelope_hash"),
         envelope_json: row.get("envelope_json"),
         status: row.get("status"),
         outcome_json: row.get("outcome_json"),
         error_json: row.get("error_json"),
-        lease_expires_at_ms: row.get("lease_expires_at_ms"),
-        due_at_ms: row.get("due_at_ms"),
+        lease_expires_at_ms: row.get::<i64, _>("lease_expires_at_ms") as u64,
+        due_at_ms: row
+            .get::<Option<i64>, _>("due_at_ms")
+            .map(|value| value as u64),
     }
 }
 
-fn postgres_effect_sleep_due_at_ms(envelope: &RuntimeEffectEnvelope, now: u64) -> Option<u64> {
-    match envelope.command {
-        RuntimeEffectCommand::Sleep { duration_ms } => Some(now.saturating_add(duration_ms)),
-        _ => None,
-    }
-}
-
-async fn postgres_effect_sleep_until_due(due_at_ms: Option<u64>) {
-    let Some(due_at_ms) = due_at_ms else {
-        return;
-    };
-    let now = current_epoch_ms();
-    if due_at_ms > now {
-        tokio::time::sleep(Duration::from_millis(due_at_ms - now)).await;
-    }
-}
-
-async fn postgres_effect_sleep_until_retry(retry_at_ms: u64) {
-    let now = current_epoch_ms();
-    let delay = if retry_at_ms > now {
-        Duration::from_millis(retry_at_ms - now).min(POSTGRES_EFFECT_BUSY_POLL)
-    } else {
-        POSTGRES_EFFECT_BUSY_POLL
-    };
-    tokio::time::sleep(delay).await;
-}
-
-fn postgres_effect_store_error(err: sqlx::Error) -> RuntimeEffectControllerError {
-    RuntimeEffectControllerError::new("postgres_effect_replay_store", err.to_string())
-}
-
-fn postgres_effect_store_message(message: String) -> RuntimeEffectControllerError {
-    RuntimeEffectControllerError::new("postgres_effect_replay_store", message)
-}
-
-fn postgres_effect_encode_error(err: serde_json::Error) -> RuntimeEffectControllerError {
-    RuntimeEffectControllerError::new(
-        "postgres_effect_replay_encode",
-        format!("failed to encode runtime effect replay row: {err}"),
+/// Insert a fresh claim, reporting `false` when a concurrent inserter won.
+async fn insert_claimed_row(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    request: &EffectClaimRequest,
+    stamp: &EffectLeaseStamp,
+) -> Result<bool, RuntimeEffectControllerError> {
+    let inserted = sqlx::query(
+        "INSERT INTO lash_runtime_effect_replay (
+            scope_id, session_id, replay_key, envelope_hash,
+            envelope_json, status, outcome_json, error_json, lease_owner_id,
+            lease_token, lease_expires_at_ms, due_at_ms, created_at_ms, updated_at_ms
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, $7, $8, $9, $10, $11, $12)
+         ON CONFLICT (scope_id, replay_key) DO NOTHING",
     )
+    .bind(&request.scope_id)
+    .bind(request.session_id.as_deref())
+    .bind(&request.replay_key)
+    .bind(&request.envelope_hash)
+    .bind(&request.envelope_json)
+    .bind(EffectRowStatus::InProgress.column())
+    .bind(&request.owner_id)
+    .bind(&request.lease_token)
+    .bind(stamp.lease_expires_at_ms as i64)
+    .bind(stamp.due_at_ms.map(|value| value as i64))
+    .bind(stamp.now_ms as i64)
+    .bind(stamp.now_ms as i64)
+    .execute(&mut **tx)
+    .await
+    .map_err(effect_store_error)?
+    .rows_affected();
+    Ok(inserted == 1)
 }
 
-fn postgres_effect_decode_error(err: serde_json::Error) -> RuntimeEffectControllerError {
-    RuntimeEffectControllerError::new(
-        "postgres_effect_replay_decode",
-        format!("failed to decode runtime effect replay row: {err}"),
+async fn take_over_expired_lease(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    request: &EffectClaimRequest,
+    stamp: &EffectLeaseStamp,
+) -> Result<(), RuntimeEffectControllerError> {
+    sqlx::query(
+        "UPDATE lash_runtime_effect_replay
+         SET lease_owner_id = $3,
+             lease_token = $4,
+             lease_expires_at_ms = $5,
+             due_at_ms = $6,
+             updated_at_ms = $7
+         WHERE scope_id = $1 AND replay_key = $2",
     )
+    .bind(&request.scope_id)
+    .bind(&request.replay_key)
+    .bind(&request.owner_id)
+    .bind(&request.lease_token)
+    .bind(stamp.lease_expires_at_ms as i64)
+    .bind(stamp.due_at_ms.map(|value| value as i64))
+    .bind(stamp.now_ms as i64)
+    .execute(&mut **tx)
+    .await
+    .map_err(effect_store_error)?;
+    Ok(())
+}
+
+fn effect_store_error(err: sqlx::Error) -> RuntimeEffectControllerError {
+    RuntimeEffectControllerError::new(VOCABULARY.code("store"), err.to_string())
+}
+
+fn effect_store_message(message: String) -> RuntimeEffectControllerError {
+    RuntimeEffectControllerError::new(VOCABULARY.code("store"), message)
 }

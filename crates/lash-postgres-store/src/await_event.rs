@@ -33,7 +33,8 @@ pub(crate) type PostgresAwaitEvents = AwaitEventCoordinator<PostgresAwaitEventBa
 /// site hardwires to the wall clock because `PostgresStorage` carries no
 /// injectable time source. These stamps are records, not decision inputs: lease
 /// and claim decisions that must survive host clock skew read the server clock
-/// instead (ADR 0044, pinned by `postgres_clock_contract`).
+/// instead — the database-authoritative lease boundary the `Clock` contract
+/// states, pinned by `postgres_clock_contract`.
 pub(crate) fn postgres_await_events(
     pool: PgPool,
     signing_secret: Arc<[u8]>,

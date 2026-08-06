@@ -23,6 +23,7 @@ use support::{SharedDatabaseLock, database_url};
 const CLOCK_SKEW_MS: u64 = 10 * 365 * 24 * 60 * 60 * 1_000;
 const RUNTIME_PERSISTENCE_SOURCE: &str = include_str!("../src/postgres/runtime_persistence.rs");
 const PROCESS_REGISTRY_SOURCE: &str = include_str!("../src/postgres/process_registry.rs");
+const EFFECT_REPLAY_SOURCE: &str = include_str!("../src/postgres/effect_replay.rs");
 
 fn unique_id(prefix: &str) -> String {
     let nonce = std::time::SystemTime::now()
@@ -135,13 +136,62 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
             "async fn commit_runtime_state(",
             "async fn save_session_meta(",
         ),
+        // Effect-replay leases fence exactly-once execution across hosts, so
+        // the persistence adapter's claim/finalize/renew atoms read the server
+        // clock like every other lease path. The shared `EffectReplayDriver`
+        // carries a wall clock for sleeps only; if it ever reached these atoms,
+        // this fence is what fails.
+        (
+            EFFECT_REPLAY_SOURCE,
+            "async fn claim(",
+            "async fn finalize(",
+        ),
+        (
+            EFFECT_REPLAY_SOURCE,
+            "async fn finalize(",
+            "async fn renew(",
+        ),
+        (
+            EFFECT_REPLAY_SOURCE,
+            "async fn renew(",
+            "async fn retire_journal(",
+        ),
+        (
+            EFFECT_REPLAY_SOURCE,
+            "async fn claim_in_transaction(",
+            "async fn select_effect_row_for_update(",
+        ),
+        // The two atoms that actually persist lease stamps. They bind values the
+        // covered `claim` region minted, so covering only the readers would let a
+        // client-clock read slip into the write side.
+        (
+            EFFECT_REPLAY_SOURCE,
+            "async fn insert_claimed_row(",
+            "async fn take_over_expired_lease(",
+        ),
+        (
+            EFFECT_REPLAY_SOURCE,
+            "async fn take_over_expired_lease(",
+            "fn effect_store_error(",
+        ),
     ];
 
+    // Every way this crate can read a host wall clock. `current_epoch_ms()` is
+    // the crate's own helper; the other two are the ways around it, and one of
+    // them (`SystemClock`) is now constructed in `effect_replay.rs` to give the
+    // shared driver its sleep clock, so it is one identifier away from these
+    // regions rather than one module away.
+    const CLIENT_CLOCK_READS: [&str; 3] =
+        ["current_epoch_ms()", "SystemTime::now()", "SystemClock"];
+
     for (source, start, end) in lease_sensitive_regions {
-        assert!(
-            !source_region(source, start, end).contains("current_epoch_ms()"),
-            "lexical clock fence: `{start}` must not use the client wall clock"
-        );
+        let region = source_region(source, start, end);
+        for read in CLIENT_CLOCK_READS {
+            assert!(
+                !region.contains(read),
+                "lexical clock fence: `{start}` must not use the client wall clock (`{read}`)"
+            );
+        }
     }
 }
 

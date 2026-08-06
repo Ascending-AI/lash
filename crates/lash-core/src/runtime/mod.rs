@@ -7,6 +7,8 @@ pub use config_ops::SessionConfigPatch;
 pub(crate) mod effect;
 #[doc(hidden)]
 pub use effect::await_event_coordinator;
+#[doc(hidden)]
+pub use effect::effect_replay_driver;
 pub use effect::promise_semantics;
 mod environment;
 mod error;

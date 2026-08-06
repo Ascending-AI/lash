@@ -265,6 +265,8 @@ pub mod facade_support {
     pub use crate::runtime::diff_token_ledger;
     pub use crate::runtime::diff_usage_reports;
     pub use crate::runtime::effect::executor::control::facade_ops::ScopedEffectControllerFacadeOps;
+    #[doc(hidden)]
+    pub use crate::runtime::effect_replay_driver;
     pub use crate::runtime::ensure_durable_effect_input;
     pub use crate::runtime::epoch_ms_from_system_time;
     pub use crate::runtime::facade_ops::TurnContextFacadeOps;
