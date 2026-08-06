@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Enforce dispositions for Lash's host-facing public API surface.
+r"""Enforce dispositions for Lash's host-facing public API surface.
 
 The public surface comes from rustdoc JSON, not from the inventory being
 checked.  This keeps the oracle independent: adding or removing an export
@@ -14,6 +14,41 @@ Those types are keyed by the compiler's canonical path, which is often rooted
 in a `pub(crate)` module and therefore appears nowhere in a root walk, even
 though every public method on the value is callable.  See
 `core_reachable_types`.
+
+The unit of *disposition* is the **API item**, not the path.  A single item is
+usually visible under several paths -- `lash::Session` and `lash_core::Session`
+are one struct, and a reachability-closure type is often also a facade export --
+so every path is keyed by the compiler's canonical identity for what it names,
+and paths that share an identity are one inventory row.  That row lives at the
+item's *primary* path (the facade path a host would write, when one exists).
+Two rows for one item are therefore a contract contradiction, not a duplicate:
+see `api_items` and the contradiction error in `item_errors`.
+
+The unit of *existence* is still the **path**.  An alias carries no verdict, but
+it is a promise: ADR 0051 makes retiring a `lash_core::` re-export breaking for
+direct core consumers, wave by wave.  So each row records its item's remaining
+paths in `aliases`, exactly as `availability` and `kind` are recorded -- derived
+from the compiler, stored so that a change has to be acknowledged rather than
+noticed.  Adding, removing, or moving any path fails the gate; only the
+*disposition* is centralized, never the path set.  `--dump-surface` prints the
+same projection the check compares against.
+
+Justification prose carries three lints, because the prose is the evidence:
+
+* No machine-local paths.  `/workspace/...`, `~/...`, and `C:\...` are one
+  developer's checkout, not a contract another reader can verify.  Evidence
+  must be repository-relative; `./`-prefixed paths are fine.
+* No impossible facade migrations.  A crate the `lash` facade is built on
+  cannot depend on the facade, so a justification may not park a consumer in
+  such a crate behind a pending migration to it.  ADR 0051 names this cycle for
+  `lash-remote-protocol`; the rule holds for every crate the facade is built on,
+  and the set comes from `cargo metadata`, not a hand-written list.  Detection
+  is per sentence and negation-aware: stating that a caller *cannot* migrate is
+  the honest description of the same fact, and the cited crate must be named in
+  the sentence making the claim so the error blames the right path.
+* No tautological assertion anchors.  `size_of::<T>() > 0` holds for every
+  non-ZST, so an anchor on one proves the path resolves and nothing else.  An
+  item whose only evidence is a tautology is undispositioned, not exercised.
 
 Three exclusions are deliberate, and each is enforced structurally rather than
 by a hand-maintained list:
@@ -38,10 +73,11 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tomllib
-from typing import Any
+from typing import Any, NamedTuple
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -154,11 +190,18 @@ def export_path(prefix: str, item: dict[str, Any]) -> str:
 
 
 def add_members(
-    surface: set[tuple[str, str]],
+    surface: dict[tuple[str, str], str],
     path: str,
+    canonical: str,
     item_id: str,
     index: dict[str, dict[str, Any]],
 ) -> None:
+    """Record every public member of `path` under both its path and its identity.
+
+    `canonical` is the owner's compiler identity, so a member's identity is that
+    identity plus the member name.  The same method reached through the facade
+    and through `lash_core` therefore lands on one identity.
+    """
     item = index.get(item_id)
     if item is None:
         return
@@ -171,7 +214,8 @@ def add_members(
             if doc_hidden(variant):
                 continue
             variant_path = f"{path}::{variant['name']}"
-            surface.add((variant_path, "variant"))
+            variant_canonical = f"{canonical}::{variant['name']}"
+            surface[(variant_path, "variant")] = variant_canonical
             variant_shape = variant["inner"]["variant"]["kind"]
             variant_fields: list[int] = []
             if isinstance(variant_shape, dict) and "struct" in variant_shape:
@@ -184,8 +228,9 @@ def add_members(
                 field = index[str(field_id)]
                 if doc_hidden(field):
                     continue
-                surface.add(
-                    (f"{variant_path}::{field.get('name') or field_id}", "field")
+                name = field.get("name") or field_id
+                surface[(f"{variant_path}::{name}", "field")] = (
+                    f"{variant_canonical}::{name}"
                 )
     elif kind in {"struct", "union"}:
         shape = inner["kind"] if kind == "struct" else inner
@@ -199,14 +244,16 @@ def add_members(
         for field_id in field_ids:
             field = index[str(field_id)]
             if public(field["visibility"]) and not doc_hidden(field):
-                surface.add((f"{path}::{field.get('name') or field_id}", "field"))
+                name = field.get("name") or field_id
+                surface[(f"{path}::{name}", "field")] = f"{canonical}::{name}"
 
     if kind == "trait":
         for member_id in inner["items"]:
             member = index[str(member_id)]
             if doc_hidden(member):
                 continue
-            surface.add((f"{path}::{member['name']}", item_kind(member)))
+            name = member["name"]
+            surface[(f"{path}::{name}", item_kind(member))] = f"{canonical}::{name}"
 
     impl_ids = inner.get("impls", []) if isinstance(inner, dict) else []
     for impl_id in impl_ids:
@@ -222,11 +269,29 @@ def add_members(
                 continue
             if doc_hidden(member):
                 continue
-            surface.add((f"{path}::{member['name']}", item_kind(member)))
+            name = member["name"]
+            surface[(f"{path}::{name}", item_kind(member))] = f"{canonical}::{name}"
+
+
+def canonical_identity(
+    item_id: str | None, paths: dict[str, dict[str, Any]], fallback: str
+) -> str:
+    """The compiler's canonical path for an item, or `fallback` when it has none.
+
+    This is the item's identity across every path that reaches it.  Rustdoc's
+    `paths` table records it for local and dependency-defined items alike, which
+    is what lets a facade re-export and its `lash_core` original collapse onto
+    one row.  Unresolved re-exports (globs) have no identity of their own, so the
+    export path stands in for one.
+    """
+    entry = paths.get(str(item_id)) if item_id is not None else None
+    if entry is None or not entry.get("path"):
+        return fallback
+    return "::".join(entry["path"])
 
 
 def add_export(
-    surface: set[tuple[str, str]],
+    surface: dict[tuple[str, str], str],
     path: str,
     item: dict[str, Any],
     index: dict[str, dict[str, Any]],
@@ -274,15 +339,18 @@ def add_export(
         return
     if kind not in PUBLIC_KINDS:
         return
-    surface.add((path, kind))
+    canonical = canonical_identity(item_id, member_paths, path)
+    surface[(path, kind)] = canonical
     if target is not None and item_id is not None:
-        add_members(surface, path, item_id, member_index)
+        add_members(surface, path, canonical, item_id, member_index)
 
 
-def lash_surface(document: dict[str, Any], all_features: bool) -> set[tuple[str, str]]:
+def lash_surface(
+    document: dict[str, Any], all_features: bool
+) -> dict[tuple[str, str], str]:
     index = document["index"]
     paths = document["paths"]
-    surface: set[tuple[str, str]] = set()
+    surface: dict[tuple[str, str], str] = {}
 
     def walk(module_id: str, prefix: str) -> None:
         module = index[module_id]["inner"]["module"]
@@ -452,7 +520,9 @@ def core_reachable_types(
     return named
 
 
-def lash_core_surface(document: dict[str, Any], all_features: bool) -> set[tuple[str, str]]:
+def lash_core_surface(
+    document: dict[str, Any], all_features: bool
+) -> dict[tuple[str, str], str]:
     """Root host exports plus every core-owned type they make reachable.
 
     Root exports are the named surface; the reachability closure is the rest of
@@ -463,7 +533,7 @@ def lash_core_surface(document: dict[str, Any], all_features: bool) -> set[tuple
     index = document["index"]
     paths = document["paths"]
     root = index[str(document["root"])]["inner"]["module"]
-    surface: set[tuple[str, str]] = set()
+    surface: dict[tuple[str, str], str] = {}
     seeds: set[str] = set()
     for child_id in root["items"]:
         child = index[str(child_id)]
@@ -484,8 +554,9 @@ def lash_core_surface(document: dict[str, Any], all_features: bool) -> set[tuple
             seeds.add(target)
 
     for path, item_id in core_reachable_types(seeds, index, paths).items():
-        surface.add((path, item_kind(index[item_id])))
-        add_members(surface, path, item_id, index)
+        # A closure type is keyed by its canonical path, so path *is* identity.
+        surface[(path, item_kind(index[item_id]))] = path
+        add_members(surface, path, path, item_id, index)
     return surface
 
 
@@ -544,36 +615,96 @@ def external_target(
     return None
 
 
-def configured_surface(all_features: bool) -> set[tuple[str, str]]:
+def configured_surface(all_features: bool) -> dict[tuple[str, str], str]:
     surface = lash_surface(
         rustdoc("lash-runtime", "lash", all_features), all_features
     )
     core = lash_core_surface(
         rustdoc("lash-core", "lash_core", all_features), all_features
     )
-    overlap = surface & core
+    overlap = set(surface) & set(core)
     if overlap:
         raise AssertionError(f"crate-qualified API names overlap: {sorted(overlap)}")
     surface.update(core)
     return surface
 
 
-def current_surface() -> list[tuple[str, str, str]]:
+def primary_path(aliases: list[str]) -> str:
+    """The one path an item's inventory row is recorded at.
+
+    Prefer what a host writes: the `lash` facade path, then the shortest path,
+    then lexicographic order.  The choice only has to be deterministic and
+    stable; picking the facade keeps the inventory readable as host contract
+    rather than as core internals.
+    """
+    return min(
+        aliases,
+        key=lambda alias: (
+            0 if alias.startswith("lash::") else 1,
+            alias.count("::"),
+            alias,
+        ),
+    )
+
+
+def api_items(surface: dict[tuple[str, str], str]) -> dict[tuple[str, str], list[str]]:
+    """Group surface paths into API items keyed by `(identity, kind)`.
+
+    Values are every path that reaches the item, sorted; the first element is
+    not special -- use `primary_path`.
+    """
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for (path, kind), identity in surface.items():
+        grouped.setdefault((identity, kind), []).append(path)
+    return {key: sorted(paths) for key, paths in grouped.items()}
+
+
+class ApiItem(NamedTuple):
+    """One unit of contract: the thing a disposition is about."""
+
+    #: The path the inventory row lives at.
+    primary: str
+    kind: str
+    availability: str
+    #: Every path that reaches this item, primary included.
+    paths: list[str]
+    #: The compiler's canonical path -- the identity that made these one item.
+    identity: str
+
+    def aliases(self) -> list[str]:
+        return [path for path in self.paths if path != self.primary]
+
+
+def current_surface() -> list[ApiItem]:
+    """One record per API item, sorted by primary path.
+
+    Availability is the item's, not a path's: an item is available in a
+    configuration when any path reaches it there.
+    """
     default = configured_surface(False)
     all_features = configured_surface(True)
-    surface = default | all_features
-    return [
-        (
-            symbol,
-            kind,
+    surface = {**all_features, **default}
+    conflicts = sorted(
+        key for key in set(default) & set(all_features) if default[key] != all_features[key]
+    )
+    if conflicts:
+        raise AssertionError(f"API identity differs between configurations: {conflicts}")
+
+    items: list[ApiItem] = []
+    for (identity, kind), paths in api_items(surface).items():
+        in_default = any((path, kind) in default for path in paths)
+        in_all_features = any((path, kind) in all_features for path in paths)
+        availability = (
             "default+all-features"
-            if (symbol, kind) in default and (symbol, kind) in all_features
+            if in_default and in_all_features
             else "default"
-            if (symbol, kind) in default
-            else "all-features",
+            if in_default
+            else "all-features"
         )
-        for symbol, kind in sorted(surface)
-    ]
+        items.append(
+            ApiItem(primary_path(paths), kind, availability, paths, identity)
+        )
+    return sorted(items)
 
 
 def relocated_reference(reference: str) -> str | None:
@@ -631,6 +762,136 @@ def refresh() -> int:
     return 1 if stale else 0
 
 
+#: A token that names somewhere on one machine rather than in this repository.
+#: `./x/y` is repository-relative, so a leading `.` must survive tokenizing.
+MACHINE_LOCAL_ROOT = re.compile(r"^(?:/|~/|\\\\|[A-Za-z]:[\\/]|file://)")
+#: Any wording that hands a consumer to the facade: migrate/move/port/switch to it.
+MIGRATION_TO_FACADE = re.compile(
+    r"\b(?:migrat|mov|port|switch|transition|relocat)\w*\b[^.]{0,60}?\bto\b[^.]{0,40}?"
+    r"\b(?:fa[cç]ade|lash)\b",
+    re.IGNORECASE,
+)
+#: Wording that denies the migration instead of promising it.
+MIGRATION_DENIED = re.compile(
+    r"\b(?:cannot|can ?not|can't|never|unable|impossible|no longer|not)\b", re.IGNORECASE
+)
+#: Assertions that hold for every non-ZST and therefore assert nothing.
+TAUTOLOGICAL_ASSERTION = re.compile(r"\b(?:size_of|align_of)\b")
+
+
+def path_tokens(text: str) -> list[str]:
+    """Path-shaped words in prose, stripped of quoting and sentence punctuation.
+
+    A trailing `.` is sentence punctuation, but a leading one is part of a
+    `./`-relative path, so the two ends strip differently.
+    """
+    tokens = []
+    for word in re.split(r"[\s,;]+", text):
+        token = word.lstrip("`'\"([{<“‘").rstrip("`'\"）)]}>”’.:,;")
+        if token:
+            tokens.append(token)
+    return tokens
+
+
+def machine_local_path(text: str) -> str | None:
+    """The first absolute or home-relative path in `text`, if any.
+
+    Absolute evidence is unverifiable for everyone but its author: the path
+    describes one checkout on one machine, and nothing in review or CI can tell
+    whether it still says what it claimed.  Repository-relative evidence is
+    checkable by anyone holding the repository.
+    """
+    for token in path_tokens(text):
+        if not MACHINE_LOCAL_ROOT.match(token):
+            continue
+        if "/" in token[1:] or "\\" in token[1:]:
+            return token
+    return None
+
+
+def tautological_assertion(assertion: str) -> bool:
+    """Whether an assertion anchor asserts something that is always true.
+
+    `assert!(size_of::<T>() > 0)` holds for every non-ZST, so it witnesses that
+    the path compiles and nothing about whether a host exercised the item.  An
+    item resting on one is undispositioned, not covered.
+    """
+    return bool(TAUTOLOGICAL_ASSERTION.search(assertion.split("#", 1)[-1]))
+
+
+def facade_dependency_dirs() -> set[str]:
+    """Workspace crate directories the `lash` facade is built on.
+
+    A crate in this set cannot depend on the facade -- that would be a cycle --
+    so a consumer living there can never "migrate to the lash facade".  Derived
+    from the resolved dependency graph so the rule cannot drift out of date the
+    way a hand-written crate list would.
+    """
+    completed = subprocess.run(
+        # All features, so a feature-gated dependency edge cannot hide a cycle.
+        ["cargo", "metadata", "--format-version", "1", "--all-features", "--locked"],
+        cwd=REPO,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    )
+    metadata = json.loads(completed.stdout)
+    members = set(metadata["workspace_members"])
+    packages = {package["id"]: package for package in metadata["packages"]}
+    dependencies = {
+        node["id"]: [dependency["pkg"] for dependency in node["deps"]]
+        for node in metadata["resolve"]["nodes"]
+    }
+    facade = next(
+        package_id
+        for package_id, package in packages.items()
+        if package["name"] == "lash-runtime"
+    )
+    reached: set[str] = set()
+    frontier = [facade]
+    while frontier:
+        current = frontier.pop()
+        for dependency in dependencies.get(current, []):
+            if dependency in reached:
+                continue
+            reached.add(dependency)
+            frontier.append(dependency)
+    directories = set()
+    for package_id in reached & members:
+        manifest = Path(packages[package_id]["manifest_path"]).parent
+        if manifest.is_relative_to(REPO):
+            directories.add(manifest.relative_to(REPO).as_posix())
+    return directories
+
+
+def impossible_facade_migration(reason: str, facade_dirs: set[str]) -> str | None:
+    """The cited consumer path that cannot migrate to the facade, if any.
+
+    `lash-core` is the loud case: it defines the types the facade re-exports, so
+    a justification saying a `crates/lash-core/...` caller will move to `lash`
+    describes a dependency cycle.  The seam is real; only the migration story is
+    fiction -- which is why the check is on the promise, not on the phrase.
+
+    Two properties keep it honest.  It reads sentence by sentence, so the crate
+    blamed is the one the claim is about rather than any path mentioned anywhere
+    in the prose.  And a denial is not a claim: "that caller *cannot* migrate to
+    the `lash` facade" states the very cycle this rejects, so rejecting it would
+    punish the correct description.
+    """
+    for sentence in re.split(r"(?<=[.])\s+|\n", reason):
+        claim = MIGRATION_TO_FACADE.search(sentence)
+        if claim is None:
+            continue
+        if MIGRATION_DENIED.search(sentence[: claim.end()]):
+            continue
+        for token in path_tokens(sentence):
+            location = token.rsplit(":", 1)[0] if ":" in token else token
+            for directory in facade_dirs:
+                if location == directory or location.startswith(f"{directory}/"):
+                    return token
+    return None
+
+
 def toml_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
@@ -650,12 +911,90 @@ def reference_exists(reference: str) -> bool:
     return line_number <= len(lines) and needle in lines[line_number - 1]
 
 
+def item_errors(
+    by_api: dict[tuple[str, str], dict[str, Any]], items: list[ApiItem]
+) -> list[str]:
+    """Reconcile the inventory against the compiler's API items.
+
+    One item is one row.  Rows found under several of an item's paths are the
+    failure this exists to catch: the same function was `unused-add` through the
+    facade and `unused-remove` through `lash_core`, which is two answers to one
+    contract question.  The contradiction is named explicitly because its fix is
+    a decision, while a mere repeat of the same disposition just needs the alias
+    row dropped.
+
+    Centralizing the *verdict* must not decentralize *existence*: the row's
+    `aliases` are compared against the compiler's projection, so retiring or
+    adding a `lash_core::` re-export -- breaking for direct core consumers under
+    ADR 0051 -- still fails the gate even though it changes no disposition.
+    """
+    errors: list[str] = []
+    matched: set[tuple[str, str]] = set()
+    for item in items:
+        primary, kind = item.primary, item.kind
+        rows = [(path, by_api[(path, kind)]) for path in item.paths if (path, kind) in by_api]
+        matched.update((path, kind) for path, _ in rows)
+        if not rows:
+            errors.append(f"undispositioned public API: {primary} ({kind})")
+            continue
+        if len(rows) > 1:
+            detail = ", ".join(
+                f"{alias} = {row.get('disposition')!r}" for alias, row in rows
+            )
+            if len({row.get("disposition") for _, row in rows}) > 1:
+                errors.append(
+                    f"{primary} ({kind}): contradictory dispositions for one API "
+                    f"item: {detail}. One item carries one disposition; keep the "
+                    f"row at {primary} and delete the others."
+                )
+            else:
+                errors.append(
+                    f"{primary} ({kind}): one API item recorded under several of "
+                    f"its paths: {detail}. An alias belongs in this item's row at "
+                    f"{primary} as an alias, not as a second row."
+                )
+            continue
+        recorded_path, row = rows[0]
+        if recorded_path != primary:
+            errors.append(
+                f"{primary} ({kind}): recorded at the alias path {recorded_path}; "
+                f"record each API item at its primary path"
+            )
+        if row.get("availability") != item.availability:
+            errors.append(
+                f"{primary} ({kind}): availability changed from "
+                f"{row.get('availability')!r} to {item.availability!r}"
+            )
+        recorded_aliases = row.get("aliases") or []
+        if sorted(recorded_aliases) != item.aliases():
+            retired = sorted(set(recorded_aliases) - set(item.aliases()))
+            added = sorted(set(item.aliases()) - set(recorded_aliases))
+            detail = []
+            if retired:
+                detail.append(
+                    f"no longer public: {', '.join(retired)} -- retiring a path is "
+                    f"breaking for its direct consumers (ADR 0051)"
+                )
+            if added:
+                detail.append(
+                    f"newly public: {', '.join(added)} -- a new path is a new promise"
+                )
+            errors.append(
+                f"{primary} ({kind}): the item's public paths changed. "
+                f"{'; '.join(detail)}. Record the change in this row's aliases."
+            )
+    for symbol, kind in sorted(set(by_api) - matched):
+        errors.append(f"inventory names an API that is no longer public: {symbol} ({kind})")
+    return errors
+
+
 def check() -> int:
     with INVENTORY.open("rb") as handle:
         document = tomllib.load(handle)
     entries = document.get("api", [])
     by_api: dict[tuple[str, str], dict[str, Any]] = {}
     errors: list[str] = []
+    facade_dirs = facade_dependency_dirs()
     for entry in entries:
         symbol = entry.get("symbol", "")
         kind = entry.get("kind", "")
@@ -666,6 +1005,17 @@ def check() -> int:
         by_api[api] = entry
         if availability not in {"default", "all-features", "default+all-features"}:
             errors.append(f"{symbol}: invalid availability {availability!r}")
+        aliases = entry.get("aliases", [])
+        if not isinstance(aliases, list) or not all(
+            isinstance(alias, str) for alias in aliases
+        ):
+            errors.append(f"{symbol}: aliases must be a list of paths")
+        elif aliases != sorted(aliases) or symbol in aliases or len(set(aliases)) != len(aliases):
+            errors.append(
+                f"{symbol}: aliases must be sorted, distinct, and exclude the primary path"
+            )
+        elif "aliases" in entry and not aliases:
+            errors.append(f"{symbol}: omit aliases rather than recording an empty list")
         if entry.get("area") not in AREAS:
             errors.append(f"{symbol}: unknown area {entry.get('area')!r}")
         disposition = entry.get("disposition")
@@ -681,46 +1031,61 @@ def check() -> int:
                 errors.append(
                     f"{symbol}: stale or invalid example assertion reference {assertion!r}"
                 )
+            elif tautological_assertion(assertion):
+                errors.append(
+                    f"{symbol}: assertion anchor {assertion!r} is a tautology -- "
+                    "size_of/align_of holds for every non-ZST and proves only that "
+                    "the path resolves. Assert an outcome the runtime produced."
+                )
         elif assertion:
             errors.append(f"{symbol}: only used-asserted entries may name an assertion")
         if disposition.startswith("unused-") and not entry.get("reason", "").strip():
             errors.append(f"{symbol}: unused disposition requires a concrete reason")
         if disposition == "unused-remove" and "Breaking:" not in entry.get("reason", ""):
             errors.append(f"{symbol}: removal disposition requires a Breaking: note")
-
-    actual = current_surface()
-    recorded = set(by_api)
-    actual_by_api = {
-        (symbol, kind): availability for symbol, kind, availability in actual
-    }
-    compiler_api = set(actual_by_api)
-    for symbol, kind in sorted(compiler_api - recorded):
-        errors.append(f"undispositioned public API: {symbol} ({kind})")
-    for symbol, kind in sorted(recorded - compiler_api):
-        errors.append(f"inventory names an API that is no longer public: {symbol} ({kind})")
-    for api in sorted(recorded & compiler_api):
-        recorded_availability = by_api[api].get("availability")
-        if recorded_availability != actual_by_api[api]:
-            errors.append(
-                f"{api[0]} ({api[1]}): availability changed from "
-                f"{recorded_availability!r} to {actual_by_api[api]!r}"
+        reason = entry.get("reason", "")
+        for field, value in (("reason", reason), ("usage", usage), ("assertion", assertion)):
+            # For evidence references only the location is a path; the anchored
+            # source text after `#` is code, and code may legitimately say `/`.
+            offender = machine_local_path(
+                value if field == "reason" else value.split("#", 1)[0]
             )
+            if offender:
+                errors.append(
+                    f"{symbol}: {field} names the machine-local path {offender!r}; "
+                    "evidence must be repository-relative"
+                )
+        migration = impossible_facade_migration(reason, facade_dirs)
+        if migration:
+            errors.append(
+                f"{symbol}: reason parks the consumer at {migration!r} behind a "
+                "migration to the lash facade, but the facade is built on that "
+                "crate and it cannot depend on the facade"
+            )
+
+    items = current_surface()
+    errors += item_errors(by_api, items)
 
     if errors:
         print("API example-coverage contract failed:", file=sys.stderr)
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
-    print(f"API example-coverage contract passed ({len(actual)} entries)")
+    print(f"API example-coverage contract passed ({len(items)} entries)")
     return 0
 
 
 def dump_surface() -> int:
-    surface = current_surface()
     json.dump(
         [
-            {"symbol": symbol, "kind": kind, "availability": availability}
-            for symbol, kind, availability in surface
+            {
+                "symbol": item.primary,
+                "kind": item.kind,
+                "availability": item.availability,
+                "identity": item.identity,
+                "aliases": item.aliases(),
+            }
+            for item in current_surface()
         ],
         sys.stdout,
         indent=2,
