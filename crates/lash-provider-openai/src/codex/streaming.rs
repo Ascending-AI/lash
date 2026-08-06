@@ -1,0 +1,933 @@
+//! Streaming a Codex response to completion.
+//!
+//! One responsibility: drive one `complete` call over whichever transport
+//! applies. The WebSocket path sends a `response.create` frame, folds frames
+//! into the shared Responses stream state, and owns the two one-shot retries
+//! (stale continuation, dead reused connection) plus the attempt diagnostics
+//! that explain the outcome. The HTTP path posts the same body and drives the
+//! SSE stream. Both end in the shared response assembly, and `Auto` falls back
+//! from the first to the second only while no stream events have been seen.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use async_trait::async_trait;
+use futures_util::{SinkExt, StreamExt};
+use serde_json::{Value, json};
+use tokio_tungstenite::tungstenite::protocol::Message as WsMessage;
+
+use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind};
+use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, LlmTerminalReason, LlmUsage};
+use lash_core::provider::{Provider, ProviderOptions, StreamTermination};
+use lash_llm_transport::streaming::{drive_sse_response, emit_stream_progress};
+use lash_llm_transport::timeouts::response_start_timeout;
+use lash_llm_transport::util::{emit_provider_request_trace, emit_provider_trace};
+use lash_llm_transport::{
+    LlmHttpMethod, LlmHttpRequest, first_header_value, header_contains, http_error_envelope,
+    openai_terminal_reason_from_response_value, openai_usage_from_response_value,
+    read_http_body_text,
+};
+use lash_provider_auth::{CredentialCallError, CredentialExecuteError};
+
+use crate::responses_shared as shared;
+
+use super::continuation::CodexWebsocketRequestPlan;
+use super::credential::{CodexCredential, credential_transport_error};
+use super::session::{CodexWebSocketAttemptError, CodexWebsocketLease};
+use super::{CodexProvider, CodexTransport, PROVIDER};
+
+#[derive(Clone, Debug)]
+struct CodexWebsocketAttemptDiagnostics {
+    configured_transport: CodexTransport,
+    reused_connection: bool,
+    cached_request: bool,
+    continuation_available: bool,
+    cache_miss_reason: Option<&'static str>,
+    previous_response_id: Option<String>,
+    full_input_items: usize,
+    sent_input_items: usize,
+    request_bytes: usize,
+    retry_after_stale_previous_response: bool,
+    retry_after_dead_reused_connection: bool,
+}
+
+/// One-shot WebSocket retries already consumed by the current send loop.
+#[derive(Clone, Copy, Default)]
+struct CodexWebsocketRetryState {
+    after_stale_previous_response: bool,
+    after_dead_reused_connection: bool,
+}
+
+impl CodexProvider {
+    fn should_parse_stream(stream_requested: bool, content_type: Option<&str>) -> bool {
+        stream_requested
+            || content_type
+                .map(|ct| ct.contains("text/event-stream"))
+                .unwrap_or(false)
+    }
+
+    fn non_sse_body_read_error(
+        status: u16,
+        content_type: Option<&str>,
+        err: LlmTransportError,
+    ) -> LlmTransportError {
+        let content_type_detail = content_type
+            .map(|ct| format!(" ({ct})"))
+            .unwrap_or_default();
+        let code = err
+            .code
+            .clone()
+            .unwrap_or_else(|| "body_read_failed".to_string());
+        LlmTransportError::new(format!(
+            "Codex returned HTTP {status} with non-SSE body{content_type_detail} but it could not be read: {}",
+            err.message
+        ))
+        .retryable(err.retryable)
+        .with_code(code)
+    }
+
+    fn response_state_started_output(state: &shared::ResponsesStreamState) -> bool {
+        !state.parts.is_empty()
+            || !state.full_text.is_empty()
+            || !state.pending_text_deltas.is_empty()
+            || !state.reasoning_deltas.is_empty()
+    }
+
+    fn is_stale_previous_response_error(error: &LlmTransportError) -> bool {
+        let haystack = format!(
+            "{}\n{}\n{}",
+            error.message,
+            error.raw.as_deref().map(String::as_str).unwrap_or_default(),
+            error.code.as_deref().unwrap_or_default()
+        )
+        .to_ascii_lowercase();
+        haystack.contains("previous_response_id")
+            || haystack.contains("previous response")
+            || haystack.contains("previous response with id")
+    }
+
+    async fn complete_websocket(
+        &self,
+        req: LlmRequest,
+        credential: &CodexCredential,
+        credential_generation: u64,
+    ) -> Result<LlmResponse, CodexWebSocketAttemptError> {
+        let full_body =
+            self.build_request_body(&req, true)
+                .map_err(|error| CodexWebSocketAttemptError {
+                    error,
+                    events_seen: false,
+                    output_started: false,
+                    stale_previous_response: false,
+                })?;
+        let timeouts = self.options.llm_timeouts();
+        let connect_timeout =
+            response_start_timeout(timeouts.request_timeout, timeouts.chunk_timeout, true)
+                .unwrap_or(timeouts.chunk_timeout);
+        let mut retry_state = CodexWebsocketRetryState::default();
+        let mut allow_cached_context = self.websocket_continuation_enabled();
+        loop {
+            let lease = self
+                .acquire_websocket(&req, connect_timeout, credential, credential_generation)
+                .await?;
+            let reused_connection = lease.reused;
+            let plan = self.websocket_request_plan(
+                &full_body,
+                lease.continuation.as_ref(),
+                allow_cached_context && lease.reusable,
+            );
+            let cached_request = plan.cached;
+            match self
+                .run_websocket_attempt(
+                    &req,
+                    &full_body,
+                    lease,
+                    plan,
+                    retry_state,
+                    timeouts.chunk_timeout,
+                )
+                .await
+            {
+                Ok(response) => return Ok(response),
+                Err(err)
+                    if cached_request
+                        && err.stale_previous_response
+                        && !err.output_started
+                        && !retry_state.after_stale_previous_response =>
+                {
+                    self.clear_continuation(&req);
+                    retry_state.after_stale_previous_response = true;
+                    allow_cached_context = false;
+                    tracing::debug!(
+                        target: "lash_core::llm::codex_oauth",
+                        error = %err.error.message,
+                        "Codex WebSocket cached continuation was stale; retrying once with full context"
+                    );
+                }
+                Err(err)
+                    if reused_connection
+                        && !err.events_seen
+                        && !retry_state.after_dead_reused_connection =>
+                {
+                    retry_state.after_dead_reused_connection = true;
+                    allow_cached_context = false;
+                    tracing::debug!(
+                        target: "lash_core::llm::codex_oauth",
+                        error = %err.error.message,
+                        "Codex WebSocket cached connection failed before stream start; reconnecting once with full context"
+                    );
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
+    async fn run_websocket_attempt(
+        &self,
+        req: &LlmRequest,
+        full_body: &Value,
+        lease: CodexWebsocketLease,
+        plan: CodexWebsocketRequestPlan,
+        retry_state: CodexWebsocketRetryState,
+        read_timeout: Duration,
+    ) -> Result<LlmResponse, CodexWebSocketAttemptError> {
+        let stream_events = req.stream_events.clone();
+        let provider_trace = req.provider_trace.clone();
+        let stream_termination = req
+            .model_capability
+            .stream_termination
+            .unwrap_or(StreamTermination::RequireTerminalEvidence);
+        let websocket_body = Self::websocket_create_request(&plan.body);
+        let request_body = match serde_json::to_string(&websocket_body) {
+            Ok(request_body) => request_body,
+            Err(error) => {
+                self.release_websocket_lease(lease, false, None);
+                return Err(CodexWebSocketAttemptError {
+                    error: LlmTransportError::new(format!(
+                        "Failed to serialize Codex WebSocket body: {error}"
+                    )),
+                    events_seen: false,
+                    output_started: false,
+                    stale_previous_response: false,
+                });
+            }
+        };
+        emit_provider_request_trace(
+            provider_trace.as_ref(),
+            "codex",
+            "responses",
+            request_body.as_bytes(),
+        );
+        let diagnostics = CodexWebsocketAttemptDiagnostics {
+            configured_transport: self.transport,
+            reused_connection: lease.reused,
+            cached_request: plan.cached,
+            continuation_available: plan.continuation_available,
+            cache_miss_reason: plan.cache_miss_reason,
+            previous_response_id: plan.previous_response_id.clone(),
+            full_input_items: plan.full_input_items,
+            sent_input_items: plan.sent_input_items,
+            request_bytes: request_body.len(),
+            retry_after_stale_previous_response: retry_state.after_stale_previous_response,
+            retry_after_dead_reused_connection: retry_state.after_dead_reused_connection,
+        };
+        self.emit_websocket_attempt_trace(provider_trace.as_ref(), &diagnostics);
+        let mut lease = Some(lease);
+        let mut events_seen = false;
+        if let Err(error) = lease
+            .as_mut()
+            .expect("websocket lease is present")
+            .websocket
+            .send(WsMessage::Text(request_body.clone().into()))
+            .await
+        {
+            self.release_websocket_lease(
+                lease.take().expect("websocket lease is present"),
+                false,
+                None,
+            );
+            return Err(CodexWebSocketAttemptError {
+                error: LlmTransportError::new(format!("Codex WebSocket send failed: {error}"))
+                    .with_request_body(request_body.clone())
+                    .retryable(true)
+                    .with_code("websocket_send"),
+                events_seen,
+                output_started: false,
+                stale_previous_response: false,
+            });
+        }
+
+        let mut state = shared::ResponsesStreamState::default();
+        let expose_thinking = self.options.expose_thinking;
+        loop {
+            let next_message = tokio::time::timeout(
+                read_timeout,
+                lease
+                    .as_mut()
+                    .expect("websocket lease is present")
+                    .websocket
+                    .next(),
+            )
+            .await;
+            let Some(message) = (match next_message {
+                Ok(message) => message,
+                Err(_) => {
+                    let output_started = Self::response_state_started_output(&state);
+                    self.release_websocket_lease(
+                        lease.take().expect("websocket lease is present"),
+                        false,
+                        None,
+                    );
+                    return Err(CodexWebSocketAttemptError {
+                        error: LlmTransportError::new("Codex WebSocket stream chunk timed out")
+                            .with_kind(ProviderFailureKind::Timeout)
+                            .with_request_body(request_body.clone())
+                            .retryable(true)
+                            .with_code("websocket_idle_timeout"),
+                        events_seen,
+                        output_started,
+                        stale_previous_response: false,
+                    });
+                }
+            }) else {
+                break;
+            };
+            let message = match message {
+                Ok(message) => message,
+                Err(error) => {
+                    let output_started = Self::response_state_started_output(&state);
+                    self.release_websocket_lease(
+                        lease.take().expect("websocket lease is present"),
+                        false,
+                        None,
+                    );
+                    return Err(CodexWebSocketAttemptError {
+                        error: LlmTransportError::new(format!(
+                            "Codex WebSocket receive failed: {error}"
+                        ))
+                        .with_request_body(request_body.clone())
+                        .retryable(true)
+                        .with_code("websocket_receive"),
+                        events_seen,
+                        output_started,
+                        stale_previous_response: false,
+                    });
+                }
+            };
+            let raw = match message {
+                WsMessage::Text(text) => text.to_string(),
+                WsMessage::Binary(bytes) => match String::from_utf8(bytes.to_vec()) {
+                    Ok(text) => text,
+                    Err(error) => {
+                        let output_started = Self::response_state_started_output(&state);
+                        self.release_websocket_lease(
+                            lease.take().expect("websocket lease is present"),
+                            false,
+                            None,
+                        );
+                        return Err(CodexWebSocketAttemptError {
+                            error: LlmTransportError::new(format!(
+                                "Codex WebSocket binary frame was not UTF-8: {error}"
+                            ))
+                            .with_request_body(request_body.clone())
+                            .with_code("websocket_protocol"),
+                            events_seen,
+                            output_started,
+                            stale_previous_response: false,
+                        });
+                    }
+                },
+                WsMessage::Close(_) => break,
+                WsMessage::Ping(_) | WsMessage::Pong(_) | WsMessage::Frame(_) => continue,
+            };
+            emit_provider_trace(provider_trace.as_ref(), "codex", &raw);
+            events_seen = true;
+            let prev_usage = state.usage.clone();
+            let mut emitted_parts = Vec::new();
+            let process_result = if Self::looks_like_sse_payload(&raw) {
+                shared::parse_sse_payload(PROVIDER, &raw, &mut state)
+            } else {
+                shared::process_sse_event(PROVIDER, &raw, &mut state, Some(&mut emitted_parts))
+            };
+            if let Err(error) = process_result {
+                let output_started = Self::response_state_started_output(&state);
+                let stale_previous_response = Self::is_stale_previous_response_error(&error);
+                self.release_websocket_lease(
+                    lease.take().expect("websocket lease is present"),
+                    false,
+                    None,
+                );
+                return Err(CodexWebSocketAttemptError {
+                    error: error.with_request_body(request_body.clone()),
+                    events_seen,
+                    output_started,
+                    stale_previous_response,
+                });
+            }
+            emit_stream_progress(
+                stream_events.as_ref(),
+                state.take_text_deltas(),
+                &state.usage,
+                &prev_usage,
+            );
+            if let Some(tx) = &stream_events {
+                for piece in state.take_reasoning_deltas() {
+                    if expose_thinking {
+                        tx.send(LlmStreamEvent::ReasoningDelta(piece));
+                    }
+                }
+                for part in emitted_parts {
+                    if matches!(part, lash_core::llm::types::LlmOutputPart::Reasoning { .. })
+                        && !expose_thinking
+                    {
+                        continue;
+                    }
+                    tx.send(LlmStreamEvent::Part(part));
+                }
+            } else {
+                state.take_reasoning_deltas();
+            }
+            if state.terminal_event_seen {
+                break;
+            }
+        }
+
+        let terminal_response_seen = state.terminal_event_seen;
+        if !terminal_response_seen
+            && stream_termination == StreamTermination::RequireTerminalEvidence
+        {
+            let output_started = Self::response_state_started_output(&state);
+            let mut partial = shared::response_from_stream_state(
+                state.clone(),
+                Some(request_body.clone()),
+                self.websocket_http_summary(&diagnostics),
+            );
+            partial.terminal_reason = LlmTerminalReason::Unknown;
+            partial.generation_disposition = Some(Self::generation_disposition(&req.generation));
+            self.release_websocket_lease(
+                lease.take().expect("websocket lease is present"),
+                false,
+                None,
+            );
+            return Err(CodexWebSocketAttemptError {
+                error: LlmTransportError::new("Codex WebSocket ended before response.completed")
+                    .with_request_body(request_body)
+                    .with_kind(ProviderFailureKind::Stream)
+                    .retryable(true)
+                    .with_code("websocket_closed_before_completed")
+                    .with_partial_response(partial),
+                events_seen,
+                output_started,
+                stale_previous_response: false,
+            });
+        }
+
+        let final_response = state.final_response.clone();
+        let continuation = final_response.as_ref().and_then(|response| {
+            self.websocket_continuation_enabled()
+                .then(|| Self::continuation_from_response(full_body, response))
+                .flatten()
+        });
+        let mut response = shared::response_from_stream_state(
+            state,
+            Some(request_body.clone()),
+            self.websocket_http_summary(&diagnostics),
+        );
+        response.http_summary = Some(self.websocket_http_summary(&diagnostics));
+        response.generation_disposition = Some(Self::generation_disposition(&req.generation));
+        self.release_websocket_lease(
+            lease.take().expect("websocket lease is present"),
+            true,
+            continuation,
+        );
+        Ok(response)
+    }
+
+    fn websocket_http_summary(&self, diagnostics: &CodexWebsocketAttemptDiagnostics) -> String {
+        format!(
+            "WS {} transport={:?} reused={} cached={} cache_miss={} retry_after_stale={} retry_after_dead_reused={} input_items={}/{} previous_response_id={} request_bytes={}",
+            self.websocket_url,
+            diagnostics.configured_transport,
+            diagnostics.reused_connection,
+            diagnostics.cached_request,
+            diagnostics.cache_miss_reason.unwrap_or("<none>"),
+            diagnostics.retry_after_stale_previous_response,
+            diagnostics.retry_after_dead_reused_connection,
+            diagnostics.sent_input_items,
+            diagnostics.full_input_items,
+            diagnostics
+                .previous_response_id
+                .as_deref()
+                .unwrap_or("<none>"),
+            diagnostics.request_bytes
+        )
+    }
+
+    fn emit_websocket_attempt_trace(
+        &self,
+        provider_trace: Option<&lash_core::llm::types::LlmProviderTraceSender>,
+        diagnostics: &CodexWebsocketAttemptDiagnostics,
+    ) {
+        let raw = json!({
+            "type": "lash.codex.websocket_request",
+            "transport": format!("{:?}", diagnostics.configured_transport),
+            "reused_connection": diagnostics.reused_connection,
+            "cached_request": diagnostics.cached_request,
+            "continuation_available": diagnostics.continuation_available,
+            "cache_miss_reason": diagnostics.cache_miss_reason,
+            "retry_after_stale_previous_response": diagnostics.retry_after_stale_previous_response,
+            "retry_after_dead_reused_connection": diagnostics.retry_after_dead_reused_connection,
+            "previous_response_id": diagnostics.previous_response_id,
+            "full_input_items": diagnostics.full_input_items,
+            "sent_input_items": diagnostics.sent_input_items,
+            "request_bytes": diagnostics.request_bytes,
+        })
+        .to_string();
+        emit_provider_trace(provider_trace, "codex", &raw);
+    }
+
+    fn looks_like_sse_payload(payload: &str) -> bool {
+        let trimmed = payload.trim_start();
+        trimmed.starts_with("event:")
+            || trimmed.starts_with("data:")
+            || payload.contains("\nevent:")
+            || payload.contains("\ndata:")
+    }
+
+    #[cfg(test)]
+    pub(super) fn process_sse_event(
+        raw: &str,
+        state: &mut shared::ResponsesStreamState,
+        emitted_parts: Option<&mut Vec<lash_core::llm::types::LlmOutputPart>>,
+    ) -> Result<(), LlmTransportError> {
+        shared::process_sse_event(PROVIDER, raw, state, emitted_parts)
+    }
+}
+
+#[async_trait]
+impl Provider for CodexProvider {
+    fn kind(&self) -> &'static str {
+        "codex"
+    }
+
+    fn options(&self) -> ProviderOptions {
+        self.options.clone()
+    }
+
+    fn set_options(&mut self, options: ProviderOptions) {
+        self.options = options;
+    }
+
+    fn serialize_config(&self) -> serde_json::Value {
+        let credential = self.credentials.snapshot();
+        let mut map = serde_json::Map::new();
+        map.insert(
+            "access_token".to_string(),
+            serde_json::Value::String(credential.access_token),
+        );
+        map.insert(
+            "refresh_token".to_string(),
+            serde_json::Value::String(credential.refresh_token),
+        );
+        map.insert(
+            "expires_at".to_string(),
+            serde_json::Value::Number(credential.expires_at.into()),
+        );
+        if let Some(account_id) = &credential.account_id {
+            map.insert(
+                "account_id".to_string(),
+                serde_json::Value::String(account_id.clone()),
+            );
+        } else {
+            map.insert("account_id".to_string(), serde_json::Value::Null);
+        }
+        if !self.options.is_default() {
+            map.insert(
+                "options".to_string(),
+                serde_json::to_value(&self.options).unwrap_or(serde_json::Value::Null),
+            );
+        }
+        if self.transport != CodexTransport::Auto {
+            map.insert(
+                "transport".to_string(),
+                serde_json::to_value(self.transport).unwrap_or(serde_json::Value::Null),
+            );
+        }
+        serde_json::Value::Object(map)
+    }
+
+    fn requires_streaming(&self) -> bool {
+        true
+    }
+
+    async fn complete(&mut self, req: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+        if self.attempt_credential.is_none() {
+            let manager = Arc::clone(&self.credentials);
+            let provider = self.clone();
+            return manager
+                .execute(move |lease| {
+                    let mut provider = provider.clone();
+                    let req = req.clone();
+                    provider.attempt_credential = Some(lease);
+                    async move {
+                        match Box::pin(provider.complete(req)).await {
+                            Ok(response) => Ok(response),
+                            Err(error) if error.status == Some(401) => {
+                                Err(CredentialCallError::PreOutputAuth(error))
+                            }
+                            Err(error) => Err(CredentialCallError::Failed(error)),
+                        }
+                    }
+                })
+                .await
+                .map_err(|error| match error {
+                    CredentialExecuteError::Credential(error) => credential_transport_error(error),
+                    CredentialExecuteError::Call(error) => error,
+                });
+        }
+        let credential_lease = self
+            .attempt_credential
+            .take()
+            .expect("credential attempt is configured");
+        let credential = &credential_lease.value;
+        let stream_termination = req
+            .model_capability
+            .stream_termination
+            .unwrap_or(StreamTermination::RequireTerminalEvidence);
+        if !matches!(self.transport, CodexTransport::Sse) {
+            let fallback_reason = matches!(self.transport, CodexTransport::Auto)
+                .then(|| self.websocket_fallback_reason(&req))
+                .flatten();
+            if let Some(reason) = fallback_reason {
+                emit_provider_trace(
+                    req.provider_trace.as_ref(),
+                    "codex",
+                    &json!({
+                        "type": "lash.codex.websocket_fallback_skip",
+                        "transport": format!("{:?}", self.transport),
+                        "reason": reason,
+                    })
+                    .to_string(),
+                );
+                tracing::debug!(
+                    target: "lash_core::llm::codex_oauth",
+                    reason = %reason,
+                    "Skipping Codex WebSocket for session with active Auto fallback"
+                );
+            } else {
+                match self
+                    .complete_websocket(req.clone(), credential, credential_lease.generation)
+                    .await
+                {
+                    Ok(response) => {
+                        self.clear_websocket_fallback(&req);
+                        return Ok(response);
+                    }
+                    Err(err)
+                        if matches!(self.transport, CodexTransport::Auto) && !err.events_seen =>
+                    {
+                        self.record_websocket_fallback(&req, &err.error);
+                        tracing::debug!(
+                            target: "lash_core::llm::codex_oauth",
+                            error = %err.error.message,
+                            "Codex WebSocket failed before stream start; falling back to SSE"
+                        );
+                    }
+                    Err(err) => {
+                        self.clear_continuation(&req);
+                        return Err(err.error);
+                    }
+                }
+            }
+        }
+        let stream_events = req.stream_events.clone();
+        let provider_trace = req.provider_trace.clone();
+        let timeouts = self.options.llm_timeouts();
+
+        let body = self.build_request_body(&req, stream_events.is_some())?;
+
+        let request_body = serde_json::to_string(&body).ok();
+        let body_bytes = serde_json::to_vec(&body).map_err(|e| {
+            LlmTransportError::new(format!("Failed to serialize Codex request: {e}"))
+        })?;
+        emit_provider_request_trace(provider_trace.as_ref(), "codex", "responses", &body_bytes);
+
+        let access_token = credential.access_token.clone();
+        let account_id = credential.account_id.clone();
+        let mut headers = vec![
+            (
+                "Authorization".to_string(),
+                format!("Bearer {access_token}"),
+            ),
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("Accept".to_string(), "text/event-stream".to_string()),
+            (
+                "OpenAI-Beta".to_string(),
+                "responses=experimental".to_string(),
+            ),
+            ("originator".to_string(), Self::CODEX_ORIGINATOR.to_string()),
+            ("User-Agent".to_string(), Self::codex_user_agent()),
+            ("session-id".to_string(), req.scope.session_id.clone()),
+            (
+                "x-client-request-id".to_string(),
+                req.scope.request_id.clone(),
+            ),
+        ];
+        if let Some(id) = account_id.as_deref() {
+            headers.push(("ChatGPT-Account-ID".to_string(), id.to_string()));
+        }
+        let http_request = LlmHttpRequest {
+            method: LlmHttpMethod::Post,
+            url: self.responses_url.clone(),
+            headers,
+            body: bytes::Bytes::from(body_bytes),
+            body_for_error: request_body.clone(),
+            response_start_timeout_message: Some("Codex response start timed out".to_string()),
+        };
+        let resp = self
+            .http_transport
+            .send(
+                http_request,
+                response_start_timeout(
+                    timeouts.request_timeout,
+                    timeouts.chunk_timeout,
+                    stream_events.is_some(),
+                ),
+            )
+            .await?;
+        let status = resp.status;
+        let content_type = first_header_value(&resp.headers, "content-type").map(str::to_string);
+        let response_headers = resp.headers.clone();
+        let is_sse = header_contains(&resp.headers, "content-type", "text/event-stream");
+        let success = resp.is_success();
+        let body = resp.body;
+        if !success {
+            let text = read_http_body_text(
+                body,
+                timeouts.request_timeout,
+                "Codex response body timed out",
+            )
+            .await
+            .unwrap_or_default();
+            let message = Self::codex_error_summary(status, &text).unwrap_or_else(|| {
+                format!(
+                    "Codex request failed with {}{}",
+                    status,
+                    content_type
+                        .as_deref()
+                        .map(|ct| format!(" ({ct})"))
+                        .unwrap_or_default()
+                )
+            });
+
+            // Retryability is decided centrally by `CodexFailureClassifier`
+            // from the attached HTTP status; no inline override here.
+            return Err(http_error_envelope(
+                message,
+                status,
+                response_headers,
+                text,
+                request_body.clone(),
+            ));
+        }
+
+        let parse_stream =
+            Self::should_parse_stream(stream_events.is_some(), content_type.as_deref());
+
+        if !parse_stream {
+            let text = read_http_body_text(
+                body,
+                timeouts.request_timeout,
+                "Codex response body timed out",
+            )
+            .await
+            .map_err(|err| Self::non_sse_body_read_error(status, content_type.as_deref(), err))?;
+            emit_provider_trace(provider_trace.as_ref(), "codex", &text);
+            if Self::looks_like_sse_payload(&text) {
+                let mut state = shared::ResponsesStreamState::default();
+                shared::parse_sse_payload(PROVIDER, &text, &mut state)?;
+                let mut response = shared::response_from_stream_state(
+                    state,
+                    request_body,
+                    format!("HTTP POST {} (stream/fallback)", self.responses_url),
+                );
+                response.generation_disposition =
+                    Some(Self::generation_disposition(&req.generation));
+                if let Some(tx) = &stream_events {
+                    if response.usage != LlmUsage::default() {
+                        tx.send(LlmStreamEvent::Usage(response.usage.clone()));
+                    }
+                    for part in &response.parts {
+                        if let lash_core::llm::types::LlmOutputPart::Text { text, .. } = part
+                            && !text.is_empty()
+                        {
+                            tx.send(LlmStreamEvent::Delta(text.clone()));
+                        }
+                    }
+                    for part in &response.parts {
+                        match part {
+                            lash_core::llm::types::LlmOutputPart::ToolCall { .. } => {
+                                tx.send(LlmStreamEvent::Part(part.clone()));
+                            }
+                            lash_core::llm::types::LlmOutputPart::Reasoning { text, .. }
+                                if !text.is_empty() && self.options.expose_thinking =>
+                            {
+                                tx.send(LlmStreamEvent::ReasoningDelta(text.clone()));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                return Ok(response);
+            }
+            let value: Value = serde_json::from_str(&text).map_err(|e| {
+                LlmTransportError::new(format!("Invalid Codex response JSON: {e}"))
+                    .with_raw(text.clone())
+            })?;
+            let content = shared::extract_text(&value);
+            let provider_usage = value.get("usage").cloned();
+            let usage = openai_usage_from_response_value(&value);
+            let mut parts = shared::response_parts_from_value(&value);
+            if parts.is_empty() && !content.is_empty() {
+                parts.push(lash_core::llm::types::LlmOutputPart::Text {
+                    text: content.clone(),
+                    response_meta: None,
+                });
+            }
+            if let Some(tx) = &stream_events {
+                if usage != LlmUsage::default() {
+                    tx.send(LlmStreamEvent::Usage(usage.clone()));
+                }
+                if !content.is_empty() {
+                    tx.send(LlmStreamEvent::Delta(content.clone()));
+                }
+            }
+            let terminal_reason = openai_terminal_reason_from_response_value(&value, &parts);
+            return Ok(LlmResponse {
+                full_text: content,
+                parts,
+                usage,
+                terminal_reason,
+                terminal_diagnostic: None,
+                provider_usage,
+                request_body,
+                http_summary: Some(format!("HTTP POST {}", self.responses_url)),
+                execution_evidence: None,
+                generation_disposition: Some(Self::generation_disposition(&req.generation)),
+                response_metadata: Default::default(),
+            });
+        }
+
+        if stream_events.is_some() && !is_sse {
+            tracing::debug!(
+                target: "lash_core::llm::codex_oauth",
+                status,
+                content_type = content_type.as_deref().unwrap_or("<missing>"),
+                "Codex streaming response did not advertise SSE; parsing as stream because stream=true was requested"
+            );
+        }
+
+        let mut state = shared::ResponsesStreamState::default();
+        let expose_thinking = self.options.expose_thinking;
+        let stream_result = drive_sse_response(
+            body,
+            timeouts.chunk_timeout,
+            "Codex stream chunk timed out",
+            |raw| {
+                emit_provider_trace(provider_trace.as_ref(), "codex", raw);
+                let prev_usage = state.usage.clone();
+                let mut emitted_parts = Vec::new();
+                shared::process_sse_event(PROVIDER, raw, &mut state, Some(&mut emitted_parts))?;
+                emit_stream_progress(
+                    stream_events.as_ref(),
+                    state.take_text_deltas(),
+                    &state.usage,
+                    &prev_usage,
+                );
+                if let Some(tx) = &stream_events {
+                    for piece in state.take_reasoning_deltas() {
+                        if expose_thinking {
+                            tx.send(LlmStreamEvent::ReasoningDelta(piece));
+                        }
+                    }
+                    for part in emitted_parts {
+                        if matches!(part, lash_core::llm::types::LlmOutputPart::Reasoning { .. })
+                            && !expose_thinking
+                        {
+                            continue;
+                        }
+                        tx.send(LlmStreamEvent::Part(part));
+                    }
+                }
+                Ok(())
+            },
+        )
+        .await;
+
+        if let Err(error) = stream_result {
+            let mut partial = shared::response_from_stream_state(
+                state.clone(),
+                request_body.clone(),
+                format!("HTTP POST {} (stream)", self.responses_url),
+            );
+            partial.terminal_reason = LlmTerminalReason::Unknown;
+            partial.generation_disposition = Some(Self::generation_disposition(&req.generation));
+            return Err(error.with_partial_response(partial));
+        }
+
+        if stream_termination == StreamTermination::RequireTerminalEvidence
+            && !state.terminal_event_seen
+        {
+            let mut partial = shared::response_from_stream_state(
+                state.clone(),
+                request_body.clone(),
+                format!("HTTP POST {} (stream)", self.responses_url),
+            );
+            partial.terminal_reason = LlmTerminalReason::Unknown;
+            partial.generation_disposition = Some(Self::generation_disposition(&req.generation));
+            return Err(LlmTransportError::new(
+                "Codex stream ended before a terminal response event",
+            )
+            .with_kind(ProviderFailureKind::Stream)
+            .with_code("stream_ended_before_terminal_response")
+            .retryable(true)
+            .with_partial_response(partial));
+        }
+
+        if state.final_response.is_none()
+            && state.parts.is_empty()
+            && state.pending_text_deltas.is_empty()
+        {
+            return Err(LlmTransportError::new(format!(
+                "Codex stream ended without SSE events (HTTP {}{})",
+                status,
+                content_type
+                    .as_deref()
+                    .map(|ct| format!(", content-type {ct}"))
+                    .unwrap_or_else(|| ", missing content-type".to_string())
+            ))
+            .retryable(true)
+            .with_code("empty_stream"));
+        }
+
+        let mut response = shared::response_from_stream_state(
+            state,
+            request_body,
+            format!("HTTP POST {} (stream)", self.responses_url),
+        );
+        response.generation_disposition = Some(Self::generation_disposition(&req.generation));
+        Ok(response)
+    }
+
+    async fn close(&self) -> Result<(), LlmTransportError> {
+        // Drain the provider-local WebSocket session cache with real Close
+        // frames. The cache is shared across clones (Arc), so closing any handle
+        // a host retained releases the cached sockets for all of them.
+        self.close_websocket_sessions().await;
+        Ok(())
+    }
+
+    fn clone_boxed(&self) -> Box<dyn Provider> {
+        Box::new(self.clone())
+    }
+}
