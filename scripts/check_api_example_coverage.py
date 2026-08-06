@@ -33,7 +33,7 @@ noticed.  Adding, removing, or moving any path fails the gate; only the
 *disposition* is centralized, never the path set.  `--dump-surface` prints the
 same projection the check compares against.
 
-Justification prose carries three lints, because the prose is the evidence:
+Evidence prose carries five lints, because the prose is the evidence:
 
 * No machine-local paths.  `/workspace/...`, `~/...`, and `C:\...` are one
   developer's checkout, not a contract another reader can verify.  Evidence
@@ -49,6 +49,18 @@ Justification prose carries three lints, because the prose is the evidence:
 * No tautological assertion anchors.  `size_of::<T>() > 0` holds for every
   non-ZST, so an anchor on one proves the path resolves and nothing else.  An
   item whose only evidence is a tautology is undispositioned, not exercised.
+* No uninformative assertion anchors.  An anchor is evidence only if the line it
+  quotes says what was observed.  Two shapes say nothing: the opening line of a
+  multi-line assertion, which is the macro call and no operands -- `assert_eq!(`,
+  or the `assert!(matches!(` the FIG-955 round's tautology lint could not see --
+  and an anchor quoting a prefix of its line, which can hide the whole assertion
+  behind `assert!(`.  See `uninformative_assertion`.
+* No reason that describes a disposition the row does not hold.  "Add X to the
+  example and assert its result" is the instruction an `unused-add` row carries;
+  on a row that records real usage and a real assertion it is simply false, and
+  it hid 904 rows' actual contract behind boilerplate.  The same goes for the
+  `used-unasserted` wording on a row that names an assertion.  See
+  `stale_disposition_reason`.
 
 Three exclusions are deliberate, and each is enforced structurally rather than
 by a hand-maintained list:
@@ -777,6 +789,21 @@ MIGRATION_DENIED = re.compile(
 )
 #: Assertions that hold for every non-ZST and therefore assert nothing.
 TAUTOLOGICAL_ASSERTION = re.compile(r"\b(?:size_of|align_of)\b")
+#: An assert invocation's opening line: the macro call, with every operand still
+#: on the lines below it.  Nested opener macros (`assert!(matches!(`) count.
+OPERANDLESS_ASSERTION = re.compile(
+    r"^(?:debug_)?assert(?:_eq|_ne)?!\(\s*(?:[a-z_]+!\(\s*)*$"
+)
+#: The `unused-add` instruction template: "Add <path> to the <name> example ...".
+ADD_INSTRUCTION_REASON = re.compile(
+    r"^\s*Add\b[^.]*?\bto\b[^.]*?\bexample\b", re.IGNORECASE
+)
+#: The `used-unasserted` wording: no executed assertion reaches this item.
+UNASSERTED_REASON = re.compile(
+    r"compile-only|setup-only|reaches no executed assertion"
+    r"|before claiming asserted usage",
+    re.IGNORECASE,
+)
 
 
 def path_tokens(text: str) -> list[str]:
@@ -817,6 +844,57 @@ def tautological_assertion(assertion: str) -> bool:
     item resting on one is undispositioned, not covered.
     """
     return bool(TAUTOLOGICAL_ASSERTION.search(assertion.split("#", 1)[-1]))
+
+
+def uninformative_assertion(assertion: str, source: str) -> str | None:
+    """Why an assertion anchor states nothing observable, if so.
+
+    An anchor is evidence because a reader can open the line and see what the
+    example observed.  Two shapes defeat that.  The first is the opening line of
+    a multi-line assertion: `assert_eq!(` names a macro and no operands, so it
+    reads as proof while asserting nothing in particular -- and it is
+    indistinguishable, in the inventory, between a real outcome check and a
+    coincidence.  The second is an anchor that quotes only the start of its line,
+    which hides the rest of the assertion; `assert!(saw_gap,` drops the very
+    message that said what the gap meant.  Both are why FIG-970 re-anchored 361
+    rows to the line that carries the observation.
+    """
+    quoted = assertion.split("#", 1)[-1].strip()
+    line = source.strip()
+    if OPERANDLESS_ASSERTION.match(quoted):
+        return (
+            "quotes only the opening line of a multi-line assertion, so it "
+            "carries no operands and observes nothing"
+        )
+    if line and quoted != line:
+        return f"quotes part of its line, which reads {line!r}"
+    return None
+
+
+def stale_disposition_reason(disposition: str, reason: str) -> str | None:
+    """Why a reason describes a disposition this row does not hold, if so.
+
+    A reason is the row's own account of its contract, so a reason left over from
+    a different verdict is a false statement, not untidiness.  Both shapes below
+    shipped in the FIG-955 inventory: 904 rows with real usage and assertion
+    anchors still carried the `unused-add` instruction to add them to an example,
+    and 121 `used-asserted` rows still carried the `used-unasserted` wording that
+    says no executed assertion reaches them.
+    """
+    if not reason.strip():
+        return None
+    if disposition.startswith("used-") and ADD_INSTRUCTION_REASON.search(reason):
+        return (
+            "is the unused-add instruction to add this item to an example, but "
+            "the row records real usage evidence; describe what the recorded "
+            "anchors actually exercise"
+        )
+    if disposition == "used-asserted" and UNASSERTED_REASON.search(reason):
+        return (
+            "says no executed assertion reaches this item, but the row records "
+            "an assertion anchor; one of the two is wrong"
+        )
+    return None
 
 
 def facade_dependency_dirs() -> set[str]:
@@ -896,19 +974,26 @@ def toml_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def reference_exists(reference: str) -> bool:
+def anchored_source(reference: str) -> str | None:
+    """The source line a reference points at, or None when it does not resolve."""
     try:
-        location, needle = reference.split("#", 1)
+        location, _ = reference.split("#", 1)
         relative, line_text = location.rsplit(":", 1)
         line_number = int(line_text)
     except (ValueError, TypeError):
-        return False
+        return None
     path = REPO / relative
-    examples = REPO / "examples"
-    if not path.is_relative_to(examples) or not path.is_file() or line_number < 1:
-        return False
+    if not path.is_relative_to(REPO / "examples") or not path.is_file() or line_number < 1:
+        return None
     lines = path.read_text(encoding="utf-8").splitlines()
-    return line_number <= len(lines) and needle in lines[line_number - 1]
+    if line_number > len(lines):
+        return None
+    return lines[line_number - 1]
+
+
+def reference_exists(reference: str) -> bool:
+    source = anchored_source(reference)
+    return source is not None and reference.split("#", 1)[-1] in source
 
 
 def item_errors(
@@ -1037,6 +1122,15 @@ def check() -> int:
                     "size_of/align_of holds for every non-ZST and proves only that "
                     "the path resolves. Assert an outcome the runtime produced."
                 )
+            else:
+                defect = uninformative_assertion(
+                    assertion, anchored_source(assertion) or ""
+                )
+                if defect:
+                    errors.append(
+                        f"{symbol}: assertion anchor {assertion!r} {defect}. "
+                        "Anchor the line that states what the example observed."
+                    )
         elif assertion:
             errors.append(f"{symbol}: only used-asserted entries may name an assertion")
         if disposition.startswith("unused-") and not entry.get("reason", "").strip():
@@ -1055,6 +1149,9 @@ def check() -> int:
                     f"{symbol}: {field} names the machine-local path {offender!r}; "
                     "evidence must be repository-relative"
                 )
+        stale = stale_disposition_reason(disposition or "", reason)
+        if stale:
+            errors.append(f"{symbol}: reason {stale}")
         migration = impossible_facade_migration(reason, facade_dirs)
         if migration:
             errors.append(
