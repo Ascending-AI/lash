@@ -312,7 +312,7 @@ pub mod plugins {
 }
 
 pub mod messages {
-    pub use lash_core::{Message, MessageRole, facade_support::MessageSequence};
+    pub use lash_core::{Message, MessageOrigin, MessageRole, facade_support::MessageSequence};
 }
 
 /// Attachment values: identity, media type, and the metadata that travels with

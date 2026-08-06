@@ -323,6 +323,13 @@ fn push_message_origin(encoded: &mut Vec<u8>, origin: &crate::MessageOrigin) {
             });
             push_optional(encoded, caused_by.as_ref(), push_causal_ref);
         }
+        crate::MessageOrigin::TurnInput { turn_id, input_id } => {
+            encoded.push(2);
+            push_string(encoded, turn_id);
+            push_optional(encoded, input_id.as_ref(), |encoded, value| {
+                push_string(encoded, value)
+            });
+        }
     }
 }
 

@@ -1922,10 +1922,12 @@ impl LashRuntime {
                 .map(crate::TurnCause::to_event_message),
         );
 
-        let user_id = turn_input_claims
+        let turn_input_id = turn_input_claims
             .iter()
-            .flat_map(|claim| claim.inputs.iter().map(|input| input.input_id.as_str()))
-            .next()
+            .flat_map(|claim| claim.inputs.iter().map(|input| input.input_id.clone()))
+            .next();
+        let user_id = turn_input_id
+            .as_deref()
             .map(crate::runtime::ingress_message_id)
             .unwrap_or_else(|| format!("m_turn_{trace_turn_id}_input"));
         let mut user_parts: Vec<Part> = Vec::new();
@@ -1984,7 +1986,13 @@ impl LashRuntime {
                 id: user_id.clone(),
                 role: MessageRole::User,
                 parts: shared_parts(user_parts),
-                origin: None,
+                // Typed provenance, not a pinned id: a host that rendered its
+                // own row for this turn recognizes the committed copy by
+                // `turn_id` (FIG-972).
+                origin: Some(crate::MessageOrigin::TurnInput {
+                    turn_id: trace_turn_id.clone(),
+                    input_id: turn_input_id.clone(),
+                }),
             });
         }
         let mut initial_turn_input_applications = Vec::new();

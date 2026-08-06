@@ -117,6 +117,10 @@ fn render_message_origin(origin: &MessageOrigin) -> String {
             }
             None => format!("process {process_id} {event_type} #{sequence}"),
         },
+        MessageOrigin::TurnInput { turn_id, input_id } => match input_id {
+            Some(input_id) => format!("turn input {input_id} on turn {turn_id}"),
+            None => format!("turn input on turn {turn_id}"),
+        },
     }
 }
 

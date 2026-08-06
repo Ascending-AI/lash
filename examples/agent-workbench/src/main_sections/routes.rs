@@ -28,14 +28,9 @@ async fn app_state(
         .iter()
         .map(|address| address.turn_id.clone())
         .collect::<BTreeSet<_>>();
-    let mut messages: Vec<_> = observation_snapshot
+    let committed_message_ids = observation_snapshot
         .read_view
         .messages()
-        .iter()
-        .map(chat_message_from_committed)
-        .collect();
-    let mut transcript = transcript_rows_from_committed(&observation_snapshot.read_view);
-    let committed_message_ids = messages
         .iter()
         .map(|message| message.id.clone())
         .collect::<BTreeSet<_>>();
@@ -51,11 +46,31 @@ async fn app_state(
             StreamItem::TurnInput { .. } | StreamItem::Done { .. } => None,
         })
         .collect::<Vec<_>>();
+    let (ui_user_turn_ids, prompt_fallback_rows) =
+        ui_owned_user_rows(&state, &active_turns, &product_messages);
+    let suppressed_turn_input_ids =
+        suppressed_turn_input_message_ids(&observation_snapshot.read_view, &ui_user_turn_ids);
+    let mut messages: Vec<_> = observation_snapshot
+        .read_view
+        .messages()
+        .iter()
+        .filter(|message| !suppressed_turn_input_ids.contains(&message.id))
+        .map(chat_message_from_committed)
+        .collect();
+    let mut transcript =
+        transcript_rows_from_committed(&observation_snapshot.read_view, &suppressed_turn_input_ids);
     let mut message_ids = messages
         .iter()
         .map(|message| message.id.clone())
         .collect::<BTreeSet<_>>();
-    for message in product_messages {
+    for message in product_messages.into_iter().chain(prompt_fallback_rows) {
+        // A suppressed committed message stays suppressed however it reached
+        // this list: the workbench mirrors committed ingress messages into the
+        // product log, and that mirror is the same copy the UI-owned row already
+        // speaks for.
+        if suppressed_turn_input_ids.contains(&message.id) {
+            continue;
+        }
         if message_ids.insert(message.id.clone()) {
             transcript.push(TranscriptRow::Message {
                 message: message.clone(),
@@ -81,28 +96,6 @@ async fn app_state(
             cursor: observation_snapshot.cursor,
         });
     drop(session);
-    for address in &active_turns {
-        let message_id = workbench_turn_user_message_id(&address.turn_id);
-        if message_ids.contains(&message_id) {
-            continue;
-        }
-        if let Some(text) = state
-            .active_turns
-            .prompt_for(&address.session_id, &address.turn_id)
-        {
-            let message = ChatMessage {
-                id: message_id,
-                role: "user".to_string(),
-                text,
-                at: String::new(),
-            };
-            message_ids.insert(message.id.clone());
-            transcript.push(TranscriptRow::Message {
-                message: message.clone(),
-            });
-            messages.push(message);
-        }
-    }
     Ok(Json(StateReadSnapshot {
         transcript,
         state: StateSnapshot {
@@ -217,69 +210,6 @@ async fn retrieve_attachment(
         .header("x-lash-attachment-id", attachment_id)
         .body(Body::from(stored.bytes))
         .expect("valid attachment response"))
-}
-
-fn chat_message_from_committed(message: &lash::messages::Message) -> ChatMessage {
-    ChatMessage {
-        id: message.id.clone(),
-        role: lash::message_role(message).to_string(),
-        text: lash::message_text(message),
-        // The durable session graph records ordering but not a presentation
-        // timestamp. The workbench does not render this field, so keep the
-        // established wire shape without fabricating a time during resume.
-        at: String::new(),
-    }
-}
-
-fn transcript_rows_from_committed(
-    read_view: &lash::persistence::SessionReadView,
-) -> Vec<TranscriptRow> {
-    read_view
-        .chronological_projection()
-        .into_entries()
-        .into_iter()
-        .filter_map(|entry| match entry.payload {
-            lash::persistence::ChronologicalPayload::Message(message) => {
-                Some(TranscriptRow::Message {
-                    message: chat_message_from_committed(&message),
-                })
-            }
-            lash::persistence::ChronologicalPayload::ProtocolEvent(event) => {
-                match lash_protocol_rlm::decode_rlm_protocol_event(&event) {
-                    Some(lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(content))
-                        if !content.reasoning.trim().is_empty() =>
-                    {
-                        Some(TranscriptRow::Reasoning {
-                            id: content.id,
-                            text: content.reasoning,
-                        })
-                    }
-                    Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step))
-                        if !step.code.trim().is_empty() =>
-                    {
-                        let mut output = step.output.join("\n");
-                        if let Some(final_output) = step.final_output {
-                            let final_output = serde_json::to_string_pretty(&final_output)
-                                .unwrap_or_else(|_| final_output.to_string());
-                            if !output.is_empty() {
-                                output.push('\n');
-                            }
-                            output.push_str(&final_output);
-                        }
-                        Some(TranscriptRow::CodeBlock {
-                            id: step.id,
-                            language: "lashlang".to_string(),
-                            code: step.code,
-                            output,
-                            success: step.error.is_none(),
-                            error: step.error,
-                        })
-                    }
-                    _ => None,
-                }
-            }
-        })
-        .collect()
 }
 
 async fn session_events(

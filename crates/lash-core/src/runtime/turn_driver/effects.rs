@@ -350,6 +350,7 @@ impl RuntimeTurnDriver<'_> {
                 .retain(|input| !already_delivered.contains(&input.input_id));
             let materialized = delivery_claim
                 .materialize_checkpoint_turn_input(
+                    &self.turn_id,
                     self.host.core.durability.attachment_store.as_ref(),
                     self.host.core.attachment_source_policy.as_ref(),
                 )
