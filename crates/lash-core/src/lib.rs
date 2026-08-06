@@ -277,6 +277,8 @@ pub mod facade_support {
     pub use crate::runtime::process_wake_source_key;
     pub use crate::runtime::promise_semantics;
     pub use crate::runtime::reconcile_pruned_trigger_deliveries;
+    #[doc(hidden)]
+    pub use crate::runtime::registry_transitions;
     pub use crate::runtime::state::facade_ops::RuntimeSessionStateFacadeOps;
     pub use crate::runtime::system_time_from_epoch_ms;
     pub use crate::runtime::terminal_append_request;

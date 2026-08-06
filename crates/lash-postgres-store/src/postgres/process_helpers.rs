@@ -51,15 +51,13 @@ pub(crate) async fn require_process_tx(
     .fetch_optional(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
-    match row {
-        Some(row) => Err(PluginError::ProcessNoLongerRetained {
+    Err(registry_transitions::absent_process_error(
+        process_id,
+        row.map(|row| registry_transitions::ProcessTombstoneStamp {
             terminal_label: row.get(0),
             pruned_at_ms: row.get::<i64, _>(1) as u64,
         }),
-        None => Err(PluginError::Session(format!(
-            "unknown process `{process_id}`"
-        ))),
-    }
+    ))
 }
 
 pub(crate) fn decode_matching_process(
@@ -345,38 +343,15 @@ pub(crate) async fn load_process_lease_tx(
     let Some(row) = row else {
         return Ok(None);
     };
-    let owner_id: Option<String> = row.get(0);
-    let lease_token: Option<String> = row.get(1);
-    let incarnation_id: Option<String> = row.get(5);
-    let (Some(owner_id), Some(lease_token)) = (owner_id, lease_token) else {
-        return Ok(None);
-    };
-    Ok(Some(ProcessLease {
-        schema_version: PROCESS_LEASE_SCHEMA_VERSION,
-        process_id: process_id.to_string(),
-        owner: LeaseOwnerIdentity {
-            incarnation_id: incarnation_id.unwrap_or_else(|| owner_id.clone()),
-            owner_id,
-        },
-        lease_token,
-        fencing_token: row.get::<i64, _>(2) as u64,
-        claimed_at_epoch_ms: row.get::<i64, _>(3) as u64,
-        expires_at_epoch_ms: row.get::<i64, _>(4) as u64,
-    }))
-}
-
-/// One authoritative wall-clock sample for every process-lease transaction.
-/// Using the database clock prevents worker clock skew from stealing or
-/// spuriously expiring a lease in multi-host Postgres deployments.
-pub(crate) async fn process_lease_now_epoch_ms_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-) -> Result<u64, PluginError> {
-    let now: i64 =
-        sqlx::query_scalar("SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT")
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
-    Ok(now.max(0) as u64)
+    Ok(registry_transitions::ProcessLeaseRow {
+        owner_id: row.get(0),
+        incarnation_id: row.get(5),
+        lease_token: row.get(1),
+        fencing_token: row.get(2),
+        claimed_at_ms: row.get(3),
+        expires_at_ms: row.get(4),
+    }
+    .project(process_id))
 }
 
 /// Insert-or-replace the persisted lease row for `process_id` with a fresh
@@ -389,24 +364,13 @@ pub(crate) async fn acquire_process_lease_tx(
     now: u64,
     lease_ttl_ms: u64,
 ) -> Result<ProcessLease, PluginError> {
-    let lease = ProcessLease {
-        schema_version: PROCESS_LEASE_SCHEMA_VERSION,
-        process_id: process_id.to_string(),
-        owner: owner.clone(),
-        lease_token: format!(
-            "{:x}",
-            Sha256::digest(
-                format!(
-                    "{process_id}:{}:{}:{now}:{fencing_token}",
-                    owner.owner_id, owner.incarnation_id
-                )
-                .as_bytes()
-            )
-        ),
+    let lease = registry_transitions::acquired_process_lease(
+        process_id,
+        owner,
         fencing_token,
-        claimed_at_epoch_ms: now,
-        expires_at_epoch_ms: now.saturating_add(lease_ttl_ms),
-    };
+        now,
+        lease_ttl_ms,
+    );
     sqlx::query(
         "INSERT INTO lash_process_leases (
             process_id, lease_owner_id, lease_owner_incarnation_id,
@@ -451,12 +415,6 @@ pub(crate) async fn retained_process_lease_fencing_token(
     Ok(existing_fence.unwrap_or(0) as u64)
 }
 
-pub(crate) fn process_lease_expired(process_id: &str) -> PluginError {
-    PluginError::ProcessLeaseSuperseded {
-        process_id: process_id.to_string(),
-    }
-}
-
 pub(crate) async fn validate_process_execution_authority_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &str,
@@ -478,26 +436,40 @@ pub(crate) async fn validate_process_execution_authority_tx(
             }
         }
         ProcessExecutionWriteAuthority::Lease(lease) => {
+            // The process-id half of the fence is checked first so a lease for
+            // another process is refused without reading this process's row.
             if lease.process_id != process_id {
-                return Err(process_lease_expired(process_id));
+                return Err(PluginError::ProcessLeaseSuperseded {
+                    process_id: process_id.to_string(),
+                });
             }
             let current = load_process_lease_tx(tx, process_id).await?;
-            if guard_lease(current.as_ref(), &lease.lease_token, now)
-                && current.as_ref().is_some_and(|current| {
-                    current.owner.same_incarnation(&lease.owner)
-                        && current.fencing_token == lease.fencing_token
-                })
-            {
-                Ok(())
-            } else {
-                Err(process_lease_expired(process_id))
-            }
+            registry_transitions::authorize_process_lease_write(
+                process_id,
+                lease,
+                current.as_ref(),
+                now,
+            )
         }
     }
 }
 
-pub(crate) fn guard_lease(current: Option<&ProcessLease>, lease_token: &str, now: u64) -> bool {
-    current
-        .map(|current| current.lease_token == lease_token && current.expires_at_epoch_ms > now)
-        .unwrap_or(false)
+/// One authoritative wall-clock sample for every process-lease transaction.
+/// Using the database clock prevents worker clock skew from stealing or
+/// spuriously expiring a lease in multi-host Postgres deployments.
+///
+/// Deliberately the last item in this file: every lease atom above it is inside
+/// `postgres_clock_contract`'s lexical fence, and this is the one function
+/// allowed to read a clock at all. It is fenced too — a dedicated end-of-file
+/// region bans client clock reads from its body and from anything appended
+/// after it, and pins that its query samples `clock_timestamp()`.
+pub(crate) async fn process_lease_now_epoch_ms_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<u64, PluginError> {
+    let now: i64 =
+        sqlx::query_scalar("SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT")
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
+    Ok(now.max(0) as u64)
 }

@@ -20,6 +20,7 @@ use super::model::{
 };
 use super::references::ProcessLiveReferenceSummary;
 use super::registry::{ProcessPruneReport, ProcessRegistry, ProjectionWatermark};
+use super::registry_transitions;
 use super::validation::{
     ProcessStartPlan, prepare_process_event_append, prepare_process_registration,
     prepare_process_start,
@@ -32,7 +33,7 @@ mod raw_state;
 mod support;
 pub use support::TestProcessRegistryWriteExt;
 use support::{
-    ExecutionWritePause, acquire_test_lease, process_external_ref_conflict, process_lease_expired,
+    ExecutionWritePause, process_external_ref_conflict, process_lease_expired,
     validate_in_memory_execution_authority,
 };
 
@@ -1350,40 +1351,51 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             return Err(error);
         }
         let _transaction = self.transaction.lock().await;
-        // A lease is authority over a retained process row, so a claim against a
-        // process this store never registered — or has already pruned — must be
-        // refused rather than materialized. The SQL backends gate every lease
-        // write on `require_process_conn`; without the same guard here the test
-        // double invented leases for unknown ids (FIG-953).
+        // A lease is authority over a retained row: the SQL backends gate every
+        // lease write on `require_process_conn`; same guard here (FIG-953).
         if !self.managed.lock().await.contains_key(process_id) {
             return Err(self.process_miss(process_id).await);
         }
         let mut leases = self.leases.lock().await;
         let now = self.clock.timestamp_ms();
-        if let Some(current) = leases.get_mut(process_id)
-            && !current.lease_token.is_empty()
-            && current.expires_at_epoch_ms > now
-        {
-            if current.owner.same_incarnation(owner) {
-                // Same incarnation re-enters its own live lease: extend the
-                // expiry without changing token or fencing token.
-                current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
-                return Ok(ProcessLeaseClaimOutcome::Acquired(current.clone()));
-            }
-            return Ok(ProcessLeaseClaimOutcome::Busy {
-                holder: current.clone(),
-            });
-        }
-        // The fencing token increases monotonically even across completion: a
-        // released lease retains its `fencing_token` so a re-claim never reuses
-        // a stale writer's token (mirrors `SqliteProcessRegistry`).
-        let fencing_token = leases
+        // The same pure tables the durable backends consult (this double's
+        // hand-rolled copy drifted once — FIG-953). An empty-token row is a
+        // retained fence, not an observable lease, per `ProcessLeaseRow::project`.
+        let observed = leases
             .get(process_id)
-            .map_or(0, |current| current.fencing_token)
-            .saturating_add(1);
-        let lease = acquire_test_lease(process_id, owner, fencing_token, now, lease_ttl_ms);
-        leases.insert(process_id.to_string(), lease.clone());
-        Ok(ProcessLeaseClaimOutcome::Acquired(lease))
+            .filter(|current| !current.lease_token.is_empty())
+            .cloned();
+        match registry_transitions::decide_process_lease_claim(
+            observed.as_ref(),
+            owner,
+            now,
+            lease_ttl_ms,
+        ) {
+            registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {
+                leases.insert(process_id.to_string(), lease.clone());
+                Ok(ProcessLeaseClaimOutcome::Acquired(lease))
+            }
+            registry_transitions::ProcessLeaseClaimDecision::ReportBusy { holder } => {
+                Ok(ProcessLeaseClaimOutcome::Busy { holder })
+            }
+            registry_transitions::ProcessLeaseClaimDecision::AcquireOnRetainedFence => {
+                // A released lease retains its fencing token for its successor.
+                let fencing_token = registry_transitions::next_process_lease_fencing_token(
+                    leases
+                        .get(process_id)
+                        .map_or(0, |current| current.fencing_token),
+                );
+                let lease = registry_transitions::acquired_process_lease(
+                    process_id,
+                    owner,
+                    fencing_token,
+                    now,
+                    lease_ttl_ms,
+                );
+                leases.insert(process_id.to_string(), lease.clone());
+                Ok(ProcessLeaseClaimOutcome::Acquired(lease))
+            }
+        }
     }
 
     async fn reclaim_process_lease(
@@ -1396,26 +1408,36 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let _transaction = self.transaction.lock().await;
         let mut leases = self.leases.lock().await;
         let now = self.clock.timestamp_ms();
-        let Some(current) = leases.get(process_id) else {
-            let lease = acquire_test_lease(process_id, owner, 1, now, lease_ttl_ms);
-            leases.insert(process_id.to_string(), lease.clone());
-            return Ok(ProcessLeaseClaimOutcome::Acquired(lease));
-        };
-        if current.lease_token.is_empty() || current.expires_at_epoch_ms <= now {
-            let lease = acquire_test_lease(
-                process_id,
-                owner,
-                current.fencing_token.saturating_add(1),
-                now,
-                lease_ttl_ms,
-            );
-            leases.insert(process_id.to_string(), lease.clone());
-            return Ok(ProcessLeaseClaimOutcome::Acquired(lease));
-        }
-        let _ = (owner, observed_holder, lease_ttl_ms);
-        Ok(ProcessLeaseClaimOutcome::Busy {
-            holder: current.clone(),
-        })
+        let observed = leases
+            .get(process_id)
+            .filter(|current| !current.lease_token.is_empty())
+            .cloned();
+        let _ = observed_holder;
+        let fencing_token =
+            match registry_transitions::decide_process_lease_reclaim(observed.as_ref(), now) {
+                registry_transitions::ProcessLeaseReclaimDecision::ReportBusy { holder } => {
+                    return Ok(ProcessLeaseClaimOutcome::Busy { holder });
+                }
+                registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence => {
+                    registry_transitions::next_process_lease_fencing_token(
+                        leases
+                            .get(process_id)
+                            .map_or(0, |current| current.fencing_token),
+                    )
+                }
+                registry_transitions::ProcessLeaseReclaimDecision::AcquireOnObservedFence {
+                    fencing_token,
+                } => fencing_token,
+            };
+        let lease = registry_transitions::acquired_process_lease(
+            process_id,
+            owner,
+            fencing_token,
+            now,
+            lease_ttl_ms,
+        );
+        leases.insert(process_id.to_string(), lease.clone());
+        Ok(ProcessLeaseClaimOutcome::Acquired(lease))
     }
 
     async fn renew_process_lease(

@@ -225,6 +225,7 @@ pub use observation::{
 };
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use process::reconcile_pruned_trigger_deliveries_interleaved;
+pub use process::registry_transitions;
 pub use process::{
     AbandonEvidence, AbandonRequest, AbandonWriter, DEFAULT_WAKE_DELIVERY_EXPIRY_MS,
     InMemoryProcessExecutionEnvStore, ObservedProcess, ObservedProcessEvent, ObservedWorkItem,

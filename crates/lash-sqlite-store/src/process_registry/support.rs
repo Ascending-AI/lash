@@ -46,17 +46,15 @@ impl SqliteProcessRegistry {
             )
             .optional()
             .map_err(process_sqlite_error)?;
-        match tombstone {
-            Some((terminal_label, pruned_at_ms)) => {
-                Err(lash_core::PluginError::ProcessNoLongerRetained {
+        Err(registry_transitions::absent_process_error(
+            process_id,
+            tombstone.map(|(terminal_label, pruned_at_ms)| {
+                registry_transitions::ProcessTombstoneStamp {
                     terminal_label,
                     pruned_at_ms: pruned_at_ms as u64,
-                })
-            }
-            None => Err(lash_core::PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            ))),
-        }
+                }
+            }),
+        ))
     }
 
     pub(crate) async fn set_observer(
@@ -507,21 +505,15 @@ impl SqliteProcessRegistry {
              WHERE process_id = ?1",
             params![process_id],
             |row| {
-                let owner_id: Option<String> = row.get(0)?;
-                let lease_token: Option<String> = row.get(1)?;
-                let incarnation_id: Option<String> = row.get(5)?;
-                let (Some(owner_id), Some(lease_token)) = (owner_id, lease_token) else {
-                    return Ok(None);
-                };
-                Ok(Some(ProcessLease {
-                    schema_version: PROCESS_LEASE_SCHEMA_VERSION,
-                    process_id: process_id.to_string(),
-                    owner: process_lease_owner_from_columns(owner_id, incarnation_id),
-                    lease_token,
-                    fencing_token: row.get::<_, i64>(2)? as u64,
-                    claimed_at_epoch_ms: row.get::<_, i64>(3)? as u64,
-                    expires_at_epoch_ms: row.get::<_, i64>(4)? as u64,
-                }))
+                Ok(registry_transitions::ProcessLeaseRow {
+                    owner_id: row.get(0)?,
+                    incarnation_id: row.get(5)?,
+                    lease_token: row.get(1)?,
+                    fencing_token: row.get(2)?,
+                    claimed_at_ms: row.get(3)?,
+                    expires_at_ms: row.get(4)?,
+                }
+                .project(process_id))
             },
         )
         .optional()
@@ -539,24 +531,13 @@ impl SqliteProcessRegistry {
         now: u64,
         lease_ttl_ms: u64,
     ) -> Result<ProcessLease, lash_core::PluginError> {
-        let lease = ProcessLease {
-            schema_version: PROCESS_LEASE_SCHEMA_VERSION,
-            process_id: process_id.to_string(),
-            owner: owner.clone(),
-            lease_token: format!(
-                "{:x}",
-                Sha256::digest(
-                    format!(
-                        "{process_id}:{}:{}:{now}:{fencing_token}",
-                        owner.owner_id, owner.incarnation_id
-                    )
-                    .as_bytes()
-                )
-            ),
+        let lease = registry_transitions::acquired_process_lease(
+            process_id,
+            owner,
             fencing_token,
-            claimed_at_epoch_ms: now,
-            expires_at_epoch_ms: now.saturating_add(lease_ttl_ms),
-        };
+            now,
+            lease_ttl_ms,
+        );
         conn.execute(
             "INSERT INTO process_leases (
                 process_id, lease_owner_id, lease_owner_incarnation_id,

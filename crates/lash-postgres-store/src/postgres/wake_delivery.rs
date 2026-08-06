@@ -85,51 +85,25 @@ pub(super) async fn load_wake_delivery_tx(
     .fetch_optional(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?
-    .ok_or_else(|| PluginError::Session(format!("unknown wake delivery `{delivery_id}`")))?;
+    .ok_or_else(|| registry_transitions::unknown_wake_delivery(delivery_id))?;
     decode_wake_delivery_row(row)
 }
 
 pub(super) fn decode_wake_delivery_row(
     row: sqlx::postgres::PgRow,
 ) -> Result<lash_core::WakeDelivery, PluginError> {
-    let delivery_id: String = row.get(0);
-    let state_value: String = row.get(1);
-    let state = match state_value.as_str() {
-        "pending" => lash_core::WakeDeliveryState::Pending,
-        "enqueuing" => lash_core::WakeDeliveryState::Enqueuing,
-        "enqueued" => lash_core::WakeDeliveryState::Enqueued,
-        "discarded" => lash_core::WakeDeliveryState::Discarded,
-        state => {
-            return Err(PluginError::Session(format!(
-                "wake delivery `{delivery_id}` has unknown state `{state}`"
-            )));
-        }
-    };
-    let discard_value: Option<String> = row.get(7);
-    let discard_reason = match discard_value.as_deref() {
-        None => None,
-        Some("expired") => Some(lash_core::WakeDiscardReason::Expired),
-        Some("target_gone") => Some(lash_core::WakeDiscardReason::TargetGone),
-        Some("retargeted") => Some(lash_core::WakeDiscardReason::Retargeted),
-        Some("sequence_rewound") => Some(lash_core::WakeDiscardReason::SequenceRewound),
-        Some(reason) => {
-            return Err(PluginError::Session(format!(
-                "wake delivery `{delivery_id}` has unknown discard reason `{reason}`"
-            )));
-        }
-    };
-    let delivery_json: String = row.get(8);
-    Ok(lash_core::WakeDelivery {
-        delivery_id,
-        wake: serde_json::from_str(&delivery_json).map_err(process_decode_error)?,
-        state,
+    registry_transitions::WakeDeliveryRow {
+        delivery_id: row.get(0),
+        state_label: row.get(1),
         claim_token: row.get(2),
-        attempts: row.get::<i64, _>(3) as u64,
-        first_attempt_ms: row.get::<Option<i64>, _>(4).map(|value| value as u64),
-        next_attempt_at_ms: row.get::<i64, _>(5) as u64,
-        expires_at_ms: row.get::<i64, _>(6) as u64,
-        discard_reason,
-    })
+        attempts: row.get(3),
+        first_attempt_ms: row.get(4),
+        next_attempt_at_ms: row.get(5),
+        expires_at_ms: row.get(6),
+        discard_reason_label: row.get(7),
+        delivery_json: row.get(8),
+    }
+    .project()
 }
 
 pub(super) fn wake_delivery_report<'a>(
@@ -166,20 +140,9 @@ pub(super) async fn update_wake_delivery_state(
         .fetch_optional(pool)
         .await
         .map_err(plugin_sqlx_error)?;
-        let current = current.ok_or_else(|| {
-            PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
-        })?;
-        let state = match current.as_str() {
-            "pending" => lash_core::WakeDeliveryState::Pending,
-            "enqueuing" => lash_core::WakeDeliveryState::Enqueuing,
-            "enqueued" => lash_core::WakeDeliveryState::Enqueued,
-            "discarded" => lash_core::WakeDeliveryState::Discarded,
-            _ => {
-                return Err(PluginError::Session(format!(
-                    "wake delivery `{delivery_id}` has unknown state `{current}`"
-                )));
-            }
-        };
+        let current =
+            current.ok_or_else(|| registry_transitions::unknown_wake_delivery(delivery_id))?;
+        let state = registry_transitions::wake_delivery_state_from_label(delivery_id, &current)?;
         return Ok(lash_core::WakeDeliveryClaimOutcome::ClaimLost { state });
     }
     Ok(lash_core::WakeDeliveryClaimOutcome::Applied)

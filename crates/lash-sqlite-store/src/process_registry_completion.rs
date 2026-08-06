@@ -1,6 +1,6 @@
 //! Atomic, lease-fenced terminal process completion.
 
-use super::process_registry::{process_lease_expired, tx_outcome};
+use super::process_registry::tx_outcome;
 use super::*;
 
 /// Unleased terminal completion, validated and appended as one atomic unit.
@@ -204,14 +204,12 @@ pub(super) async fn complete_process_with_lease(
                 }
 
                 let current = SqliteProcessRegistry::load_process_lease_conn(tx, process_id)?;
-                if !guard_lease(current.as_ref(), &lease.lease_token, now)
-                    || !current.as_ref().is_some_and(|current| {
-                        current.owner.same_incarnation(&lease.owner)
-                            && current.fencing_token == lease.fencing_token
-                    })
-                {
-                    return Err(process_lease_expired(process_id));
-                }
+                registry_transitions::authorize_process_lease_write(
+                    process_id,
+                    &lease,
+                    current.as_ref(),
+                    now,
+                )?;
 
                 let lash_core::facade_support::ProcessEventAppendPlan::Insert {
                     event,
