@@ -11,7 +11,9 @@ from check_api_example_coverage import (
     lash_core_surface,
     machine_local_path,
     primary_path,
+    stale_disposition_reason,
     tautological_assertion,
+    uninformative_assertion,
 )
 
 
@@ -320,6 +322,123 @@ class TautologicalAssertionTests(unittest.TestCase):
     def test_ignores_the_location_and_reads_only_the_anchored_source(self):
         # A path may legitimately contain the word; the anchor text may not.
         self.assertFalse(tautological_assertion("examples/size_of/src/main.rs:1#assert!(ok);"))
+
+
+class UninformativeAssertionTests(unittest.TestCase):
+    """FIG-970: an anchor is evidence only if its line says what was observed.
+
+    Every opener below shipped as an `assertion` anchor on FIG-955's inventory --
+    388 rows whose recorded evidence was the word `assert_eq!(` and a line number.
+    `assert!(matches!(` is the shape the tautology lint could not see: two macro
+    names, no operands, and a `matches!` pattern the reader never gets to check.
+    """
+
+    OPENERS = (
+        "assert_eq!(",
+        "assert!(",
+        "assert!(matches!(",
+        "assert_ne!(",
+        "debug_assert!(",
+    )
+
+    def defect(self, quoted, source=None):
+        return uninformative_assertion(
+            f"examples/agent-workbench/src/main.rs:12#{quoted}",
+            quoted if source is None else source,
+        )
+
+    def test_rejects_every_operandless_assert_opener(self):
+        for opener in self.OPENERS:
+            self.assertIn("no operands", self.defect(opener) or "", opener)
+
+    def test_rejects_an_anchor_quoting_only_the_start_of_its_line(self):
+        # The dropped tail is the assertion's whole meaning.
+        defect = self.defect(
+            "assert!(saw_gap,",
+            '        assert!(saw_gap, "trimmed cursor should emit replay_gap");',
+        )
+        self.assertIn("quotes part of its line", defect)
+
+    def test_accepts_a_line_that_states_the_observation(self):
+        self.assertIsNone(self.defect('assert_eq!(scope.session_id, "session-finance");'))
+
+    def test_accepts_an_operand_line_from_inside_a_multi_line_assertion(self):
+        # Re-anchoring lands here: the line that carries the observed outcome.
+        self.assertIsNone(self.defect('}) if turn_id == "transient-turn"'))
+        self.assertIsNone(
+            self.defect('"cancelling a parent must stop work guarded by its child"')
+        )
+
+    def test_reads_through_indentation(self):
+        self.assertIsNone(
+            self.defect("assert!(ok);", "            assert!(ok);")
+        )
+
+    def test_says_nothing_about_an_anchor_whose_line_cannot_be_read(self):
+        # Resolution failures are already reported as stale references.
+        self.assertIsNone(self.defect("assert_eq!(left, right);", ""))
+
+
+class StaleDispositionReasonTests(unittest.TestCase):
+    """A reason that describes another disposition is false, not untidy.
+
+    Both wordings below shipped on rows holding the opposite evidence: the
+    `unused-add` instruction on 904 rows that record real usage and a real
+    assertion, and the `used-unasserted` wording on 121 rows that name an
+    assertion anchor. Each is legal on the row it actually describes, so the lint
+    has to read the disposition, not the prose alone.
+    """
+
+    #: The instruction 904 used-* rows carried, verbatim.
+    ADD = (
+        "Add lash::process::CausalRef::TriggerOccurrence to the agent-workbench "
+        "durable-process example and assert its externally observable result."
+    )
+    #: The same instruction in the wording four more rows used: "to a ... example".
+    ADD_WIDER = (
+        "Add lash::process::SessionScope::for_agent_frame session provenance to a "
+        "durable process example."
+    )
+    #: The used-unasserted wording, verbatim.
+    UNASSERTED = (
+        "The current example use of lash::process::ProcessProvenance is compile-only, "
+        "setup-only, or reaches no executed assertion that independently observes its "
+        "externally meaningful outcome; add an outcome-driven example test before "
+        "claiming asserted usage."
+    )
+    #: What FIG-970 replaced them with: the row's own anchors, in words.
+    DERIVED = (
+        "Exercised by the agent-workbench example at "
+        "examples/agent-workbench/src/main_sections/tests/process_work.rs:382; the "
+        "assertion at examples/agent-workbench/src/main_sections/tests/"
+        "process_work.rs:392 in `durable_process_registry_preserves_identity` observes "
+        'that `session_id` equals `"session-finance"`.'
+    )
+
+    def test_rejects_the_add_instruction_on_a_row_that_records_usage(self):
+        for disposition in ("used-asserted", "used-unasserted"):
+            defect = stale_disposition_reason(disposition, self.ADD)
+            self.assertIn("unused-add instruction", defect or "", disposition)
+
+    def test_rejects_the_wider_add_wording_the_inventory_also_shipped(self):
+        self.assertIsNotNone(stale_disposition_reason("used-asserted", self.ADD_WIDER))
+
+    def test_leaves_the_add_instruction_legal_where_it_is_the_verdict(self):
+        self.assertIsNone(stale_disposition_reason("unused-add", self.ADD))
+
+    def test_rejects_denying_an_assertion_the_row_records(self):
+        defect = stale_disposition_reason("used-asserted", self.UNASSERTED)
+        self.assertIn("no executed assertion", defect or "")
+
+    def test_leaves_that_wording_legal_on_an_unasserted_row(self):
+        self.assertIsNone(stale_disposition_reason("used-unasserted", self.UNASSERTED))
+
+    def test_accepts_a_reason_derived_from_the_rows_own_anchors(self):
+        self.assertIsNone(stale_disposition_reason("used-asserted", self.DERIVED))
+
+    def test_ignores_rows_that_record_no_reason(self):
+        self.assertIsNone(stale_disposition_reason("used-asserted", ""))
+        self.assertIsNone(stale_disposition_reason("used-asserted", "   "))
 
 
 class MachineLocalPathTests(unittest.TestCase):
