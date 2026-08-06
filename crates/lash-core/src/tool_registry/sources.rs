@@ -1,6 +1,7 @@
 struct ToolProviderSource {
     id: String,
     provider: Arc<dyn ToolProvider>,
+    tools: RwLock<BTreeMap<ToolId, ToolManifest>>,
 }
 
 impl ToolProviderSource {
@@ -8,8 +9,53 @@ impl ToolProviderSource {
         Self {
             id: id.into(),
             provider,
+            tools: RwLock::new(BTreeMap::new()),
         }
     }
+
+    fn read_advertised_tools(&self) -> Vec<ToolManifest> {
+        let manifests = self.provider.tool_manifests();
+        *self.tools.write().expect("tool provider lock poisoned") = manifests
+            .iter()
+            .cloned()
+            .map(|manifest| (manifest.id.clone(), manifest))
+            .collect();
+        manifests
+    }
+
+    fn indexed_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
+        if let Some(manifest) = self
+            .tools
+            .read()
+            .expect("tool provider lock poisoned")
+            .get(id)
+        {
+            return Some(manifest.clone());
+        }
+        let manifest = self.provider.resolve_manifest_by_id(id)?;
+        self.tools
+            .write()
+            .expect("tool provider lock poisoned")
+            .insert(id.clone(), manifest.clone());
+        Some(manifest)
+    }
+}
+
+fn resolve_contract_for_indexed_manifest(
+    provider: &dyn ToolProvider,
+    manifest: &ToolManifest,
+) -> Option<Arc<ToolContract>> {
+    // The source index is authoritative for the id-to-name pairing. Accept a
+    // name-resolved contract only when its process-local identity matches that
+    // indexed pair; otherwise preserve the provider's by-id outcome. This
+    // prevents a stale name reassigned to another id from crossing tool
+    // identity while keeping the indexed fast path allocation-free.
+    if let Some(contract) = provider.resolve_contract(&manifest.name)
+        && contract.matches_manifest_identity(manifest)
+    {
+        return Some(contract);
+    }
+    provider.resolve_contract_by_id(&manifest.id)
 }
 
 struct ToolProviderGroupSource {
@@ -63,13 +109,32 @@ impl ToolProviderGroupSource {
     }
 
     fn provider_index_for_id(&self, id: &ToolId) -> Option<usize> {
-        self.resolve_manifest_by_id(id).and_then(|_| {
-            self.tools
-                .read()
-                .expect("tool provider group lock poisoned")
-                .get(id)
-                .map(|(_, provider_idx)| *provider_idx)
-        })
+        self.indexed_manifest_and_provider_by_id(id)
+            .map(|(_, provider_idx)| provider_idx)
+    }
+
+    fn indexed_manifest_and_provider_by_id(
+        &self,
+        id: &ToolId,
+    ) -> Option<(ToolManifest, usize)> {
+        if let Some((manifest, provider_idx)) = self
+            .tools
+            .read()
+            .expect("tool provider group lock poisoned")
+            .get(id)
+        {
+            return Some((manifest.clone(), *provider_idx));
+        }
+        for (provider_idx, provider) in self.providers.iter().enumerate() {
+            if let Some(manifest) = provider.resolve_manifest_by_id(id) {
+                self.tools
+                    .write()
+                    .expect("tool provider group lock poisoned")
+                    .insert(id.clone(), (manifest.clone(), provider_idx));
+                return Some((manifest, provider_idx));
+            }
+        }
+        None
     }
 }
 
@@ -106,24 +171,8 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
     }
 
     fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
-        if let Some((manifest, _)) = self
-            .tools
-            .read()
-            .expect("tool provider group lock poisoned")
-            .get(id)
-        {
-            return Some(manifest.clone());
-        }
-        for (provider_idx, provider) in self.providers.iter().enumerate() {
-            if let Some(manifest) = provider.resolve_manifest_by_id(id) {
-                self.tools
-                    .write()
-                    .expect("tool provider group lock poisoned")
-                    .insert(id.clone(), (manifest.clone(), provider_idx));
-                return Some(manifest);
-            }
-        }
-        None
+        self.indexed_manifest_and_provider_by_id(id)
+            .map(|(manifest, _)| manifest)
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
@@ -132,17 +181,8 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
     }
 
     fn resolve_contract_by_id(&self, id: &ToolId) -> Option<Arc<ToolContract>> {
-        let (manifest, provider_idx) = self
-            .resolve_manifest_by_id(id)
-            .and_then(|manifest| {
-                self.tools
-                    .read()
-                    .expect("tool provider group lock poisoned")
-                    .get(id)
-                    .map(|(_, provider_idx)| (manifest, *provider_idx))
-            })?;
-        let _ = manifest;
-        self.providers[provider_idx].resolve_contract_by_id(id)
+        let (manifest, provider_idx) = self.indexed_manifest_and_provider_by_id(id)?;
+        resolve_contract_for_indexed_manifest(self.providers[provider_idx].as_ref(), &manifest)
     }
 
     async fn prepare_tool_call(
@@ -200,15 +240,29 @@ impl ToolSourceExecutor for ToolProviderSource {
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {
-        self.provider.tool_manifests()
+        self.read_advertised_tools()
     }
 
     fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
-        self.provider.resolve_manifest(name)
+        if let Some(manifest) = self
+            .tools
+            .read()
+            .expect("tool provider lock poisoned")
+            .values()
+            .find(|manifest| manifest.name == name)
+        {
+            return Some(manifest.clone());
+        }
+        let manifest = self.provider.resolve_manifest(name)?;
+        self.tools
+            .write()
+            .expect("tool provider lock poisoned")
+            .insert(manifest.id.clone(), manifest.clone());
+        Some(manifest)
     }
 
     fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
-        self.provider.resolve_manifest_by_id(id)
+        self.indexed_manifest_by_id(id)
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
@@ -216,7 +270,8 @@ impl ToolSourceExecutor for ToolProviderSource {
     }
 
     fn resolve_contract_by_id(&self, id: &ToolId) -> Option<Arc<ToolContract>> {
-        self.provider.resolve_contract_by_id(id)
+        let manifest = self.indexed_manifest_by_id(id)?;
+        resolve_contract_for_indexed_manifest(self.provider.as_ref(), &manifest)
     }
 
     async fn prepare_tool_call(

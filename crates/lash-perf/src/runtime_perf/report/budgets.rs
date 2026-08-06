@@ -8,8 +8,8 @@ pub(super) fn allocation_budget_bytes(scenario: RuntimePerfScenario) -> f64 {
         RuntimePerfScenario::TurnStartGate => 90_000_000.0,
         RuntimePerfScenario::TurnCancelRoundTrip => 85_000_000.0,
         RuntimePerfScenario::IngressClaimProjection => 180_000_000.0,
-        RuntimePerfScenario::ToolDiscoverySearch => 2_300_000_000.0,
-        RuntimePerfScenario::RlmLargeToolCatalog => 5_600_000_000.0,
+        RuntimePerfScenario::ToolDiscoverySearch => 630_000_000.0,
+        RuntimePerfScenario::RlmLargeToolCatalog => 1_200_000_000.0,
         RuntimePerfScenario::RlmLargePrint => 1_000_000_000.0,
         RuntimePerfScenario::RlmObliqueStackMix => 1_950_000_000.0,
         RuntimePerfScenario::RlmStreamedPairedLashlang => 128_000_000.0,
@@ -34,9 +34,10 @@ pub(super) fn steady_state_turn_allocation_budget_bytes(scenario: RuntimePerfSce
             6_000_000.0
         }
         RuntimePerfScenario::IngressClaimProjection => 14_000_000.0,
-        RuntimePerfScenario::ToolDiscoverySearch => 170_000_000.0,
-        RuntimePerfScenario::RlmLargeToolCatalog => 430_000_000.0,
+        RuntimePerfScenario::ToolDiscoverySearch => 48_000_000.0,
+        RuntimePerfScenario::RlmLargeToolCatalog => 95_000_000.0,
         RuntimePerfScenario::RlmLargePrint => 750_000_000.0,
+        RuntimePerfScenario::RlmSubagentSpawn => 45_000_000.0,
         RuntimePerfScenario::RlmObliqueStackMix => 165_000_000.0,
         RuntimePerfScenario::RlmStreamedPairedLashlang => 64_000_000.0,
         RuntimePerfScenario::LiveReplayPressure => 96_000_000.0,
@@ -55,9 +56,9 @@ pub(super) fn wall_clock_budget_ms(scenario: RuntimePerfScenario) -> f64 {
         RuntimePerfScenario::TurnStartGate => 1_600.0,
         RuntimePerfScenario::TurnCancelRoundTrip => 310.0,
         RuntimePerfScenario::IngressClaimProjection => 460.0,
-        RuntimePerfScenario::ToolDiscoverySearch
-        | RuntimePerfScenario::RlmLargeToolCatalog
-        | RuntimePerfScenario::RlmObliqueStackMix => 20_000.0,
+        RuntimePerfScenario::ToolDiscoverySearch => 1_200.0,
+        RuntimePerfScenario::RlmLargeToolCatalog => 2_500.0,
+        RuntimePerfScenario::RlmObliqueStackMix => 20_000.0,
         RuntimePerfScenario::LiveReplayPressure => 5_000.0,
         _ => 10_000.0,
     }
@@ -535,8 +536,9 @@ fn scenario_phase_wall_clock_budget_ms(scenario: RuntimePerfScenario, phase: &st
         (IngressClaimProjection | RlmLargePrint | RlmTriggerMailPipeline, "effect_loop") => 200.0,
         (DeepTurnComposition | RlmProcessAsyncToolCompletion, "effect_loop") => 400.0,
         (RlmProcessHandles | RlmSubagentSpawn, "effect_loop") => 750.0,
-        (RlmObliqueStackMix | ToolDiscoverySearch, "effect_loop") => 2_000.0,
-        (RlmLargeToolCatalog, "effect_loop") => 6_000.0,
+        (RlmObliqueStackMix, "effect_loop") => 2_000.0,
+        (ToolDiscoverySearch, "effect_loop") => 500.0,
+        (RlmLargeToolCatalog, "effect_loop") => 1_000.0,
 
         // Push CI uses the debug quick profile; these two projector-heavy
         // scenarios are materially slower there than in the release baseline.

@@ -277,6 +277,8 @@ pub struct ToolManifest {
 /// Heavy tool contract resolved only when a prompt or call needs schemas/docs.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ToolContract {
+    #[serde(skip)]
+    identity: Option<ToolContractIdentity>,
     #[serde(default = "ToolContract::default_input_schema_contract")]
     pub input_schema: SchemaContract,
     #[serde(default)]
@@ -287,9 +289,16 @@ pub struct ToolContract {
     pub examples: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ToolContractIdentity {
+    id: ToolId,
+    name: String,
+}
+
 impl Default for ToolContract {
     fn default() -> Self {
         Self {
+            identity: None,
             input_schema: Self::default_input_schema_contract(),
             output_schema: serde_json::Value::Null.into(),
             output_contract: ToolOutputContract::Static,
@@ -309,6 +318,17 @@ impl ToolContract {
             "properties": {},
             "additionalProperties": true
         })
+    }
+
+    /// Whether this contract was resolved from the exact manifest identity.
+    ///
+    /// Contracts produced through [`ToolDefinition::contract`] carry this
+    /// process-local identity. Standalone/deserialized contracts do not and
+    /// must use a provider's authoritative by-id resolution path instead.
+    pub fn matches_manifest_identity(&self, manifest: &ToolManifest) -> bool {
+        self.identity
+            .as_ref()
+            .is_some_and(|identity| identity.id == manifest.id && identity.name == manifest.name)
     }
 
     pub fn compact_contract(&self, manifest: &ToolManifest) -> CompactToolContract {
@@ -535,10 +555,12 @@ impl ToolDefinition {
         input_schema: serde_json::Value,
         output_schema: serde_json::Value,
     ) -> Self {
+        let id = id.into();
+        let name = name.into();
         Self {
             manifest: ToolManifest {
-                id: id.into(),
-                name: name.into(),
+                id: id.clone(),
+                name: name.clone(),
                 description: description.into(),
                 compact_contract: None,
                 activation: ToolActivation::default(),
@@ -547,6 +569,7 @@ impl ToolDefinition {
                 retry_policy: default_tool_retry_policy(),
             },
             contract: ToolContract {
+                identity: Some(ToolContractIdentity { id, name }),
                 input_schema: input_schema.into(),
                 output_schema: output_schema.into(),
                 ..ToolContract::default()
@@ -691,12 +714,21 @@ impl ToolDefinition {
     }
 
     pub fn contract(&self) -> ToolContract {
-        self.contract.clone()
+        let mut contract = self.contract.clone();
+        contract.identity = Some(ToolContractIdentity {
+            id: self.manifest.id.clone(),
+            name: self.manifest.name.clone(),
+        });
+        contract
     }
 
     /// Recompose a definition from its [`ToolManifest`] and [`ToolContract`]
     /// projections — the inverse of [`ToolDefinition::manifest`]/[`ToolDefinition::contract`].
-    pub fn from_parts(manifest: ToolManifest, contract: ToolContract) -> Self {
+    pub fn from_parts(manifest: ToolManifest, mut contract: ToolContract) -> Self {
+        contract.identity = Some(ToolContractIdentity {
+            id: manifest.id.clone(),
+            name: manifest.name.clone(),
+        });
         Self { manifest, contract }
     }
 

@@ -49,6 +49,9 @@ mod tests {
     struct DynamicToolProvider {
         names: Arc<std::sync::Mutex<Vec<String>>>,
     }
+    struct CountingManifestProvider {
+        manifest_reads: Arc<AtomicUsize>,
+    }
     struct BlockingLiveTool {
         entered: Arc<tokio::sync::Semaphore>,
         release: Arc<tokio::sync::Semaphore>,
@@ -149,6 +152,31 @@ mod tests {
                 vec![
                     test_tool("enabled_tool", "enabled"),
                     test_tool("disabled_tool", "disabled"),
+                ],
+                name,
+            )
+        }
+
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+            ToolResult::ok(serde_json::json!("ok"))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ToolProvider for CountingManifestProvider {
+        fn tool_manifests(&self) -> Vec<ToolManifest> {
+            self.manifest_reads.fetch_add(1, Ordering::SeqCst);
+            manifests(vec![
+                test_tool("indexed_alpha", "alpha contract"),
+                test_tool("indexed_beta", "beta contract"),
+            ])
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+            contract_from(
+                vec![
+                    test_tool("indexed_alpha", "alpha contract"),
+                    test_tool("indexed_beta", "beta contract"),
                 ],
                 name,
             )
@@ -379,6 +407,182 @@ mod tests {
                 .forget();
             ToolResult::ok(json!("completed from captured registry"))
         }
+    }
+
+    #[test]
+    fn grouped_contract_lookup_reuses_the_indexed_manifest() {
+        let manifest_reads = Arc::new(AtomicUsize::new(0));
+        let registry = ToolRegistry::from_tool_providers(vec![Arc::new(
+            CountingManifestProvider {
+                manifest_reads: Arc::clone(&manifest_reads),
+            },
+        )])
+        .expect("registry");
+        let reads_after_registration = manifest_reads.load(Ordering::SeqCst);
+
+        for (name, description) in [
+            ("indexed_alpha", "alpha contract"),
+            ("indexed_beta", "beta contract"),
+        ] {
+            let actual = registry
+                .resolve_contract(name)
+                .expect("indexed provider contract should resolve");
+            assert_eq!(
+                serde_json::to_value(actual.as_ref()).expect("serialize actual contract"),
+                serde_json::to_value(test_tool(name, description).contract())
+                    .expect("serialize expected contract"),
+                "indexed contract must match the old by-id path for {name}"
+            );
+        }
+
+        assert_eq!(
+            manifest_reads.load(Ordering::SeqCst),
+            reads_after_registration,
+            "contract routing must not rematerialize the provider manifest catalog"
+        );
+    }
+
+    #[test]
+    fn single_provider_contract_lookup_reuses_the_indexed_manifest() {
+        let manifest_reads = Arc::new(AtomicUsize::new(0));
+        let registry = ToolRegistry::from_tool_provider(Arc::new(CountingManifestProvider {
+            manifest_reads: Arc::clone(&manifest_reads),
+        }))
+        .expect("registry");
+        let reads_after_registration = manifest_reads.load(Ordering::SeqCst);
+
+        let actual = registry
+            .resolve_contract("indexed_beta")
+            .expect("indexed provider contract should resolve");
+        assert_eq!(
+            serde_json::to_value(actual.as_ref()).expect("serialize actual contract"),
+            serde_json::to_value(test_tool("indexed_beta", "beta contract").contract())
+                .expect("serialize expected contract")
+        );
+        assert_eq!(
+            manifest_reads.load(Ordering::SeqCst),
+            reads_after_registration,
+            "single-provider routing must not rematerialize the provider manifest catalog"
+        );
+    }
+
+    #[test]
+    fn grouped_contract_lookup_falls_back_to_by_id_resolution() {
+        struct ByIdOnlyProvider;
+
+        impl ByIdOnlyProvider {
+            fn definition() -> ToolDefinition {
+                test_tool("deferred_contract", "resolved only by id")
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl ToolProvider for ByIdOnlyProvider {
+            fn tool_manifests(&self) -> Vec<ToolManifest> {
+                manifests(vec![Self::definition()])
+            }
+
+            fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
+                None
+            }
+
+            fn resolve_contract_by_id(&self, id: &crate::ToolId) -> Option<Arc<ToolContract>> {
+                (id == Self::definition().id())
+                    .then(|| Arc::new(Self::definition().contract()))
+            }
+
+            async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+                ToolResult::ok(json!("ok"))
+            }
+        }
+
+        let registry = ToolRegistry::from_tool_providers(vec![Arc::new(ByIdOnlyProvider)])
+            .expect("registry");
+        let actual = registry
+            .resolve_contract("deferred_contract")
+            .expect("by-id-only contract should resolve through the group");
+
+        assert_eq!(
+            serde_json::to_value(actual.as_ref()).expect("serialize actual contract"),
+            serde_json::to_value(ByIdOnlyProvider::definition().contract())
+                .expect("serialize expected contract")
+        );
+    }
+
+    #[test]
+    fn grouped_contract_lookup_does_not_cross_identity_after_name_drift() {
+        struct DriftingProvider {
+            definitions: Arc<std::sync::Mutex<Vec<ToolDefinition>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl ToolProvider for DriftingProvider {
+            fn tool_manifests(&self) -> Vec<ToolManifest> {
+                self.definitions
+                    .lock()
+                    .expect("drifting definitions lock")
+                    .iter()
+                    .map(ToolDefinition::manifest)
+                    .collect()
+            }
+
+            fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+                self.definitions
+                    .lock()
+                    .expect("drifting definitions lock")
+                    .iter()
+                    .find(|definition| definition.name() == name)
+                    .map(|definition| Arc::new(definition.contract()))
+            }
+
+            async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+                ToolResult::ok(json!("ok"))
+            }
+        }
+
+        let definitions = Arc::new(std::sync::Mutex::new(vec![ToolDefinition::raw(
+            "tool:stable-id",
+            "search",
+            "original search",
+            json!({ "type": "object", "properties": { "query": { "type": "string" } } }),
+            json!({ "type": "string" }),
+        )]));
+        let registry = ToolRegistry::from_tool_providers(vec![Arc::new(DriftingProvider {
+            definitions: Arc::clone(&definitions),
+        })])
+        .expect("registry");
+
+        let reassigned_id = ToolDefinition::raw(
+            "tool:stable-id",
+            "find",
+            "same id with a new name",
+            json!({ "type": "object", "properties": { "needle": { "type": "integer" } } }),
+            json!({ "type": "integer" }),
+        );
+        let reused_name = ToolDefinition::raw(
+            "tool:different-id",
+            "search",
+            "old name reassigned to another id",
+            json!({ "type": "object", "properties": { "query": { "type": "boolean" } } }),
+            json!({ "type": "boolean" }),
+        );
+        *definitions.lock().expect("drifting definitions lock") =
+            vec![reassigned_id.clone(), reused_name.clone()];
+
+        let actual = registry
+            .resolve_contract("search")
+            .expect("the old by-id path still resolves the stable id");
+        let actual = serde_json::to_value(actual.as_ref()).expect("serialize actual contract");
+        assert_eq!(
+            actual,
+            serde_json::to_value(reassigned_id.contract()).expect("serialize by-id contract"),
+            "a stale indexed name must fall back to the provider's by-id outcome"
+        );
+        assert_ne!(
+            actual,
+            serde_json::to_value(reused_name.contract()).expect("serialize reused-name contract"),
+            "a stale indexed name must not return another id's contract"
+        );
     }
 
     #[test]
