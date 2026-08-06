@@ -368,9 +368,7 @@ fn operation() -> impl Strategy<Value = StoreContractOp> {
             .prop_map(|(process, replay, value, wake, stale)| StoreContractOp::Signal { process, replay, value, wake, stale }),
         2 => (0..PROCESS_COUNT, any::<u8>())
             .prop_map(|(process, reason)| StoreContractOp::CancelRequest { process, reason }),
-        // Keep the baseline weight: increasing it exposed the latent in-memory
-        // lease-guard drift tracked by FIG-953 at differential seed 852.
-        2 => (0..PROCESS_COUNT, 0_u8..4)
+        3 => (0..PROCESS_COUNT, 0_u8..4)
             .prop_map(|(process, disposition)| StoreContractOp::Terminal { process, disposition }),
         2 => (0..PROCESS_COUNT, 0..SESSION_COUNT)
             .prop_map(|(process, session)| StoreContractOp::AddObserver { process, session }),
@@ -390,9 +388,7 @@ fn operation() -> impl Strategy<Value = StoreContractOp> {
             .prop_map(|process| StoreContractOp::EnqueueWake { process }),
         3 => (any::<u8>(), any::<bool>(), any::<bool>())
             .prop_map(|(selection, highest_in_group, stale)| StoreContractOp::ConsumeWake { selection, highest_in_group, stale }),
-        // Keep the baseline weight: increasing it exposed the latent in-memory
-        // lease-guard drift tracked by FIG-953 at differential seed 852.
-        2 => any::<bool>().prop_map(|watermark| StoreContractOp::Prune { watermark }),
+        3 => any::<bool>().prop_map(|watermark| StoreContractOp::Prune { watermark }),
         2 => any::<bool>().prop_map(|caught_up| StoreContractOp::CompactTombstones { caught_up }),
     ]
 }
@@ -886,7 +882,16 @@ async fn apply_operation(
         }
         StoreContractOp::ClaimLease { process, owner } => {
             let id = process_id(*process);
-            if let Ok(ProcessLeaseClaimOutcome::Acquired(lease)) = handles
+            // A lease is authority over a retained registry row, so the store
+            // must refuse a claim for a process it does not retain — never
+            // registered, or already pruned to a tombstone. Backends that
+            // materialize the lease anyway diverge from the SQL stores in raw
+            // durable state (FIG-953, differential seed 852).
+            let retained = model
+                .processes
+                .get(&id)
+                .is_some_and(|process| process.expected_record.is_some());
+            let outcome = handles
                 .registry
                 .claim_process_lease(
                     &id,
@@ -896,8 +901,16 @@ async fn apply_operation(
                     ),
                     60_000,
                 )
-                .await
-            {
+                .await;
+            if !retained {
+                return match outcome {
+                    Err(_) => Ok(()),
+                    Ok(outcome) => Err(format!(
+                        "Lease retention guard: claim for unretained process `{id}` returned {outcome:?} instead of refusing"
+                    )),
+                };
+            }
+            if let Ok(ProcessLeaseClaimOutcome::Acquired(lease)) = outcome {
                 let leases = &mut model.process_mut(&id).leases;
                 if let Some(current) = leases
                     .last_mut()
