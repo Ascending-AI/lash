@@ -4,6 +4,32 @@
 The public surface comes from rustdoc JSON, not from the inventory being
 checked.  This keeps the oracle independent: adding or removing an export
 changes the compiler's view and requires an explicit inventory update.
+
+`lash-runtime` is walked through its public module tree; every path a host can
+write is a named export.  `lash-core` cannot be walked that way -- its nested
+public modules are runtime internals that happen to be reachable -- so its
+surface is the root exports plus their *reachability closure*: every
+core-owned type a root export hands to a host through a public signature.
+Those types are keyed by the compiler's canonical path, which is often rooted
+in a `pub(crate)` module and therefore appears nowhere in a root walk, even
+though every public method on the value is callable.  See
+`core_reachable_types`.
+
+Three exclusions are deliberate, and each is enforced structurally rather than
+by a hand-maintained list:
+
+1. `#[doc(hidden)]` items.  Hidden means "not host contract"; rustdoc omits
+   them from this JSON unless `--document-hidden-items` is passed, which
+   `rustdoc()` never does, and `doc_hidden` refuses them a second time so a
+   future rustdoc that stops omitting them cannot silently widen the gate.
+   `lash_core::runtime::await_event_coordinator` is the current example: a
+   doc-hidden re-export of a `pub(crate)`-rooted module, deliberately outside
+   the gate.
+2. Items in nested `lash-core` public modules that no publicly reachable
+   signature mentions.  They are internals; if one becomes host-visible it
+   enters through the reachability closure automatically.
+3. Items owned by another crate and not re-exported by `lash` or `lash-core`.
+   Each crate answers for its own surface.
 """
 
 from __future__ import annotations
@@ -79,12 +105,32 @@ DEPENDENCY_PACKAGES = {
 _DEPENDENCY_DOCUMENTS: dict[tuple[str, bool], dict[str, Any]] = {}
 
 
+#: Type-bearing rustdoc kinds a reachability edge can land on.
+REACHABLE_KINDS = {"enum", "struct", "trait", "type_alias", "union"}
+
+
 def item_kind(item: dict[str, Any]) -> str:
     return next(iter(item["inner"]))
 
 
 def public(visibility: Any) -> bool:
     return visibility == "public"
+
+
+def doc_hidden(item: dict[str, Any]) -> bool:
+    """Whether rustdoc recorded `#[doc(hidden)]` on this item.
+
+    Hidden items are not host contract, so they stay outside the gate. Today
+    rustdoc already omits them from the JSON; this keeps the exclusion true by
+    intent rather than by side effect.
+    """
+    for attribute in item.get("attrs") or []:
+        if isinstance(attribute, str):
+            if "doc(hidden)" in attribute.replace(" ", ""):
+                return True
+        elif isinstance(attribute, dict) and "doc_hidden" in attribute:
+            return True
+    return False
 
 
 def target_id(item: dict[str, Any]) -> str | None:
@@ -122,6 +168,8 @@ def add_members(
     if kind == "enum":
         for variant_id in inner["variants"]:
             variant = index[str(variant_id)]
+            if doc_hidden(variant):
+                continue
             variant_path = f"{path}::{variant['name']}"
             surface.add((variant_path, "variant"))
             variant_shape = variant["inner"]["variant"]["kind"]
@@ -134,6 +182,8 @@ def add_members(
                 ]
             for field_id in variant_fields:
                 field = index[str(field_id)]
+                if doc_hidden(field):
+                    continue
                 surface.add(
                     (f"{variant_path}::{field.get('name') or field_id}", "field")
                 )
@@ -148,12 +198,14 @@ def add_members(
             field_ids = inner["fields"]
         for field_id in field_ids:
             field = index[str(field_id)]
-            if public(field["visibility"]):
+            if public(field["visibility"]) and not doc_hidden(field):
                 surface.add((f"{path}::{field.get('name') or field_id}", "field"))
 
     if kind == "trait":
         for member_id in inner["items"]:
             member = index[str(member_id)]
+            if doc_hidden(member):
+                continue
             surface.add((f"{path}::{member['name']}", item_kind(member)))
 
     impl_ids = inner.get("impls", []) if isinstance(inner, dict) else []
@@ -167,6 +219,8 @@ def add_members(
         for member_id in impl["items"]:
             member = index.get(str(member_id))
             if member is None or not public(member["visibility"]):
+                continue
+            if doc_hidden(member):
                 continue
             surface.add((f"{path}::{member['name']}", item_kind(member)))
 
@@ -207,7 +261,7 @@ def add_export(
             raise RuntimeError(f"cannot resolve external module export {path}")
         for child_id in target["inner"]["module"]["items"]:
             child = member_index[str(child_id)]
-            if not public(child["visibility"]):
+            if not public(child["visibility"]) or doc_hidden(child):
                 continue
             add_export(
                 surface,
@@ -234,7 +288,7 @@ def lash_surface(document: dict[str, Any], all_features: bool) -> set[tuple[str,
         module = index[module_id]["inner"]["module"]
         for child_id in module["items"]:
             child = index[str(child_id)]
-            if not public(child["visibility"]):
+            if not public(child["visibility"]) or doc_hidden(child):
                 continue
             kind = item_kind(child)
             name = exported_name(child)
@@ -250,15 +304,172 @@ def lash_surface(document: dict[str, Any], all_features: bool) -> set[tuple[str,
     return surface
 
 
+def referenced_ids(node: Any, found: set[str]) -> None:
+    """Collect every resolved item id a rustdoc type/generics node names."""
+    if isinstance(node, list):
+        for element in node:
+            referenced_ids(element, found)
+        return
+    if not isinstance(node, dict):
+        return
+    for key, value in node.items():
+        if key == "resolved_path":
+            if value.get("id") is not None:
+                found.add(str(value["id"]))
+            referenced_ids(value.get("args"), found)
+        elif key in {"primitive", "generic", "infer"}:
+            continue
+        else:
+            referenced_ids(value, found)
+
+
+def signature_ids(member: dict[str, Any]) -> set[str]:
+    """Item ids a public member exposes through its signature."""
+    found: set[str] = set()
+    kind = item_kind(member)
+    inner = member["inner"][kind]
+    if kind == "function":
+        referenced_ids(inner.get("sig"), found)
+        referenced_ids(inner.get("generics"), found)
+    elif kind in {"assoc_const", "assoc_type", "constant", "static"}:
+        referenced_ids(inner.get("type"), found)
+        referenced_ids(inner.get("bounds"), found)
+    return found
+
+
+def exposed_ids(item_id: str, index: dict[str, dict[str, Any]]) -> set[str]:
+    """Item ids an export hands to a host: field, variant, and member types.
+
+    Standalone exports carry their exposure in their own signature; types carry
+    it in their public fields, variants, and inherent or trait members.
+    """
+    item = index.get(item_id)
+    if item is None:
+        return set()
+    kind = item_kind(item)
+    if kind not in REACHABLE_KINDS:
+        return signature_ids(item)
+    inner = item["inner"][kind]
+    found: set[str] = set()
+
+    if kind == "type_alias":
+        referenced_ids(inner.get("type"), found)
+        return found
+
+    field_ids: list[Any] = []
+    if kind == "enum":
+        for variant_id in inner["variants"]:
+            variant = index.get(str(variant_id))
+            if variant is None or doc_hidden(variant):
+                continue
+            shape = variant["inner"]["variant"]["kind"]
+            if isinstance(shape, dict) and "struct" in shape:
+                field_ids += shape["struct"]["fields"]
+            elif isinstance(shape, dict) and "tuple" in shape:
+                field_ids += [field for field in shape["tuple"] if field is not None]
+    elif kind in {"struct", "union"}:
+        shape = inner["kind"] if kind == "struct" else inner
+        if isinstance(shape, dict) and "plain" in shape:
+            field_ids = shape["plain"]["fields"]
+        elif isinstance(shape, dict) and "tuple" in shape:
+            field_ids = [field for field in shape["tuple"] if field is not None]
+        elif kind == "union":
+            field_ids = inner["fields"]
+        field_ids = [
+            field_id
+            for field_id in field_ids
+            if public((index.get(str(field_id)) or {}).get("visibility"))
+        ]
+    for field_id in field_ids:
+        field = index.get(str(field_id))
+        if field is None or doc_hidden(field):
+            continue
+        referenced_ids(field["inner"]["struct_field"], found)
+
+    members: list[dict[str, Any]] = []
+    if kind == "trait":
+        members += [
+            member
+            for member_id in inner["items"]
+            if (member := index.get(str(member_id))) is not None
+        ]
+    for impl_id in inner.get("impls", []) if isinstance(inner, dict) else []:
+        implementation = index.get(str(impl_id))
+        if implementation is None:
+            continue
+        impl = implementation["inner"].get("impl")
+        # Inherent impls only: a trait impl's members belong to the trait.
+        if impl is None or impl["trait"] is not None:
+            continue
+        members += [
+            member
+            for member_id in impl["items"]
+            if (member := index.get(str(member_id))) is not None
+            and public(member["visibility"])
+        ]
+    for member in members:
+        if doc_hidden(member):
+            continue
+        found |= signature_ids(member)
+    return found
+
+
+def core_reachable_types(
+    seeds: set[str], index: dict[str, dict[str, Any]], paths: dict[str, dict[str, Any]]
+) -> dict[str, str]:
+    """Core-owned types a host can reach from the root exports, but cannot name.
+
+    A root export's public method can return, or accept, a type whose only
+    module path is `pub(crate)`. The value is then in host hands and every
+    public method on it is callable, yet a root walk never mentions it. This
+    closes over public signatures, fields, and variants from the root exports
+    until no new core-owned type appears, and keys each result by the
+    compiler's canonical path -- the only stable identity such a type has.
+
+    Returns `{canonical path: item id}` for types outside `seeds`.
+    """
+    reached = set(seeds)
+    frontier = list(seeds)
+    while frontier:
+        for candidate in exposed_ids(frontier.pop(), index):
+            if candidate in reached:
+                continue
+            item = index.get(candidate)
+            # Absent from this index means another crate owns it.
+            if item is None or item_kind(item) not in REACHABLE_KINDS:
+                continue
+            if doc_hidden(item):
+                continue
+            reached.add(candidate)
+            frontier.append(candidate)
+
+    named: dict[str, str] = {}
+    for item_id in sorted(reached - seeds):
+        entry = paths.get(item_id)
+        if entry is None:
+            raise RuntimeError(f"reachable core type {item_id} has no canonical path")
+        named["::".join(entry["path"])] = item_id
+    return named
+
+
 def lash_core_surface(document: dict[str, Any], all_features: bool) -> set[tuple[str, str]]:
-    """Collect only root host exports, not every item in public internals."""
+    """Root host exports plus every core-owned type they make reachable.
+
+    Root exports are the named surface; the reachability closure is the rest of
+    the contract. Nested public modules are not walked -- an item there enters
+    the gate only when a publicly reachable signature exposes it, which is the
+    same thing as being host-visible.
+    """
     index = document["index"]
     paths = document["paths"]
     root = index[str(document["root"])]["inner"]["module"]
     surface: set[tuple[str, str]] = set()
+    seeds: set[str] = set()
     for child_id in root["items"]:
         child = index[str(child_id)]
         if not public(child["visibility"]) or item_kind(child) == "module":
+            continue
+        if doc_hidden(child):
             continue
         add_export(
             surface,
@@ -268,6 +479,13 @@ def lash_core_surface(document: dict[str, Any], all_features: bool) -> set[tuple
             paths,
             all_features,
         )
+        target = target_id(child)
+        if target is not None and target in index:
+            seeds.add(target)
+
+    for path, item_id in core_reachable_types(seeds, index, paths).items():
+        surface.add((path, item_kind(index[item_id])))
+        add_members(surface, path, item_id, index)
     return surface
 
 
