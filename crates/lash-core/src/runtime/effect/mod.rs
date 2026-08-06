@@ -1,5 +1,6 @@
 pub mod await_event_coordinator;
 mod await_events;
+pub mod effect_replay_driver;
 mod envelope;
 pub(crate) mod executor;
 mod inline_host;

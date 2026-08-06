@@ -1092,6 +1092,100 @@ async fn sqlite_await_event_rows_are_stamped_by_the_injected_clock() {
     assert_eq!(stamps, (INJECTED_MS as i64, INJECTED_MS as i64));
 }
 
+/// SQLite's authoritative effect-lease clock is the host's injected `Clock`,
+/// because this store shares its host's clock domain. PostgreSQL — the other
+/// implementor of the same shared `EffectReplayDriver` — deliberately reads the
+/// *server* clock instead (the `Clock` contract's database-authoritative lease
+/// boundary, fenced by `postgres_clock_contract`), so
+/// each half of that split needs its own referee now that one driver drives
+/// both. The driver's own clock only sleeps; if it ever stamped a row, the
+/// stamps below would come from the OS clock instead.
+#[tokio::test]
+async fn sqlite_effect_replay_rows_are_stamped_by_the_injected_clock() {
+    const INJECTED_MS: u64 = 1_234_567_890_000;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("injected-clock-effect-replay.db");
+    let clock = Arc::new(lash_core::testing::TestClock::new(INJECTED_MS));
+    let controller = SqliteRuntimeEffectController::open_with_clock(
+        &path,
+        durable_turn_scope(
+            "injected-clock-effect-session",
+            "injected-clock-effect-turn",
+        ),
+        Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
+    )
+    .await
+    .expect("SQLite effect controller on an injected clock");
+
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let executor_release = Arc::clone(&release);
+    let executing = tokio::spawn({
+        let controller = controller.clone();
+        async move {
+            controller
+                .execute_effect(
+                    exec_envelope("injected-clock-effect", "first"),
+                    RuntimeEffectLocalExecutor::testing(move |_| async move {
+                        let _ = entered_tx.send(());
+                        executor_release.notified().await;
+                        Ok(exec_outcome("stamped"))
+                    }),
+                )
+                .await
+        }
+    });
+    entered_rx.await.expect("executor entered under the claim");
+
+    let claim_path = path.clone();
+    let (created_at_ms, lease_expires_at_ms) = tokio::task::spawn_blocking(move || {
+        let connection = rusqlite::Connection::open(&claim_path).expect("open raw effect journal");
+        connection
+            .query_row(
+                "SELECT created_at_ms, lease_expires_at_ms
+                 FROM runtime_effect_replay WHERE replay_key = ?1",
+                rusqlite::params!["injected-clock-effect"],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .expect("read claimed lease stamps")
+    })
+    .await
+    .expect("read the in-progress claim");
+    assert_eq!(
+        created_at_ms, INJECTED_MS as i64,
+        "the claim stamp must come from the injected clock"
+    );
+    assert_eq!(
+        lease_expires_at_ms,
+        (INJECTED_MS + lash_core::facade_support::LeaseTimings::default().ttl_ms()) as i64,
+        "the lease expiry must be derived from the injected claim instant"
+    );
+
+    release.notify_waiters();
+    assert_exec_marker(
+        executing
+            .await
+            .expect("execution task joins")
+            .expect("finalize the claimed effect"),
+        "stamped",
+    );
+
+    let connection = rusqlite::Connection::open(&path).expect("reopen raw effect journal");
+    let (updated_at_ms, released_lease): (i64, i64) = connection
+        .query_row(
+            "SELECT updated_at_ms, lease_expires_at_ms
+             FROM runtime_effect_replay WHERE replay_key = ?1",
+            rusqlite::params!["injected-clock-effect"],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("read finalized stamps");
+    assert_eq!(
+        updated_at_ms, INJECTED_MS as i64,
+        "the finalize stamp must come from the injected clock"
+    );
+    assert_eq!(released_lease, 0, "finalizing releases the lease");
+}
+
 #[tokio::test]
 async fn sqlite_effect_host_satisfies_cold_process_await_event_conformance() {
     use tokio::io::{AsyncBufReadExt as _, BufReader};
