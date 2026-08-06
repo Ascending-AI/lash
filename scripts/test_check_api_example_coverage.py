@@ -2,7 +2,17 @@
 
 import unittest
 
-from check_api_example_coverage import doc_hidden, lash_core_surface
+from check_api_example_coverage import (
+    ApiItem,
+    api_items,
+    doc_hidden,
+    impossible_facade_migration,
+    item_errors,
+    lash_core_surface,
+    machine_local_path,
+    primary_path,
+    tautological_assertion,
+)
 
 
 def item(name, visibility, inner, item_id, **extra):
@@ -69,6 +79,9 @@ def fixture():
             "21": item("Unreached", "public", {"struct": {"kind": "unit", "impls": []}}, 21),
         },
         "paths": {
+            # `Handle` is exported as `lash_core::Handle` but defined in `h`, so
+            # its identity is the definition path, not the export path.
+            "2": {"path": ["lash_core", "h", "Handle"], "kind": "struct"},
             "6": {"path": ["lash_core", "private_mod", "Handed"], "kind": "struct"},
             "10": {"path": ["lash_core", "private_mod", "Hidden"], "kind": "struct"},
         },
@@ -107,6 +120,312 @@ class CoreSurfaceTests(unittest.TestCase):
         self.assertEqual(
             [symbol for symbol, _ in self.surface if "Unreached" in symbol], []
         )
+
+    def test_keys_every_path_by_its_canonical_identity(self):
+        # FIG-955: identity is what makes two paths one contract item.
+        self.assertEqual(
+            self.surface[("lash_core::Handle", "struct")], "lash_core::h::Handle"
+        )
+        self.assertEqual(
+            self.surface[("lash_core::Handle::handed", "function")],
+            "lash_core::h::Handle::handed",
+        )
+
+
+class ApiItemTests(unittest.TestCase):
+    def test_paths_sharing_an_identity_are_one_item(self):
+        surface = {
+            ("lash::Session", "struct"): "lash_core::session::Session",
+            ("lash::prelude::Session", "struct"): "lash_core::session::Session",
+            ("lash_core::Session", "struct"): "lash_core::session::Session",
+            ("lash::Other", "struct"): "lash_core::other::Other",
+        }
+        grouped = api_items(surface)
+        self.assertEqual(
+            grouped[("lash_core::session::Session", "struct")],
+            ["lash::Session", "lash::prelude::Session", "lash_core::Session"],
+        )
+        self.assertEqual(grouped[("lash_core::other::Other", "struct")], ["lash::Other"])
+
+    def test_primary_path_prefers_the_facade_then_the_shortest(self):
+        self.assertEqual(
+            primary_path(["lash_core::Session", "lash::sessions::Session"]),
+            "lash::sessions::Session",
+        )
+        self.assertEqual(
+            primary_path(["lash::sessions::Session", "lash::Session"]), "lash::Session"
+        )
+        self.assertEqual(
+            primary_path(["lash_core::b::Thing", "lash_core::a::Thing"]),
+            "lash_core::a::Thing",
+        )
+
+
+def row(symbol, disposition, availability="default+all-features", aliases=None):
+    entry = {
+        "symbol": symbol,
+        "kind": "function",
+        "availability": availability,
+        "area": "sessions-turns",
+        "disposition": disposition,
+    }
+    if aliases:
+        entry["aliases"] = sorted(aliases)
+    return entry
+
+
+class OneDispositionPerItemTests(unittest.TestCase):
+    """FIG-955 / audit item 4: one item carries one disposition.
+
+    The pair below is the real contradiction #251 had to reconcile by hand --
+    `AwaitEventKey::key_id` was `unused-add` through the facade and
+    `unused-remove` through `lash_core`, and the gate passed. Both dispositions
+    were individually well-formed, so nothing short of comparing them across an
+    item's paths can catch it.
+    """
+
+    ITEM = ApiItem(
+        primary="lash::AwaitEventKey::key_id",
+        kind="function",
+        availability="default+all-features",
+        paths=["lash::AwaitEventKey::key_id", "lash_core::AwaitEventKey::key_id"],
+        identity="lash_core::runtime::await_event::AwaitEventKey::key_id",
+    )
+
+    #: The alias set a correct row for `ITEM` records.
+    ALIASES = ["lash_core::AwaitEventKey::key_id"]
+
+    def errors(self, rows):
+        return item_errors({(entry["symbol"], "function"): entry for entry in rows}, [self.ITEM])
+
+    def primary(self, **kwargs):
+        return row("lash::AwaitEventKey::key_id", "unused-add", aliases=self.ALIASES, **kwargs)
+
+    def test_rejects_contradictory_dispositions_across_an_items_paths(self):
+        errors = self.errors(
+            [
+                self.primary(),
+                row("lash_core::AwaitEventKey::key_id", "unused-remove"),
+            ]
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("contradictory dispositions", errors[0])
+        self.assertIn("'unused-add'", errors[0])
+        self.assertIn("'unused-remove'", errors[0])
+
+    def test_reports_agreeing_repeats_as_undropped_aliases_not_contradictions(self):
+        errors = self.errors(
+            [
+                self.primary(),
+                row("lash_core::AwaitEventKey::key_id", "unused-add"),
+            ]
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("recorded under several of its paths", errors[0])
+        self.assertNotIn("contradictory", errors[0])
+
+    def test_accepts_one_row_at_the_primary_path(self):
+        self.assertEqual(self.errors([self.primary()]), [])
+
+    def test_rejects_a_row_recorded_only_at_an_alias_path(self):
+        # Misplacement necessarily also misstates the projection, so both rules
+        # fire; the placement error is the one that names the fix.
+        errors = self.errors([row("lash_core::AwaitEventKey::key_id", "unused-add")])
+        self.assertIn("recorded at the alias path", errors[0])
+        self.assertEqual(len(errors), 2, errors)
+
+    def test_reports_an_item_with_no_row_and_a_row_with_no_item(self):
+        errors = item_errors({("lash::Gone", "function"): row("lash::Gone", "unused-add")}, [self.ITEM])
+        self.assertEqual(len(errors), 2, errors)
+        self.assertIn("undispositioned public API: lash::AwaitEventKey::key_id", errors[0])
+        self.assertIn("no longer public: lash::Gone", errors[1])
+
+    def test_compares_availability_against_the_item_not_the_path(self):
+        errors = self.errors([self.primary(availability="all-features")])
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("availability changed", errors[0])
+
+
+class AliasExistenceGateTests(unittest.TestCase):
+    """Centralizing the verdict must not decentralize existence.
+
+    Collapsing a facade twin onto one row removes the row whose disappearance
+    used to signal that a `lash_core::` re-export had been retired -- a change
+    ADR 0051 makes breaking for direct core consumers. These are the reviewer's
+    two probes: internalize a twin's core path, and invent one. Both changed the
+    public path set while changing no disposition, and both must fail.
+    """
+
+    ITEM = ApiItem(
+        primary="lash::AwaitEventKey::key_id",
+        kind="function",
+        availability="default+all-features",
+        paths=[
+            "lash::AwaitEventKey::key_id",
+            "lash::prelude::AwaitEventKey::key_id",
+            "lash_core::AwaitEventKey::key_id",
+        ],
+        identity="lash_core::runtime::await_event::AwaitEventKey::key_id",
+    )
+
+    def errors(self, aliases):
+        entry = row("lash::AwaitEventKey::key_id", "unused-add", aliases=aliases)
+        return item_errors({("lash::AwaitEventKey::key_id", "function"): entry}, [self.ITEM])
+
+    def test_accepts_the_recorded_projection(self):
+        self.assertEqual(self.errors(self.ITEM.aliases()), [])
+
+    def test_rejects_a_recorded_path_the_compiler_no_longer_publishes(self):
+        # Internalizing a `lash_core::` re-export: the row still promises it.
+        # This is the direction ADR 0051 calls breaking, so the error says so.
+        errors = self.errors(sorted(self.ITEM.aliases() + ["lash_core::Retired::key_id"]))
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("no longer public: lash_core::Retired::key_id", errors[0])
+        self.assertIn("ADR 0051", errors[0])
+
+    def test_rejects_a_public_path_the_row_does_not_record(self):
+        # A new re-export is a new promise, and must be acknowledged.
+        errors = self.errors(["lash::prelude::AwaitEventKey::key_id"])
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("newly public: lash_core::AwaitEventKey::key_id", errors[0])
+        self.assertIn("a new path is a new promise", errors[0])
+
+    def test_rejects_dropping_a_prelude_alias(self):
+        errors = self.errors(["lash_core::AwaitEventKey::key_id"])
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("newly public: lash::prelude::AwaitEventKey::key_id", errors[0])
+
+
+class TautologicalAssertionTests(unittest.TestCase):
+    #: The two anchors the review found holding up a reversed removal verdict.
+    ANCHORS = (
+        "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:63"
+        "#assert!(std::mem::size_of::<lash::triggers::TriggerIngressResult>() > 0);",
+        "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:64"
+        "#std::mem::align_of::<lash::triggers::TriggerDeliveryRetentionCandidate>()",
+    )
+
+    def test_rejects_size_of_and_align_of_anchors(self):
+        for anchor in self.ANCHORS:
+            self.assertTrue(tautological_assertion(anchor), anchor)
+
+    def test_accepts_an_assertion_on_a_produced_outcome(self):
+        self.assertFalse(
+            tautological_assertion(
+                "examples/docs-snippets/src/architecture_providers.rs:178"
+                '#assert_eq!(capability_wire["reasoning"]["disable"]["budget"], 0);'
+            )
+        )
+
+    def test_ignores_the_location_and_reads_only_the_anchored_source(self):
+        # A path may legitimately contain the word; the anchor text may not.
+        self.assertFalse(tautological_assertion("examples/size_of/src/main.rs:1#assert!(ok);"))
+
+
+class MachineLocalPathTests(unittest.TestCase):
+    #: The exact reason FIG-955 found in the inventory, absolute path included.
+    FIGMENTS = (
+        "Concrete consumer: downstream Figments app at "
+        "/workspace/code/figments/apps/lash-runtime/src/main.rs:122 imports or uses "
+        "lash_core::InputItem directly; retain this low-level alias until that caller "
+        "migrates to the lash facade."
+    )
+
+    def test_rejects_the_absolute_paths_the_inventory_shipped_with(self):
+        self.assertEqual(
+            machine_local_path(self.FIGMENTS),
+            "/workspace/code/figments/apps/lash-runtime/src/main.rs:122",
+        )
+
+    def test_rejects_home_relative_and_windows_roots(self):
+        self.assertEqual(machine_local_path("see ~/checkouts/lash/src/lib.rs:4"), "~/checkouts/lash/src/lib.rs:4")
+        self.assertEqual(machine_local_path(r"see C:\lash\src\lib.rs"), r"C:\lash\src\lib.rs")
+
+    def test_accepts_repository_relative_evidence_and_ordinary_prose(self):
+        self.assertIsNone(
+            machine_local_path(
+                "Internal integrator seam: consumed at crates/lash-core/src/model.rs:295."
+            )
+        )
+        self.assertIsNone(machine_local_path("either/or, N/A, and a bare / separator"))
+        self.assertIsNone(machine_local_path(""))
+
+    def test_accepts_dot_slash_relative_evidence(self):
+        # `./x/y` is as verifiable as `x/y`; stripping the leading dot used to
+        # turn it into an absolute path and reject it.
+        self.assertIsNone(machine_local_path("consumed at ./examples/foo/src/main.rs:12."))
+        self.assertIsNone(machine_local_path("see ../sibling/src/lib.rs:3"))
+
+    def test_rejects_a_unc_share(self):
+        self.assertEqual(
+            machine_local_path(r"see \\build-01\share\lash\src\lib.rs"),
+            r"\\build-01\share\lash\src\lib.rs",
+        )
+
+
+class FacadeMigrationTests(unittest.TestCase):
+    """The rule is the dependency cycle, not the sentence that describes it.
+
+    A phrase regex cannot tell a promise from its negation, and the honest
+    description of this defect *is* the negation: "that caller cannot migrate to
+    the `lash` facade". Each case below pins a discrimination the regex alone got
+    wrong -- broader wordings that must still be caught, the negation that must
+    not be, and blame that must land on the crate the claim is about.
+    """
+
+    #: The exact reason FIG-955 found on forty `lash_core` entries.
+    CORE = (
+        "Concrete consumer: Lash workspace crate at "
+        "crates/lash-core/src/runtime/effect/envelope.rs:435 imports or uses "
+        "lash_core::AwaitEventKey directly; retain this low-level alias until that "
+        "caller migrates to the lash facade."
+    )
+    FACADE_DIRS = {"crates/lash-core", "crates/lash-protocol-rlm"}
+
+    def migration(self, reason):
+        return impossible_facade_migration(reason, self.FACADE_DIRS)
+
+    def test_rejects_a_migration_the_dependency_graph_forbids(self):
+        self.assertEqual(
+            self.migration(self.CORE),
+            "crates/lash-core/src/runtime/effect/envelope.rs:435",
+        )
+
+    def test_rejects_the_same_promise_in_other_words(self):
+        for wording in (
+            "until that caller moves to the lash facade.",
+            "until that caller migrates to the facade.",
+            "pending a switch to the `lash` facade.",
+            "we will port this caller to lash.",
+        ):
+            reason = self.CORE.rsplit("until that caller", 1)[0] + wording
+            self.assertIsNotNone(self.migration(reason), wording)
+
+    def test_allows_the_claim_for_a_crate_the_facade_is_not_built_on(self):
+        reason = self.CORE.replace("crates/lash-core", "crates/lash-restate")
+        self.assertIsNone(self.migration(reason))
+
+    def test_allows_stating_that_the_caller_cannot_migrate(self):
+        # Same sentence, same crate, same words -- opposite claim. The negation
+        # is the correct description of the cycle, so it must pass.
+        for denial in (
+            "so that caller cannot migrate to the `lash` facade",
+            "so that caller can never move to the lash facade",
+            "that caller is unable to migrate to the lash facade",
+        ):
+            reason = (
+                "Internal integrator seam: `lash_core::AwaitEventKey` is consumed at "
+                f"crates/lash-core/src/runtime/effect/envelope.rs:435, and {denial}."
+            )
+            self.assertIsNone(self.migration(reason), denial)
+
+    def test_blames_the_crate_the_claim_is_about_not_any_path_mentioned(self):
+        reason = (
+            "Concrete consumer: crates/lash-restate/src/lib.rs:588 uses this until that "
+            "caller migrates to the lash facade. Defined at "
+            "crates/lash-core/src/runtime/effect/envelope.rs:435."
+        )
+        self.assertIsNone(self.migration(reason))
 
 
 if __name__ == "__main__":

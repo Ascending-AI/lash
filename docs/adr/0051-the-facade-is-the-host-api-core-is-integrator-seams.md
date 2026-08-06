@@ -137,3 +137,27 @@ authoritative.
   feature is therefore a fifth seeding point for the closure alongside the four
   classes. It reaches 70 inherent members on retained root exports, 52 of them
   as the sole caller outside `lash-core`; all are retained core surface.
+- The example-coverage inventory keys one row per **API item**, not per path
+  (FIG-955), so "a `lash-core` row" now means an item with no facade projection.
+  At that keying the surface is 7,516 items, of which **826** are reachable only
+  through `lash_core`. The 3,193-row facade-seam floor above counted paths, and
+  that path count has since grown to 4,233 (FIG-863 measured 3,193; #258 added
+  949 reachability-closure rows and #244 one more). Of those paths, 3,407 name
+  items the facade already re-exports, and each was carrying a second — often
+  contradictory — disposition for the same contract. The rule is unchanged and
+  the count remains an outcome rather than a goal, but a path count and an item
+  count measure different things and must not be compared.
+- **Per-path existence stays enforced.** Retiring a `lash_core::` re-export is
+  breaking per the internalization bullet above, and item keying would have made
+  it invisible (the retired path is an alias, not a row). So each row records its
+  item's remaining public paths in `aliases`, derived from rustdoc the same way
+  `availability` and `kind` are, and any path appearing or disappearing fails
+  `scripts/check_api_example_coverage.py`. Only the *disposition* is centralized
+  on the item; the path set is not, and a wave that internalizes core paths must
+  still edit the inventory row by row.
+- No justification may park a `lash-core` (or other facade-dependency) consumer
+  behind a pending migration to the facade. The cycle this ADR names for
+  `lash-remote-protocol` holds for every crate the facade is built on. The
+  checker derives that crate set from the resolved dependency graph
+  (`cargo metadata`) and reads the claim per sentence, so stating that a caller
+  *cannot* migrate — the honest description of the cycle — is not flagged.
