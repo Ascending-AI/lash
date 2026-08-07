@@ -122,6 +122,25 @@ the failure is upstream of anything you would judge — Abort/RCA, don't score t
 UI and backend must agree; a rendered board the board endpoint contradicts, or an inbox
 card that disagrees with the inbox API, is a contract violation → Abort/RCA.
 
+## Three-layer cross-check (workbench scenarios)
+
+Self-consistency inside one layer is not evidence. For every scenario step that changes the
+conversation, reconcile all three layers before scoring it:
+
+1. **Rendered DOM** — the rows a user actually sees, counted per role.
+2. **Durable state** — the session graph's committed messages plus the app's own projection
+   surfaces (`/api/state`, the product-event log).
+3. **Logs** — the workbench trace, counted as executions (one completed turn per submitted
+   send or wake).
+
+Reconcile them **pairwise**, as counts and identities, not as a vibe: the same step must
+produce the same number of user rows, assistant rows, committed messages, projected
+messages, and turn executions across all three. **Any pairwise mismatch is a FAIL**, even
+when each layer is internally consistent — a duplicated render over a single durable
+message and a doubled durable commit under a single execution are both projection defects,
+and only the cross-check separates them. When they disagree, record which layers agreed and
+which did not; that split is the diagnosis, so never normalize it away.
+
 ## When to STOP (Abort triggers)
 
 Stop immediately on **any** of:
