@@ -1,0 +1,323 @@
+# E2E Scenario: Slack-Clone Bot — Lash as a Guest in Someone Else's Product
+
+> **Read [../RULES.md](../RULES.md) first** — especially the browser-surface, polling,
+> **don't-blind-yourself-with-the-fault-you-inject**, named-checkpoint screenshot,
+> **cross-check**, real-token, Abort/RCA, and teardown rules. This runbook adds only the
+> slack-clone scenario, and extends the cross-check to **four** layers.
+
+**Purpose.** Referee the **integration shape**, not a host's own UI. Every other browser
+runbook drives an app that *owns* its surface: the browser talks to Lash, and Lash's
+projection is the thing under test. This one is inverted, which is the shape most real
+integrations have — somebody else's product already exists, it has its own users, its own
+database and its own wire contract, and the agent is one more app in it reached only over
+HTTP. `examples/slack-clone` is the repository's canonical downstream reference for that
+shape and its only standard-mode host, so what this runbook gates is whether a Lash bot
+behaves correctly *as a guest*: it hears everything, answers only when addressed, spends
+nothing while merely listening, answers exactly once, and survives both processes dying.
+
+**Why four layers.** The other runbooks reconcile three (DOM / durable state / logs) inside
+one process. Here there are **two independent processes with two independent durable stores**,
+and the interesting failures live precisely in the seam between them — a reply the platform
+has and the bot does not think it sent, a context line the bot folded that the platform never
+delivered, a turn that ran twice because a retry crossed a restart. A three-layer check
+inside either process would pass through all of them. So:
+
+| Layer | What it is | Where |
+| --- | --- | --- |
+| **1. Rendered platform UI** | what each human actually sees, per tab | `#stream .msg` rows, `.msg.is-bot` for app rows |
+| **2. Platform durable truth** | the product's own database and its Slack-shaped API | `<data>/platform/workspace.db` (`messages`, `event_outbox`); `/api/conversations.history`, `/platform/history` |
+| **3. Bot durable truth** | the Lash session and the bot's consumer record | `<data>/bot/lash/lash-sessions/durable-core.db` (`graph_nodes`, `pending_turn_inputs`); `<data>/bot/events.db` (`handled_events`) |
+| **4. Traces** | what the bot decided, and what the runtime did | bot stdout `Disposition::…` lines; `<data>/bot/lash/trace.jsonl` |
+
+Reconcile them **pairwise**. Any mismatch is a **FAIL**, even when each layer is internally
+consistent: one rendered bot row over two committed assistant messages and two rendered rows
+over one delivered event are different defects, and only the cross-check tells them apart.
+When they disagree, record which layers agreed — that split is the diagnosis.
+
+**What can go wrong here that nothing else catches.** The example reproduces three real Slack
+behaviours on purpose, and each is a bot-side hazard rather than a platform bug:
+
+- the platform delivers a `message` event for the bot's **own** posts (carrying `bot_id`), so
+  without the app-authored guard the bot answers itself forever;
+- a message that mentions the app arrives **twice**, as `message` *and* `app_mention`, under
+  two different `event_id`s — so deduplication cannot help, and the bot must drop the twin
+  whose meaning is ambiguous;
+- delivery is genuinely at-least-once, with three retries carrying `x-slack-retry-num`.
+
+Ambient traffic is admitted as **queued turn input with no turn**
+(`session.enqueue(...).id(...)`), and only a mention drains it
+(`session.queued_turn().drain_id(...)`), with the queued-work driver deliberately switched
+off so nothing but a mention can make the bot speak. That is the property phase 2 exists to
+prove, and it is invisible to any single layer: "no reply" is not evidence of "heard and
+remembered", and "remembered" is not evidence of "cost nothing".
+
+**Real tokens.** Turns go through OpenRouter, so prose, termination style, whether the model
+reaches for a tool, and how long a turn stays in flight are all nondeterministic. No exact
+wording is an answer key. Neither is a **recovery path**: which `ReplySource` a restart
+resolves through depends on where the kill landed relative to the turn's commit, and all
+three are correct. The answer key is **counts, typed dispositions, and typed provenance**.
+
+## Scenario-specific golden rules
+
+1. **Count rows and messages; never match id shapes or prose.** A rendered row is a
+   `#stream .msg`; a bot row is `.msg.is-bot`. Correlate the bot's work to the session
+   transcript through Lash's typed `MessageOrigin::TurnInput { turn_id, input_id }`
+   provenance and through the reply's own Slack `metadata.event_payload.event_id` — never by
+   parsing `m_turn_…`, `Ev…` or `C…` strings. The example itself is careful about this; a
+   runbook that cheats undoes the lesson.
+2. **Assert the typed disposition, not the absence of a reply.** The bot reports
+   `Folded` / `Replied { source }` / `Duplicate { stage }` / `Ignored { reason }` /
+   `ReplyLost`. "Nothing appeared in the channel" is satisfied by a bot that crashed. Require
+   the disposition *and* the durable evidence behind it.
+3. **Ambient must cost nothing.** For every ambient message: a `pending_turn_inputs` row
+   exists in the bot's session store, no new `turn_completed` appears in `trace.jsonl`, and
+   the usage total is unchanged. A bot that answers ambient traffic and a bot that silently
+   drops it both fail this, in opposite directions.
+4. **A mention is exactly one reply everywhere.** One `.msg.is-bot` row per tab, one bot row
+   in `messages`, one `Replied`, one `handled_events` row at stage `replied` with a
+   `reply_ts`. Two rows carrying the same text is the classic failure and is still two rows.
+5. **Record which `ReplySource` fired; do not require one.** `Turn` (the model ran),
+   `Ledger` (recorded text reposted), `Transcript` (answer read back out of the committed
+   session graph). Phase 5 must report which one resolved it and why that is consistent with
+   where the kill landed — a runbook that demands a specific source is testing timing, not
+   correctness.
+6. **Use the ledger stage to time the fault, not a sleep.** `handled_events.stage` names the
+   exact window: `accepted` is "claimed, work not finished" (which spans the whole model
+   turn), `reply_pending` is "answer known, post owed". Poll for the stage you want, then
+   inject.
+7. **Observe the fault window from inside the page.** Per [../RULES.md](../RULES.md), a
+   driver sitting in a `kill`/restart command cannot poll. Install a `MutationObserver` in
+   each tab that appends every added row to an array with a timestamp, and read it afterwards:
+   that is what turns "no duplicate appeared" into evidence rather than an absence of
+   observation. Launch the restart non-blocking and poll `/healthz`.
+8. **Two humans means two browser contexts.** Identity is per-context (`localStorage`
+   `slack-clone-name` plus `POST /platform/identify`). One context with two tabs is one
+   human and does not exercise the fan-out.
+
+## Working material
+
+- Require `OPENROUTER_API_KEY` (environment or repo `.env`; the platform needs no key).
+  Boot both processes on a dedicated port with all state outside the repo:
+  `SLACK_CLONE_STATE_DIR=<scratch> SLACK_CLONE_OPEN=0 bash scripts/slack-clone-dev.sh up --port <p>`.
+  The **bot port is `<p> + 1`**, and state lands under
+  `<scratch>/<host>_<p>/{platform,bot}` with logs in `<scratch>/run/`. Gate both
+  `GET /healthz` endpoints. Teardown on success or Abort:
+  `bash scripts/slack-clone-dev.sh down --port <p>`.
+- UI affordances: the name picker (`#namePicker` / `#nameInput`), the channel list
+  (`#channels`), the current channel (`#channelName`, `#channelId`), the rendered mention
+  token (`#botMention`), the composer (`#composer`, `#text`, `#send`), and the message stream
+  (`#stream`). The client dedupes rendered rows by `message.ts`, so a duplicate **post** —
+  which gets a fresh `ts` — renders as a second row and cannot hide.
+- Platform HTTP truth: `GET /platform/bootstrap` (identity, channels, users),
+  `POST /platform/identify`, `POST /platform/messages`, `GET /platform/history?channel=<C…>`,
+  and the Slack-shaped `POST /api/conversations.history` (bearer bot token, form-encoded,
+  `include_all_metadata=true` to read reply metadata).
+- Bot HTTP truth: `GET /healthz` (resolved identity), `POST /slack/events` (the Events API
+  request URL, used directly for the redelivery phase).
+- Store queries. Platform:
+  `SELECT ts, author_user_id, bot_id, subtype, text, metadata_json FROM messages WHERE channel_id = ? ORDER BY ts`
+  and the outbox's `delivered_at` / `attempts` / `abandoned_at`. Bot ledger:
+  `SELECT event_id, kind, stage, reply_ts, deliveries, input_text FROM handled_events`. Bot
+  session graph: `graph_nodes` filtered to `session_id = 'channel:<C…>' AND tombstoned = 0`,
+  reading `node_json` for `kind = 'event'` nodes whose `event.Conversation` names a role and,
+  for admitted inputs, an `origin` of `{"kind":"turn_input", …}`.
+- Trace truth: `trace.jsonl` records with `context.session_id = 'channel:<C…>'`; count
+  `type = "turn_completed"` for executions and look for `tool_call_started` /
+  `tool_call_completed` for the tool loop.
+- **Normalize `ts` before comparing layers.** The platform *stores* `ts` as an integer of
+  epoch **microseconds** (`messages.ts`, per that table's own comment) and *renders* Slack's
+  `<secs>.<micros>` string on the wire; the bot's `handled_events.reply_ts` and the rendered
+  row both carry the string form. Comparing the raw column against either of the others fails
+  on encoding while the layers agree on the instant — a false FAIL that looks exactly like a
+  correlation defect. Convert with `micros // 1_000_000` and `% 1_000_000` zero-padded to six
+  digits, and compare in the wire form. The same applies to role and stage vocabularies: the
+  session graph writes `User`/`Assistant`, the ledger writes lowercase stage names.
+- The bot's session id is `channel:<C…>` — **constructed** from the channel id, never parsed.
+
+Save every named artifact, both tabs' screenshots, and all four layer extracts per phase.
+
+## Phase 0 — Boot, identify two humans, and pin the empty baseline
+
+Boot, gate both `/healthz`, and record the bot's `bot_user_id`, `bot_id` and `team_id`. Open
+two browser contexts, name them (e.g. `ada` and `brix`), and require in **both**: the
+rendered identity, `#general` selected with the same `#channelId`, the same `#botMention`
+token as the bot's own `bot_user_id`, and an empty stream. `GET /platform/bootstrap` must list
+both humans plus the bot. All four layers start empty for this channel: no `messages` rows, no
+`handled_events` rows, no session graph, no `turn_completed`. Screenshot `00-both-tabs.png`.
+
+## Phase 1 — The bot is present but silent
+
+Before any traffic, require that merely booting produced no chat: zero `.msg` rows in both
+tabs and zero rows in `messages` for the channel. A bot that greets the room on boot fails
+this. Screenshot folded into `00-both-tabs.png` is sufficient.
+
+## Phase 2 — Human A posts ambient facts: heard, remembered, free
+
+As **A**, post two ambient lines through the composer, each carrying a unique literal marker
+(e.g. `FIG999-AMBIENT-ONE-<run-id>`). Neither mentions the bot. Record the usage/trace
+baseline first.
+
+Gate, in order, and require **all** of:
+
+- **Layer 1:** each line renders exactly once in **both** tabs (A's own and B's, via the live
+  stream), and **no** `.msg.is-bot` row appears.
+- **Layer 2:** two `messages` rows, both with `author_user_id` set and `bot_id` NULL; the
+  `event_outbox` rows for them reach `delivered_at IS NOT NULL`.
+- **Layer 3:** the bot's `handled_events` has one row per delivered event at stage `folded`,
+  and the bot's session store holds a `pending_turn_inputs` row per ambient line — the context
+  is durably queued, undrained.
+- **Layer 4:** one `Folded` disposition per ambient event, and **zero** new `turn_completed`
+  records for the channel session.
+
+The twin rule already applies: an ambient `message` produces exactly one event, so
+`handled_events` must not contain an `app_mention` row yet. Screenshot `02-ambient-both-tabs.png`.
+
+**This phase fails if the bot replies, and equally if nothing reaches layer 3.** Silence with
+an empty queue is a bot that is not listening.
+
+## Phase 3 — Human B mentions the bot: one reply, folding the ambient context, through a tool
+
+As **B**, post one message that mentions the bot (using the rendered `#botMention` token) and
+that requires *both* the ambient context and a workspace lookup — e.g.
+`<@U…> what did ada say about <marker>, and which channels exist in this workspace?`
+
+Gate the mention's `app_mention` event through to a settled reply, then require:
+
+- **Layer 1:** exactly **one** new `.msg.is-bot` row, identical in both tabs, and the
+  user-row count increased by exactly one. Not two bot rows.
+- **Layer 2:** exactly one new `messages` row with `bot_id` set and `subtype = 'bot_message'`,
+  and its `metadata_json` carries the originating `event_id`. Confirm the same through
+  `conversations.history` with `include_all_metadata=true` — the wire, not just the table.
+- **Layer 3:** `handled_events` shows the `app_mention` row at `replied` with a `reply_ts`
+  equal to the bot row's `ts`, **and** the `message` twin at `ignored` with reason
+  `superseded_by_app_mention`. In the session graph, the drained turn's committed messages
+  include the ambient markers, each carrying `MessageOrigin::TurnInput` — this is the proof
+  the fold happened, and it must be read from provenance, not from the reply's prose.
+- **Layer 4:** exactly **one** new `turn_completed`; `Replied { source: Turn }`; a
+  `tool_call_started` / `tool_call_completed` pair for `list_channels` or `channel_history`;
+  and a usage total that increased.
+
+The reply's *wording* is not gated. That it names A's fact and a real channel is judged
+behaviour; that exactly one turn ran and folded the queued input is the objective gate.
+Screenshot `03-mention-both-tabs.png`.
+
+## Phase 4 — Redelivery: the same event again changes nothing
+
+Re-POST the **same** `app_mention` envelope to the bot's `/slack/events` with
+`x-slack-retry-num: 1` and an `x-slack-retry-reason`, exactly as the platform's retry does.
+Require: disposition `Duplicate` at stage `replied`; `handled_events.deliveries` incremented
+(the retry left evidence) with the stage and `reply_ts` unchanged; **no** new `turn_completed`;
+and the bot-row count still one in every layer and both tabs. Screenshot
+`04-after-redelivery-both-tabs.png`.
+
+## Phase 5 — Kill the bot mid-mention; recovery answers it (the crown)
+
+Arm the in-page row recorders. As **A**, post a second mention. Poll the bot's
+`handled_events` until that event's row is at stage `accepted` — the window that spans the
+whole model turn — then **`kill -9` the bot process** (non-blocking; its pid is in
+`<scratch>/run/bot-<host>_<p>.pid`).
+
+While the bot is down, require from the page and the platform — never from inside the killing
+shell — that no bot row exists for this mention and the platform is still serving. Screenshot
+`05-bot-down-both-tabs.png`.
+
+Restart the bot (`bash scripts/slack-clone-dev.sh up --port <p>` is idempotent and restarts
+the missing process; launch it non-blocking) and poll the bot's `/healthz`. Boot recovery
+walks the unfinished ledger rows. Require:
+
+- the disposition for that event is `Replied` — **record which `source`** resolved it (`Turn`
+  if the queued input was still undrained, `Transcript` if the pre-kill turn had committed,
+  `Ledger` if the text had been recorded) and state why that is consistent with the kill
+  point;
+- **exactly one** bot row for this mention in both tabs, in `messages`, and in the in-page
+  recorder's full history — no duplicate at any instant, which is the recorder's whole purpose;
+- `handled_events` for it at `replied` with a `reply_ts` matching that row;
+- the reply's `metadata` carries this event's id;
+- the channel's total `turn_completed` count is consistent with the number of turns that
+  actually ran (one if recovery re-ran it, unchanged if recovery read it back) — reconcile
+  against the reported `source` rather than assuming.
+
+`ReplyLost` here is a **FAIL**: the ledger stages exist precisely so the accepted window is
+resumable. Screenshot `05-recovered-both-tabs.png`.
+
+**The `accepted` window has two halves, and they fail differently — capture which one you hit.**
+Alongside the ledger row, extract the mention's `pending_turn_inputs` row from the bot's
+session store and record `state` *and* `claim_owner_incarnation_id`:
+
+- killed **before** the drain claimed the input → the row is unclaimed and still pending, the
+  restarted bot's drain finds it, and the correct outcome is `Replied { source: Turn }`;
+- killed **after** the drain claimed it but **before** the turn committed → the row is still
+  `deferred_next_turn` yet carries a `claim_id` owned by the **dead boot's**
+  incarnation, and there are **no** graph nodes for that turn.
+
+In the second half, a `queued_turn().run()` that returns nothing does **not** mean "a previous
+process already answered this" — nothing was committed — so a `ReplyLost` there is a stranded
+claim, not the documented residual. Distinguishing them is the whole point of reading the
+claim owner: `reply_lost_after_commit` is only an honest label when the transcript actually
+holds a committed turn. Report the incarnation ids and the graph-node count for the turn.
+
+## Phase 6 — Platform restart: the durable outbox converges
+
+Prove the outbox survives its own process. Stop the **bot** so a delivery must fail, then as
+**A** post one ambient line with a fresh marker. Poll the platform's `event_outbox` until that
+event's row shows `attempts >= 1` and `delivered_at IS NULL` — a real undelivered, retrying
+row. Now restart the **platform** (non-blocking; poll `/healthz`), and require the row is
+still there, undelivered, after the restart: that is the durability claim.
+
+Bring the bot back and require convergence: the row reaches `delivered_at IS NOT NULL`, the
+bot records exactly one `folded` row for it, a `pending_turn_inputs` row appears, **no** bot
+reply is produced, and no `turn_completed` is added. Screenshot `06-outbox-converged-both-tabs.png`.
+
+## Phase 7 — Reload both tabs: identical row multisets
+
+Record each tab's row multiset (bot-or-human class plus body text). Reload both contexts, then
+**re-select the scenario's channel and re-gate the rendered `#channelId`**: a reload
+re-identifies from `localStorage` and then selects `channels[0]`, which is not necessarily the
+channel under test, so a driver that compares straight after reload compares against a
+different room and reads as catastrophic row loss. Wait for backfill from `/platform/history`,
+and require: each tab's post-reload multiset equals its
+own pre-reload multiset; **and** the two tabs equal each other; and both equal the `messages`
+table's ordered projection for the channel. The live stream and the history backfill are two
+independent renderings of one conversation, and a row present in only one localizes the defect.
+Screenshot `07-reloaded-both-tabs.png`.
+
+**Normalize mentions before comparing rendered text to stored text.** The client renders
+`<@U…>` as an `@display-name` chip, so a rendered body is deliberately not byte-equal to the
+stored text; resolve the token through the `users` map from `/platform/bootstrap` and compare
+the normalized forms. Comparing raw-to-rendered reads as a total row mismatch — and falling
+back to counting a marker's occurrences is not a substitute, because a marker legitimately
+appears three times: in the ambient line, in the mention that quotes it, and in the reply that
+answers it. Exact normalized multiset equality is both stronger and correct.
+
+## Phase 8 — Teardown and score
+
+Run `bash scripts/slack-clone-dev.sh down --port <p>` and confirm both processes are gone.
+
+| Item | Objective gate | Verdict | Evidence |
+|------|----------------|---------|----------|
+| Boot/identity | both `/healthz`; two humans + bot in bootstrap; `#botMention` equals the bot's `bot_user_id`; all layers empty | | `00-both-tabs.png` |
+| Silent on boot | zero `.msg` rows and zero `messages` rows before traffic | | `00-both-tabs.png` |
+| Ambient heard | each line once in both tabs; outbox delivered; one `folded` per event | | `02-ambient-both-tabs.png` |
+| Ambient remembered | a `pending_turn_inputs` row per ambient line in the bot's session store | | layer-3 extract |
+| Ambient free | zero new `turn_completed`; usage unchanged | | layer-4 extract |
+| One mention, one reply | one `.msg.is-bot` row per tab = one `messages` bot row = one `Replied` | | `03-mention-both-tabs.png` |
+| Reply is attributable | reply `metadata` carries the `event_id`, on the wire and in the table | | layer-2 extract |
+| Fold is provable | ambient markers committed in the drained turn with `TurnInput` provenance | | layer-3 extract |
+| Twin dropped | the `message` twin `ignored` as `superseded_by_app_mention` | | layer-3 extract |
+| Tool loop ran | `tool_call_started`/`completed` pair; exactly one `turn_completed` | | layer-4 extract |
+| Redelivery inert | `Duplicate` at `replied`; `deliveries` incremented; counts unchanged | | `04-after-redelivery-both-tabs.png` |
+| Mid-turn kill recovered | `Replied` (source recorded); exactly one reply in all four layers and in the in-page history | | `05-bot-down-*.png`, `05-recovered-*.png` |
+| Outbox durable | an undelivered retrying row survives a platform restart, then converges once | | `06-outbox-converged-both-tabs.png` |
+| Reload identity | each tab's multiset unchanged, equal to the other tab's and to `messages` | | `07-reloaded-both-tabs.png` |
+| Four-layer cross-check | every phase reconciles UI / platform / bot / trace pairwise | | all per-phase extracts |
+
+**Aggregate:** did a Lash bot living as a guest in someone else's product hear everything two
+humans said, stay silent and free until addressed, answer a mention exactly once with the
+room's context and a real tool call, ignore a redelivery, answer a mention it was killed in
+the middle of, survive the platform restarting under it, and render one identical conversation
+to both humans — with the platform's database, the bot's Lash stores, and the runtime trace
+agreeing on every count?
+
+---
+
+_Stop triggers and the Abort/RCA + reporting protocol are in [../RULES.md](../RULES.md)._
