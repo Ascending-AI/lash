@@ -804,3 +804,57 @@ test("turn A Done does not retract turn B provisional prose", () => {
     [{ turnId: "turn-b", text: "turn B provisional text" }],
   );
 });
+
+/* FIG-1000: a turn that failed committed nothing its optimistic rows can stand
+   for, and the server has already retired them from the product lane. A tab that
+   still renders them has exactly one way to drop a rendered row — re-deriving
+   from the authoritative snapshot — so the `failed` outcome must reach
+   `recoverFromState`, and a completed turn must not pay for that re-derivation. */
+function doneReducerContext(outcome) {
+  const recoveries = [];
+  const reducerContext = {
+    Set,
+    projectionState: createWorkbenchProjectionState(),
+    renderedProductEvents: new Set(),
+    assistantDraft: null,
+    assistantDraftTurnId: null,
+    assistantDraftText: "",
+    assistantDraftChunks: [],
+    pendingTools: [],
+    appendTool() {},
+    reasoningChunks: [],
+    pendingCodeBlock: null,
+    reasoning: null,
+    renderMessage() {},
+    renderIngressReceipt() {},
+    setBusy() {},
+    refreshUsage() {},
+    recoverFromState(message) {
+      recoveries.push(message);
+    },
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_TRANSIENT_SETTLEMENT", "WORKBENCH_TRANSIENT_SETTLEMENT")}
+     ${markedSource("WORKBENCH_PRODUCT_EVENT_REDUCER", "WORKBENCH_PRODUCT_EVENT_REDUCER")}
+     applyProductEvent({
+       event_id: "refused-turn-done",
+       sequence: 1,
+       type: "done",
+       turn_id: "refused-turn",
+       outcome: ${JSON.stringify(outcome)}
+     });`,
+    reducerContext,
+  );
+  return recoveries;
+}
+
+test("a failed turn's Done re-derives the transcript from durable truth", () => {
+  const recoveries = doneReducerContext("failed");
+  assert.equal(recoveries.length, 1);
+  assert.match(recoveries[0], /turn failed/);
+});
+
+test("a completed turn's Done re-derives nothing", () => {
+  assert.deepEqual(doneReducerContext("completed"), []);
+  assert.deepEqual(doneReducerContext(undefined), []);
+});

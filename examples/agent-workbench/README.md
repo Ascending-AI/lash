@@ -215,6 +215,28 @@ top of it. A turn that finishes with a terminal value — `finish`, which
 message, so the workbench commits the reply it renders. Either way a completed
 turn leaves exactly one committed assistant copy.
 
+### One turn at a time, admitted honestly
+
+A session runs one turn at a time — the session execution lease and the
+commit-CAS fence enforce that durably — so `POST /api/turn` cannot start a turn
+on a session that already has one running. It admits the send as the next turn's
+input instead and says so: `{"accepted":true,"queued":true,"queued_input":{…}}`
+carries the same `TurnInputReceipt` `/api/turn/input` returns, and the same
+`turn_input` product event reaches every viewer, so a second client's message is
+held durably, rendered as a queued receipt, and answered by the queued-work drain
+as its own turn. No optimistic user row is published for it: the receipt is the
+row, and the drained turn's committed message reconciles against it through
+`turn_input_applied`.
+
+That check is advisory, exactly like the one behind `inject now`. Two sends can
+both read an idle session and race, and the lease and CAS — not the handler —
+decide who commits. So the losing side has to be visible rather than silent: the
+turn that fails retires the rows the workbench published for it, renders one
+failure row, and publishes `done` with `outcome: "failed"`. A viewer that already
+rendered those rows re-derives from `/api/state` on that outcome, which is the
+only way a rendered row is removed, so no viewer keeps a conversation row whose
+commit was refused.
+
 `turn_input_applied` is the only application signal. The live path consumes
 its typed application objects; snapshot recovery uses
 `remote_turn_input_applications()`. The host does not inspect

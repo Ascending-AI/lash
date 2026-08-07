@@ -103,11 +103,12 @@ Discovering this is part of the run. What follows was derived from
 [`index.html`](../../examples/agent-workbench/assets/index.html) **and confirmed by
 execution**, including the stack that writes the flag. Re-derive it if the client changes.
 
-`busy` is one client-local boolean per tab (`let busy = false`). Four things write it:
+`busy` is one client-local boolean per tab (`let busy = false`). Five things write it:
 
 | writer | trigger | reaches | observed |
 |---|---|---|---|
 | `postCommand` → `setBusy(true, "starting turn")` | this tab POSTs `/api/turn` / `/api/reset` | **only this tab** (optimistic) | yes |
+| composer submit → `setBusy(true, "queued next · waiting for the running turn")` | `/api/turn` answered `queued: true`, so this send is the next turn's input (FIG-1000) | **only this tab** (the queued receipt itself fans out) | Phase 6 |
 | `applyStateSnapshot` → `setBusy(true, "turn running · restored")` | any authoritative `/api/state` read that sees `active_turns` non-empty | **every tab that performs one** | yes — the only cross-tab start path |
 | `applyProductEvent` `done` → `setBusy(false, "ready")` | the turn's `done` product event on `/api/events` | **every attached tab** | yes |
 | `renderQueuedWorkStarted` → `setBusy(true, "agent running")` | `queued_work_started` turn activity on `/api/observations` | every attached tab, in principle | **never fired** — see Phase 3d |
@@ -158,14 +159,18 @@ Two consequences that matter more than the pill:
   tab is continuously re-backfilled from durable truth, so it is structurally incapable of
   accumulating live-path drift. It is also a cost that scales with transcript size, not a
   free win — every turn start re-derives the whole conversation in every watching tab.
-- **`POST /api/turn` has no server-side concurrency guard.** `send_turn` tracks the turn
-  and submits it; it never rejects on non-empty `active_turns`. Compare `/api/turn/input`
-  with `active_turn` ingress ("inject now requires exactly one running turn") and
-  `run_queued_work_batch` ("queued work cannot be run while this session has an active
-  turn"), which both return conflicts. The only thing stopping a second viewer from
-  starting a concurrent turn on one session is the **client-local** `busy` flag —
-  `postCommand`'s early return and `sendButton.disabled` — which a watching tab arms only
-  once its recovery lands. Phase 6 probes this deliberately and reports it as a finding.
+- **`POST /api/turn` admits a send against a busy session, it does not start one**
+  (FIG-1000). `send_turn` reads `active_turns` and, when the session already has a running
+  turn, enqueues the send as a `next_turn` input and answers `queued: true` with the same
+  receipt `/api/turn/input` returns — the same admission shape as `inject now` ("inject now
+  requires exactly one running turn") and `run_queued_work_batch` ("queued work cannot be
+  run while this session has an active turn"), which both refuse rather than lie. So the
+  **client-local** `busy` flag — `postCommand`'s early return and `sendButton.disabled` —
+  is no longer the only thing standing between a second viewer and a doomed concurrent
+  turn; it is now just the local affordance. The server check is advisory (two sends can
+  race past it), so the fence-refused path has to be visible too: a failed turn retires the
+  rows the workbench published for it and publishes `done` with `outcome: "failed"`.
+  Phase 6 gates both halves.
 
 **What downstream multi-viewer hosts should expect.** Transcript convergence is strong and
 needs no host work: every viewer is re-backfilled from committed truth at each turn start,
@@ -175,10 +180,12 @@ guarantees. Running state also reaches every viewer, fast (0.26 s measured), but
 label literally says `restored`, it costs a full transcript re-derivation in every viewer
 on every turn start, and it is the *only* path — a trigger press has no direct start
 signal either, not even in the tab that pressed. A host that wants a first-class
-turn-started fan-out must publish one itself. And a host that must prevent two viewers
-from starting concurrent turns on one session **must add its own admission control**:
-`/api/turn` accepts the second submission, the durable fence then refuses the conflicting
-commit, and the user-visible result is a lost answer with no error (Phase 6).
+turn-started fan-out must publish one itself. Concurrent submission, by contrast, needs no
+host invention: `/api/turn` holds a second viewer's send as the next turn's input and says
+so, and a turn the durable fence refuses anyway surfaces as a failure row whose optimistic
+rows retire in every viewer (Phase 6). What a host does have to copy is the *shape*: an
+advisory admission check plus an honest failure path, because the lease and the CAS — never
+the handler — decide who commits.
 
 ## Working material
 
@@ -399,53 +406,54 @@ appearing **only** before it localizes to the live path; either is as much a fai
 one in both. Screenshot `05-converged-both.png`; save `05-multiset-a-{before,after}.json`,
 `05-multiset-b-{before,after}.json`, `05-b-after-reload.json`.
 
-## Phase 6 — Concurrent-submission probe
+## Phase 6 — Concurrent-submission admission gate
 
-Run this **last**: it deliberately starts overlapping turns on one session, so its side
-effects must not contaminate the convergence phases.
+Run this **last**: it deliberately submits a second turn against a session that already
+has one, so its side effects must not contaminate the convergence phases.
 
 Start a long turn from A. While `active_turns` is non-empty, submit a second `POST
 /api/turn` for the same session from B. B's own composer is disabled by then (Phase 3b),
 so this is an **API-level probe of layer 2**, and the runbook says so plainly rather than
-pretending it is a browser gesture: the point is to characterise the server contract the
-browser guard is standing in for. Record the status, the body, and `active_turns` before
-and after.
+pretending it is a browser gesture: the point is to gate the server contract the browser
+guard stands in for. Record the status, the body, and `active_turns` before and after.
 
-**What this runbook's execution found, reproduced 2/2 on fresh sessions.** The submission
-is accepted — `200 {"accepted":true}` — and then **both** turns are lost:
+**This is a hard gate, not a characterisation.** FIG-1000 fixed the contract: a session
+runs one turn at a time, the lease and the commit CAS enforce that durably, and `/api/turn`
+now reports what it actually did with the send instead of accepting a doomed second turn.
+Require all of:
 
-- only **one** `turn_completed` is recorded for two submitted turns;
-- **no assistant reply is committed at all** (durable `0` assistant messages for the
-  pair), even though the trace holds the in-flight turn's complete generated answer in its
-  `protocol_step` / `RlmTrajectoryEntry` records;
-- the in-flight turn never terminalizes: no `turn_completed`, no `done` product event;
-- the concurrent turn's **optimistic user row is broadcast as a product event to every
-  attached tab** and stays rendered although its user message was never committed, so
-  **every** viewer shows exactly **one phantom conversation row** that durable truth does
-  not have (DOM `(2,0)` vs durable `(1,0)`);
-- both tabs' pills nevertheless return to **`idle`** with no error row — the UI reports a
-  settled, idle session whose last two turns silently produced nothing.
+- the response is `200` with `queued: true` and a `queued_input` receipt whose `ingress` is
+  `next_turn` and whose `text` is B's marker — an `{"accepted":true}` body with no `queued`
+  field, or `queued: false`, is a **FAIL** (the old, lying contract);
+- `active_turns` still holds exactly **one** turn — the queued send must not register a
+  second one — and no second turn workflow is submitted;
+- `/api/state.pending_turn_inputs` carries B's marker as a `deferred_next_turn` input, and
+  **no** user row for it appears in either tab: the queued send renders as an
+  `.ingress-receipt` (`queued next`), never as an optimistic `.message.user`;
+- after A's turn settles, the queued input is drained as **exactly one** further turn whose
+  committed user message carries B's marker and which produces **exactly one** assistant
+  row, in **both** tabs — the same shape Phase 4 gates for `queue next`. A queued input
+  that never runs is a lost-input **FAIL**, as is a second drained turn.
 
-The server log names the cause, and it is the durable fence doing its job: `session
-execution lease for session ... is busy` and `store head revision conflict: expected 20,
-actual 21`. Nothing durable was corrupted — the CAS-on-commit fence correctly refused the
-conflicting write. The defect is therefore **not** durability; it is (a) the missing
-admission guard that lets a second viewer create the collision at all, and (b) the browser
-surface's failure to represent a failed turn — a phantom row, a dropped reply, and a false
-`idle` instead of an error.
+The pair of turns must never both be lost, and no tab may end on a phantom row: the DOM
+multiset must equal durable truth exactly, with no row the graph does not have.
 
-Record this as a **characterisation plus a finding**, with the consequence spelled out: a
-multi-viewer host must add its own per-session turn admission control, because the
-sub-second client-guard window is the only protection and losing the race costs the user
-their answer with no visible error.
+**The losing-race path is part of this gate.** The admission check is advisory — two sends
+can both read an idle session, and the lease and CAS remain the authority — so if a turn is
+refused by the fence anyway (server log `session execution lease for session ... is busy`
+or `store head revision conflict: expected N, actual N+1`), require that the refusal is
+*visible*: the failed turn publishes a `turn:<id>:failed` product row with the fixed public
+copy `turn could not be completed`, its `done` event carries `outcome: "failed"`, and every
+tab drops the refused turn's optimistic user row (the server retires it from the product
+lane and the `failed` outcome makes each tab re-derive from `/api/state`). A refused turn
+that leaves a rendered row durable truth does not have, or that returns both pills to
+`idle` with nothing said, is a **FAIL** — that was the FIG-993 defect this phase now gates.
 
-Then gate what actually matters: after everything settles, require **both tabs still
-converge** — multisets equal, and each tab's per-role counts reconciled against the shared
-API and graph counts, with any excess rows named as phantoms and attributed. Tab-vs-tab
-**divergence** here is a genuine FAIL: overlapping turns must not fork the two clients'
-transcripts, and in this execution they did not (both tabs agreed exactly, including on
-the phantom row). Screenshot `06-concurrent-both.png`; save `06-concurrent-submit.json`,
-`06-truth.json`, `06-dom-vs-dom.json`.
+Then gate what this scenario exists for: after everything settles, require **both tabs
+still converge** — multisets equal, and each tab's per-role counts reconciled against the
+shared API and graph counts. Tab-vs-tab **divergence** is a genuine FAIL: an overlapping
+submission must not fork the two clients' transcripts. Screenshot `06-concurrent-both.png`;
+save `06-concurrent-submit.json`, `06-truth.json`, `06-dom-vs-dom.json`.
 
 ## Phase 7 — Teardown and score
 
@@ -468,8 +476,10 @@ port-derived Restate container are gone.
 | Wake start uses the same path | both pills `running`; over the whole wake turn neither tab records `agent running`, both record only `turn running · restored` | | `03d-wake.json`, `03d-wake-both.png` |
 | Cross-tab queue-next | B's queued marker runs in exactly one drained turn and renders in both tabs | | `04-*.json`, `04-after-queued-both.png` |
 | Reload convergence | post-reload B multiset equals A's; pre-reload rows all survive; A unaffected | | `05-multiset-*.json`, `05-converged-both.png` |
-| Concurrent submission | characterised: `/api/turn` accepts it, one `turn_completed` for two turns, no reply committed, one phantom row in **every** tab, both pills `idle` | | `06-concurrent-submit.json`, `06-truth.json` |
-| Concurrent submission: no fork | despite the loss, the two tabs still agree exactly (phantom row included) | | `06-dom-vs-dom.json`, `06-concurrent-both.png` |
+| Concurrent submission queued | `/api/turn` answers `queued: true` with a `next_turn` receipt; `active_turns` stays at 1; no second workflow; B's marker pending as `deferred_next_turn`; no optimistic user row for it in either tab | | `06-concurrent-submit.json`, `06-truth.json` |
+| Queued send answered | the queued marker runs as exactly one drained turn: 1 committed user row + 1 assistant row, in **both** tabs; nothing lost | | `06-truth.json`, `06-concurrent-both.png` |
+| Refused turn is visible | any fence-refused turn renders `turn could not be completed`, its `done` carries `outcome: "failed"`, and its optimistic row is gone from **every** tab | | `06-concurrent-submit.json`, `06-dom-vs-dom.json` |
+| Concurrent submission: no fork | the two tabs agree exactly, and neither holds a row durable truth lacks | | `06-dom-vs-dom.json`, `06-concurrent-both.png` |
 | Three-layer cross-check | every conversation-changing step reconciles each tab's DOM vs the shared durable state vs the trace, pairwise | | all `*-truth.json` |
 | Divergence attribution | on any mismatch, both tabs' rows, the shared durable counts, and the dissenting tab are recorded | | `*-dom-vs-dom.json` |
 

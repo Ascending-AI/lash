@@ -3223,7 +3223,15 @@
           setBusy(false, "ready");
           return false;
         }
-        return true;
+        /* The body is the command's outcome, not decoration: /api/turn reports
+           whether the send started a turn or was queued behind a running one
+           (FIG-1000). A command whose body is not JSON still counts as
+           accepted — its acceptance is the status, and it has nothing to say. */
+        try {
+          return (await response.json()) || {};
+        } catch (_) {
+          return {};
+        }
       } catch (error) {
         if (error.name === "AbortError") {
           if (!resetInFlight) renderNote("turn stopped");
@@ -3378,6 +3386,14 @@
         finishTransientRows(event.turn_id);
         setBusy(false, "ready");
         refreshUsage();
+        /* A turn that failed committed nothing its optimistic rows can stand
+           for, and the server has already retired them from the lane
+           (FIG-1000). This tab may still be rendering them, and rows are only
+           removed by re-deriving from the authoritative snapshot — which also
+           restores the pill if another turn is still running. */
+        if (event.outcome === "failed") {
+          recoverFromState("a turn failed; reload to restore the conversation");
+        }
       }
     }
     // END WORKBENCH_PRODUCT_EVENT_REDUCER
@@ -3609,6 +3625,15 @@
         attachment_id: attachment?.id || null,
         ...selectedModelPayload()
       });
+      /* The session already had a turn running, so this send is the next turn's
+         input rather than a second concurrent turn (FIG-1000). It renders as the
+         same ingress receipt `queue next` produces — the row the drained turn's
+         committed message later reconciles against — and the pill keeps saying
+         running, because one is. */
+      if (accepted?.queued) {
+        if (accepted.queued_input) renderIngressReceipt(accepted.queued_input);
+        setBusy(true, "queued next · waiting for the running turn");
+      }
       if (accepted && selectedAttachment?.id === attachment?.id) clearAttachment();
     });
 

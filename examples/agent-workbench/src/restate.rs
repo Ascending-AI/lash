@@ -1254,13 +1254,7 @@ fn record_turn_failure(
             "error": message,
         }),
     );
-    state.push_message_with_id_for_session(
-        session_id,
-        format!("turn:{turn_id}:failed"),
-        "event",
-        crate::PUBLIC_TURN_FAILURE_MESSAGE,
-    );
-    state.publish_turn_done(session_id, turn_id);
+    state.publish_turn_failed(session_id, turn_id);
 }
 
 async fn sync_cron_jobs_with_context(

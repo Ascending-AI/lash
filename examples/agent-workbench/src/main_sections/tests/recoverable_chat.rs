@@ -776,7 +776,13 @@ fn session_event_registry_isolates_channels_and_recreates_after_removal() {
     let mut session_a = registry.subscribe("session-a");
     let mut session_b = registry.subscribe("session-b");
 
-    registry.publish("session-a", StreamItem::Done { turn_id: None });
+    registry.publish(
+        "session-a",
+        StreamItem::Done {
+            turn_id: None,
+            outcome: TurnDoneOutcome::Completed,
+        },
+    );
     assert!(matches!(
         session_a.try_recv(),
         Ok(ProductEvent {
@@ -792,7 +798,13 @@ fn session_event_registry_isolates_channels_and_recreates_after_removal() {
     registry.remove("session-a");
     assert!(!registry.contains("session-a"));
     let mut replacement_a = registry.subscribe("session-a");
-    registry.publish("session-a", StreamItem::Done { turn_id: None });
+    registry.publish(
+        "session-a",
+        StreamItem::Done {
+            turn_id: None,
+            outcome: TurnDoneOutcome::Completed,
+        },
+    );
     assert!(matches!(
         replacement_a.try_recv(),
         Ok(ProductEvent {
@@ -828,6 +840,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
         "turn-done",
         StreamItem::Done {
             turn_id: Some("reconciled-turn".to_string()),
+            outcome: TurnDoneOutcome::Completed,
         },
     );
 
@@ -845,6 +858,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
             "turn-done",
             StreamItem::Done {
                 turn_id: Some("reconciled-turn".to_string()),
+                outcome: TurnDoneOutcome::Completed,
             },
         ),
         "compaction must retain event identity for idempotent workflow replay"
@@ -1287,7 +1301,8 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
             ) && !matches!(
                 &event.item,
                 StreamItem::Done {
-                    turn_id: Some(done_turn_id)
+                    turn_id: Some(done_turn_id),
+                    ..
                 } if done_turn_id == &turn_id
             )
         }),
