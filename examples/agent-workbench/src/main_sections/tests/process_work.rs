@@ -854,4 +854,206 @@ mod process_work_tests {
             2
         );
     }
+
+    #[test]
+    fn session_delete_reclaims_the_deleted_sessions_terminal_work() {
+        run_async_test_on_stack_budget("workbench-session-delete-retention-test", || {
+            session_delete_reclaims_the_deleted_sessions_terminal_work_inner()
+        });
+    }
+
+    /// The work rail reads the runtime-wide process registry, and deleting a
+    /// session deliberately detaches rather than deletes the globally-owned rows
+    /// it originated. Without the retention half of the delete, every reset left
+    /// the dead session's finished work — trigger deliveries above all — on the
+    /// rail forever (FIG-989).
+    async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
+        use lash::process::{
+            ProcessCompletionAuthority, ProcessInput, ProcessProvenance, ProcessRegistration,
+            RecoveryDisposition, SessionScope,
+        };
+        let data_dir = std::env::temp_dir().join(format!(
+            "agent-workbench-session-delete-retention-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
+        let process_registry = Arc::new(
+            lash_sqlite_store::SqliteProcessRegistry::open(
+                &data_dir.join("processes.db"),
+                data_dir.join("lash-sessions"),
+            )
+            .await
+            .expect("open registry"),
+        ) as Arc<dyn lash::process::ProcessRegistry>;
+        let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
+            lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
+        );
+        let provider = lash::testing::TestProvider::builder()
+            .kind("workbench-test")
+            .complete_error("session delete retention test should not call the provider")
+            .build()
+            .into_handle();
+        let model =
+            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None)
+                .expect("model spec");
+        let (restate_ingress_url, _restate_requests) = spawn_restate_ingress_capture().await;
+        let core = explicit_durable_test_facets(&data_dir)
+            .provider(provider)
+            .model(model)
+            .store_factory(core_store_factory)
+            .process_registry(Arc::clone(&process_registry))
+            .build()
+            .expect("build core");
+        let process_observer = core
+            .processes()
+            .observer()
+            .expect("process observer configured");
+        let state = AppState {
+            core,
+            attachment_store: test_attachment_store(),
+            trigger_store: in_memory_trigger_store(),
+            process_observer,
+            process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
+            session_ids: WorkbenchSessionIds::fresh(),
+            messages: Arc::new(Mutex::new(Vec::new())),
+            selected_model: Arc::new(Mutex::new(ModelSelection {
+                model: "test-model".to_string(),
+                model_variant: Default::default(),
+            })),
+            web_configured: false,
+            trace_sink: None,
+            lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
+            event_tx: SessionEventRegistry::new(16),
+            queued_work_driver: inert_queued_work_driver(),
+            restate_ingress_url,
+            restate_admin_url: "http://127.0.0.1:9070".to_string(),
+            restate_http: reqwest::Client::new(),
+            restate_cron_job_keys: Arc::new(Mutex::new(BTreeSet::new())),
+            mail_world: mail::MailWorld::new(),
+            active_turns: ActiveTurns::default(),
+            authorization: WorkbenchAuthorization::allow_all(),
+        };
+        let deleted_session_id = state.current_session_id();
+        let surviving_session_id = format!("{deleted_session_id}-survivor");
+        let reclaimed = "trigger-delivery-of-deleted-session".to_string();
+
+        // Four rows the work rail can render: the deleted session's finished
+        // trigger delivery and its still-running work, plus work another session
+        // and the host itself own.
+        for (process_id, originator) in [
+            (
+                "trigger-delivery-of-deleted-session",
+                Some(deleted_session_id.clone()),
+            ),
+            ("live-work-of-deleted-session", Some(deleted_session_id.clone())),
+            (
+                "trigger-delivery-of-surviving-session",
+                Some(surviving_session_id.clone()),
+            ),
+            ("host-owned-work", None),
+        ] {
+            process_registry
+                .register_process(ProcessRegistration::new(
+                    process_id,
+                    ProcessInput::External {
+                        metadata: json!({ "trigger_delivery": originator.is_some() }),
+                    },
+                    RecoveryDisposition::ExternallyOwned,
+                    match &originator {
+                        Some(session_id) => {
+                            ProcessProvenance::session(SessionScope::new(session_id))
+                        }
+                        None => ProcessProvenance::host(),
+                    },
+                ))
+                .await
+                .expect("register work-rail process");
+        }
+        for process_id in [
+            "trigger-delivery-of-deleted-session",
+            "trigger-delivery-of-surviving-session",
+            "host-owned-work",
+        ] {
+            process_registry
+                .complete_process(
+                    process_id,
+                    lash::process::ProcessAwaitOutput::Success {
+                        value: json!({ "delivered": true }),
+                        control: None,
+                    },
+                    ProcessCompletionAuthority::external_owner(),
+                )
+                .await
+                .expect("complete work-rail process");
+        }
+        let session = state
+            .core
+            .session(deleted_session_id.clone())
+            .open()
+            .await
+            .expect("open the session under deletion");
+        drop(session);
+
+        assert_eq!(
+            work_rail_process_ids(&state).await,
+            vec![
+                "host-owned-work".to_string(),
+                "live-work-of-deleted-session".to_string(),
+                "trigger-delivery-of-deleted-session".to_string(),
+                "trigger-delivery-of-surviving-session".to_string(),
+            ],
+            "every registered row is on the runtime-wide rail before the delete"
+        );
+
+        let scope = state
+            .core
+            .session_delete_scope(&deleted_session_id)
+            .await
+            .expect("build session delete scope");
+        let effect_host = state.core.effect_host();
+        let scoped = effect_host
+            .scoped(scope)
+            .expect("scope inline session deletion");
+        let retention = state
+            .delete_session_and_reclaim_processes(&deleted_session_id, scoped)
+            .await
+            .expect("delete the session and reclaim its finished work");
+        assert_eq!(retention.pruned_processes, 1, "one finished row reclaimed");
+        assert_eq!(retention.pruned_events, 1, "its terminal event went with it");
+        assert_eq!(retention.pruned_trigger_deliveries, 0, "no delivery reserved");
+
+        let rail = work_rail_process_ids(&state).await;
+        assert!(!rail.contains(&reclaimed), "reclaimed work leaves the rail");
+        assert_eq!(
+            rail,
+            vec![
+                "host-owned-work".to_string(),
+                "live-work-of-deleted-session".to_string(),
+                "trigger-delivery-of-surviving-session".to_string(),
+            ],
+            "live work and other owners' finished work stay on the rail"
+        );
+        assert!(
+            matches!(
+                process_registry.get_process(&reclaimed).await,
+                Err(lash::plugins::PluginError::ProcessNoLongerRetained { .. })
+            ),
+            "the reclaimed row must read as a payload-free tombstone"
+        );
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    /// The process ids the work rail renders with no session selected: the
+    /// runtime-wide registry snapshot `/api/work` serves.
+    async fn work_rail_process_ids(state: &AppState) -> Vec<String> {
+        let Json(work) = list_work(State(state.clone()), Query(SessionQuery::default()))
+            .await
+            .expect("list runtime-wide work");
+        let mut ids = work
+            .into_iter()
+            .map(|item| item.process.process_id)
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids
+    }
 }

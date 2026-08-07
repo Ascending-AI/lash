@@ -901,20 +901,9 @@ async fn run_session_delete(
         .scoped_effect_controller(request.execution_scope)
         // Audited: constructing this scope only validates the supplied execution-scope fields.
         .map_err(AppError::internal)?;
-    let report = state
-        .core
-        .delete_session(&request.session_id, scoped_effect_controller)
-        .await
-        // Audited: delete_session lowers component and factory failures to non-tombstone EmbedError variants.
-        .map_err(AppError::internal)?;
-    state.trace_for_session(
-        &request.session_id,
-        "reset.restate.session_deleted",
-        json!({
-            "session_id": request.session_id,
-            "report": report,
-        }),
-    );
+    state
+        .delete_session_and_reclaim_processes(&request.session_id, scoped_effect_controller)
+        .await?;
     Ok(())
 }
 

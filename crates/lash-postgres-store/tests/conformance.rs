@@ -1676,6 +1676,19 @@ async fn postgres_process_prune_batch_tombstones_are_ordered_when_configured() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_process_prune_scopes_to_the_retention_filter_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres scoped process prune conformance: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    lash_core::testing::conformance::process_prune_scoped_by_originator(Arc::new(
+        storage.process_registry(),
+    ))
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_leased_completion_replay_repairs_projection_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres leased replay repair: LASH_POSTGRES_DATABASE_URL is not set");

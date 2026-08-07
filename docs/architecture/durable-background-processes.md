@@ -260,7 +260,7 @@ guarantee, so a consumer that needs completeness reconciles from `events_after`,
 and terminal events deliberately do not ride the sink (they ride
 `await_terminal`). Because the decorator awaits `emit` inline on the append path,
 a sink must return fast and offload any I/O. Host retention is
-`core.processes().prune(cutoff_epoch_ms, watermark)`:
+`core.processes().prune(cutoff_epoch_ms, filter, watermark)`:
 a host that has
 projected a process's outcome into its own store calls it on the maintenance
 cadence to replace eligible terminal rows with payload-free tombstones after
@@ -268,6 +268,14 @@ the projection watermark advances — removing their events, wakes, observer edg
 only once host policy has retained them beyond every still-replayable
 `await_terminal`. Lash exposes no finite maximum waiter lifetime to validate a
 cutoff against; a later await after pruning receives `ProcessNoLongerRetained`.
+The optional `ProcessListFilter` narrows which eligible rows one call reclaims,
+so differentiated policy is several scheduled calls over one lever (ADR 0023):
+`agent-service` prunes everything past a uniform window, while
+`agent-workbench` prunes `originator_id`-scoped rows when it deletes a session,
+because deleting a session detaches its process state without deleting
+globally-owned rows and the work rail reads the runtime-wide registry. A filter
+selecting a non-terminal status can never match a prunable row and is refused
+rather than silently reclaiming nothing.
 The facade reconciles exact trigger-delivery rows after pruning. Tombstone
 reclamation uses `core.processes().compact_tombstones(cutoff_epoch_ms, watermark)`,
 which structurally retains any tombstone referenced by the trigger store's
@@ -298,7 +306,7 @@ Process policy is factory-scoped and deliberately small:
   with the observer-visible candidates, while run-local possession remains a
   capability. Admin/host list, event, signal, and cancel paths use the complete
   observer-edge view.
-- `Processes::prune(cutoff, ProjectionWatermark)` and the registry prune and
+- `Processes::prune(cutoff, Option<&ProcessListFilter>, ProjectionWatermark)` and the registry prune and
   tombstone-compaction operations require
   `ProjectionWatermark::UpTo(cursor)` or the explicit
   `ProjectionWatermark::NoProjector` statement.

@@ -112,6 +112,96 @@ impl AppState {
             .insert_with_prompt(session_id, turn_id, Some(prompt));
     }
 
+    /// Delete `session_id`, reclaim the finished work it left behind, and report
+    /// what the reclamation removed.
+    ///
+    /// Both halves are the workbench's session-deletion contract, so they live
+    /// in one place: the runtime delete retires the session, and the retention
+    /// lever below reclaims the globally-owned process rows the delete
+    /// deliberately only detaches.
+    async fn delete_session_and_reclaim_processes(
+        &self,
+        session_id: &str,
+        scoped_effect_controller: lash::runtime::ScopedEffectController<'_>,
+    ) -> Result<lash::process::ProcessPruneReport, AppError> {
+        let report = self
+            .core
+            .delete_session(session_id, scoped_effect_controller)
+            .await
+            // Audited: delete_session lowers component and factory failures to non-tombstone EmbedError variants.
+            .map_err(AppError::internal)?;
+        let retention = self.prune_processes_originated_by(session_id).await?;
+        self.trace_for_session(
+            session_id,
+            "reset.restate.session_deleted",
+            json!({
+                "session_id": session_id,
+                "report": report,
+                "process_retention": {
+                    "pruned_processes": retention.pruned_processes,
+                    "pruned_events": retention.pruned_events,
+                    "pruned_trigger_deliveries": retention.pruned_trigger_deliveries,
+                },
+            }),
+        );
+        Ok(retention)
+    }
+
+    /// Reclaim the terminal process rows `session_id` originated, as the
+    /// retention half of deleting that session.
+    ///
+    /// Deleting a session deliberately detaches rather than deletes its process
+    /// state: rows in the process registry are runtime-global and record the
+    /// creating session only as provenance, so the delete discards the wakes
+    /// aimed at the session and drops its observer edges while leaving the rows
+    /// themselves. Reclaiming them is this separate host lever, and a host that
+    /// never pulls it accumulates every deleted session's finished work in the
+    /// runtime-wide registry the work rail reads.
+    ///
+    /// Two choices this workbench has to make explicitly:
+    ///
+    /// * No age bound. Retention normally protects rows a late
+    ///   `await_terminal` could still replay, and age is the host's proxy for
+    ///   "nobody is coming back for this". Here the bound is identity, not age:
+    ///   the originating session is gone, its awaits were revoked before the
+    ///   delete, and its observer edges no longer exist, so every one of its
+    ///   terminal rows is eligible the moment the delete commits. A `now`
+    ///   cutoff would express the same set while also needing a wall-clock read
+    ///   inside a durable workflow handler.
+    /// * [`ProjectionWatermark::NoProjector`](lash::process::ProjectionWatermark::NoProjector).
+    ///   The workbench installs a best-effort
+    ///   [`ProcessEventSink`](lash::process::ProcessEventSink) that pushes
+    ///   events straight to the UI stream for freshness (ADR 0017), and reads
+    ///   the registry live for every rail render. It never folds the process
+    ///   change feed into a store of its own, so it holds no acknowledged
+    ///   cursor and has no unprojected history for a watermark to protect.
+    ///
+    /// Live processes are untouched by construction: the lever only ever
+    /// deletes terminal rows, and processes this session started that are still
+    /// running deliberately outlive it as global work. This is one reclamation
+    /// at delete time, not a standing sweep, so work that was live at the delete
+    /// and terminates afterwards stays observable on the rail — the property the
+    /// `workbench-process-lifecycle` runbook judges.
+    async fn prune_processes_originated_by(
+        &self,
+        session_id: &str,
+    ) -> Result<lash::process::ProcessPruneReport, AppError> {
+        self.core
+            .processes()
+            .prune(
+                u64::MAX,
+                Some(&lash::process::ProcessListFilter {
+                    status: lash::process::ProcessStatusFilter::Any,
+                    originator_id: Some(session_id.to_string()),
+                    ..lash::process::ProcessListFilter::default()
+                }),
+                lash::process::ProjectionWatermark::NoProjector,
+            )
+            .await
+            // Audited: process retention reads and writes the global registry and never consults a session tombstone.
+            .map_err(AppError::internal)
+    }
+
     /// Fan out exact-address cooperative cancellation to the active turns the
     /// UI submitted for `session_id`.
     async fn cancel_turns_for_session(

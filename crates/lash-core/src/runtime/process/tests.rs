@@ -298,6 +298,14 @@ async fn test_local_process_registry_satisfies_conformance() {
     .await;
 }
 
+#[tokio::test]
+async fn test_local_process_prune_scopes_to_the_retention_filter() {
+    crate::testing::conformance::process_prune_scoped_by_originator(Arc::new(
+        TestLocalProcessRegistry::default(),
+    ))
+    .await;
+}
+
 fn wake_registration(id: &str, target_session_id: &str) -> ProcessRegistration {
     registration(id)
         .with_wake_session_id(Some(target_session_id.to_string()))
