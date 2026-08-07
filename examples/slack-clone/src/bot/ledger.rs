@@ -13,11 +13,11 @@
 //! event the bot finished must be dropped. One `handled` flag cannot tell those
 //! apart, and guessing wrong loses a reply or duplicates one.
 //!
-//! **Every write is one statement.** [`EventLedger::claim`] is a single
-//! `INSERT … ON CONFLICT … RETURNING`, and [`EventLedger::advance`] is a single
-//! compare-and-set `UPDATE`. Neither depends on the caller holding a lock to be
-//! correct, which matters because the thing being guarded against is concurrency
-//! the bot does not control.
+//! **Every state transition is atomic.** [`EventLedger::claim`] transactionally
+//! pairs its `INSERT … ON CONFLICT … RETURNING` with the additive route record,
+//! and [`EventLedger::advance`] is a single compare-and-set `UPDATE`. Neither
+//! depends on the caller holding a lock to be correct, which matters because the
+//! thing being guarded against is concurrency the bot does not control.
 
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension as _, params};
@@ -45,11 +45,25 @@ CREATE TABLE IF NOT EXISTS handled_events (
     updated_at    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_handled_events_stage ON handled_events(stage);
+
+-- Routing and Lash correlation are kept in an additive companion table so an
+-- existing FIG-1008 ledger upgrades without rewriting its settled rows.
+CREATE TABLE IF NOT EXISTS event_routes (
+    event_id     TEXT PRIMARY KEY REFERENCES handled_events(event_id) ON DELETE CASCADE,
+    thread_ts    TEXT,
+    input_id     TEXT,
+    fork_node_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_event_routes_thread ON event_routes(thread_ts);
+CREATE INDEX IF NOT EXISTS idx_event_routes_input ON event_routes(input_id);
 ";
 
 /// Columns every read projects, in the order [`read_row`] expects.
-const COLUMNS: &str =
+const BASE_COLUMNS: &str =
     "event_id, channel_id, message_ts, kind, stage, input_text, reply_ts, detail, deliveries";
+const COLUMNS: &str = "handled_events.event_id, channel_id, message_ts, kind, stage, input_text, \
+     reply_ts, detail, deliveries, event_routes.thread_ts, event_routes.input_id, \
+     event_routes.fork_node_id";
 
 /// Event kind for a message that mentions the bot.
 pub const KIND_APP_MENTION: &str = "app_mention";
@@ -118,6 +132,12 @@ pub struct EventRecord {
     /// How many times the platform has delivered this event. Greater than one
     /// is direct evidence the retry path ran.
     pub deliveries: u32,
+    /// Thread parent, or `None` for top-level channel traffic.
+    pub thread_ts: Option<String>,
+    /// Durable Lash admission identity returned by `enqueue`.
+    pub input_id: Option<String>,
+    /// Retained turn boundary that includes this input, when it has committed.
+    pub fork_node_id: Option<String>,
 }
 
 /// The outcome of claiming an event for handling.
@@ -154,10 +174,10 @@ impl EventLedger {
 
     /// Record a delivery and report whether this caller should do the work.
     ///
-    /// One `INSERT … ON CONFLICT(event_id) DO UPDATE … RETURNING` statement, so
-    /// the insert-or-bump is atomic without a surrounding transaction or a
-    /// caller-held lock: two concurrent deliveries of the same event are
-    /// serialized by SQLite, and the loser sees the row the winner wrote.
+    /// One transaction pairs the `INSERT … ON CONFLICT(event_id) DO UPDATE …
+    /// RETURNING` admission with its thread route. It needs no caller-held lock:
+    /// two concurrent deliveries of the same event are serialized by SQLite,
+    /// and the loser sees the row the winner wrote.
     ///
     /// `deliveries` is bumped on every claim including the first, so the value is
     /// delivery attempts and not "retries after the first" — and `deliveries == 1`
@@ -169,12 +189,14 @@ impl EventLedger {
         message_ts: String,
         kind: String,
         input_text: Option<String>,
+        thread_ts: Option<String>,
     ) -> Result<Claim> {
         let record = self
             .database
             .call(move |connection| {
                 let now = now_seconds();
-                let record = connection.query_row(
+                let transaction = connection.transaction()?;
+                let record = transaction.query_row(
                     &format!(
                         "INSERT INTO handled_events
                             (event_id, channel_id, message_ts, kind, stage, input_text,
@@ -186,7 +208,7 @@ impl EventLedger {
                             -- already holds under the source key.
                             input_text = COALESCE(handled_events.input_text, excluded.input_text),
                             updated_at = ?7
-                         RETURNING {COLUMNS}"
+                         RETURNING {BASE_COLUMNS}"
                     ),
                     params![
                         event_id,
@@ -197,8 +219,17 @@ impl EventLedger {
                         input_text,
                         now,
                     ],
-                    read_row,
+                    read_base_row,
                 )?;
+                transaction.execute(
+                    "INSERT INTO event_routes (event_id, thread_ts)
+                     VALUES (?1, ?2)
+                     ON CONFLICT(event_id) DO UPDATE SET
+                         thread_ts = COALESCE(event_routes.thread_ts, excluded.thread_ts)",
+                    params![record.event_id, thread_ts],
+                )?;
+                let record = read(&transaction, &record.event_id)?.expect("claimed row exists");
+                transaction.commit()?;
                 Ok(record)
             })
             .await?;
@@ -209,6 +240,91 @@ impl EventLedger {
         } else {
             Claim::Resume(record)
         })
+    }
+
+    /// Record the exact Lash admission identity after an idempotent enqueue.
+    pub async fn record_input_id(&self, event_id: String, input_id: String) -> Result<()> {
+        self.database
+            .call(move |connection| {
+                connection.execute(
+                    "UPDATE event_routes SET input_id = COALESCE(input_id, ?2)
+                     WHERE event_id = ?1",
+                    params![event_id, input_id],
+                )?;
+                Ok(())
+            })
+            .await
+    }
+
+    /// Associate every admission committed by a turn with its retained boundary.
+    pub async fn record_fork_node_for_inputs(
+        &self,
+        input_ids: Vec<String>,
+        fork_node_id: String,
+    ) -> Result<()> {
+        self.database
+            .call(move |connection| {
+                let transaction = connection.transaction()?;
+                for input_id in input_ids {
+                    transaction.execute(
+                        "UPDATE event_routes SET fork_node_id = COALESCE(fork_node_id, ?2)
+                         WHERE input_id = ?1",
+                        params![input_id, fork_node_id],
+                    )?;
+                }
+                transaction.commit()?;
+                Ok(())
+            })
+            .await
+    }
+
+    /// Top-level admissions at or before a thread root, oldest first.
+    pub async fn channel_context_through(
+        &self,
+        channel_id: String,
+        message_ts: String,
+    ) -> Result<Vec<EventRecord>> {
+        self.database
+            .call(move |connection| {
+                let mut statement = connection.prepare(&format!(
+                    "SELECT {COLUMNS} FROM handled_events
+                     LEFT JOIN event_routes USING(event_id)
+                     WHERE channel_id = ?1 AND message_ts <= ?2
+                       AND event_routes.thread_ts IS NULL AND input_text IS NOT NULL
+                     ORDER BY message_ts, first_seen_at"
+                ))?;
+                Ok(statement
+                    .query_map(params![channel_id, message_ts], read_row)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?)
+            })
+            .await
+    }
+
+    /// The bot admission that corresponds to a top-level Slack message.
+    pub async fn channel_message(
+        &self,
+        channel_id: String,
+        message_ts: String,
+    ) -> Result<Option<EventRecord>> {
+        self.database
+            .call(move |connection| {
+                Ok(connection
+                    .query_row(
+                        &format!(
+                            "SELECT {COLUMNS} FROM handled_events
+                             LEFT JOIN event_routes USING(event_id)
+                             WHERE channel_id = ?1 AND message_ts = ?2
+                               AND event_routes.thread_ts IS NULL
+                               AND input_text IS NOT NULL
+                             ORDER BY CASE kind WHEN 'app_mention' THEN 0 ELSE 1 END
+                             LIMIT 1"
+                        ),
+                        params![channel_id, message_ts],
+                        read_row,
+                    )
+                    .optional()?)
+            })
+            .await
     }
 
     /// Move an event from `from` to `to`, if it is still at `from`.
@@ -264,6 +380,7 @@ impl EventLedger {
             .call(|connection| {
                 let mut statement = connection.prepare(&format!(
                     "SELECT {COLUMNS} FROM handled_events
+                     LEFT JOIN event_routes USING(event_id)
                      WHERE stage IN ('accepted', 'reply_pending')
                      ORDER BY first_seen_at, message_ts"
                 ))?;
@@ -279,7 +396,11 @@ impl EventLedger {
 fn read(connection: &Connection, event_id: &str) -> Result<Option<EventRecord>> {
     Ok(connection
         .query_row(
-            &format!("SELECT {COLUMNS} FROM handled_events WHERE event_id = ?1"),
+            &format!(
+                "SELECT {COLUMNS} FROM handled_events
+                 LEFT JOIN event_routes USING(event_id)
+                 WHERE handled_events.event_id = ?1"
+            ),
             params![event_id],
             read_row,
         )
@@ -297,6 +418,26 @@ fn read_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRecord> {
         reply_ts: row.get(6)?,
         detail: row.get(7)?,
         deliveries: row.get(8)?,
+        thread_ts: row.get(9)?,
+        input_id: row.get(10)?,
+        fork_node_id: row.get(11)?,
+    })
+}
+
+fn read_base_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRecord> {
+    Ok(EventRecord {
+        event_id: row.get(0)?,
+        channel_id: row.get(1)?,
+        message_ts: row.get(2)?,
+        kind: row.get(3)?,
+        stage: Stage::parse(&row.get::<_, String>(4)?),
+        input_text: row.get(5)?,
+        reply_ts: row.get(6)?,
+        detail: row.get(7)?,
+        deliveries: row.get(8)?,
+        thread_ts: None,
+        input_id: None,
+        fork_node_id: None,
     })
 }
 
@@ -326,6 +467,7 @@ mod tests {
                 "1.000001".to_string(),
                 KIND_APP_MENTION.to_string(),
                 Some("ada: hello".to_string()),
+                None,
             )
             .await
             .expect("claim")

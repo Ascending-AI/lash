@@ -313,7 +313,13 @@ impl LashCore {
         }
     }
 
-    async fn current_session_exists(&self, session_id: &str) -> Result<bool> {
+    /// Report whether `session_id` has durable live session metadata.
+    ///
+    /// This is a cheap existence read: it does not create, hydrate, or open the
+    /// session. A permanently deleted session returns `false`; callers that try
+    /// to recreate the id still receive the store's typed deletion error.
+    pub async fn session_exists(&self, session_id: impl AsRef<str>) -> Result<bool> {
+        let session_id = session_id.as_ref();
         let Some(store_factory) = self.store_factory.as_ref() else {
             return Err(EmbedError::MissingSessionStoreFactory);
         };
@@ -341,7 +347,7 @@ impl LashCore {
         session_id: impl AsRef<str>,
     ) -> Result<lash_core::ExecutionScope> {
         let session_id = session_id.as_ref();
-        if !self.current_session_exists(session_id).await? {
+        if !self.session_exists(session_id).await? {
             return Err(EmbedError::StoreFactory {
                 session_id: session_id.to_string(),
                 message: "session does not exist".to_string(),

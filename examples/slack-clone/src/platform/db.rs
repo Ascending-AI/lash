@@ -54,6 +54,16 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_thread
     ON messages(channel_id, thread_ts, ts);
 
+-- A broadcast reply remains one threaded message. This relation only controls
+-- its second projection into channel history; duplicating the message row would
+-- give one Slack message two identities.
+CREATE TABLE IF NOT EXISTS message_broadcasts (
+    channel_id TEXT NOT NULL,
+    ts         INTEGER NOT NULL,
+    PRIMARY KEY (channel_id, ts),
+    FOREIGN KEY (channel_id, ts) REFERENCES messages(channel_id, ts) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS apps (
     id           TEXT PRIMARY KEY,
     bot_id       TEXT NOT NULL,
@@ -115,6 +125,7 @@ pub struct MessageRow {
     pub author: Author,
     pub text: String,
     pub thread_ts: Option<Ts>,
+    pub reply_broadcast: bool,
     pub metadata_json: Option<String>,
 }
 
@@ -330,6 +341,7 @@ pub fn append_message(
     author: Author,
     text: &str,
     thread_ts: Option<Ts>,
+    reply_broadcast: bool,
     metadata_json: Option<&str>,
 ) -> Result<MessageRow> {
     if channel_by_id(transaction, channel_id)?.is_none() {
@@ -376,12 +388,19 @@ pub fn append_message(
             metadata_json,
         ],
     )?;
+    if reply_broadcast && thread_ts.is_some() {
+        transaction.execute(
+            "INSERT INTO message_broadcasts (channel_id, ts) VALUES (?1, ?2)",
+            params![channel_id, ts.micros() as i64],
+        )?;
+    }
     Ok(MessageRow {
         channel_id: channel_id.to_string(),
         ts,
         author,
         text: text.to_string(),
         thread_ts,
+        reply_broadcast: reply_broadcast && thread_ts.is_some(),
         metadata_json: metadata_json.map(str::to_string),
     })
 }
@@ -419,10 +438,17 @@ pub fn channel_history(
 ) -> Result<Vec<MessageRow>> {
     let (lower, upper) = window.bounds();
     let mut statement = connection.prepare(
-        "SELECT channel_id, ts, author_user_id, bot_id, username, text, thread_ts, metadata_json
+        "SELECT channel_id, ts, author_user_id, bot_id, username, text, thread_ts, metadata_json,
+                EXISTS (SELECT 1 FROM message_broadcasts
+                        WHERE message_broadcasts.channel_id = messages.channel_id
+                          AND message_broadcasts.ts = messages.ts)
          FROM messages
          WHERE channel_id = ?1
-           AND thread_ts IS NULL
+           AND (thread_ts IS NULL OR EXISTS (
+               SELECT 1 FROM message_broadcasts
+               WHERE message_broadcasts.channel_id = messages.channel_id
+                 AND message_broadcasts.ts = messages.ts
+           ))
            AND ts > ?2 AND ts < ?3
          ORDER BY ts DESC
          LIMIT ?4",
@@ -447,7 +473,10 @@ pub fn thread_replies(
 ) -> Result<Vec<MessageRow>> {
     let (lower, upper) = window.bounds();
     let mut statement = connection.prepare(
-        "SELECT channel_id, ts, author_user_id, bot_id, username, text, thread_ts, metadata_json
+        "SELECT channel_id, ts, author_user_id, bot_id, username, text, thread_ts, metadata_json,
+                EXISTS (SELECT 1 FROM message_broadcasts
+                        WHERE message_broadcasts.channel_id = messages.channel_id
+                          AND message_broadcasts.ts = messages.ts)
          FROM messages
          WHERE channel_id = ?1
            AND thread_ts = ?2
@@ -507,7 +536,10 @@ pub fn message_by_ts(
 ) -> Result<Option<MessageRow>> {
     Ok(connection
         .query_row(
-            "SELECT channel_id, ts, author_user_id, bot_id, username, text, thread_ts, metadata_json
+            "SELECT channel_id, ts, author_user_id, bot_id, username, text, thread_ts, metadata_json,
+                    EXISTS (SELECT 1 FROM message_broadcasts
+                            WHERE message_broadcasts.channel_id = messages.channel_id
+                              AND message_broadcasts.ts = messages.ts)
              FROM messages WHERE channel_id = ?1 AND ts = ?2",
             params![channel_id, ts.micros() as i64],
             read_message,
@@ -554,6 +586,7 @@ fn read_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRow> {
         author,
         text: row.get(5)?,
         thread_ts: thread_ts.map(|ts| Ts::from_micros(ts as u64)),
+        reply_broadcast: row.get(8)?,
         metadata_json: row.get(7)?,
     })
 }

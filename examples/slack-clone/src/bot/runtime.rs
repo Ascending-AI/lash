@@ -184,10 +184,16 @@ pub fn provider_from_env() -> Result<(ProviderHandle, ModelSpec)> {
 /// **Session-per-channel is the mapping doctrine of this example.** A channel is
 /// a durable, long-lived conversation with a stable id that the platform already
 /// guarantees is unique, so it maps one-to-one onto a Lash session. Keying on
-/// anything shorter-lived — a mention, a thread, a process lifetime — would
-/// throw the room's memory away every time somebody asked a question.
+/// anything shorter-lived — a mention or a process lifetime — would throw the
+/// room's memory away every time somebody asked a question. Threads branch from
+/// this session; they do not replace it.
 pub fn session_id(channel_id: &str) -> String {
     format!("channel:{channel_id}")
+}
+
+/// Stable id for the forked session behind one Slack thread.
+pub fn thread_session_id(channel_id: &str, thread_ts: &str) -> String {
+    format!("thread:{channel_id}:{thread_ts}")
 }
 
 /// Trace/store root under a data directory, used by the dev script and tests.

@@ -24,6 +24,8 @@ pub struct ChatPostMessageArgs {
     pub text: Option<String>,
     /// Parent message `ts` to reply in a thread.
     pub thread_ts: Option<String>,
+    /// Whether a threaded reply should also be visible in channel history.
+    pub reply_broadcast: Option<String>,
     /// Override the display name of the posting app.
     pub username: Option<String>,
     /// JSON-encoded `{"event_type": "...", "event_payload": {...}}`.

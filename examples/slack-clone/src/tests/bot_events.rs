@@ -3,7 +3,7 @@
 
 use crate::bot::channel::{Disposition, ReplySource};
 use crate::bot::ledger::Stage;
-use crate::bot::runtime::session_id;
+use crate::bot::runtime::{session_id, thread_session_id};
 use crate::bot::tools::{CHANNEL_HISTORY, LIST_CHANNELS};
 
 use super::support::{Script, Step, TestPlatform, bot_dir, only_event, scratch, start_bot};
@@ -309,6 +309,554 @@ async fn each_channel_gets_its_own_session_and_neither_sees_the_others_context()
             .is_empty()
     );
     assert_ne!(secret_session.session_id(), public_session.session_id());
+}
+
+#[tokio::test]
+async fn a_thread_forks_on_its_first_reply_and_inherits_uncommitted_root_context() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let script = Script::prose("The deploy target was EU west.");
+    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+
+    let channel = platform.channel("thread-fork").await;
+    let ada = platform.identify("ada").await;
+    let grace = platform.identify("grace").await;
+    let root = platform
+        .say(&channel, &ada, "the deploy target is EU west")
+        .await;
+    for envelope in platform.drain_envelopes().await {
+        bot.ingest(envelope, None).await.expect("fold thread root");
+    }
+
+    let channel_session = bot
+        .core()
+        .session(session_id(&channel))
+        .open()
+        .await
+        .expect("open channel session");
+    let channel_head_before = channel_session
+        .read_view()
+        .session_graph()
+        .leaf_node_id
+        .clone();
+
+    let mention = platform.mention();
+    platform
+        .say_thread(
+            &channel,
+            &grace,
+            root,
+            &format!("{mention} where are we deploying?"),
+        )
+        .await;
+    let app_mention = only_event(&platform.drain_envelopes().await, "app_mention");
+    let disposition = bot
+        .ingest(app_mention, None)
+        .await
+        .expect("handle first thread engagement");
+    assert!(matches!(disposition, Disposition::Replied { .. }));
+
+    let thread_id = thread_session_id(&channel, &root.to_string());
+    assert!(
+        bot.core()
+            .session_exists(&thread_id)
+            .await
+            .expect("check child session existence"),
+        "the deterministic child session must exist"
+    );
+    assert_eq!(
+        channel_session.read_view().session_graph().leaf_node_id,
+        channel_head_before,
+        "forking and running the thread must not advance the channel head"
+    );
+    assert!(
+        script.saw("the deploy target is EU west"),
+        "the queued root is copied because it was not yet in the forked graph: {:?}",
+        script.requests()
+    );
+    assert_eq!(platform.thread_messages(&channel, root).await.len(), 2);
+    assert!(
+        platform.bot_messages(&channel).await.is_empty(),
+        "the bot reply is in the thread, not channel history"
+    );
+}
+
+#[tokio::test]
+async fn a_thread_fork_shares_a_committed_channel_turn_by_provenance() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let script = Script::new([
+        Step::Text("Channel answer.".to_string()),
+        Step::Text("Thread answer.".to_string()),
+    ]);
+    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let channel = platform.channel("thread-committed-root").await;
+    let ada = platform.identify("ada").await;
+    let root = platform.say(&channel, &ada, "retained channel fact").await;
+    let root_event = only_event(&platform.drain_envelopes().await, "message");
+    bot.ingest(root_event.clone(), None)
+        .await
+        .expect("fold root");
+
+    platform
+        .say(
+            &channel,
+            &ada,
+            &format!("{} commit the channel turn", platform.mention()),
+        )
+        .await;
+    let channel_mention = only_event(&platform.drain_envelopes().await, "app_mention");
+    bot.ingest(channel_mention, None)
+        .await
+        .expect("commit channel turn");
+    let root_record = bot
+        .ledger()
+        .get(root_event.event_id)
+        .await
+        .expect("read ledger")
+        .expect("root row");
+    assert!(
+        root_record.input_id.is_some() && root_record.fork_node_id.is_some(),
+        "typed application correlation records the retained boundary: {root_record:?}"
+    );
+
+    platform
+        .say_thread(
+            &channel,
+            &ada,
+            root,
+            &format!("{} what was retained?", platform.mention()),
+        )
+        .await;
+    let thread_mention = only_event(&platform.drain_envelopes().await, "app_mention");
+    bot.ingest(thread_mention, None)
+        .await
+        .expect("run forked thread turn");
+    let requests = script.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests[1].contains("retained channel fact"),
+        "the child shares committed ancestry: {}",
+        requests[1]
+    );
+}
+
+#[tokio::test]
+async fn recovery_records_the_applied_turns_boundary_after_a_later_turn_commits() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let bot_dir = bot_dir(scratch.path());
+    let script = Script::new([
+        Step::Text("Older answer.".to_string()),
+        Step::Text("Later answer.".to_string()),
+    ]);
+    let bot = start_bot(&platform, &bot_dir, &script).await;
+    let channel = platform.channel("recovery-retains-applied-turn").await;
+    let ada = platform.identify("ada").await;
+
+    let root = platform.say(&channel, &ada, "older retained fact").await;
+    let root_event = only_event(&platform.drain_envelopes().await, "message");
+    bot.ingest(root_event.clone(), None)
+        .await
+        .expect("fold older root");
+    platform
+        .say(
+            &channel,
+            &ada,
+            &format!("{} commit older turn", platform.mention()),
+        )
+        .await;
+    let older_mention = only_event(&platform.drain_envelopes().await, "app_mention");
+    let older_reply = bot
+        .ingest(older_mention.clone(), None)
+        .await
+        .expect("commit older turn");
+    let Disposition::Replied {
+        reply_ts: older_reply_ts,
+        ..
+    } = older_reply
+    else {
+        panic!("older mention must reply: {older_reply:?}");
+    };
+    let older_boundary = bot
+        .ledger()
+        .get(root_event.event_id.clone())
+        .await
+        .expect("read older root")
+        .expect("older root row")
+        .fork_node_id
+        .expect("older turn boundary was initially recorded");
+
+    // Reconstruct a crash after pinning the committed boundary but before the
+    // additive ledger write records it. The reply and terminal stage are also
+    // absent, so the next boot must take the committed empty-drain path.
+    platform.delete_message(&channel, &older_reply_ts).await;
+    bot.ledger()
+        .advance(
+            older_mention.event_id.clone(),
+            Stage::Replied,
+            Stage::Accepted,
+            None,
+            None,
+        )
+        .await
+        .expect("rewind older event to the crash window");
+    rusqlite::Connection::open(bot_dir.join("events.db"))
+        .expect("open ledger for crash staging")
+        .execute(
+            "UPDATE event_routes SET fork_node_id = NULL WHERE fork_node_id = ?1",
+            rusqlite::params![older_boundary],
+        )
+        .expect("remove the unrecorded boundary");
+
+    platform
+        .say(
+            &channel,
+            &ada,
+            &format!("{} commit later turn", platform.mention()),
+        )
+        .await;
+    let later_mention = only_event(&platform.drain_envelopes().await, "app_mention");
+    bot.ingest(later_mention.clone(), None)
+        .await
+        .expect("commit later turn");
+    let later_boundary = bot
+        .ledger()
+        .get(later_mention.event_id)
+        .await
+        .expect("read later mention")
+        .expect("later mention row")
+        .fork_node_id
+        .expect("later turn boundary");
+    assert_ne!(
+        older_boundary, later_boundary,
+        "the scenario must stage two distinct committed turn boundaries"
+    );
+
+    let recovered = bot.recover().await.expect("recover older turn").settled;
+    assert_eq!(recovered.len(), 1, "only the older turn was unfinished");
+    let recovered_root = bot
+        .ledger()
+        .get(root_event.event_id)
+        .await
+        .expect("read recovered root")
+        .expect("recovered root row");
+    assert_eq!(
+        recovered_root.fork_node_id.as_deref(),
+        Some(older_boundary.as_str()),
+        "recovery must retain the older applied turn, not the channel's current head"
+    );
+    assert_ne!(
+        recovered_root.fork_node_id.as_deref(),
+        Some(later_boundary.as_str()),
+        "post-root channel content must not become part of the root fork"
+    );
+    assert_eq!(root.to_string(), recovered_root.message_ts);
+}
+
+#[tokio::test]
+async fn thread_open_rederives_a_missing_root_boundary_from_its_application() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let bot_dir = bot_dir(scratch.path());
+    let script = Script::new([
+        Step::Text("Root turn answer.".to_string()),
+        Step::Text("Later channel answer.".to_string()),
+        Step::Text("Thread answer.".to_string()),
+    ]);
+    let bot = start_bot(&platform, &bot_dir, &script).await;
+    let channel = platform.channel("thread-rederives-root-boundary").await;
+    let ada = platform.identify("ada").await;
+
+    let root = platform.say(&channel, &ada, "root fact before fork").await;
+    let root_event = only_event(&platform.drain_envelopes().await, "message");
+    bot.ingest(root_event.clone(), None)
+        .await
+        .expect("fold root fact");
+    platform
+        .say(
+            &channel,
+            &ada,
+            &format!("{} commit root turn", platform.mention()),
+        )
+        .await;
+    let root_turn = only_event(&platform.drain_envelopes().await, "app_mention");
+    bot.ingest(root_turn, None).await.expect("commit root turn");
+    let recorded_root = bot
+        .ledger()
+        .get(root_event.event_id.clone())
+        .await
+        .expect("read committed root")
+        .expect("committed root row");
+    let root_boundary = recorded_root
+        .fork_node_id
+        .expect("root boundary initially recorded");
+    assert!(
+        recorded_root.input_id.is_some(),
+        "root keeps durable input identity"
+    );
+
+    // Crash between pin and record_fork_node_for_inputs: the retained point and
+    // application survive, but this root route lacks its fork-node projection.
+    rusqlite::Connection::open(bot_dir.join("events.db"))
+        .expect("open ledger for crash staging")
+        .execute(
+            "UPDATE event_routes SET fork_node_id = NULL WHERE event_id = ?1",
+            rusqlite::params![root_event.event_id],
+        )
+        .expect("remove root fork-node projection");
+
+    platform
+        .say(
+            &channel,
+            &ada,
+            &format!("{} later channel turn", platform.mention()),
+        )
+        .await;
+    let later_turn = only_event(&platform.drain_envelopes().await, "app_mention");
+    bot.ingest(later_turn, None)
+        .await
+        .expect("commit later channel turn");
+
+    platform
+        .say_thread(
+            &channel,
+            &ada,
+            root,
+            &format!("{} open from root", platform.mention()),
+        )
+        .await;
+    let thread_turn = only_event(&platform.drain_envelopes().await, "app_mention");
+    bot.ingest(thread_turn, None)
+        .await
+        .expect("open thread from rederived root");
+
+    let requests = script.requests();
+    assert_eq!(requests.len(), 3);
+    assert!(
+        requests[2].contains("root fact before fork"),
+        "the rederived boundary includes the root turn: {}",
+        requests[2]
+    );
+    assert!(
+        !requests[2].contains("later channel turn"),
+        "thread-open must not silently degrade a repairable root to the current head: {}",
+        requests[2]
+    );
+    let repaired_root = bot
+        .ledger()
+        .get(root_event.event_id)
+        .await
+        .expect("read repaired root")
+        .expect("repaired root row");
+    assert_eq!(
+        repaired_root.fork_node_id.as_deref(),
+        Some(root_boundary.as_str()),
+        "thread-open repairs the durable root projection"
+    );
+}
+
+#[tokio::test]
+async fn thread_and_channel_traffic_are_isolated_after_the_fork() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let script = Script::new([
+        Step::Text("Thread answer one.".to_string()),
+        Step::Text("Thread answer two.".to_string()),
+    ]);
+    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let channel = platform.channel("thread-isolation").await;
+    let ada = platform.identify("ada").await;
+    let root = platform.say(&channel, &ada, "shared before fork").await;
+    for envelope in platform.drain_envelopes().await {
+        bot.ingest(envelope, None).await.expect("fold root");
+    }
+
+    let mention = platform.mention();
+    platform
+        .say_thread(
+            &channel,
+            &ada,
+            root,
+            &format!("{mention} first thread turn"),
+        )
+        .await;
+    let first = only_event(&platform.drain_envelopes().await, "app_mention");
+    bot.ingest(first, None).await.expect("first thread turn");
+
+    platform
+        .say(&channel, &ada, "channel only after fork")
+        .await;
+    for envelope in platform.drain_envelopes().await {
+        if envelope.event.thread_ts().is_none() {
+            bot.ingest(envelope, None)
+                .await
+                .expect("fold channel-only traffic");
+        }
+    }
+    platform
+        .say_thread(
+            &channel,
+            &ada,
+            root,
+            &format!("{mention} second thread turn"),
+        )
+        .await;
+    let second = only_event(&platform.drain_envelopes().await, "app_mention");
+    bot.ingest(second, None).await.expect("second thread turn");
+
+    let requests = script.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].contains("first thread turn"));
+    assert!(
+        !requests[1].contains("channel only after fork"),
+        "post-fork channel traffic cannot appear in the child prompt: {}",
+        requests[1]
+    );
+
+    let channel_text = channel_session_text(&bot, &channel).await;
+    assert_eq!(
+        channel_text, "",
+        "queued channel inputs and thread turns must not become committed channel transcript"
+    );
+    assert!(!channel_text.contains("first thread turn"));
+    assert!(!channel_text.contains("second thread turn"));
+    let channel_session = bot
+        .core()
+        .session(session_id(&channel))
+        .open()
+        .await
+        .expect("open channel session");
+    assert_eq!(
+        channel_session
+            .pending_turn_inputs()
+            .await
+            .expect("channel pending inputs")
+            .len(),
+        2,
+        "the root and post-fork channel traffic remain queued only on the channel session"
+    );
+    assert_eq!(
+        bot.session_lock_count(),
+        0,
+        "uncontended routed-session locks are scoped to active handling"
+    );
+}
+
+#[tokio::test]
+async fn a_thread_event_is_deduplicated_in_the_shared_ledger() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let script = Script::prose("Once in thread.");
+    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let channel = platform.channel("thread-dedupe").await;
+    let ada = platform.identify("ada").await;
+    let root = platform.say(&channel, &ada, "root").await;
+    for envelope in platform.drain_envelopes().await {
+        bot.ingest(envelope, None).await.expect("fold root");
+    }
+    platform
+        .say_thread(
+            &channel,
+            &ada,
+            root,
+            &format!("{} answer once", platform.mention()),
+        )
+        .await;
+    let event = only_event(&platform.drain_envelopes().await, "app_mention");
+    assert!(matches!(
+        bot.ingest(event.clone(), None)
+            .await
+            .expect("first delivery"),
+        Disposition::Replied { .. }
+    ));
+    assert!(matches!(
+        bot.ingest(event, Some(1)).await.expect("redelivery"),
+        Disposition::Duplicate {
+            stage: Stage::Replied,
+            ..
+        }
+    ));
+    assert_eq!(script.calls(), 1);
+    assert_eq!(platform.thread_messages(&channel, root).await.len(), 2);
+}
+
+#[tokio::test]
+async fn an_ambient_thread_reply_creates_the_fork_and_waits_for_a_mention() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let script = Script::prose("I saw the thread context.");
+    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let channel = platform.channel("thread-ambient").await;
+    let ada = platform.identify("ada").await;
+    let root = platform.say(&channel, &ada, "channel root fact").await;
+    for envelope in platform.drain_envelopes().await {
+        bot.ingest(envelope, None).await.expect("fold root");
+    }
+
+    platform
+        .say_thread(&channel, &ada, root, "thread detail before engagement")
+        .await;
+    let ambient = only_event(&platform.drain_envelopes().await, "message");
+    assert!(matches!(
+        bot.ingest(ambient, None)
+            .await
+            .expect("fold thread ambient"),
+        Disposition::Folded { .. }
+    ));
+    assert_eq!(script.calls(), 0, "ambient thread traffic spends no token");
+    let thread = bot
+        .core()
+        .session(thread_session_id(&channel, &root.to_string()))
+        .open()
+        .await
+        .expect("open fork created by first reply");
+    assert_eq!(
+        thread
+            .pending_turn_inputs()
+            .await
+            .expect("thread pending inputs")
+            .len(),
+        2,
+        "the inherited root and ambient thread reply wait in the child"
+    );
+
+    platform
+        .say_thread(
+            &channel,
+            &ada,
+            root,
+            &format!("{} now answer", platform.mention()),
+        )
+        .await;
+    let mention = only_event(&platform.drain_envelopes().await, "app_mention");
+    bot.ingest(mention, None)
+        .await
+        .expect("drain thread context");
+    assert!(script.saw("channel root fact"));
+    assert!(script.saw("thread detail before engagement"));
+}
+
+async fn channel_session_text(bot: &crate::bot::channel::ChannelBot, channel: &str) -> String {
+    let session = bot
+        .core()
+        .session(session_id(channel))
+        .open()
+        .await
+        .expect("open channel session");
+    session
+        .read_view()
+        .chronological_projection()
+        .into_entries()
+        .into_iter()
+        .filter_map(|entry| match entry.payload {
+            lash::persistence::ChronologicalPayload::Message(message) => {
+                Some(lash::message_text(&message))
+            }
+            lash::persistence::ChronologicalPayload::ProtocolEvent(_) => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[tokio::test]

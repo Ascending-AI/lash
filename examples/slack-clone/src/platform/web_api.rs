@@ -79,6 +79,7 @@ pub async fn chat_post_message(
         Some(raw) => Some(Ts::parse(raw).ok_or_else(|| ApiError::new("invalid_thread_ts"))?),
         None => None,
     };
+    let reply_broadcast = flag(args.reply_broadcast.as_ref());
     let identity = state.identity();
     let username = args
         .username
@@ -99,6 +100,7 @@ pub async fn chat_post_message(
             },
             text,
             thread_ts,
+            reply_broadcast,
             metadata_json,
         )
         .await

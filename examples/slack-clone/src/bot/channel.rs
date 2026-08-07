@@ -33,8 +33,11 @@ use tokio::sync::RwLock;
 use super::ledger::{Claim, EventLedger, EventRecord, KIND_APP_MENTION, KIND_MESSAGE, Stage};
 use super::runtime::session_id;
 use super::slack_api::{ChatPostMessageRequest, SlackApi, find_posted_reply};
+use super::threads;
 use crate::secrets::constant_time_eq;
 use crate::wire::events::{self, Event, EventCallback};
+
+type SessionLockRegistry = Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>;
 
 /// How long [`ChannelBot::retry_deferred`] waits between attempts.
 ///
@@ -143,10 +146,9 @@ pub struct ChannelBot {
     identity: BotIdentity,
     verification_token: String,
     session_owner: LeaseOwnerIdentity,
-    /// One lock per channel. Deliveries for one room are handled in order so an
-    /// ambient message cannot interleave with the drain that should have
-    /// included it; different rooms stay fully parallel.
-    channel_locks: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+    /// One lock per routed session. Channels preserve admission order, while
+    /// independent threads in the same channel remain fully parallel.
+    session_locks: SessionLockRegistry,
     /// `U…` to display name, so `<@U…>` renders as something a model can reason
     /// about. Filled from `users.list` and refreshed on a miss.
     directory: Arc<RwLock<HashMap<String, String>>>,
@@ -169,7 +171,7 @@ impl ChannelBot {
             identity,
             verification_token,
             session_owner,
-            channel_locks: Arc::new(Mutex::new(HashMap::new())),
+            session_locks: Arc::new(Mutex::new(HashMap::new())),
             directory: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -187,6 +189,14 @@ impl ChannelBot {
     /// The core, for the shutdown trace flush.
     pub fn core(&self) -> &LashCore {
         &self.core
+    }
+
+    #[cfg(test)]
+    pub fn session_lock_count(&self) -> usize {
+        self.session_locks
+            .lock()
+            .expect("session lock map is never poisoned")
+            .len()
     }
 
     /// Whether an envelope's `token` is the one this bot expects.
@@ -238,7 +248,7 @@ impl ChannelBot {
         let unfinished = self.ledger.unfinished().await?;
         let mut report = RecoveryReport::default();
         for record in unfinished {
-            let guard = self.channel_lock(&record.channel_id).await;
+            let guard = self.session_lock(&record);
             let _held = guard.lock().await;
             let outcome = match record.stage {
                 // The turn is done and its text is on record: only the post is
@@ -301,7 +311,7 @@ impl ChannelBot {
                 });
             }
             let attempt = {
-                let guard = self.channel_lock(&record.channel_id).await;
+                let guard = self.session_lock(&record);
                 let _held = guard.lock().await;
                 match record.stage {
                     Stage::ReplyPending => self.settle_reply_debt(&record).await,
@@ -369,6 +379,7 @@ impl ChannelBot {
 
         let channel = envelope.event.channel().to_string();
         let message_ts = envelope.event.ts().to_string();
+        let thread_ts = envelope.event.thread_ts().map(str::to_string);
         let (kind, intent) = self.classify(&envelope.event);
 
         // Compose before claiming so the admission text is recorded with the row:
@@ -386,6 +397,7 @@ impl ChannelBot {
                 message_ts,
                 kind.to_string(),
                 admission,
+                thread_ts,
             )
             .await?;
         if let Claim::Settled(record) = &claim {
@@ -410,7 +422,7 @@ impl ChannelBot {
             });
         }
 
-        let guard = self.channel_lock(&channel).await;
+        let guard = self.session_lock(claim.record());
         let _held = guard.lock().await;
 
         let record = claim.record();
@@ -462,7 +474,27 @@ impl ChannelBot {
             });
         }
 
-        let session = self.open_session(&record.channel_id).await?;
+        let session = if record.thread_ts.is_some() {
+            let Some(session) =
+                threads::open_thread_session(&self.core, &self.ledger, &self.session_owner, record)
+                    .await?
+            else {
+                self.settle(
+                    record,
+                    Stage::Ignored,
+                    None,
+                    Some("thread_session_retired".to_string()),
+                )
+                .await?;
+                return Ok(Disposition::Ignored {
+                    event_id: record.event_id.clone(),
+                    reason: "thread_session_retired",
+                });
+            };
+            session
+        } else {
+            self.open_session(&record.channel_id).await?
+        };
         // The source key is derived from the message's `ts`, not the `event_id`:
         // `ts` *is* the message's identity, so a redelivery — or the same message
         // arriving under a second event — resolves to the one admission record
@@ -478,7 +510,11 @@ impl ChannelBot {
             ))
             .send()
             .await
-            .context("admit channel message as queued turn input")?;
+            .context("admit routed message as queued turn input")?;
+        self.ledger
+            .record_input_id(record.event_id.clone(), receipt.input_id.clone())
+            .await
+            .context("record Lash admission identity")?;
 
         if !is_mention {
             self.settle(record, Stage::Folded, None, None).await?;
@@ -514,6 +550,11 @@ impl ChannelBot {
             // not reach the input", and the two demand opposite responses.
             return self.settle_empty_drain(session, record, input_id).await;
         };
+
+        if record.thread_ts.is_none() {
+            threads::retain_applied_turn_boundary(&self.core, &self.ledger, session, input_id)
+                .await?;
+        }
 
         let Some(reply) = output
             .result
@@ -586,6 +627,10 @@ impl ChannelBot {
                 reason: "input_claimed_by_live_lease_generation",
             });
         }
+        if record.thread_ts.is_none() {
+            threads::retain_applied_turn_boundary(&self.core, &self.ledger, session, input_id)
+                .await?;
+        }
         match reply_from_transcript(session, input_id) {
             Some(reply) => {
                 self.owe_and_post(record, reply, ReplySource::Transcript)
@@ -632,9 +677,7 @@ impl ChannelBot {
         {
             return self.observed_elsewhere(record).await;
         }
-        let reply_ts = self
-            .post_reply(&record.channel_id, &reply, &record.event_id)
-            .await?;
+        let reply_ts = self.post_reply(record, &reply).await?;
         self.ledger
             .advance(
                 record.event_id.clone(),
@@ -676,9 +719,7 @@ impl ChannelBot {
                 channel: record.channel_id.clone(),
             });
         };
-        let reply_ts = self
-            .post_reply(&record.channel_id, &reply, &record.event_id)
-            .await?;
+        let reply_ts = self.post_reply(record, &reply).await?;
         self.settle(record, Stage::Replied, Some(reply_ts.clone()), None)
             .await?;
         Ok(Disposition::Replied {
@@ -704,6 +745,7 @@ impl ChannelBot {
             &record.channel_id,
             &record.message_ts,
             &record.event_id,
+            record.thread_ts.as_deref(),
         )
         .await
         .context("scan channel history for an already-posted reply")
@@ -740,10 +782,19 @@ impl ChannelBot {
         })
     }
 
-    async fn post_reply(&self, channel: &str, text: &str, event_id: &str) -> Result<String> {
+    async fn post_reply(&self, record: &EventRecord, text: &str) -> Result<String> {
+        let request = match record.thread_ts.as_deref() {
+            Some(thread_ts) => ChatPostMessageRequest::thread_reply(
+                &record.channel_id,
+                text,
+                &record.event_id,
+                thread_ts,
+            ),
+            None => ChatPostMessageRequest::reply(&record.channel_id, text, &record.event_id),
+        };
         let posted = self
             .api
-            .chat_post_message(&ChatPostMessageRequest::reply(channel, text, event_id))
+            .chat_post_message(&request)
             .await
             .context("post bot reply")?;
         Ok(posted.ts)
@@ -751,12 +802,15 @@ impl ChannelBot {
 
     /// Open (or resume) the channel's session.
     async fn open_session(&self, channel: &str) -> Result<LashSession> {
-        self.core
+        let session = self
+            .core
             .session(session_id(channel))
             .session_execution_owner(self.session_owner.clone())
             .open()
             .await
-            .with_context(|| format!("open session for channel {channel}"))
+            .with_context(|| format!("open session for channel {channel}"))?;
+        threads::ensure_forkable_channel_head(&self.core, &session).await?;
+        Ok(session)
     }
 
     /// Decide what an event means to this bot.
@@ -832,16 +886,59 @@ impl ChannelBot {
         user_id.to_string()
     }
 
-    async fn channel_lock(&self, channel: &str) -> Arc<tokio::sync::Mutex<()>> {
+    fn session_lock(&self, record: &EventRecord) -> SessionLockLease {
+        let key = record.thread_ts.as_deref().map_or_else(
+            || session_id(&record.channel_id),
+            |thread_ts| super::runtime::thread_session_id(&record.channel_id, thread_ts),
+        );
         let mut locks = self
-            .channel_locks
+            .session_locks
             .lock()
-            .expect("channel lock map is never poisoned");
-        Arc::clone(
+            .expect("session lock map is never poisoned");
+        let lock = Arc::clone(
             locks
-                .entry(channel.to_string())
+                .entry(key.clone())
                 .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
-        )
+        );
+        drop(locks);
+        SessionLockLease {
+            key,
+            lock,
+            registry: Arc::clone(&self.session_locks),
+        }
+    }
+}
+
+/// One scoped reference to a routed-session lock.
+///
+/// The registry entry disappears after the last holder or waiter finishes, so
+/// a long-lived bot does not retain one allocation for every thread ever seen.
+struct SessionLockLease {
+    key: String,
+    lock: Arc<tokio::sync::Mutex<()>>,
+    registry: SessionLockRegistry,
+}
+
+impl SessionLockLease {
+    async fn lock(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.lock.lock().await
+    }
+}
+
+impl Drop for SessionLockLease {
+    fn drop(&mut self) {
+        let mut registry = self
+            .registry
+            .lock()
+            .expect("session lock map is never poisoned");
+        let is_current = registry
+            .get(&self.key)
+            .is_some_and(|registered| Arc::ptr_eq(registered, &self.lock));
+        // The registry plus this lease are the final two strong references.
+        // Holding the registry mutex closes the race with a new clone.
+        if is_current && Arc::strong_count(&self.lock) == 2 {
+            registry.remove(&self.key);
+        }
     }
 }
 

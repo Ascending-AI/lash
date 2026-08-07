@@ -234,6 +234,7 @@ pub async fn post_as_user(
             },
             text,
             thread_ts,
+            false,
             None,
         )
         .await
@@ -253,6 +254,8 @@ pub async fn post_as_user(
 #[derive(Debug, Deserialize)]
 pub struct ChannelQuery {
     pub channel: String,
+    #[serde(default)]
+    pub thread_ts: Option<String>,
 }
 
 /// `GET /platform/history` — the backlog a tab renders on load.
@@ -266,30 +269,56 @@ pub async fn history(
     Query(query): Query<ChannelQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let channel = query.channel;
-    let (rows, users) = state
+    let thread_ts = query
+        .thread_ts
+        .as_deref()
+        .filter(|raw| !raw.is_empty())
+        .map(|raw| Ts::parse(raw).ok_or_else(|| ApiError::new("invalid_thread_ts")))
+        .transpose()?;
+    let (rows, users, summaries) = state
         .database()
         .call(move |connection| {
             if db::channel_by_id(connection, &channel)?.is_none() {
                 anyhow::bail!("channel_not_found");
             }
-            Ok((
-                db::channel_history(connection, &channel, db::TsWindow::default(), 200)?,
-                db::list_users(connection)?,
-            ))
+            let rows = if let Some(parent_ts) = thread_ts {
+                let Some(parent) = db::message_by_ts(connection, &channel, parent_ts)? else {
+                    anyhow::bail!("thread_not_found");
+                };
+                let mut rows = vec![parent];
+                rows.extend(db::thread_replies(
+                    connection,
+                    &channel,
+                    parent_ts,
+                    db::TsWindow::default(),
+                    200,
+                )?);
+                rows
+            } else {
+                let mut rows =
+                    db::channel_history(connection, &channel, db::TsWindow::default(), 200)?;
+                rows.reverse();
+                rows
+            };
+            let summaries = rows
+                .iter()
+                .filter(|row| row.thread_ts.is_none())
+                .map(|row| Ok((row.ts, db::thread_summary(connection, &channel, row.ts)?)))
+                .collect::<anyhow::Result<std::collections::HashMap<_, _>>>()?;
+            Ok((rows, db::list_users(connection)?, summaries))
         })
         .await
         .map_err(|error| match error.to_string().as_str() {
             "channel_not_found" => ApiError::new("channel_not_found"),
+            "thread_not_found" => ApiError::new("thread_not_found"),
             _ => ApiError::internal("read history", error),
         })?;
     let names: std::collections::HashMap<String, String> = users
         .into_iter()
         .map(|user| (user.id, user.display_name))
         .collect();
-    // Stored newest-first; the UI renders oldest-first.
     let messages = rows
         .into_iter()
-        .rev()
         .map(|row| {
             let (author_id, author_name, is_bot) = match &row.author {
                 Author::User { user_id } => (
@@ -302,6 +331,7 @@ pub async fn history(
                 ),
                 Author::App { bot_id, username } => (bot_id.clone(), username.clone(), true),
             };
+            let summary = summaries.get(&row.ts);
             json!({
                 "ts": row.ts.to_string(),
                 "author_id": author_id,
@@ -309,6 +339,8 @@ pub async fn history(
                 "is_bot": is_bot,
                 "text": row.text,
                 "thread_ts": row.thread_ts.map(|ts| ts.to_string()),
+                "reply_broadcast": row.reply_broadcast,
+                "reply_count": summary.map(|summary| summary.reply_count).unwrap_or(0),
             })
         })
         .collect::<Vec<_>>();

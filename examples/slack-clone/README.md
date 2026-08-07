@@ -24,7 +24,8 @@ chat turns driven by the native tool loop (`LashCore::standard_builder()`).
  │                                          │        │                        │
  │  users / channels / messages in SQLite   │        │  session per channel   │
  │  Slack-compatible Web API      ◄─────────┼────────┤  slack_api.rs client   │
- │  Events API outbox, at-least-once ───────┼───────►│  /slack/events         │
+│  Events API outbox, at-least-once ───────┼───────►│  channel sessions      │
+│                                          │        │  thread session forks │
  └──────────────────────────────────────────┘        └────────────────────────┘
 ```
 
@@ -54,6 +55,7 @@ State lives under `.slack-clone/`. `cargo test -p slack-clone` needs no model ke
 | Concern | Where |
 | --- | --- |
 | Session per durable conversation | `bot/runtime.rs::session_id`, `bot/channel.rs` |
+| Thread as a forked child session | `bot/threads.rs`, `bot/runtime.rs::thread_session_id` |
 | Ambient context as queued turn input, with no turn | `bot/channel.rs::ingest` |
 | Mention-triggered turn that drains the queue | `bot/channel.rs::run_mention_turn` |
 | Standard-mode native tool loop | `bot/tools.rs` |
@@ -77,8 +79,7 @@ anything shorter-lived throws the room's memory away:
 
 - keyed per mention → the bot has amnesia between questions;
 - keyed per user → the bot cannot see a conversation, only one side of it;
-- keyed per thread → reasonable *in addition* (see [Deferred](#deferred)), but as
-  the only key it loses everything said in the channel body;
+- keyed per thread as the only mapping → loses everything said in the channel body;
 - keyed per process → the bot forgets the room on every deploy.
 
 Because the session id is derived from platform data and the stores are SQLite,
@@ -106,6 +107,71 @@ Every enqueue carries a source key derived from the message's `ts`
 therefore resolves to the admission record Lash already holds instead of adding a
 duplicate context line — idempotence at the runtime layer, independent of the
 bot's own ledger.
+
+## Threads
+
+The reference mapping is **workspace → one Lash core, channel → one durable
+session, thread → one forked child session**. A thread id is deterministic:
+`thread:<C…>:<thread_ts>`, but that id is never opened as a fresh root. The bot
+creates it only through `LashCore::pin` plus `fork_at`, so the child shares the
+channel graph through its source boundary and owns a new branch after it.
+
+The lazy trigger is the **first reply in the thread**, whether ambient or a
+mention. This is slightly more eager than waiting for the first mention, but it
+has one durable state instead of a separate pre-engagement buffer: ambient
+replies enqueue directly on the child, cost no model call, and the first mention
+drains them there. No thread event is ever admitted to `channel:<C…>`.
+
+### Locating the fork boundary
+
+The ledger records the `input_id` returned by Lash for every Slack admission.
+After a channel turn commits, the bot reads `turn_input_applications`, finds the
+application for that `input_id`, groups every application with the same typed
+`turn_id`, pins the committed leaf, and records that boundary for those Slack
+messages. If a crash lands after the pin but before that ledger write, thread-open
+uses the durable application to re-derive and repair the missing boundary before
+it forks. Nothing parses an input, turn, message, or node id.
+
+A newly opened channel has a non-message baseline commit, so every honest
+fallback is forkable without spending a token. Thread-open chooses as follows:
+
+| Durable root evidence | Fork boundary and context policy |
+| --- | --- |
+| Recorded `fork_node_id` | Fork at that retained turn boundary. |
+| `input_id` with a committed application, but no `fork_node_id` | Re-derive the applied turn boundary, repair the ledger row, then fork there. |
+| `input_id` with no application record | The root is still queued: fork at the current committed head and copy top-level admissions through the root that are not already in the child graph. |
+| No root admission (for example, the bot joined after the root was posted) | Fork at the current committed head and invent no older context. |
+
+Copied admissions remain queued and are folded by the thread's first mention.
+The current-head fallback is deliberately limited to cases where the durable
+application needed to name an older committed boundary is absent.
+
+Fork isolation is directional in both cases and is asserted against the real
+store semantics:
+
+- thread nodes and pending inputs never appear in the channel session;
+- channel nodes and pending inputs added after the fork never appear in the
+  thread session;
+- the ancestry present at the retained boundary is shared, not copied.
+
+The staged event ledger carries `thread_ts`, so recovery opens the same child
+session, takes the same per-session lock, and applies the same accepted / reply
+pending / terminal protocol. Locks are keyed by routed session id: events in one
+thread serialize, while sibling threads and their channel can progress in
+parallel. An idle lock entry is removed after its last holder or waiter finishes,
+so old thread ids do not accumulate in memory. A deleted thread id is a permanent
+single-use tombstone; attempting to re-engage it settles as
+`thread_session_retired` rather than silently creating an unrelated conversation
+under the same id.
+
+On the platform side, clicking a parent opens the right-hand thread panel,
+replies stay out of the main list, and the parent carries a reply count. Slack's
+`reply_broadcast` is also accepted: it projects the one threaded message onto the
+channel surface, while bot context routing remains on the thread session. Real
+Slack additionally has notification preferences, thread subscriptions, broadcast
+pointer subtypes, edits/deletes, private-conversation scope rules, and retention
+policies; this example does not pretend those product concerns are session
+semantics.
 
 ### Text the model sees
 
@@ -137,10 +203,10 @@ Three mechanisms, each doing one job:
 A boolean cannot distinguish "already answered" (drop it) from "accepted and then
 crashed" (resume it), and guessing wrong loses a reply or duplicates one.
 
-Both ledger writes are single statements, and that is deliberate. A claim is one
-`INSERT … ON CONFLICT(event_id) DO UPDATE … RETURNING`, so insert-or-bump is
-atomic without a surrounding transaction: two concurrent deliveries of one event
-cannot both see "fresh". An advance is one compare-and-set
+The handled-event claim is one
+`INSERT … ON CONFLICT(event_id) DO UPDATE … RETURNING`, followed by the additive
+thread-route row in the same SQLite transaction, so two concurrent deliveries of
+one event cannot both see "fresh". An advance is one compare-and-set
 `UPDATE … WHERE stage = <expected>`, so a stale handler — a task from a previous
 boot, or a redelivery racing the recovery pass — cannot regress `replied` back to
 `reply_pending` and cause the duplicate this module exists to prevent. Neither
@@ -154,7 +220,8 @@ Even with the ledger deleted, redelivery does not duplicate the transcript.
 
 **3. Reply metadata for the last gap.** Each reply is posted with Slack's
 `metadata` field carrying its originating `event_id`. A recovering bot asks the
-platform — `conversations.history` with `include_all_metadata=true` — whether its
+platform — `conversations.history` for a channel reply or
+`conversations.replies` for a thread reply, with metadata included — whether its
 reply already landed, rather than guessing. That closes the
 crash-between-posting-and-recording window without needing an idempotency key
 Slack does not have.
@@ -351,7 +418,7 @@ migration — so the encoding is asserted by a test, not assumed.
 | Method | Notes |
 | --- | --- |
 | `auth.test` | `ok, url, team, user, team_id, user_id, bot_id` |
-| `chat.postMessage` | `channel`, `text`, `thread_ts`, `username`, `metadata`; response `{ok, channel, ts, message}` with `subtype: "bot_message"` + `bot_id` on app posts |
+| `chat.postMessage` | `channel`, `text`, `thread_ts`, `reply_broadcast`, `username`, `metadata`; response `{ok, channel, ts, message}` with `subtype: "bot_message"` + `bot_id` on app posts |
 | `conversations.list` | full channel object; `base64("team:<C…>")` cursor |
 | `conversations.history` | newest-first, top-level only, `has_more`, `pin_count`, `base64("next_ts:<micros>")` cursor, `include_all_metadata` |
 | `conversations.replies` | parent first with `reply_count` / `reply_users_count` / `latest_reply`, then replies oldest-first with `parent_user_id` |
@@ -379,6 +446,7 @@ with **three** retries carrying `x-slack-retry-num: 1|2|3` and
 | Envelope `token` is the verification mechanism; no `X-Slack-Signature` | Signing is in "what real Slack adds" below. The `token` field is real (deprecated) Slack. |
 | `pin_count` is always `0`; `num_members` is the workspace size; `color`, `tz` are fixed | The platform has no pins, no per-channel membership and no timezones. The fields are part of the contract, so they are reported honestly rather than omitted. |
 | `conversations.replies` pages only the replies; the parent is returned on the first page | Pagination the reader can follow, with the wire shape unchanged. |
+| `reply_broadcast` projects the original reply into channel history instead of a separate `thread_broadcast` pointer event | The example has one durable message identity and no separate broadcast-event product model; both surfaces still agree on the same `ts`. |
 | Cursor paging walks the ordered list rather than seeking an index | The whole workspace is smaller than one page here. |
 | The `event_callback` envelope omits `event_context`, `is_ext_shared_channel` and `context_team_id`/`context_enterprise_id` | One workspace, no shared channels and no Enterprise Grid, so there is nothing truthful to put in them. A bot must not require them. |
 | The delivery outbox is read, not leased: exactly one dispatcher per process | Two dispatchers would double-deliver — which the bot's ledger tolerates, since Slack redelivers anyway — but the retry counters and backoff would stop meaning anything. A multi-process platform needs a real claim lease. |
@@ -450,6 +518,7 @@ src/
   bot.rs            config, boot, registration    ← the Lash embedding
   bot/runtime.rs      standard-mode LashCore, stores, prompt, session mapping
   bot/channel.rs      session per channel; ambient fold; mention turn; recovery
+  bot/threads.rs      thread fork location, inheritance and child-session open
   bot/ledger.rs       staged idempotent-consumer record
   bot/slack_api.rs    the liftable client
   bot/tools.rs        native tools for the standard tool loop
@@ -490,11 +559,6 @@ that method needs the bot token, and a bot token has no business in a browser.
 
 Tracked for follow-up rather than half-built:
 
-- **Threads.** The wire shape is complete — `thread_ts` on posts,
-  `conversations.replies` with parent statistics, thread replies excluded from
-  channel history — and the tests cover it, but the UI does not render threads and
-  the bot does not reply in one. The open design question is the session mapping:
-  a thread is plausibly its own session with the channel session as its parent.
 - **DMs and group DMs.** `channel_type` is modelled; `im`/`mpim` conversations are
   not. A DM is a different session-mapping question again (per user, not per
   channel).

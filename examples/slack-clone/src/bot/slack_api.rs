@@ -139,15 +139,25 @@ impl SlackApi {
         ts: &str,
         limit: u32,
     ) -> Result<ConversationsRepliesResponse> {
-        self.call_form(
-            "conversations.replies",
-            &[
-                ("channel".to_string(), channel.to_string()),
-                ("ts".to_string(), ts.to_string()),
-                ("limit".to_string(), limit.to_string()),
-            ],
-        )
-        .await
+        self.conversations_replies_page(channel, ts, limit, None)
+            .await
+    }
+
+    async fn conversations_replies_page(
+        &self,
+        channel: &str,
+        ts: &str,
+        limit: u32,
+        cursor: Option<&str>,
+    ) -> Result<ConversationsRepliesResponse> {
+        let mut args = vec![
+            ("channel".to_string(), channel.to_string()),
+            ("ts".to_string(), ts.to_string()),
+            ("limit".to_string(), limit.to_string()),
+            ("include_all_metadata".to_string(), "true".to_string()),
+        ];
+        push_optional(&mut args, "cursor", cursor);
+        self.call_form("conversations.replies", &args).await
     }
 
     /// `users.list`.
@@ -293,6 +303,8 @@ pub struct ChatPostMessageRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread_ts: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_broadcast: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<MessageMetadata>,
 }
 
@@ -303,6 +315,27 @@ impl ChatPostMessageRequest {
             channel: channel.into(),
             text: text.into(),
             thread_ts: None,
+            reply_broadcast: None,
+            metadata: Some(MessageMetadata {
+                event_type: REPLY_METADATA_EVENT_TYPE.to_string(),
+                event_payload: serde_json::json!({ "event_id": event_id }),
+            }),
+        }
+    }
+
+    /// A reply in a thread. Lash-side routing remains on the thread session even
+    /// if a caller elects to broadcast the posted message into channel history.
+    pub fn thread_reply(
+        channel: impl Into<String>,
+        text: impl Into<String>,
+        event_id: &str,
+        thread_ts: impl Into<String>,
+    ) -> Self {
+        Self {
+            channel: channel.into(),
+            text: text.into(),
+            thread_ts: Some(thread_ts.into()),
+            reply_broadcast: None,
             metadata: Some(MessageMetadata {
                 event_type: REPLY_METADATA_EVENT_TYPE.to_string(),
                 event_payload: serde_json::json!({ "event_id": event_id }),
@@ -348,7 +381,29 @@ pub async fn find_posted_reply(
     channel: &str,
     message_ts: &str,
     event_id: &str,
+    thread_ts: Option<&str>,
 ) -> Result<Option<String>> {
+    if let Some(thread_ts) = thread_ts {
+        let mut page = api
+            .conversations_replies(channel, thread_ts, MAX_HISTORY_LIMIT)
+            .await?;
+        loop {
+            if let Some(reply_ts) = find_reply_in_messages(&page.messages, bot_id, event_id) {
+                return Ok(Some(reply_ts));
+            }
+            let next = page
+                .response_metadata
+                .as_ref()
+                .map(|metadata| metadata.next_cursor.clone())
+                .filter(|cursor| !cursor.is_empty());
+            let Some(cursor) = next.filter(|_| page.has_more) else {
+                return Ok(None);
+            };
+            page = api
+                .conversations_replies_page(channel, thread_ts, MAX_HISTORY_LIMIT, Some(&cursor))
+                .await?;
+        }
+    }
     let query = HistoryQuery::since(channel, message_ts);
     let mut page = api.conversations_history(&query).await?;
     loop {
@@ -365,4 +420,25 @@ pub async fn find_posted_reply(
         };
         page = api.conversations_history(&query.at_cursor(cursor)).await?;
     }
+}
+
+fn find_reply_in_messages(
+    messages: &[crate::wire::methods::MessageObject],
+    bot_id: &str,
+    event_id: &str,
+) -> Option<String> {
+    messages
+        .iter()
+        .filter(|message| message.bot_id.as_deref() == Some(bot_id))
+        .find(|message| {
+            message.metadata.as_ref().is_some_and(|metadata| {
+                metadata.event_type == REPLY_METADATA_EVENT_TYPE
+                    && metadata
+                        .event_payload
+                        .get("event_id")
+                        .and_then(Value::as_str)
+                        == Some(event_id)
+            })
+        })
+        .map(|message| message.ts.clone())
 }
