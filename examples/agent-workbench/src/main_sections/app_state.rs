@@ -507,6 +507,56 @@ async fn apply_model_selection_to_session(
     Ok(())
 }
 
+/// Whether the reply this turn produced is the workbench's to commit.
+///
+/// The runtime owns a turn's assistant output. A turn that finishes *as* an
+/// assistant message has already had that text committed once — by the protocol
+/// during the turn, or by the turn boundary materializing the terminal output —
+/// so a workbench copy on top of it would put the same reply in the durable
+/// transcript twice. That is what a background wake turn did: a queued turn runs
+/// without `require_finish`, so a prose-only reply terminates naturally into
+/// `TurnFinish::AssistantMessage` (FIG-984). The regime is the termination, not
+/// the path: any turn ending in bare prose reaches it.
+///
+/// A turn that finishes with a terminal *value* is not an assistant message.
+/// `require_finish` — which the send path applies — forces the answer through
+/// `finish`, and the runtime deliberately keeps that value out of the
+/// conversation. The reply the workbench renders is then the workbench's own to
+/// commit, so resume and `/api/state` still read it from durable truth.
+fn workbench_owns_committed_agent_reply(output: &TurnResult) -> bool {
+    output.assistant_message().is_none()
+}
+
+/// Commit the reply the workbench renders as this turn's durable assistant
+/// message. Only for turns `workbench_owns_committed_agent_reply` claims.
+pub(crate) async fn commit_assistant_transcript(
+    session: &lash::LashSession,
+    turn_id: &str,
+    assistant_text: String,
+) -> Result<(), AppError> {
+    let message_id = workbench_turn_assistant_message_id(turn_id);
+    let already_committed = session
+        .read_view()
+        .messages()
+        .iter()
+        .any(|message| message.id == message_id);
+    if already_committed {
+        return Ok(());
+    }
+    session
+        .admin()
+        .state()
+        .append_messages(vec![
+            lash::plugins::PluginMessage::text(
+                lash::messages::MessageRole::Assistant,
+                assistant_text,
+            )
+            .with_id(message_id),
+        ])
+        .await
+        .map_err(AppError::runtime)
+}
+
 fn assistant_text_for_display(output: &TurnResult, streamed_prose: &str) -> String {
     let terminal = output.final_value().map(terminal_value_text).or_else(|| {
         output

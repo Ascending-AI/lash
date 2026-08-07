@@ -366,12 +366,23 @@ async fn standard_runtime_assembles_stream_only_text_response() {
         TurnOutcome::Finished(TurnFinish::AssistantMessage { .. })
     ));
     assert_eq!(turn.assistant_output.safe_text, "What time is it?");
+    // A turn that finishes *as* an assistant message leaves that text committed
+    // exactly once. Whether the protocol committed it during the turn or the
+    // turn boundary materialized it at the end is the runtime's business; the
+    // count is the contract, and hosts read it as "this reply is already durable
+    // and is not mine to commit again" (FIG-984).
     let assistant_messages = active_conversation_messages(&turn.state)
         .into_iter()
         .filter(|message| message.role == MessageRole::Assistant)
         .collect::<Vec<_>>();
-    assert_eq!(assistant_messages.len(), 1);
-    assert_eq!(assistant_messages[0].parts[0].content, "What time is it?");
+    assert_eq!(
+        assistant_messages
+            .iter()
+            .map(|message| message.parts[0].content.as_str())
+            .collect::<Vec<_>>(),
+        vec!["What time is it?"],
+        "the assistant reply a turn finishes with must be committed exactly once"
+    );
 
     let streamed_text: String = sink
         .snapshot()

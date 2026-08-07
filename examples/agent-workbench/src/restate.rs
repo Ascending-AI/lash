@@ -28,9 +28,10 @@ use serde_json::{Value, json};
 use crate::{
     AppError, AppState, ButtonChoice, CRON_SCHEDULE_SOURCE_TYPE, ChannelTurnEvents, ModelSelection,
     TurnStreamState, apply_model_selection_to_session, assistant_text_for_display,
-    enqueue_button_trigger_command, enqueue_mail_received_trigger_command,
-    model_spec_from_selection,
+    commit_assistant_transcript, enqueue_button_trigger_command,
+    enqueue_mail_received_trigger_command, model_spec_from_selection,
     restate_ingress::{submit_restate_empty, submit_restate_workflow_json},
+    workbench_owns_committed_agent_reply, workbench_turn_assistant_message_id,
 };
 
 const CRON_STATE_KEY: &str = "state";
@@ -1233,10 +1234,12 @@ pub(crate) async fn record_turn_output(
             );
         }
         _ => {
-            commit_assistant_transcript(session, turn_id, assistant_text.clone()).await?;
+            if workbench_owns_committed_agent_reply(&output) {
+                commit_assistant_transcript(session, turn_id, assistant_text.clone()).await?;
+            }
             state.push_message_with_id_for_session(
                 &session.session_id(),
-                format!("workbench-assistant:{turn_id}"),
+                workbench_turn_assistant_message_id(turn_id),
                 "assistant",
                 assistant_text,
             );
@@ -1244,34 +1247,6 @@ pub(crate) async fn record_turn_output(
     }
     state.publish_turn_done(&session.session_id(), turn_id);
     Ok(())
-}
-
-pub(crate) async fn commit_assistant_transcript(
-    session: &lash::LashSession,
-    turn_id: &str,
-    assistant_text: String,
-) -> Result<(), AppError> {
-    let message_id = format!("workbench-assistant:{turn_id}");
-    let already_committed = session
-        .read_view()
-        .messages()
-        .iter()
-        .any(|message| message.id == message_id);
-    if already_committed {
-        return Ok(());
-    }
-    session
-        .admin()
-        .state()
-        .append_messages(vec![
-            lash::plugins::PluginMessage::text(
-                lash::messages::MessageRole::Assistant,
-                assistant_text,
-            )
-            .with_id(message_id),
-        ])
-        .await
-        .map_err(AppError::runtime)
 }
 
 fn record_turn_failure(

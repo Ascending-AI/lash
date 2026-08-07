@@ -670,3 +670,195 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         let _ = std::fs::remove_dir_all(data_dir);
     });
 }
+
+/// One background wake turn must leave exactly one agent reply behind — once in
+/// the durable transcript and once on screen.
+///
+/// A wake turn runs without `require_finish`, so a prose-only model reply
+/// terminates naturally and the turn finishes with
+/// `TurnFinish::AssistantMessage`. That is precisely the outcome the runtime
+/// materializes its own terminal assistant message for
+/// (`materialize_terminal_output`), so a host that also commits its own copy of
+/// the same reply writes the answer into the transcript twice and renders it
+/// twice. A foreground send never showed it because `require_finish` forces the
+/// reply through `finish`, which the runtime does not materialize (FIG-984).
+#[test]
+fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
+    run_async_test_on_stack_budget("workbench-wake-single-agent-reply", || async {
+        const WAKE_REPLY: &str = "You pressed the Red button!";
+        let data_dir = std::env::temp_dir().join(format!(
+            "agent-workbench-wake-single-reply-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&data_dir).expect("create wake single-reply dir");
+        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
+            lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
+        );
+        let state = recoverable_chat_test_state_with_dependencies(
+            &data_dir,
+            16,
+            lash::testing::TestProvider::builder()
+                .kind("workbench-wake-single-reply-test")
+                .complete(|_| async { Ok(text_response(WAKE_REPLY)) })
+                .build()
+                .into_handle(),
+            in_memory_trigger_store(),
+            Arc::clone(&store_factory),
+            Some(inert_queued_work_driver()),
+        )
+        .await;
+        let session_id = state.current_session_id();
+        let session = state
+            .core
+            .session(session_id.clone())
+            .open()
+            .await
+            .expect("open wake single-reply session");
+        let target = store_factory
+            .create_store(&lash::persistence::SessionStoreCreateRequest {
+                session_id: session_id.clone(),
+                relation: lash::persistence::SessionRelation::Root,
+                policy: session.policy_snapshot(),
+            })
+            .await
+            .expect("open wake single-reply receiver");
+        let registry = Arc::new(lash::testing::TestLocalProcessRegistry::default())
+            as Arc<dyn lash::process::ProcessRegistry>;
+        let process_id = "workbench-wake-single-reply-process";
+        registry
+            .register_process(
+                lash::process::ProcessRegistration::new(
+                    process_id,
+                    lash::process::ProcessInput::External {
+                        metadata: Value::Null,
+                    },
+                    lash::process::RecoveryDisposition::ExternallyOwned,
+                    lash::process::ProcessProvenance::host(),
+                )
+                .with_extra_event_types([lash::process::ProcessEventType {
+                    name: "producer.wake".to_string(),
+                    payload_schema: lash::triggers::LashSchema::any(),
+                    semantics: lash::process::ProcessEventSemanticsSpec {
+                        wake: Some(lash::process::ProcessWakeSpec {
+                            when: Some(lash::process::ProcessValueSelector::Present(
+                                "/wake_input".to_string(),
+                            )),
+                            input: lash::process::ProcessValueSelector::Pointer(
+                                "/wake_input".to_string(),
+                            ),
+                        }),
+                        ..lash::process::ProcessEventSemanticsSpec::default()
+                    },
+                }])
+                .with_wake_session_id(Some(session_id.clone())),
+            )
+            .await
+            .expect("register wake single-reply producer");
+        let wake = registry
+            .append_event(
+                process_id,
+                lash::process::ProcessEventAppendRequest::new(
+                    "producer.wake",
+                    json!({"wake_input": "the user pressed the Red button"}),
+                ),
+            )
+            .await
+            .expect("append wake single-reply event")
+            .wake_delivery
+            .expect("wake single-reply delivery");
+        target
+            .enqueue_queued_work(workbench_process_wake_draft(wake))
+            .await
+            .expect("enqueue wake single-reply batch");
+
+        let turn_id = "workbench-queued-wake-single-reply";
+        state.track_turn(&session_id, turn_id);
+        let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
+        let output = restate::WorkbenchQueuedTurnWorkflowRequest {
+            turn_id: turn_id.to_string(),
+            session_id: session_id.clone(),
+            reason: "test_wake_single_reply".to_string(),
+            batch_ids: Vec::new(),
+            drain_id: Some(format!("{turn_id}-drain")),
+        }
+        .queued_turn(&session)
+        .stream_to(&ChannelTurnEvents {
+            turn_state: Arc::clone(&turn_state),
+        })
+        .await
+        .expect("run wake single-reply turn")
+        .expect("the wake batch produced a turn");
+        assert!(
+            matches!(
+                &output.outcome,
+                lash::TurnOutcome::Finished(lash::TurnFinish::AssistantMessage { text })
+                    if text == WAKE_REPLY
+            ),
+            "a wake turn's prose reply must terminate naturally as an assistant \
+             message, which is the outcome the runtime materializes: {:?}",
+            output.outcome
+        );
+        crate::restate::record_turn_output(
+            &state,
+            &session,
+            turn_id,
+            output,
+            turn_state,
+            "test.wake_single_reply.completed",
+        )
+        .await
+        .expect("record wake single-reply turn output");
+        let committed_agent_replies = session
+            .read_view()
+            .messages()
+            .iter()
+            .filter(|message| {
+                lash::message_role(message) == "assistant"
+                    && lash::message_text(message).contains(WAKE_REPLY)
+            })
+            .map(|message| message.id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            committed_agent_replies.len(),
+            1,
+            "a completed wake turn must commit the agent reply exactly once, \
+             got {committed_agent_replies:?}"
+        );
+        crate::restate::settle_workbench_turn(&state, &session_id, turn_id)
+            .await
+            .expect("settle wake single-reply turn");
+        session
+            .close()
+            .await
+            .expect("close wake single-reply session");
+
+        let Json(snapshot) = app_state(State(state.clone()), Query(SessionQuery::default()))
+            .await
+            .expect("read wake single-reply snapshot");
+        let rendered_agent_rows = snapshot
+            .transcript
+            .iter()
+            .filter_map(|row| match row {
+                TranscriptRow::Message { message }
+                    if message.role == "assistant" && message.text.contains(WAKE_REPLY) =>
+                {
+                    Some(message.id.clone())
+                }
+                TranscriptRow::Message { .. }
+                | TranscriptRow::Reasoning { .. }
+                | TranscriptRow::CodeBlock { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rendered_agent_rows.len(),
+            1,
+            "the settled snapshot must render the agent reply exactly once, \
+             got {rendered_agent_rows:?}"
+        );
+        assert_eq!(
+            rendered_agent_rows, committed_agent_replies,
+            "the rendered agent row must be the committed transcript copy"
+        );
+        let _ = std::fs::remove_dir_all(data_dir);
+    });
+}
