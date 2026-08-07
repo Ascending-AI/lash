@@ -810,7 +810,7 @@ fn session_event_registry_isolates_channels_and_recreates_after_removal() {
 fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
     let registry = SessionEventRegistry::new(4);
     let session_id = "reconciled-session";
-    let committed_id = "m_turn_reconciled-turn_input";
+    let committed_id = workbench_turn_user_message_id("reconciled-turn");
     registry.publish_identified(
         session_id,
         "provisional-message",
@@ -990,6 +990,126 @@ async fn workbench_state_snapshot_merges_canonical_history_with_partial_product_
         ],
         "the Lash read view remains authoritative and product-only rows supplement it"
     );
+}
+
+#[tokio::test]
+async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_reconciled() {
+    let data_dir = tempfile::tempdir().expect("single user row tempdir");
+    let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+    let session_id = state.current_session_id();
+    let turn_id = "workbench-turn-fig972";
+
+    // What `send_turn` publishes: the workbench's own optimistic row for a turn
+    // it just submitted, in the workbench's id namespace.
+    state.track_turn_prompt(&session_id, turn_id, "one send".to_string());
+    state.push_message_with_id_for_session(
+        &session_id,
+        workbench_turn_user_message_id(turn_id),
+        "user",
+        "one send",
+    );
+    // What the runtime commits for the same send: a runtime-minted id — here the
+    // queued-ingress spelling, which no host can predict — carrying the turn
+    // provenance the runtime stamps.
+    let session = state
+        .core
+        .session(session_id.clone())
+        .open()
+        .await
+        .expect("open session for the committed turn input");
+    session
+        .admin()
+        .state()
+        .append_messages(vec![
+            lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, "one send")
+                .with_id("m_ingress_workbench-input-1")
+                .with_origin(lash::messages::MessageOrigin::TurnInput {
+                    turn_id: turn_id.to_string(),
+                    input_id: Some("workbench-input-1".to_string()),
+                }),
+        ])
+        .await
+        .expect("commit the runtime's copy of the turn input");
+    session.close().await.expect("close session");
+    // The workbench also mirrors committed ingress messages into its product log
+    // so the live page replaces ingress receipts; that mirror must not become a
+    // second row either.
+    state.push_message_with_id_for_session(
+        &session_id,
+        "m_ingress_workbench-input-1",
+        "user",
+        "one send",
+    );
+
+    let ui_row = (
+        workbench_turn_user_message_id(turn_id),
+        "one send".to_string(),
+    );
+    let committed_row = (
+        "m_ingress_workbench-input-1".to_string(),
+        "one send".to_string(),
+    );
+
+    let Json(running) = Box::pin(app_state(
+        State(state.clone()),
+        Query(SessionQuery::default()),
+    ))
+    .await
+    .expect("materialize the running snapshot");
+    assert_eq!(
+        user_rows(&running),
+        vec![ui_row.clone()],
+        "the UI-owned row renders once and the committed copy stays provenance"
+    );
+    assert_eq!(
+        transcript_user_rows(&running),
+        vec![ui_row],
+        "the transcript projection suppresses the same committed copy"
+    );
+
+    // Backfill: once the turn settles the UI-owned row is reconciled away, and
+    // the committed copy is what a reload renders — still exactly one row.
+    crate::restate::settle_workbench_turn(&state, &session_id, turn_id)
+        .await
+        .expect("settle the turn");
+    let Json(settled) = Box::pin(app_state(State(state), Query(SessionQuery::default())))
+        .await
+        .expect("materialize the settled snapshot");
+    assert_eq!(
+        user_rows(&settled),
+        vec![committed_row.clone()],
+        "with no UI-owned row left, the committed copy backfills the send"
+    );
+    assert_eq!(
+        transcript_user_rows(&settled),
+        vec![committed_row],
+        "the transcript backfills from the same committed copy"
+    );
+}
+
+fn user_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
+    snapshot
+        .state
+        .messages
+        .iter()
+        .filter(|message| message.role == "user")
+        .map(|message| (message.id.clone(), message.text.clone()))
+        .collect()
+}
+
+fn transcript_user_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
+    snapshot
+        .transcript
+        .iter()
+        .filter_map(|row| match row {
+            TranscriptRow::Message { message } if message.role == "user" => {
+                Some((message.id.clone(), message.text.clone()))
+            }
+            TranscriptRow::Message { .. }
+            | TranscriptRow::Reasoning { .. }
+            | TranscriptRow::CodeBlock { .. } => None,
+        })
+        .collect()
 }
 
 #[tokio::test]

@@ -56,6 +56,19 @@ pub enum MessageOrigin {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         caused_by: Option<crate::CausalRef>,
     },
+    /// The runtime's own commit of a turn's input. A host that renders its own
+    /// optimistic user row correlates that row to this committed copy through
+    /// `turn_id` — typed provenance the runtime publishes — instead of pinning
+    /// or parsing a message id. Message ids stay runtime-minted.
+    TurnInput {
+        /// The turn whose input this message carries.
+        turn_id: String,
+        /// The durable turn input this message was materialized from, present
+        /// when the input arrived through queued ingress and absent when the
+        /// turn was driven with its input in hand.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input_id: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1380,6 +1393,103 @@ mod tests {
         let transcript_text = block_text(&transcript.messages[0], 0);
         assert!(!transcript_text.contains("Thinking."));
         assert!(!transcript_text.contains("CIPHER=="));
+    }
+
+    #[test]
+    fn turn_input_origin_wire_shape_is_tagged_and_omits_an_absent_input_id() {
+        let direct = Message {
+            id: "m_turn_t1_input".to_string(),
+            role: MessageRole::User,
+            parts: vec![part(PartKind::Text, "hello")].into(),
+            origin: Some(MessageOrigin::TurnInput {
+                turn_id: "t1".to_string(),
+                input_id: None,
+            }),
+        };
+        assert_eq!(
+            serde_json::to_value(&direct.origin).expect("serialize direct origin"),
+            serde_json::json!({ "kind": "turn_input", "turn_id": "t1" }),
+            "an absent input id must not appear on the wire"
+        );
+
+        let ingress = Message {
+            id: "m_ingress_in-7".to_string(),
+            role: MessageRole::User,
+            parts: vec![part(PartKind::Text, "follow up")].into(),
+            origin: Some(MessageOrigin::TurnInput {
+                turn_id: "t1".to_string(),
+                input_id: Some("in-7".to_string()),
+            }),
+        };
+        assert_eq!(
+            serde_json::to_value(&ingress.origin).expect("serialize ingress origin"),
+            serde_json::json!({
+                "kind": "turn_input",
+                "turn_id": "t1",
+                "input_id": "in-7",
+            })
+        );
+
+        let msgs = vec![direct, ingress];
+        let decoded: Vec<Message> =
+            serde_json::from_str(&serde_json::to_string(&msgs).expect("serialize"))
+                .expect("deserialize");
+        assert_eq!(
+            decoded[0].origin,
+            Some(MessageOrigin::TurnInput {
+                turn_id: "t1".to_string(),
+                input_id: None,
+            })
+        );
+        assert_eq!(
+            decoded[1].origin,
+            Some(MessageOrigin::TurnInput {
+                turn_id: "t1".to_string(),
+                input_id: Some("in-7".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn message_origins_written_before_turn_input_provenance_still_deserialize() {
+        // Snapshots written before FIG-972 have no turn-input origin: a user
+        // message carried no origin at all, and plugin/process origins are
+        // unchanged. All three shapes must still round-trip.
+        let legacy = r#"[
+            {
+                "id":"m_turn_old_input","role":"User",
+                "parts":[{"id":"m_turn_old_input.p0","kind":"Text","content":"hi","prune_state":"Intact"}]
+            },
+            {
+                "id":"m1","role":"System",
+                "parts":[{"id":"m1.p0","kind":"Text","content":"note","prune_state":"Intact"}],
+                "origin":{"kind":"plugin","plugin_id":"compactor"}
+            },
+            {
+                "id":"m2","role":"Event",
+                "parts":[{"id":"m2.p0","kind":"Text","content":"woke","prune_state":"Intact"}],
+                "origin":{"kind":"process","process_id":"p1","event_type":"finished","sequence":3}
+            }
+        ]"#;
+        let msgs: Vec<Message> = serde_json::from_str(legacy).expect("legacy snapshot");
+        assert_eq!(msgs[0].origin, None);
+        assert_eq!(
+            msgs[1].origin,
+            Some(MessageOrigin::Plugin {
+                plugin_id: "compactor".to_string(),
+                transient: false,
+            })
+        );
+        assert_eq!(
+            msgs[2].origin,
+            Some(MessageOrigin::Process {
+                process_id: "p1".to_string(),
+                event_type: "finished".to_string(),
+                sequence: 3,
+                wake_id: None,
+                caused_by: None,
+            })
+        );
     }
 
     #[test]

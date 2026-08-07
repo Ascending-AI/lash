@@ -137,14 +137,18 @@ struct ChatMessage {
     at: String,
 }
 
+/// The id of the optimistic user row this workbench publishes when a send is
+/// accepted. It lives in the workbench's own id namespace — symmetric with
+/// `workbench-assistant:{turn_id}` — because the UI owns the rows it renders.
+/// The runtime's committed copy of the same text keeps its runtime-minted id
+/// and is correlated by `MessageOrigin::TurnInput`, never by id shape
+/// (FIG-972).
 fn workbench_turn_user_message_id(turn_id: &str) -> String {
-    format!("m_turn_{turn_id}_input")
+    format!("workbench-user:{turn_id}")
 }
 
 fn workbench_turn_id_from_user_message_id(message_id: &str) -> Option<&str> {
-    message_id
-        .strip_prefix("m_turn_")
-        .and_then(|message_id| message_id.strip_suffix("_input"))
+    message_id.strip_prefix("workbench-user:")
 }
 
 #[derive(Clone, Debug, Serialize)]

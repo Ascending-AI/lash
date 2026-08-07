@@ -1668,6 +1668,17 @@ async fn normal_turn_stores_effective_user_text_in_state() {
         user_message.parts.first().map(|part| part.content.as_str()),
         Some("/yolopush\n\n<skill>\nbody\n</skill>")
     );
+    // The committed turn input carries typed provenance so a host that rendered
+    // its own row for this turn recognizes this copy without parsing the
+    // runtime-minted message id (FIG-972). The direct path has no durable turn
+    // input behind it, so `input_id` is absent.
+    assert_eq!(
+        user_message.origin,
+        Some(crate::MessageOrigin::TurnInput {
+            turn_id: "skill-command-visibility-turn".to_string(),
+            input_id: None,
+        })
+    );
 }
 
 #[tokio::test]
@@ -1910,7 +1921,13 @@ async fn queued_checkpoint_input_commits_before_continuing_standard_turn() {
         })
         .collect::<Vec<_>>();
     assert_eq!(admitted.len(), 1);
-    assert!(admitted[0].origin.is_none());
+    // A normal user message that records which turn absorbed it, not a plugin or
+    // process injection (FIG-972).
+    assert!(matches!(
+        admitted[0].origin.as_ref(),
+        Some(crate::MessageOrigin::TurnInput { turn_id, input_id })
+            if turn_id == "queued-checkpoint-turn" && input_id.is_some()
+    ));
 }
 
 #[tokio::test]
@@ -2402,14 +2419,35 @@ async fn queued_checkpoint_input_accepts_and_persists_one_normal_user_message() 
                 && message.parts.iter().any(|part| part.content == "follow up")
         })
         .expect("committed injected input");
-    assert!(
-        follow_up.origin.is_none(),
-        "injected input must use the normal user-message representation"
+    // The injected input keeps the normal user-message representation — no
+    // plugin or process origin — and records which turn absorbed it and which
+    // durable input it came from (FIG-972).
+    let crate::MessageOrigin::TurnInput { turn_id, input_id } = follow_up
+        .origin
+        .as_ref()
+        .expect("committed injected input carries turn-input provenance")
+    else {
+        panic!("injected input must use the normal user-message representation");
+    };
+    assert_eq!(turn_id, "injection-accepted-turn");
+    let input_id = input_id
+        .as_deref()
+        .expect("queued ingress records the durable input id");
+    assert_eq!(follow_up.id, crate::runtime::ingress_message_id(input_id));
+    let opening = projected
+        .iter()
+        .find(|message| {
+            message.role == crate::MessageRole::User
+                && message.parts.iter().any(|part| part.content == "hello")
+        })
+        .expect("committed opening input");
+    assert_eq!(
+        opening.origin,
+        Some(crate::MessageOrigin::TurnInput {
+            turn_id: "injection-accepted-turn".to_string(),
+            input_id: None,
+        })
     );
-    assert!(projected.iter().any(|message| {
-        message.role == crate::MessageRole::User
-            && message.parts.iter().any(|part| part.content == "hello")
-    }));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

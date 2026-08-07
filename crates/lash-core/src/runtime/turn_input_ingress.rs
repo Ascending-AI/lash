@@ -448,6 +448,7 @@ impl crate::WorkClaim<TurnInputClaimData> {
     /// attachments and omitting inputs that produce no committed message.
     pub async fn materialize_checkpoint_turn_input(
         &self,
+        turn_id: &crate::TurnId,
         attachment_store: &crate::SessionAttachmentStore,
         attachment_source_policy: &dyn crate::AttachmentSourcePolicy,
     ) -> Result<QueuedCheckpointTurnInput, String> {
@@ -455,6 +456,7 @@ impl crate::WorkClaim<TurnInputClaimData> {
         for input in &self.inputs {
             if let Some(message) = committed_message_from_pending_input(
                 input,
+                turn_id,
                 attachment_store,
                 attachment_source_policy,
             )
@@ -535,6 +537,7 @@ pub(crate) fn plugin_message_from_turn_input(input: &TurnInput) -> Option<Plugin
 
 async fn committed_message_from_pending_input(
     pending: &PendingTurnInput,
+    turn_id: &crate::TurnId,
     attachment_store: &crate::SessionAttachmentStore,
     attachment_source_policy: &dyn crate::AttachmentSourcePolicy,
 ) -> Result<Option<crate::Message>, String> {
@@ -587,7 +590,12 @@ async fn committed_message_from_pending_input(
     Ok(Some(crate::Message {
         id: message_id,
         role: crate::MessageRole::User,
-        origin: None,
+        // Same typed provenance the turn's opening input carries: the absorbing
+        // turn plus the durable input this message came from (FIG-972).
+        origin: Some(crate::MessageOrigin::TurnInput {
+            turn_id: turn_id.to_string(),
+            input_id: Some(pending.input_id.clone()),
+        }),
         parts: crate::shared_parts(parts),
     }))
 }
