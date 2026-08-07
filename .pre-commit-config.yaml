@@ -42,6 +42,14 @@ repos:
         files: '\.rs$'
         pass_filenames: false
 
+      # Mirrors CI Lint "Check durable-read fixture schema declaration".
+      - id: durable-read-fixture-version
+        name: durable-read fixture schema declaration
+        language: system
+        entry: python3 scripts/check-durable-read-fixture-version.py --cached
+        files: '^(fixtures/durable-read/|crates/lash-core/tests/support/durable_read_fixture\.rs$)'
+        pass_filenames: false
+
       # Mirrors CI Lint "Clippy (workspace, all targets)". Warm-cache this is
       # tens of seconds; run at push so commits stay instant.
       - id: cargo-clippy-workspace

@@ -853,9 +853,11 @@ impl ProcessRegistry for PostgresProcessRegistry {
     ) -> Result<ProcessRecord, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        validate_process_execution_authority_tx(&mut tx, process_id, &record, authority, None, now)
-            .await?;
+        let lease_now = process_lease_now_epoch_ms_tx(&mut tx).await?;
+        validate_process_execution_authority_tx(
+            &mut tx, process_id, &record, authority, None, lease_now,
+        )
+        .await?;
         if record.is_terminal() {
             return Err(PluginError::Session(format!(
                 "terminal process `{process_id}` cannot enter a wait state"
@@ -870,7 +872,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
             &mut tx,
             &mut record,
             request,
-            now,
+            self.clock.timestamp_ms(),
             self.wake_delivery_config,
         )
         .await?;

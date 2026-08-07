@@ -13,6 +13,8 @@ pub mod queued_work;
 mod realization;
 mod runtime_commit;
 pub(crate) mod session_execution_lease;
+#[cfg(any(test, feature = "testing"))]
+mod testing;
 mod turn_id;
 mod usage;
 mod work_claim;
@@ -39,6 +41,8 @@ pub use session_execution_lease::{
     SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
     SessionExecutionLeaseDisplacement,
 };
+#[cfg(any(test, feature = "testing"))]
+pub use testing::append_request_commit_with_clock_for_testing;
 pub use turn_id::TurnId;
 pub use usage::{merge_token_ledger_entries_checked, merge_token_ledger_entry_checked};
 pub use work_claim::{WorkClaim, WorkCompletion};
@@ -957,34 +961,13 @@ pub fn append_request_commit_for_testing(
     nodes: &[crate::SessionAppendNode],
     requested_ancestor_node_id: Option<&str>,
 ) -> Result<RuntimeCommit, StoreError> {
-    let operation = crate::runtime::state::boundary_operation(
-        &state.session_id,
+    append_request_commit_with_clock_for_testing(
+        state,
         operation_id,
-        "append-session-nodes",
-    );
-    let stamp = RuntimeTurnCommitStamp::append_session_nodes(
-        operation.clone(),
+        nodes,
         requested_ancestor_node_id,
-        nodes,
-    )?;
-    let draft_namespace = operation.storage_key()?;
-    crate::runtime::state::append_session_nodes_to_state_with_clock(
-        state,
-        nodes,
-        &draft_namespace,
         &crate::SystemClock,
-    );
-    let mut graph = state.pending_graph_commit();
-    graph.derive_node_ids(&state.session_id, &operation)?;
-    let mut commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation(
-        state,
-        graph,
-        &[],
-        operation,
-    )?;
-    commit.turn_commit = stamp;
-    commit.debug_assert_append_envelope_scope();
-    Ok(commit)
+    )
 }
 
 fn remap_optional_node_id(node_id: &mut Option<String>, mapping: &[(String, String)]) {

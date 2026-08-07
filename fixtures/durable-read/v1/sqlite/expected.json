@@ -1,0 +1,294 @@
+{
+  "fixture_schema_version": 1,
+  "head_revision": 3,
+  "node_ids_in_read_order": [
+    "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
+    "n_a4ce52601dca198bf0f1df46a748ede0704fe4f823ce2c3fa4128b8ad37b20ac",
+    "n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9"
+  ],
+  "current_append_retry": {
+    "session_id": "durable-read-fixture",
+    "expected_head_revision": 0,
+    "config": {
+      "provider_id": "",
+      "model": {
+        "id": "",
+        "variant": "provider_default",
+        "limits": {
+          "context_window_tokens": 1
+        }
+      }
+    },
+    "current_frame_node_id": "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
+    "graph": {
+      "nodes": [
+        {
+          "node_id": "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
+          "timestamp": "2023-11-14T22:13:20+00:00",
+          "kind": "frame_open",
+          "frame_key": "initial-frame",
+          "reason": "initial",
+          "assignment": {
+            "policy": {
+              "model": {
+                "id": "",
+                "variant": "provider_default",
+                "limits": {
+                  "context_window_tokens": 1
+                }
+              },
+              "provider_id": "",
+              "session_id": null,
+              "autonomous": false,
+              "max_turns": null
+            },
+            "plugin_options": {}
+          },
+          "protocol_turn_options": {
+            "schema_version": 1,
+            "payload": {}
+          }
+        },
+        {
+          "node_id": "n_a4ce52601dca198bf0f1df46a748ede0704fe4f823ce2c3fa4128b8ad37b20ac",
+          "parent_node_id": "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
+          "timestamp": "2023-11-14T22:13:20+00:00",
+          "kind": "event",
+          "event": {
+            "Conversation": {
+              "id": "m_append_5b56214e4aa13f5f64634578e4b3af5426535c9018989aa3e92e2f5637692ff6",
+              "role": "User",
+              "parts": [
+                {
+                  "id": "m_append_5b56214e4aa13f5f64634578e4b3af5426535c9018989aa3e92e2f5637692ff6.p0",
+                  "kind": "Text",
+                  "content": "durable read user message",
+                  "prune_state": "Intact"
+                }
+              ],
+              "origin": {
+                "kind": "plugin",
+                "plugin_id": "plugin"
+              }
+            }
+          }
+        },
+        {
+          "node_id": "n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9",
+          "parent_node_id": "n_a4ce52601dca198bf0f1df46a748ede0704fe4f823ce2c3fa4128b8ad37b20ac",
+          "timestamp": "2023-11-14T22:13:20+00:00",
+          "kind": "plugin",
+          "plugin_type": "durable-read-plugin",
+          "body": {
+            "fixture": true,
+            "order": 2
+          }
+        }
+      ],
+      "leaf_node_id": "n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9"
+    },
+    "checkpoint": {
+      "turn_state": {
+        "turn_index": 0,
+        "token_usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "reasoning_output_tokens": 0
+        },
+        "protocol_turn_options": {
+          "schema_version": 1,
+          "payload": {}
+        }
+      },
+      "tool_state_ref": null,
+      "tool_state": null,
+      "plugin_snapshot_ref": null,
+      "plugin_snapshot": null,
+      "plugin_snapshot_revision": null,
+      "execution_state_ref": null,
+      "execution_state": null
+    },
+    "usage_deltas": [],
+    "turn_commit": {
+      "operation": {
+        "scope": {
+          "type": "runtime_operation",
+          "operation_id": "session:durable-read-fixture:boundary:durable-read-current-append"
+        },
+        "key": "append-session-nodes"
+      },
+      "identity_encoding_version": 1,
+      "request_identity_hash": "0c1bfb2609965714df841751355e4060ab2ada9631a1ae90f81785aac931ae2e",
+      "requested_node_count": 2
+    },
+    "completed_queue_claims": [],
+    "completed_turn_input_claims": [],
+    "committed_attachment_ids": []
+  },
+  "legacy_commit_retry": {
+    "session_id": "durable-read-fixture",
+    "expected_head_revision": 1,
+    "config": {
+      "provider_id": "",
+      "model": {
+        "id": "",
+        "variant": "provider_default",
+        "limits": {
+          "context_window_tokens": 1
+        }
+      }
+    },
+    "current_frame_node_id": "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
+    "graph": {
+      "nodes": [],
+      "leaf_node_id": "n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9"
+    },
+    "checkpoint": {
+      "turn_state": {
+        "turn_index": 7,
+        "token_usage": {
+          "input_tokens": 13,
+          "output_tokens": 8,
+          "cache_read_input_tokens": 5,
+          "cache_write_input_tokens": 3,
+          "reasoning_output_tokens": 2
+        },
+        "protocol_turn_options": {
+          "schema_version": 1,
+          "payload": {}
+        }
+      },
+      "tool_state_ref": null,
+      "tool_state": {
+        "generation": 887,
+        "tools": {}
+      },
+      "plugin_snapshot_ref": null,
+      "plugin_snapshot": {
+        "plugins": {
+          "durable-read-snapshot-plugin": {
+            "meta": {
+              "plugin_id": "durable-read-snapshot-plugin",
+              "plugin_version": "8.8.7",
+              "revision": 887,
+              "state": {
+                "fixture": "plugin-state",
+                "value": 887
+              }
+            },
+            "artifacts": [
+              {
+                "name": "durable-read-artifact.bin",
+                "data": [
+                  8,
+                  8,
+                  7
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "plugin_snapshot_revision": 4,
+      "execution_state_ref": null,
+      "execution_state": [
+        70,
+        73,
+        71,
+        56,
+        56,
+        55
+      ]
+    },
+    "usage_deltas": [
+      {
+        "identity": {
+          "operation_storage_key": "{\"key\":\"commit\",\"scope\":{\"operation_id\":\"durable-read-legacy-commit\",\"type\":\"runtime_operation\"}}",
+          "entry_ordinal": 0,
+          "payload_encoding_version": 2,
+          "payload_hash": "ebdcf60d363dd343af59872a3ae811b0a6c007ed748633c7a74a6376d8437711"
+        },
+        "entry": {
+          "source": "durable-read-turn",
+          "model": "durable-read-model",
+          "usage": {
+            "input_tokens": 21,
+            "output_tokens": 12,
+            "cache_read_input_tokens": 5,
+            "cache_write_input_tokens": 3,
+            "reasoning_output_tokens": 2
+          }
+        }
+      }
+    ],
+    "turn_commit": {
+      "operation": {
+        "scope": {
+          "type": "runtime_operation",
+          "operation_id": "durable-read-legacy-commit"
+        },
+        "key": "commit"
+      }
+    },
+    "completed_queue_claims": [],
+    "completed_turn_input_claims": [],
+    "committed_attachment_ids": [
+      "durable-read-attachment"
+    ]
+  },
+  "queue_batch_id": "qwb:74e14912cbb41768d773d3622c10aca7fed2f185771d0b63ebf66617f6943112",
+  "pending_input_id": "durable-read-pending-input",
+  "process_env_ref": "process-env:v2:sha256:02f6585f92aa774919cc2d3b51f1853eb4ff3d9b25d441936d7742ed58f8ba7e",
+  "await_event_key": {
+    "scope": {
+      "type": "turn",
+      "session_id": "durable-read-fixture",
+      "turn_id": "durable-read-turn"
+    },
+    "wait": {
+      "type": "tool_completion",
+      "tool_call_id": "durable-read-tool-call"
+    },
+    "key_id": "await-event:v3:sha256:3fc7a6553351ed965cb2ec4fd441a5e0c2029abe8e4ffeead899dd453bf6d771",
+    "signature": "fa40870502ea247dfb7452270fcd0aa736036097c723fb6b3082b160722e7aa1"
+  },
+  "revoked_await_event_key": {
+    "scope": {
+      "type": "turn",
+      "session_id": "durable-read-revoked-session",
+      "turn_id": "durable-read-revoked-turn"
+    },
+    "wait": {
+      "type": "tool_completion",
+      "tool_call_id": "durable-read-revoked-tool-call"
+    },
+    "key_id": "await-event:v3:sha256:1daa8c11e7f824832120eb80a9b4b2ca1381fe6c609669579caed407d56899e1",
+    "signature": "d51d23a53aa1f947e9f7177e1babef81c26d0b9ed4597ad36412880e82eca528"
+  },
+  "wake_delivery": {
+    "wake_id": "wake:v1:sha256:d82c45cf6ce199889e0e844cf214478e5e4dec79119ae37a4bb81dbd00d6f228",
+    "target_session_id": "durable-read-fixture",
+    "process_id": "durable-read-wake-process",
+    "sequence": 1,
+    "event_type": "fixture.wake",
+    "event_invocation": {
+      "scope": {
+        "session_id": "runtime"
+      },
+      "subject": {
+        "type": "process_event",
+        "process_id": "durable-read-wake-process",
+        "sequence": 1,
+        "event_type": "fixture.wake"
+      },
+      "caused_by": {
+        "type": "process",
+        "process_id": "durable-read-wake-process"
+      }
+    },
+    "input": "durable read wake",
+    "created_at_ms": 1700000000000
+  }
+}

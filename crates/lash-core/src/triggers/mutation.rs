@@ -22,6 +22,33 @@ pub fn evaluate_trigger_mutation(
     Ok(apply_in_memory_trigger_command(&mut state, command, now))
 }
 
+/// Testing seam for fixture generators that must pin otherwise-random trigger identity.
+#[doc(hidden)]
+pub fn evaluate_trigger_mutation_with_incarnation(
+    current: Option<TriggerSubscriptionRecord>,
+    command: TriggerCommand,
+    now: u64,
+    incarnation: String,
+) -> Result<TriggerEffectResult, PluginError> {
+    if !command.is_mutation() {
+        return Err(PluginError::Session(
+            "trigger mutation evaluator received a list command".to_string(),
+        ));
+    }
+    let mut state = InMemoryTriggerEventState::default();
+    if let Some(record) = current {
+        state
+            .subscriptions
+            .insert(record.subscription_id.clone(), record);
+    }
+    Ok(apply_in_memory_trigger_command_with_incarnation(
+        &mut state,
+        command,
+        now,
+        &mut || incarnation.clone(),
+    ))
+}
+
 pub(super) fn mutate_enabled(
     state: &mut InMemoryTriggerEventState,
     owner_scope: TriggerOwnerScope,

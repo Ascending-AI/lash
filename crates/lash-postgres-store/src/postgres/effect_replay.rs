@@ -59,8 +59,21 @@ impl PostgresEffectHost {
     }
 
     pub fn with_options(storage: &PostgresStorage, options: PostgresEffectReplayOptions) -> Self {
+        Self::with_options_and_clock(
+            storage,
+            options,
+            Arc::new(lash_core::facade_support::SystemClock),
+        )
+    }
+
+    /// Construct a host with an explicit record/scheduling clock.
+    pub fn with_options_and_clock(
+        storage: &PostgresStorage,
+        options: PostgresEffectReplayOptions,
+        clock: Arc<dyn lash_core::Clock>,
+    ) -> Self {
         Self {
-            inner: Arc::new(build_effect_replay_driver(storage, options)),
+            inner: Arc::new(build_effect_replay_driver(storage, options, clock)),
         }
     }
 
@@ -168,7 +181,11 @@ impl PostgresRuntimeEffectController {
         options: PostgresEffectReplayOptions,
     ) -> Self {
         Self {
-            inner: Arc::new(build_effect_replay_driver(storage, options)),
+            inner: Arc::new(build_effect_replay_driver(
+                storage,
+                options,
+                Arc::new(lash_core::facade_support::SystemClock),
+            )),
             scope,
         }
     }
@@ -245,13 +262,13 @@ impl RuntimeEffectController for PostgresRuntimeEffectController {
 fn build_effect_replay_driver(
     storage: &PostgresStorage,
     options: PostgresEffectReplayOptions,
+    clock: Arc<dyn lash_core::Clock>,
 ) -> PostgresEffectReplay {
     // The driver's clock only sleeps: `Sleep` effect due times, busy-retry
     // backoff, and the lease renewal interval. Every lease stamp and comparison
     // is the server's (`transaction_timestamp()`), so `PostgresStorage` needs no
     // injectable time source and this `SystemClock` is deliberately explicit
     // rather than a private `current_epoch_ms()` call per statement.
-    let clock: Arc<dyn lash_core::Clock> = Arc::new(lash_core::facade_support::SystemClock);
     let await_events = postgres_await_events(
         storage.pool.clone(),
         Arc::clone(&storage.await_event_signing_secret),

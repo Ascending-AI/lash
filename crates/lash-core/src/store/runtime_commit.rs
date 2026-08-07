@@ -82,6 +82,24 @@ pub struct RuntimeCommit {
     pub committed_attachment_ids: Vec<crate::AttachmentId>,
 }
 
+#[cfg(any(test, feature = "testing"))]
+impl RuntimeCommit {
+    /// Build a test commit with a fixed operation identity.
+    #[doc(hidden)]
+    pub fn persisted_state_with_operation_for_testing(
+        state: &crate::RuntimeSessionState,
+        usage_deltas: &[crate::TokenLedgerEntry],
+        operation: OperationId,
+    ) -> Self {
+        let mut graph = state.pending_graph_commit();
+        graph
+            .derive_node_ids(&state.session_id, &operation)
+            .expect("fixed-identity test commit node ids must be derivable");
+        Self::persisted_state_with_graph_commit_and_operation(state, graph, usage_deltas, operation)
+            .expect("fixed-identity test commit must be hashable")
+    }
+}
+
 /// Durable identity for one usage row submitted through a runtime commit.
 ///
 /// The operation key, ordinal, payload-encoding version, and payload hash are

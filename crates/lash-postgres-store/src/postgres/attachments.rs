@@ -40,12 +40,13 @@ impl AttachmentManifest for PostgresSessionStore {
         attachment_ids: &[AttachmentId],
     ) -> Result<(), StoreError> {
         let pool = self.pool.clone();
+        let now = self.clock.timestamp_ms();
         let session_id = session_id.to_string();
         let attachment_ids = attachment_ids.to_vec();
         block_on_detached(async move {
             let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
             crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, &session_id).await?;
-            commit_attachment_refs_tx(&mut tx, &session_id, &attachment_ids).await?;
+            commit_attachment_refs_tx(&mut tx, &session_id, &attachment_ids, now).await?;
             tx.commit().await.map_err(store_sqlx_error)
         })
     }

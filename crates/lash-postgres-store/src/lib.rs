@@ -201,6 +201,23 @@ impl PostgresProcessRegistry {
 #[derive(Clone)]
 pub struct PostgresTriggerStore {
     pool: PgPool,
+    clock: Arc<dyn lash_core::Clock>,
+    fixed_incarnation: Option<String>,
+}
+
+impl PostgresTriggerStore {
+    /// Bind trigger record timestamps to an explicit clock.
+    pub fn with_clock(mut self, clock: Arc<dyn lash_core::Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    /// Pin otherwise-random trigger incarnation identity for durable fixture generation.
+    #[doc(hidden)]
+    pub fn with_incarnation_for_testing(mut self, incarnation: impl Into<String>) -> Self {
+        self.fixed_incarnation = Some(incarnation.into());
+        self
+    }
 }
 
 #[derive(Clone)]
@@ -596,6 +613,8 @@ impl PostgresStorage {
     pub fn trigger_store(&self) -> PostgresTriggerStore {
         PostgresTriggerStore {
             pool: self.pool.clone(),
+            clock: Arc::new(lash_core::facade_support::SystemClock),
+            fixed_incarnation: None,
         }
     }
 
@@ -647,6 +666,12 @@ fn warn_postgres_process_registry_not_wired() {
 impl PostgresSessionStore {
     pub fn unbound(storage: &PostgresStorage) -> Self {
         storage.unbound_session_store()
+    }
+
+    /// Bind this handle to an explicit clock for deterministic embedding and tests.
+    pub fn with_clock(mut self, clock: Arc<dyn lash_core::Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     #[cfg(test)]
