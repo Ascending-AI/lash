@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Slack Clone — Lash bot workspace</title>
   <style>
     :root {
@@ -32,9 +32,10 @@
     * { box-sizing: border-box; }
     html, body { margin: 0; height: 100%; background: var(--panel); color: var(--ink); }
     button, input { font: inherit; color: inherit; }
+    button:focus-visible, input:focus-visible, .msg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .app { display: grid; grid-template-columns: 260px minmax(0, 1fr); height: 100vh; height: 100dvh; }
 
-    aside { background: var(--shell); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; }
+    .sidebar { background: var(--shell); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; }
     .brand { padding: 20px 18px 16px; border-bottom: 1px solid var(--line); }
     .brand h1 { margin: 0; font-size: var(--text-display); font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
     .brand p { margin: 6px 0 0; font-size: var(--text-small); font-weight: 400; color: var(--muted); line-height: 1.4; }
@@ -50,14 +51,26 @@
     .new-channel input { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); font-size: var(--text-small); }
     .new-channel button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); cursor: pointer; font-size: var(--text-small); font-weight: 500; }
 
-    main { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; }
+    main { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; }
+    .workbench { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; }
+    .workbench.has-thread { grid-template-columns: minmax(0, 1fr) minmax(320px, 38%); }
+    .channel-pane, .thread-panel { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
+    .thread-panel { border-left: 1px solid var(--line); background: var(--panel); }
+    .thread-panel[hidden] { display: none; }
+    .thread-head { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+    .thread-head strong { font-size: var(--text-name); }
+    .thread-head span { color: var(--dim); font-size: var(--text-meta); }
+    .thread-close { margin-left: auto; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 1.25rem; }
+    .thread-stream { overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
     .topbar { padding: 16px 22px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
     .topbar strong { font-size: var(--text-title); font-weight: 700; letter-spacing: -0.015em; line-height: 1.15; }
     .topbar span { font-size: var(--text-meta); font-weight: 400; color: var(--dim); font-variant-numeric: tabular-nums; }
     .topbar .who { margin-left: auto; font-size: var(--text-meta); color: var(--muted); }
 
     .stream { overflow-y: auto; padding: 18px 22px 8px; display: flex; flex-direction: column; gap: 14px; }
-    .msg { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 10px; }
+    .msg { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 10px; border-radius: 7px; padding: 3px; margin: -3px; }
+    .stream .msg { cursor: pointer; }
+    .stream .msg:hover { background: color-mix(in oklch, var(--raised), transparent 45%); }
     .avatar { width: 34px; height: 34px; border-radius: 7px; display: grid; place-items: center; font-size: var(--text-small); font-weight: 700; background: var(--raised); color: var(--muted); }
     .msg.is-bot .avatar { background: color-mix(in oklch, var(--bot), transparent 78%); color: var(--bot); }
     .msg-head { display: flex; align-items: baseline; gap: 8px; }
@@ -66,6 +79,7 @@
     .msg-head time { font-size: var(--text-meta); font-weight: 400; color: var(--dim); font-variant-numeric: tabular-nums; }
     .msg-body { font-size: var(--text-body); font-weight: 400; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
     .msg-body .mention { color: var(--accent); background: color-mix(in oklch, var(--accent), transparent 86%); border-radius: 4px; padding: 0 3px; }
+    .thread-badge { margin-top: 5px; border: 0; background: transparent; color: var(--bot); padding: 0; cursor: pointer; font-size: var(--text-small); font-weight: 650; }
     .empty { color: var(--dim); font-size: var(--text-small); padding: 8px 0; }
 
     .composer { border-top: 1px solid var(--line); padding: 14px 22px 18px; display: grid; gap: 8px; }
@@ -89,16 +103,23 @@
     @media (max-width: 720px) {
       :root { --text-title: 1.25rem; --text-name: 1rem; --text-body: 0.9375rem; }
       .app { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
-      aside { flex-direction: row; align-items: center; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      .sidebar { flex-direction: row; align-items: center; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
       .brand, .section-label, .sidebar-foot, .new-channel { display: none; }
       .channels { display: flex; gap: 4px; padding: 8px; }
       .channel { width: auto; white-space: nowrap; }
+      .workbench.has-thread { grid-template-columns: 1fr; }
+      .workbench.has-thread .channel-pane { display: none; }
+      .thread-panel { border-left: 0; }
+    }
+    @media (pointer: coarse) {
+      button, .msg[role="button"] { min-height: 44px; }
+      .thread-close { min-width: 44px; }
     }
   </style>
 </head>
 <body>
   <div class="app">
-    <aside>
+    <aside class="sidebar">
       <div class="brand">
         <h1>Slack Clone</h1>
         <p>A chat product with a Lash bot as a guest.</p>
@@ -121,17 +142,36 @@
         <span id="channelId"></span>
         <span class="who" id="memberCount"></span>
       </div>
-      <div class="stream" id="stream"></div>
-      <div class="composer">
-        <form id="composer">
-          <input id="text" placeholder="Message" autocomplete="off" aria-label="Message" disabled />
-          <button id="send" type="submit" disabled>Send</button>
-        </form>
-        <div class="hint">
-          Messages without a mention are folded into the bot's channel session as
-          context and get <b>no reply</b>. Mention the bot to make it answer.
-        </div>
-        <div class="error" id="error" hidden></div>
+      <div class="workbench" id="workbench">
+        <section class="channel-pane">
+          <div class="stream" id="stream"></div>
+          <div class="composer">
+            <form id="composer">
+              <input id="text" placeholder="Message" autocomplete="off" aria-label="Message" disabled />
+              <button id="send" type="submit" disabled>Send</button>
+            </form>
+            <div class="hint">
+              Messages without a mention are folded into the bot's channel session as
+              context and get <b>no reply</b>. Mention the bot to make it answer.
+            </div>
+            <div class="error" id="error" hidden></div>
+          </div>
+        </section>
+        <aside class="thread-panel" id="threadPanel" hidden>
+          <div class="thread-head">
+            <strong>Thread</strong>
+            <span id="threadContext"></span>
+            <button class="thread-close" id="threadClose" type="button" aria-label="Close thread">×</button>
+          </div>
+          <div class="thread-stream" id="threadStream"></div>
+          <div class="composer">
+            <form id="threadComposer">
+              <input id="threadText" placeholder="Reply in thread" autocomplete="off" aria-label="Reply in thread" />
+              <button type="submit">Reply</button>
+            </form>
+            <div class="hint">Thread replies stay in the thread. Mention the bot here to engage its forked session.</div>
+          </div>
+        </aside>
       </div>
     </main>
   </div>
@@ -155,7 +195,9 @@
       channels: [],
       users: new Map(),
       channel: null,
-      seen: new Set(),
+      channelSeen: new Set(),
+      threadSeen: new Set(),
+      threadTs: null,
       stream: null,
     };
 
@@ -199,11 +241,25 @@
       return fragment;
     }
 
-    function renderMessage(message) {
-      if (state.seen.has(message.ts)) return;
-      state.seen.add(message.ts);
+    function renderMessage(message, target = streamNode, seen = state.channelSeen, interactive = true) {
+      if (seen.has(message.ts)) return;
+      seen.add(message.ts);
       const row = document.createElement('div');
       row.className = message.is_bot ? 'msg is-bot' : 'msg';
+      row.dataset.ts = message.ts;
+      if (interactive) {
+        row.tabIndex = 0;
+        row.setAttribute('role', 'button');
+        row.setAttribute('aria-label', 'Open thread');
+        const open = () => openThread(message.thread_ts || message.ts);
+        row.addEventListener('click', open);
+        row.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            open();
+          }
+        });
+      }
 
       const avatar = document.createElement('div');
       avatar.className = 'avatar';
@@ -234,9 +290,39 @@
       body.append(renderText(message.text));
 
       column.append(head, body);
+      if (!message.thread_ts && Number(message.reply_count) > 0) {
+        column.append(replyBadge(message.ts, Number(message.reply_count)));
+      }
       row.append(avatar, column);
-      streamNode.append(row);
-      streamNode.scrollTop = streamNode.scrollHeight;
+      target.append(row);
+      target.scrollTop = target.scrollHeight;
+    }
+
+    function replyBadge(threadTs, count) {
+      const badge = document.createElement('button');
+      badge.className = 'thread-badge';
+      badge.type = 'button';
+      badge.dataset.threadTs = threadTs;
+      badge.dataset.replyCount = String(count);
+      badge.textContent = `${count} ${count === 1 ? 'reply' : 'replies'}`;
+      badge.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openThread(threadTs);
+      });
+      return badge;
+    }
+
+    function incrementReplyCount(threadTs) {
+      const parent = streamNode.querySelector(`.msg[data-ts="${CSS.escape(threadTs)}"]`);
+      if (!parent) return;
+      let badge = parent.querySelector('.thread-badge');
+      if (!badge) {
+        badge = replyBadge(threadTs, 0);
+        parent.lastElementChild.append(badge);
+      }
+      const count = Number(badge.dataset.replyCount) + 1;
+      badge.dataset.replyCount = String(count);
+      badge.textContent = `${count} ${count === 1 ? 'reply' : 'replies'}`;
     }
 
     function renderChannels() {
@@ -264,7 +350,8 @@
 
     async function selectChannel(channel) {
       state.channel = channel;
-      state.seen = new Set();
+      closeThread();
+      state.channelSeen = new Set();
       streamNode.replaceChildren();
       el('channelName').textContent = `# ${channel.name}`;
       el('channelId').textContent = channel.id;
@@ -281,6 +368,37 @@
         renderMessage(message);
       }
       follow(channel);
+    }
+
+    async function openThread(threadTs) {
+      if (!state.channel) return;
+      state.threadTs = threadTs;
+      state.threadSeen = new Set();
+      const panel = el('threadPanel');
+      const threadStream = el('threadStream');
+      panel.hidden = false;
+      el('workbench').classList.add('has-thread');
+      el('threadContext').textContent = `in #${state.channel.name}`;
+      threadStream.replaceChildren();
+      try {
+        const body = await api(
+          `/platform/history?channel=${encodeURIComponent(state.channel.id)}&thread_ts=${encodeURIComponent(threadTs)}`,
+        );
+        for (const message of body.messages ?? []) {
+          renderMessage(message, threadStream, state.threadSeen, false);
+        }
+        el('threadText').focus();
+      } catch (error) {
+        closeThread();
+        showError(`Could not open thread: ${error.message}`);
+      }
+    }
+
+    function closeThread() {
+      state.threadTs = null;
+      state.threadSeen = new Set();
+      el('threadPanel').hidden = true;
+      el('workbench').classList.remove('has-thread');
     }
 
     // One NDJSON response, read line by line. No second protocol, no framing.
@@ -320,8 +438,19 @@
 
     function handleLive(event) {
       if (event.type === 'message') {
-        streamNode.querySelector('.empty')?.remove();
-        renderMessage(event);
+        if (event.thread_ts) {
+          incrementReplyCount(event.thread_ts);
+          if (state.threadTs === event.thread_ts) {
+            renderMessage(event, el('threadStream'), state.threadSeen, false);
+          }
+          if (event.reply_broadcast) {
+            streamNode.querySelector('.empty')?.remove();
+            renderMessage(event);
+          }
+        } else {
+          streamNode.querySelector('.empty')?.remove();
+          renderMessage(event);
+        }
         showError(null);
       } else if (event.type === 'channel_created') {
         if (!state.channels.some((channel) => channel.id === event.channel)) {
@@ -382,6 +511,32 @@
             channel: state.channel.id,
             user_id: state.me.user_id,
             text,
+          }),
+        });
+        showError(null);
+      } catch (error) {
+        input.value = text;
+        showError(error.message);
+      }
+    });
+
+    el('threadClose').addEventListener('click', closeThread);
+
+    el('threadComposer').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const input = el('threadText');
+      const text = input.value.trim();
+      if (!text || !state.channel || !state.me || !state.threadTs) return;
+      input.value = '';
+      try {
+        await api('/platform/messages', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            channel: state.channel.id,
+            user_id: state.me.user_id,
+            text,
+            thread_ts: state.threadTs,
           }),
         });
         showError(null);

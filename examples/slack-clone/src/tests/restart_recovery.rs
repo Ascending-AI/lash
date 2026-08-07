@@ -163,6 +163,7 @@ async fn a_reply_owed_at_crash_time_is_posted_by_the_next_boots_recovery_pass() 
             app_mention.event.ts().to_string(),
             KIND_APP_MENTION.to_string(),
             Some("ada: anything?".to_string()),
+            None,
         )
         .await
         .expect("claim event");
@@ -462,6 +463,7 @@ async fn an_event_accepted_before_a_crash_is_answered_by_the_next_boots_recovery
                 envelope.event.ts().to_string(),
                 kind.to_string(),
                 Some(text.to_string()),
+                None,
             )
             .await
             .expect("claim event");
@@ -874,6 +876,86 @@ async fn a_deferred_mention_is_answered_once_the_dead_boots_lease_lapses() {
         "{disposition:?}"
     );
     assert_eq!(platform.bot_messages(&channel).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_thread_mention_interrupted_mid_turn_uses_the_same_deferral_recovery() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let bot_dir = bot_dir(scratch.path());
+    let channel = platform.channel("interrupted-thread").await;
+    let ada = platform.identify("ada").await;
+    let root = platform.say(&channel, &ada, "the shard is cobalt").await;
+
+    let dying_script = Script::new([Step::Gated("never delivered".to_string())]);
+    let dying = start_bot(&platform, &bot_dir, &dying_script).await;
+    for envelope in platform.drain_envelopes().await {
+        dying.ingest(envelope, None).await.expect("fold root");
+    }
+    platform
+        .say_thread(
+            &channel,
+            &ada,
+            root,
+            &format!("{} which shard?", platform.mention()),
+        )
+        .await;
+    let app_mention = only_event(&platform.drain_envelopes().await, "app_mention");
+    let turn = tokio::spawn({
+        let dying = Arc::clone(&dying);
+        let event = app_mention.clone();
+        async move {
+            let _ = dying.ingest(event, None).await;
+        }
+    });
+    dying_script.wait_gated().await;
+
+    let reborn_script = Script::prose("The shard is cobalt.");
+    let reborn = start_bot(&platform, &bot_dir, &reborn_script).await;
+    let report = reborn.recover().await.expect("thread recovery pass");
+    assert_eq!(report.deferred, vec![app_mention.event_id.clone()]);
+    assert!(matches!(
+        report.settled.first(),
+        Some(Disposition::Deferred {
+            reason: "input_claimed_by_live_lease_generation",
+            ..
+        })
+    ));
+    let record = reborn
+        .ledger()
+        .get(app_mention.event_id.clone())
+        .await
+        .expect("read ledger")
+        .expect("thread ledger row");
+    assert_eq!(record.stage, Stage::Accepted);
+    let root_ts = root.to_string();
+    assert_eq!(record.thread_ts.as_deref(), Some(root_ts.as_str()));
+
+    turn.abort();
+    dying_script.release_gate();
+    assert!(super::support::expire_session_leases(&bot_dir) > 0);
+    let outcome = reborn
+        .retry_deferred(app_mention.event_id, std::time::Duration::from_secs(30))
+        .await
+        .expect("settle deferred thread mention");
+    assert!(matches!(
+        outcome,
+        Disposition::Replied {
+            source: ReplySource::Turn,
+            ..
+        }
+    ));
+    assert_eq!(reborn_script.calls(), 1);
+    assert!(reborn_script.saw("the shard is cobalt"));
+    let replies = platform.thread_messages(&channel, root).await;
+    assert_eq!(
+        replies
+            .iter()
+            .filter(|message| message.bot_id.is_some())
+            .count(),
+        1
+    );
+    assert!(platform.bot_messages(&channel).await.is_empty());
 }
 
 #[tokio::test]

@@ -432,6 +432,49 @@ async fn conversations_replies_returns_the_parent_then_its_replies() {
 }
 
 #[tokio::test]
+async fn reply_broadcast_projects_one_thread_reply_onto_both_surfaces() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let channel = platform.channel("thread-broadcast").await;
+    let user = platform.identify("grace").await;
+    let parent = platform.say(&channel, &user, "broadcast root").await;
+    let posted = call(
+        &platform,
+        "chat.postMessage",
+        serde_json::json!({
+            "channel": channel,
+            "text": "important thread reply",
+            "thread_ts": parent.to_string(),
+            "reply_broadcast": true,
+        }),
+    )
+    .await;
+    assert_eq!(posted["ok"], Value::Bool(true));
+
+    let history = call(
+        &platform,
+        "conversations.history",
+        serde_json::json!({ "channel": channel }),
+    )
+    .await;
+    assert_eq!(history["messages"].as_array().expect("history").len(), 2);
+    assert_eq!(history["messages"][0]["ts"], posted["ts"]);
+    assert_eq!(
+        history["messages"][0]["thread_ts"],
+        Value::String(parent.to_string())
+    );
+
+    let replies = call(
+        &platform,
+        "conversations.replies",
+        serde_json::json!({ "channel": channel, "ts": parent.to_string() }),
+    )
+    .await;
+    assert_eq!(replies["messages"].as_array().expect("replies").len(), 2);
+    assert_eq!(replies["messages"][1]["ts"], posted["ts"]);
+}
+
+#[tokio::test]
 async fn a_channel_message_queues_a_message_event_in_slacks_envelope() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;

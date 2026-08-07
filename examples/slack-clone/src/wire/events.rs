@@ -121,6 +121,14 @@ impl Event {
         }
     }
 
+    /// Thread parent, when this event is a reply rather than channel traffic.
+    pub fn thread_ts(&self) -> Option<&str> {
+        match self {
+            Event::Message(event) => event.thread_ts.as_deref(),
+            Event::AppMention(event) => event.thread_ts.as_deref(),
+        }
+    }
+
     /// The message text as authored, with `<@U…>` mention syntax intact.
     pub fn text(&self) -> &str {
         match self {

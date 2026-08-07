@@ -55,6 +55,7 @@ pub enum LiveEvent {
         is_bot: bool,
         text: String,
         thread_ts: Option<String>,
+        reply_broadcast: bool,
     },
     /// A channel was created.
     ChannelCreated { channel: String, name: String },
@@ -208,6 +209,7 @@ impl PlatformState {
         author: Author,
         text: String,
         thread_ts: Option<Ts>,
+        reply_broadcast: bool,
         metadata_json: Option<String>,
     ) -> Result<MessageRow> {
         let factory = self.event_factory();
@@ -222,6 +224,7 @@ impl PlatformState {
                     author,
                     &text,
                     thread_ts,
+                    reply_broadcast,
                     metadata_json.as_deref(),
                 )?;
                 for envelope in factory.envelopes_for(&stored) {
@@ -245,6 +248,7 @@ impl PlatformState {
             is_bot,
             text: stored.text.clone(),
             thread_ts: stored.thread_ts.map(|ts| ts.to_string()),
+            reply_broadcast: stored.reply_broadcast,
         });
         self.notify_delivery();
         Ok(stored)

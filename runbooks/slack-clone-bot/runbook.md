@@ -93,6 +93,19 @@ three are correct. The answer key is **counts, typed dispositions, and typed pro
 8. **Two humans means two browser contexts.** Identity is per-context (`localStorage`
    `slack-clone-name` plus `POST /platform/identify`). One context with two tabs is one
    human and does not exercise the fan-out.
+9. **A thread is a fork, never a second root session.** Its deterministic id is
+   `thread:<C…>:<thread_ts>`, but require a persisted fork relation whose source is the
+   channel's retained boundary. A session with that id created independently is a **FAIL**.
+10. **Thread traffic has one context route.** A normal thread reply renders only in the
+    thread panel and is admitted only to the thread session. `reply_broadcast` may add a
+    channel-surface projection, but it never admits the reply to the channel session.
+11. **Gate branch isolation in both directions.** The thread inherits committed channel
+    context through its fork boundary; channel traffic after that boundary is absent from
+    the thread, and every thread admission/reply is absent from the channel transcript.
+    Browser placement alone is not session evidence.
+12. **Count thread replies separately from channel rows.** In each tab, gate the parent
+    `.thread-badge`, `#threadStream .msg`, and `#stream .msg` independently. A correct
+    non-broadcast reply increments the badge and thread count without adding a main-stream row.
 
 ## Working material
 
@@ -106,10 +119,14 @@ three are correct. The answer key is **counts, typed dispositions, and typed pro
 - UI affordances: the name picker (`#namePicker` / `#nameInput`), the channel list
   (`#channels`), the current channel (`#channelName`, `#channelId`), the rendered mention
   token (`#botMention`), the composer (`#composer`, `#text`, `#send`), and the message stream
-  (`#stream`). The client dedupes rendered rows by `message.ts`, so a duplicate **post** —
+  (`#stream`), thread panel (`#threadPanel`, `#threadStream`, `#threadComposer`,
+  `#threadText`, `#threadClose`) and parent count (`.thread-badge`). The client dedupes
+  rendered rows by `message.ts`, so a duplicate **post** —
   which gets a fresh `ts` — renders as a second row and cannot hide.
 - Platform HTTP truth: `GET /platform/bootstrap` (identity, channels, users),
-  `POST /platform/identify`, `POST /platform/messages`, `GET /platform/history?channel=<C…>`,
+  `POST /platform/identify`, `POST /platform/messages` (with `thread_ts` for a reply),
+  `GET /platform/history?channel=<C…>`,
+  `GET /platform/history?channel=<C…>&thread_ts=<root-ts>`,
   and the Slack-shaped `POST /api/conversations.history` (bearer bot token, form-encoded,
   `include_all_metadata=true` to read reply metadata).
 - Bot HTTP truth: `GET /healthz` (resolved identity), `POST /slack/events` (the Events API
@@ -132,7 +149,8 @@ three are correct. The answer key is **counts, typed dispositions, and typed pro
   correlation defect. Convert with `micros // 1_000_000` and `% 1_000_000` zero-padded to six
   digits, and compare in the wire form. The same applies to role and stage vocabularies: the
   session graph writes `User`/`Assistant`, the ledger writes lowercase stage names.
-- The bot's session id is `channel:<C…>` — **constructed** from the channel id, never parsed.
+- The bot's channel session id is `channel:<C…>` and thread session id is
+  `thread:<C…>:<thread_ts>` — **constructed** from platform identities, never parsed.
 
 Save every named artifact, both tabs' screenshots, and all four layer extracts per phase.
 
@@ -200,6 +218,35 @@ Gate the mention's `app_mention` event through to a settled reply, then require:
 The reply's *wording* is not gated. That it names A's fact and a real channel is judged
 behaviour; that exactly one turn ran and folded the queued input is the objective gate.
 Screenshot `03-mention-both-tabs.png`.
+
+## Phase 3T — Human B opens a thread: inherited context, one threaded reply, no channel leak
+
+Use Human A's first ambient message from phase 2 as the thread root. In **B's** tab click that
+message to open `#threadPanel`, then post a thread reply that mentions the bot and asks about
+the root's unique ambient marker. Open the same parent in **A's** tab. Gate all four layers:
+
+- **Layer 1:** both tabs show the same parent plus B's mention and exactly one bot reply in
+  `#threadStream`; the parent's `.thread-badge` increments to two replies; neither tab gains
+  a main `#stream .msg` row for either thread reply. The bot answer must refer to the unique
+  pre-fork ambient fact, judged semantically rather than by exact prose.
+- **Layer 2:** `messages` holds B's mention and the bot reply with `thread_ts = <root-ts>`;
+  `/api/conversations.replies` returns parent first and both replies; normal
+  `/api/conversations.history` contains neither reply. The bot reply metadata carries the
+  thread `app_mention` event id.
+- **Layer 3:** a session named `thread:<C…>:<root-ts>` exists as a fork of the channel's
+  retained boundary. Its committed prompt/transcript contains the pre-fork ambient marker and
+  the thread mention. The `channel:<C…>` graph and pending-input table contain **no** message
+  with the thread event's `input_id`, `MessageOrigin::TurnInput`, text marker, or turn id.
+- **Layer 4:** the turn and `Replied { source: Turn }` are scoped to the thread session id;
+  there is no channel-scoped turn for this mention.
+
+Now post a fresh ambient marker in the channel **after** the fork, allow it to reach `Folded`,
+and mention the bot a second time in the thread. Require the second thread model request and
+committed transcript to exclude that post-fork channel marker. This is the opposite-direction
+isolation gate; without it the test proves only that the channel cannot see the child.
+
+Save `03T-thread-both-tabs.png` plus four extracts: thread DOM rows/badge; platform parent and
+reply rows; channel and thread session graphs/pending inputs; trace records grouped by session.
 
 ## Phase 4 — Redelivery: the same event again changes nothing
 
@@ -279,6 +326,27 @@ evidence (a turn-input application record) rather than on the ambiguous empty dr
 Report the incarnation ids, the graph-node count for the turn, and the lease generation the
 claim is pinned to; a stranded claim terminalized as `ReplyLost` is the FIG-1008 regression.
 
+## Phase 5T — Kill the bot mid-thread mention; recover on the child session
+
+Repeat phase 5 inside the phase-3T thread. Arm row recorders in both tabs, post a fresh thread
+mention, correlate its `app_mention` by `thread_ts = <root-ts>`, poll its ledger row to
+`accepted`, and kill the bot. Reuse every phase-5 lease/deferral gate, with these additional
+thread requirements:
+
+- every drain, lease diagnostic, turn-input application, trace, and final turn is scoped to
+  `thread:<C…>:<root-ts>`; the channel session's head, graph, pending rows and turn count are
+  unchanged by the thread mention and its recovery;
+- the final reply appears exactly once in each open `#threadStream`, exactly once in
+  `conversations.replies`, and nowhere in the main channel list/history;
+- the parent badge increments exactly once; the in-page recorder sees no transient duplicate;
+- the ledger retains the original `thread_ts` through `accepted`, any `Deferred`,
+  `reply_pending`, and `replied`, and the posted reply metadata names the original event id.
+
+Allow the same 30-40s lease window and accept `Turn`, `Transcript`, or `Ledger` only when the
+four-layer evidence matches the kill point. `ReplyLost`, a terminal row without a reply, a
+channel-scoped recovery turn, or a reply in the channel surface is a **FAIL**. Save
+`05T-thread-bot-down-both-tabs.png` and `05T-thread-recovered-both-tabs.png`.
+
 ## Phase 6 — Platform restart: the durable outbox converges
 
 Prove the outbox survives its own process. Stop the **bot** so a delivery must fail, then as
@@ -328,8 +396,12 @@ Run `bash scripts/slack-clone-dev.sh down --port <p>` and confirm both processes
 | Fold is provable | ambient markers committed in the drained turn with `TurnInput` provenance | | layer-3 extract |
 | Twin dropped | the `message` twin `ignored` as `superseded_by_app_mention` | | layer-3 extract |
 | Tool loop ran | `tool_call_started`/`completed` pair; exactly one `turn_completed` | | layer-4 extract |
+| Thread fork | deterministic child session with retained channel ancestry | | `03T-thread-both-tabs.png`, layer-3 extract |
+| Thread inheritance | reply uses the pre-fork ambient fact; post-fork channel marker absent | | phase-3T request/transcript extract |
+| Thread isolation | no thread rows in channel UI/history/session; no post-fork channel traffic in thread | | phase-3T four-layer extracts |
 | Redelivery inert | `Duplicate` at `replied`; `deliveries` incremented; counts unchanged | | `04-after-redelivery-both-tabs.png` |
 | Mid-turn kill recovered | `Replied` (source recorded); exactly one reply in all four layers and in the in-page history | | `05-bot-down-*.png`, `05-recovered-*.png` |
+| Mid-thread kill recovered | child-scoped deferral settles once; badge increments once; channel remains untouched | | `05T-thread-*.png` |
 | Outbox durable | an undelivered retrying row survives a platform restart, then converges once | | `06-outbox-converged-both-tabs.png` |
 | Reload identity | each tab's multiset unchanged, equal to the other tab's and to `messages` | | `07-reloaded-both-tabs.png` |
 | Four-layer cross-check | every phase reconciles UI / platform / bot / trace pairwise | | all per-phase extracts |

@@ -271,10 +271,29 @@ impl TestPlatform {
                 },
                 text.to_string(),
                 None,
+                false,
                 None,
             )
             .await
             .expect("post as user")
+            .ts
+    }
+
+    /// Post a human reply in a thread and return its `ts`.
+    pub async fn say_thread(&self, channel: &str, user_id: &str, thread_ts: Ts, text: &str) -> Ts {
+        self.state
+            .post_message(
+                channel.to_string(),
+                Author::User {
+                    user_id: user_id.to_string(),
+                },
+                text.to_string(),
+                Some(thread_ts),
+                false,
+                None,
+            )
+            .await
+            .expect("post thread reply as user")
             .ts
     }
 
@@ -361,6 +380,28 @@ impl TestPlatform {
             .await
             .into_iter()
             .filter(|message| message.bot_id.is_some())
+            .collect()
+    }
+
+    /// Every reply in one thread, oldest first (parent excluded).
+    pub async fn thread_messages(&self, channel: &str, thread_ts: Ts) -> Vec<MessageObject> {
+        let channel = channel.to_string();
+        let rows = self
+            .state
+            .database()
+            .call(move |connection| {
+                db::thread_replies(
+                    connection,
+                    &channel,
+                    thread_ts,
+                    db::TsWindow::default(),
+                    500,
+                )
+            })
+            .await
+            .expect("read thread replies");
+        rows.iter()
+            .map(|row| crate::platform::web_api::message_object(row, true))
             .collect()
     }
 }
