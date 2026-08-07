@@ -44,6 +44,7 @@ Thumbs.db
 /.lash/
 /.agent-service/
 /.agent-workbench/
+/.slack-clone/
 /.openrouter-chat-ui/
 /.agent-service.schema*-backup-*/
 /.agent-workbench.schema*-backup-*/

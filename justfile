@@ -29,6 +29,32 @@ agent-workbench-down port='3030':
 agent-workbench-foreground port='3030':
   ./scripts/agent-workbench-dev.sh foreground --port "{{port}}"
 
+# The slack-clone example is two processes: the platform on `port` and the bot on
+# `port + 1`. `up` starts both and waits for the bot to register for events.
+slack-clone port='3040':
+  ./scripts/slack-clone-dev.sh up --port "{{port}}"
+
+slack-clone-up port='3040':
+  ./scripts/slack-clone-dev.sh up --port "{{port}}"
+
+slack-clone-restart port='3040':
+  ./scripts/slack-clone-dev.sh restart --port "{{port}}"
+
+slack-clone-status port='3040':
+  ./scripts/slack-clone-dev.sh status --port "{{port}}"
+
+slack-clone-logs port='3040':
+  ./scripts/slack-clone-dev.sh logs --port "{{port}}"
+
+slack-clone-logs-follow port='3040':
+  ./scripts/slack-clone-dev.sh logs --port "{{port}}" --follow
+
+slack-clone-down port='3040':
+  ./scripts/slack-clone-dev.sh down --port "{{port}}"
+
+slack-clone-platform-foreground port='3040':
+  ./scripts/slack-clone-dev.sh platform-foreground --port "{{port}}"
+
 workflow-graph-roundtrip port='3031':
   #!/usr/bin/env bash
   set -euo pipefail

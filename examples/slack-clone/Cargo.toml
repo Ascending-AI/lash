@@ -1,0 +1,54 @@
+[package]
+name = "slack-clone"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme = "README.md"
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# Two binaries, one crate. The split is the point of the example: the platform
+# binary is a plain product with no Lash dependency, and the bot binary is the
+# Lash embedding that lives inside it.
+[[bin]]
+name = "slack-clone-platform"
+path = "src/bin/platform.rs"
+
+[[bin]]
+name = "slack-clone-bot"
+path = "src/bin/bot.rs"
+
+# Standard-mode host: no `rlm` feature, no `lash-protocol-rlm`, no Lashlang
+# artifact store. `LashCore::standard_builder()` pre-seeds the standard protocol
+# plugin, and the bot's turns are native tool-loop turns.
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+axum = "0.8"
+base64 = { workspace = true }
+bytes = { workspace = true }
+dotenvy = "0.15"
+futures-util = { workspace = true }
+lash = { workspace = true }
+lash-provider-openai = { workspace = true }
+lash-sqlite-store = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+schemars = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+
+[dev-dependencies]
+lash = { workspace = true, features = ["testing"] }
+# `form` only for the test that proves Slack's form-encoded argument dialect works.
+reqwest = { workspace = true, features = ["json", "rustls", "http2", "form"] }
+tempfile = { workspace = true }

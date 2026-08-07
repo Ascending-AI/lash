@@ -80,14 +80,22 @@ Full walkthrough in the [quickstart](https://lash.run/quickstart.html); the comp
 
 ## Examples
 
-Two runnable apps under `examples/` drive the facade end-to-end: full hosts with
-a browser UI, real persistence, remote DTO streams, and optional durable
-execution. Start with `agent-service` for the smallest production-shaped browser
-embedding: app-owned product state, a Lash session per chat, and session
-observation live replay for reconnect. Move to `agent-workbench` when you want
-the advanced Restate host with durable processes, triggers, cron, and the same
-cursor-based browser stream. The docs walk through both at
-<https://lash.run/examples.html>.
+Runnable apps under `examples/` drive the facade end-to-end, with real
+persistence, remote DTO streams, and optional durable execution.
+
+Two of them are hosts that **own** their UI. Start with `agent-service` for the
+smallest production-shaped browser embedding: app-owned product state, a Lash
+session per chat, and session observation live replay for reconnect. Move to
+`agent-workbench` when you want the advanced Restate host with durable processes,
+triggers, cron, and the same cursor-based browser stream — it is also the
+reference for RLM mode.
+
+`slack-clone` is the inverted shape, and the reference for **standard mode**: a
+Slack-compatible chat platform with no Lash dependency at all, plus a Lash bot
+living inside it as a guest over HTTP. Read it for the integration questions —
+session per channel, ambient room context as queued turn input, idempotent
+consumption of at-least-once webhooks, restart recovery — and for the native tool
+loop. The docs walk through them at <https://lash.run/examples.html>.
 
 ```bash
 # Durable chat app: SQLite or Postgres, RLM, app-owned tools, Restate turns
@@ -95,6 +103,9 @@ OPENROUTER_API_KEY=sk-or-... cargo run -p agent-service        # then open http:
 
 # Adds durable background work: Lashlang processes, subagents, cron triggers (Restate required)
 OPENROUTER_API_KEY=sk-or-... just agent-workbench 3000         # then open http://127.0.0.1:3000
+
+# Lash as a bot inside someone else's product: standard mode, session per channel
+OPENROUTER_API_KEY=sk-or-... just slack-clone 3040             # then open http://127.0.0.1:3040
 ```
 
 See each example's README for environment knobs and Restate recipes.

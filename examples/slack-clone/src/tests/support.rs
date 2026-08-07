@@ -1,0 +1,386 @@
+//! Test harness: a real platform on a real socket, and a bot with a scripted
+//! model.
+//!
+//! No test in this crate ever needs a model token. The provider is
+//! `lash::testing::TestProvider` scripted with standard-mode responses — plain
+//! text, or a native tool call followed by text — so the tool loop is exercised
+//! deterministically.
+
+use std::collections::VecDeque;
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use lash::ModelSpec;
+use lash::direct::LlmOutputPart;
+use lash::provider::{LlmResponse, ProviderHandle};
+use tokio::task::JoinHandle;
+
+use crate::bot::channel::{BotIdentity, ChannelBot};
+use crate::bot::ledger::EventLedger;
+use crate::bot::runtime::{self, RuntimeConfig};
+use crate::bot::slack_api::SlackApi;
+use crate::bot::{ledger, webhook};
+use crate::ids::Ts;
+use crate::platform::db::{self, Author};
+use crate::platform::state::PlatformState;
+use crate::platform::{self, PlatformConfig};
+use crate::store::SqliteHandle;
+use crate::wire::events::{EventCallback, EventRequest};
+use crate::wire::methods::MessageObject;
+
+/// The bot token every test uses.
+pub const BOT_TOKEN: &str = "xoxb-test-token";
+/// The verification token every test envelope carries.
+pub const VERIFICATION_TOKEN: &str = "test-verification";
+
+/// One scripted model response.
+#[derive(Clone, Debug)]
+pub enum Step {
+    /// Finish the turn with this text.
+    Text(String),
+    /// Call a native tool. The loop continues, so a `Text` step must follow.
+    ToolCall {
+        name: String,
+        args: serde_json::Value,
+    },
+}
+
+/// A scripted standard-mode model.
+#[derive(Clone)]
+pub struct Script {
+    steps: Arc<tokio::sync::Mutex<VecDeque<Step>>>,
+    /// Serialized `LlmRequest` per call, so a test can prove what the model saw.
+    requests: Arc<Mutex<Vec<String>>>,
+    calls: Arc<AtomicUsize>,
+}
+
+impl Script {
+    /// A script that plays `steps` in order and then repeats its last text.
+    pub fn new(steps: impl IntoIterator<Item = Step>) -> Self {
+        Self {
+            steps: Arc::new(tokio::sync::Mutex::new(steps.into_iter().collect())),
+            requests: Arc::new(Mutex::new(Vec::new())),
+            calls: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    /// A script that answers every turn with one line of prose.
+    pub fn prose(text: &str) -> Self {
+        Self::new([Step::Text(text.to_string())])
+    }
+
+    /// How many provider calls happened. One plain turn is one call; a turn with
+    /// a tool call is two.
+    pub fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+
+    /// The serialized requests the model received.
+    pub fn requests(&self) -> Vec<String> {
+        self.requests.lock().expect("script mutex").clone()
+    }
+
+    /// Whether any request carried `needle` — used to prove that ambient channel
+    /// traffic really reached the prompt.
+    pub fn saw(&self, needle: &str) -> bool {
+        self.requests()
+            .iter()
+            .any(|request| request.contains(needle))
+    }
+
+    /// Build the provider handle.
+    pub fn provider(&self) -> ProviderHandle {
+        let steps = Arc::clone(&self.steps);
+        let requests = Arc::clone(&self.requests);
+        let calls = Arc::clone(&self.calls);
+        lash::testing::TestProvider::builder()
+            .kind("slack-clone-test")
+            .complete(move |request| {
+                let steps = Arc::clone(&steps);
+                let requests = Arc::clone(&requests);
+                let calls = Arc::clone(&calls);
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    if let Ok(encoded) = serde_json::to_string(&request) {
+                        requests.lock().expect("script mutex").push(encoded);
+                    }
+                    let mut queue = steps.lock().await;
+                    // The last step repeats so a test that runs an extra turn
+                    // gets a sensible answer instead of a panic.
+                    let step = if queue.len() > 1 {
+                        queue.pop_front().expect("non-empty queue")
+                    } else {
+                        queue
+                            .front()
+                            .cloned()
+                            .unwrap_or(Step::Text("ok".to_string()))
+                    };
+                    Ok(match step {
+                        Step::Text(text) => LlmResponse {
+                            full_text: text.clone(),
+                            parts: vec![LlmOutputPart::Text {
+                                text,
+                                response_meta: None,
+                            }],
+                            response_metadata: Default::default(),
+                            ..LlmResponse::default()
+                        },
+                        Step::ToolCall { name, args } => LlmResponse {
+                            parts: vec![LlmOutputPart::ToolCall {
+                                call_id: format!("call-{}", calls.load(Ordering::SeqCst)),
+                                tool_name: name,
+                                input_json: args.to_string(),
+                                replay: None,
+                            }],
+                            response_metadata: Default::default(),
+                            ..LlmResponse::default()
+                        },
+                    })
+                }
+            })
+            .build()
+            .into_handle()
+    }
+}
+
+/// A platform served on an ephemeral port.
+pub struct TestPlatform {
+    pub state: PlatformState,
+    pub base_url: String,
+    pub addr: SocketAddr,
+    _server: JoinHandle<()>,
+}
+
+impl TestPlatform {
+    /// Boot a platform rooted at `dir`.
+    pub async fn start(dir: &Path) -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test platform");
+        let addr = listener.local_addr().expect("platform addr");
+        let config = PlatformConfig {
+            addr,
+            data_dir: dir.to_path_buf(),
+            bot_token: BOT_TOKEN.to_string(),
+            verification_token: VERIFICATION_TOKEN.to_string(),
+            bot_handle: "lashbot".to_string(),
+            team_name: "Test Workspace".to_string(),
+            retry_backoff: Duration::from_millis(10),
+            delivery_timeout: Duration::from_millis(500),
+        };
+        let database = SqliteHandle::open(&dir.join("workspace.db"), db::SCHEMA)
+            .expect("open test workspace store");
+        let state = PlatformState::seed(config, database)
+            .await
+            .expect("seed test workspace");
+        let router = platform::router(state.clone());
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        Self {
+            state,
+            base_url: format!("http://{addr}"),
+            addr,
+            _server: server,
+        }
+    }
+
+    /// Claim a human identity, returning its `U…`.
+    pub async fn identify(&self, name: &str) -> String {
+        let id = self.state.ids().mint("U");
+        let handle = name.to_lowercase();
+        let display = name.to_string();
+        self.state
+            .database()
+            .call(move |connection| db::upsert_user(connection, &id, &handle, &display, false))
+            .await
+            .expect("claim identity")
+            .id
+    }
+
+    /// Create a channel, returning its `C…`.
+    pub async fn channel(&self, name: &str) -> String {
+        let id = self.state.ids().mint("C");
+        let name = name.to_string();
+        self.state
+            .database()
+            .call(move |connection| db::upsert_channel(connection, &id, &name, "", false))
+            .await
+            .expect("create channel")
+            .id
+    }
+
+    /// The bot's mention token.
+    pub fn mention(&self) -> String {
+        crate::wire::events::mention_token(&self.state.identity().bot_user_id)
+    }
+
+    /// Post as a human and return the resulting `ts`.
+    pub async fn say(&self, channel: &str, user_id: &str, text: &str) -> Ts {
+        self.state
+            .post_message(
+                channel.to_string(),
+                Author::User {
+                    user_id: user_id.to_string(),
+                },
+                text.to_string(),
+                None,
+                None,
+            )
+            .await
+            .expect("post as user")
+            .ts
+    }
+
+    /// Drain the outbox, returning the envelopes the platform queued and marking
+    /// them delivered so a later call returns only what is new.
+    ///
+    /// This is how the bot tests get *real* envelopes: the platform's own event
+    /// generation is under test alongside the bot's handling of it.
+    pub async fn drain_envelopes(&self) -> Vec<EventCallback> {
+        let rows: Vec<(i64, String)> = self
+            .state
+            .database()
+            .call(|connection| {
+                let mut statement = connection.prepare(
+                    "SELECT id, payload_json FROM event_outbox
+                     WHERE delivered_at IS NULL AND abandoned_at IS NULL
+                     ORDER BY id",
+                )?;
+                let rows = statement
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                for (id, _) in &rows {
+                    connection.execute(
+                        "UPDATE event_outbox SET delivered_at = 1 WHERE id = ?1",
+                        rusqlite::params![id],
+                    )?;
+                }
+                Ok(rows)
+            })
+            .await
+            .expect("drain outbox");
+        rows.into_iter()
+            .filter_map(|(_, payload)| {
+                match serde_json::from_str::<EventRequest>(&payload).expect("decode envelope") {
+                    EventRequest::EventCallback(envelope) => Some(*envelope),
+                    EventRequest::UrlVerification(_) => None,
+                }
+            })
+            .collect()
+    }
+
+    /// Every message in a channel, oldest first.
+    pub async fn messages(&self, channel: &str) -> Vec<MessageObject> {
+        let channel = channel.to_string();
+        let rows = self
+            .state
+            .database()
+            .call(move |connection| {
+                db::channel_history(connection, &channel, db::TsWindow::default(), 500)
+            })
+            .await
+            .expect("read channel history");
+        rows.iter()
+            .rev()
+            .map(|row| crate::platform::web_api::message_object(row, true))
+            .collect()
+    }
+
+    /// Only the app-authored messages in a channel.
+    pub async fn bot_messages(&self, channel: &str) -> Vec<MessageObject> {
+        self.messages(channel)
+            .await
+            .into_iter()
+            .filter(|message| message.bot_id.is_some())
+            .collect()
+    }
+}
+
+/// Build a bot against a platform, on `data_dir`.
+///
+/// Restart tests call this twice with the same `data_dir`: the second call is a
+/// new process's worth of state, rebuilt from the same durable stores.
+pub async fn start_bot(
+    platform: &TestPlatform,
+    data_dir: &Path,
+    script: &Script,
+) -> Arc<ChannelBot> {
+    let api = Arc::new(SlackApi::new(&platform.base_url, BOT_TOKEN).expect("build api client"));
+    let auth = api.auth_test().await.expect("auth.test");
+    let identity = BotIdentity {
+        bot_user_id: auth.user_id,
+        bot_id: auth.bot_id,
+        handle: auth.user,
+        team_id: auth.team_id,
+    };
+    let ledger_database =
+        SqliteHandle::open(&data_dir.join("events.db"), ledger::SCHEMA).expect("open test ledger");
+    let mut runtime_config = RuntimeConfig::new(data_dir.join("lash"));
+    runtime_config.trace_to_stderr = false;
+    let session_owner = runtime::session_owner(&runtime_config.incarnation);
+    let model = ModelSpec::from_token_limits("mock/model", Default::default(), 200_000, None)
+        .expect("valid mock model metadata");
+    let core = runtime::build_core(&runtime_config, script.provider(), model, Arc::clone(&api))
+        .await
+        .expect("build test core");
+    let bot = Arc::new(ChannelBot::new(
+        core,
+        api,
+        EventLedger::new(ledger_database),
+        identity,
+        VERIFICATION_TOKEN.to_string(),
+        session_owner,
+    ));
+    bot.refresh_directory().await.expect("preload directory");
+    bot
+}
+
+/// Serve a bot's webhook router on an ephemeral port, returning its request URL.
+pub async fn serve_bot(bot: Arc<ChannelBot>) -> (String, JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test bot");
+    let addr = listener.local_addr().expect("bot addr");
+    let router = webhook::router(bot);
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+    (format!("http://{addr}{}", webhook::EVENTS_PATH), handle)
+}
+
+/// A scratch directory that cleans itself up.
+pub fn scratch() -> tempfile::TempDir {
+    tempfile::tempdir().expect("tempdir")
+}
+
+/// Sub-directory paths a restart test reuses across two bot instances.
+pub fn bot_dir(root: &Path) -> PathBuf {
+    root.join("bot")
+}
+
+/// Find the single envelope of a given event type, failing loudly otherwise.
+pub fn only_event(envelopes: &[EventCallback], kind: &str) -> EventCallback {
+    let matching: Vec<&EventCallback> = envelopes
+        .iter()
+        .filter(|envelope| event_kind(envelope) == kind)
+        .collect();
+    assert_eq!(
+        matching.len(),
+        1,
+        "expected exactly one {kind} envelope, got {:?}",
+        envelopes.iter().map(event_kind).collect::<Vec<_>>()
+    );
+    matching[0].clone()
+}
+
+/// The event type name inside an envelope.
+pub fn event_kind(envelope: &EventCallback) -> &'static str {
+    match envelope.event {
+        crate::wire::events::Event::Message(_) => "message",
+        crate::wire::events::Event::AppMention(_) => "app_mention",
+    }
+}

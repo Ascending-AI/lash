@@ -35,6 +35,7 @@ members = [
     "examples/agent-service",
     "examples/agent-workbench",
     "examples/docs-snippets",
+    "examples/slack-clone",
     "examples/workflow-graph-roundtrip",
     "runbooks/restate-postgres-workers",
 ]
