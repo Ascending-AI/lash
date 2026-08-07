@@ -12,6 +12,14 @@ Cursor (ADR 0020), so a host can express
 "prune terminal subagent processes after 24h" and "prune terminal host-scope processes after
 90 days, but never past my projector's acknowledged cursor" as two scheduled calls.
 
+The public `Processes::prune` lever forwards that filter, so differentiated policy is
+expressible without dropping to the raw registry: `agent-workbench` prunes the terminal rows
+an `originator_id` scope owns when it deletes that session, because deleting a session detaches
+its state from globally-owned process rows without deleting them. Because retention only ever
+deletes terminal rows, the facade refuses a filter selecting a non-terminal status — including
+the `Running` default a `..Default::default()` filter carries — instead of accepting a filter
+that can only ever reclaim nothing.
+
 No schema change beyond ADR 0020's change sequence; no declared class field on any backend; a
 producer (including lash-owned spawn paths) never guesses a policy the host owns. The
 watermark bound is what makes host projection safe: without it, a host that projects process

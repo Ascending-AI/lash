@@ -116,6 +116,122 @@ pub async fn leased_completion_replay_repairs_projection<C, Fut>(
     );
 }
 
+/// Prove that the retention filter scopes a prune (ADR 0023): a host pruning
+/// one originator's terminal work reclaims exactly those rows and leaves every
+/// other originator's row, and its own live row, in place.
+pub async fn process_prune_scoped_by_originator(registry: Arc<dyn ProcessRegistry>) {
+    async fn register_for(
+        registry: &Arc<dyn ProcessRegistry>,
+        process_id: &str,
+        scope: &SessionScope,
+    ) {
+        registry
+            .register_process(
+                registration(process_id)
+                    .with_process_provenance(ProcessProvenance::session(scope.clone())),
+            )
+            .await
+            .expect("register scoped prune process");
+    }
+
+    async fn complete(registry: &Arc<dyn ProcessRegistry>, process_id: &str) {
+        registry
+            .complete_process(
+                process_id,
+                ProcessAwaitOutput::Success {
+                    value: serde_json::Value::Null,
+                    control: None,
+                },
+                ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete scoped prune process");
+    }
+
+    async fn retained(registry: &Arc<dyn ProcessRegistry>, process_id: &str) -> bool {
+        match registry.get_process(process_id).await {
+            Ok(record) => record.is_some(),
+            Err(crate::PluginError::ProcessNoLongerRetained { .. }) => false,
+            Err(err) => panic!("read scoped prune process: {err:?}"),
+        }
+    }
+
+    let deleted = SessionScope::for_agent_frame("scoped-prune-deleted", "scoped-prune-frame");
+    let surviving = SessionScope::for_agent_frame("scoped-prune-surviving", "scoped-prune-frame");
+    register_for(&registry, "scoped-prune-deleted-terminal", &deleted).await;
+    complete(&registry, "scoped-prune-deleted-terminal").await;
+    register_for(&registry, "scoped-prune-deleted-live", &deleted).await;
+    register_for(&registry, "scoped-prune-surviving-terminal", &surviving).await;
+    complete(&registry, "scoped-prune-surviving-terminal").await;
+
+    let report = registry
+        .prune_terminal_processes(
+            u64::MAX,
+            Some(ProcessListFilter {
+                status: ProcessStatusFilter::Any,
+                originator_id: Some(deleted.session_id.clone()),
+                ..ProcessListFilter::default()
+            }),
+            crate::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect("prune one originator's terminal processes");
+    assert_eq!(
+        report.pruned_processes, 1,
+        "only the filtered originator's terminal row is reclaimed"
+    );
+    assert_eq!(report.pruned_events, 1);
+    assert!(
+        !retained(&registry, "scoped-prune-deleted-terminal").await,
+        "the filtered originator's terminal row must be gone"
+    );
+    assert!(
+        retained(&registry, "scoped-prune-deleted-live").await,
+        "a live row is never a prune candidate, whatever the filter matches"
+    );
+    assert!(
+        retained(&registry, "scoped-prune-surviving-terminal").await,
+        "another originator's terminal row must survive a scoped prune"
+    );
+    assert_eq!(
+        registry
+            .filter_tombstoned_process_ids(&[
+                "scoped-prune-deleted-terminal".to_string(),
+                "scoped-prune-surviving-terminal".to_string(),
+            ])
+            .await
+            .expect("classify scoped prune history"),
+        vec!["scoped-prune-deleted-terminal".to_string()],
+        "only the reclaimed row becomes a tombstone"
+    );
+
+    // A terminal status narrows the same lever further, and the unfiltered
+    // sweep still reaches the row a scoped prune deliberately skipped.
+    let report = registry
+        .prune_terminal_processes(
+            u64::MAX,
+            Some(ProcessListFilter {
+                status: ProcessStatusFilter::Failed,
+                originator_id: Some(surviving.session_id.clone()),
+                ..ProcessListFilter::default()
+            }),
+            crate::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect("prune with a terminal status filter");
+    assert_eq!(
+        report.pruned_processes, 0,
+        "a completed row does not match a `failed` retention filter"
+    );
+    let report = registry
+        .prune_terminal_processes(u64::MAX, None, crate::ProjectionWatermark::NoProjector)
+        .await
+        .expect("prune every terminal process");
+    assert_eq!(report.pruned_processes, 1);
+    assert!(!retained(&registry, "scoped-prune-surviving-terminal").await);
+    assert!(retained(&registry, "scoped-prune-deleted-live").await);
+}
+
 /// Prove that one SQL prune batch allocates complete, process-id-ordered
 /// tombstone sequences and reports every removed process event.
 pub async fn process_prune_batch_tombstones(registry: Arc<dyn ProcessRegistry>) {

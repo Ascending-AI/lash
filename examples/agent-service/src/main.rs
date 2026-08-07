@@ -433,8 +433,15 @@ fn spawn_retention(processes: lash::process::Processes) {
                 Err(_) => continue,
             };
             let cutoff = now_ms.saturating_sub(RETENTION_WINDOW.as_millis() as u64);
+            // No filter: this service applies one uniform window to every
+            // terminal row. A host with differentiated policy passes a scoped
+            // filter here instead (ADR 0023).
             let process_result = processes
-                .prune(cutoff, lash::process::ProjectionWatermark::NoProjector)
+                .prune(
+                    cutoff,
+                    None,
+                    lash::process::ProjectionWatermark::NoProjector,
+                )
                 .await;
             match process_result {
                 Ok(report)

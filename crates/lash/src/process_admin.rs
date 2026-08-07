@@ -191,6 +191,35 @@ impl Processes {
         ))
     }
 
+    /// The listing filter [`prune`](Self::prune) surveys effect-journal
+    /// retirement candidates with. It is the caller's retention filter verbatim
+    /// so the journals retired are exactly the rows the prune can delete, and
+    /// absence widens to every status rather than the `Running` default.
+    fn prune_selection(
+        filter: Option<&lash_core::ProcessListFilter>,
+    ) -> Result<lash_core::ProcessListFilter> {
+        let Some(filter) = filter else {
+            return Ok(lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..lash_core::ProcessListFilter::default()
+            });
+        };
+        if matches!(
+            filter.status,
+            lash_core::ProcessStatusFilter::Running | lash_core::ProcessStatusFilter::Waiting
+        ) {
+            return Err(EmbedError::Plugin(lash_core::PluginError::Session(
+                format!(
+                    "process retention filter selects the non-terminal status `{}`, \
+                     which no prunable row can hold; pass \
+                     `ProcessStatusFilter::Any` or a terminal status",
+                    filter.status.label().unwrap_or("any")
+                ),
+            )));
+        }
+        Ok(filter.clone())
+    }
+
     fn process_invocation(command: &lash_core::ProcessCommand) -> lash_core::RuntimeInvocation {
         let effect_id = command.effect_id();
         lash_core::RuntimeInvocation::effect(
@@ -500,17 +529,26 @@ impl Processes {
     /// [`ProjectionWatermark::UpTo`](lash_core::ProjectionWatermark::UpTo)
     /// cursor or an explicit
     /// [`ProjectionWatermark::NoProjector`](lash_core::ProjectionWatermark::NoProjector).
+    ///
+    /// `filter` narrows *which* eligible terminal rows this call reclaims (ADR
+    /// 0023): retention is differentiated host policy, so a host expresses
+    /// "reclaim the work this deleted session originated" and "reclaim terminal
+    /// subagent debris after a day" as two scheduled calls over the same lever.
+    /// `None` considers every terminal row. Because retention only ever deletes
+    /// terminal rows, a filter that selects
+    /// [`ProcessStatusFilter::Running`](lash_core::ProcessStatusFilter::Running)
+    /// or [`Waiting`](lash_core::ProcessStatusFilter::Waiting) — including the
+    /// `Running` default a `..Default::default()` filter carries — can never
+    /// match, so it is refused instead of silently reclaiming nothing.
     pub async fn prune(
         &self,
         cutoff_epoch_ms: u64,
+        filter: Option<&lash_core::ProcessListFilter>,
         watermark: lash_core::ProjectionWatermark,
     ) -> Result<lash_core::ProcessPruneReport> {
         let registry = self.registry()?;
         let candidates = registry
-            .list_processes(&lash_core::ProcessListFilter {
-                status: lash_core::ProcessStatusFilter::Any,
-                ..lash_core::ProcessListFilter::default()
-            })
+            .list_processes(&Self::prune_selection(filter)?)
             .await?;
         for process in candidates
             .into_iter()
@@ -538,7 +576,7 @@ impl Processes {
             }
         }
         let mut report = match registry
-            .prune_terminal_processes(cutoff_epoch_ms, None, watermark)
+            .prune_terminal_processes(cutoff_epoch_ms, filter.cloned(), watermark)
             .await
         {
             Ok(report) => report,

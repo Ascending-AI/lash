@@ -330,9 +330,35 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
         )
         .await?;
 
+    // A retention filter carrying the `ProcessListFilter` default status selects
+    // `running`, which no prunable row can hold. Refusing it is what keeps a
+    // scoped retention call from reporting a silent zero (ADR 0023).
+    let refused = core
+        .processes()
+        .prune(
+            u64::MAX,
+            Some(&lash_core::ProcessListFilter {
+                originator_id: Some("some-session".to_string()),
+                ..lash_core::ProcessListFilter::default()
+            }),
+            lash_core::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect_err("a non-terminal retention filter must be refused");
+    assert!(
+        refused
+            .to_string()
+            .contains("non-terminal status `running`"),
+        "unexpected refusal: {refused}"
+    );
+    assert!(
+        registry.get_process(&process_id).await?.is_some(),
+        "a refused retention filter must not have deleted anything"
+    );
+
     let report = core
         .processes()
-        .prune(u64::MAX, lash_core::ProjectionWatermark::NoProjector)
+        .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
         .await?;
     assert_eq!(report.pruned_processes, 1);
     assert_eq!(report.pruned_trigger_deliveries, 1);
@@ -1158,7 +1184,11 @@ async fn inline_process_await_sink_and_prune_end_to_end() -> Result<()> {
     let projected_before_prune = sink.collected();
     let report = core
         .processes()
-        .prune(i64::MAX as u64, lash_core::ProjectionWatermark::NoProjector)
+        .prune(
+            i64::MAX as u64,
+            None,
+            lash_core::ProjectionWatermark::NoProjector,
+        )
         .await
         .expect("prune terminal process");
     assert_eq!(
@@ -1334,7 +1364,11 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
     // Retention: the facade prune reclaims the terminal row.
     let prune = core
         .processes()
-        .prune(i64::MAX as u64, lash_core::ProjectionWatermark::NoProjector)
+        .prune(
+            i64::MAX as u64,
+            None,
+            lash_core::ProjectionWatermark::NoProjector,
+        )
         .await?;
     assert_eq!(prune.pruned_processes, 1);
     assert!(
