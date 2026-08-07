@@ -49,6 +49,12 @@ pub enum Step {
         name: String,
         args: serde_json::Value,
     },
+    /// Announce arrival, block until released, then finish with this text.
+    ///
+    /// Holds a turn open at a point where the runtime has already claimed the
+    /// queued input and taken the session-execution lease — the state a process
+    /// killed mid-turn leaves behind.
+    Gated(String),
 }
 
 /// A scripted standard-mode model.
@@ -58,6 +64,10 @@ pub struct Script {
     /// Serialized `LlmRequest` per call, so a test can prove what the model saw.
     requests: Arc<Mutex<Vec<String>>>,
     calls: Arc<AtomicUsize>,
+    /// Notified when a [`Step::Gated`] call is entered.
+    entered: Arc<tokio::sync::Notify>,
+    /// Awaited by a [`Step::Gated`] call before it answers.
+    release: Arc<tokio::sync::Notify>,
 }
 
 impl Script {
@@ -67,7 +77,21 @@ impl Script {
             steps: Arc::new(tokio::sync::Mutex::new(steps.into_iter().collect())),
             requests: Arc::new(Mutex::new(Vec::new())),
             calls: Arc::new(AtomicUsize::new(0)),
+            entered: Arc::new(tokio::sync::Notify::new()),
+            release: Arc::new(tokio::sync::Notify::new()),
         }
+    }
+
+    /// Wait until a gated step has been entered — i.e. the turn is live and its
+    /// queued input is claimed.
+    pub async fn wait_gated(&self) {
+        self.entered.notified().await;
+    }
+
+    /// Let a gated step finish.
+    pub fn release_gate(&self) {
+        self.release.notify_waiters();
+        self.release.notify_one();
     }
 
     /// A script that answers every turn with one line of prose.
@@ -99,12 +123,16 @@ impl Script {
         let steps = Arc::clone(&self.steps);
         let requests = Arc::clone(&self.requests);
         let calls = Arc::clone(&self.calls);
+        let entered = Arc::clone(&self.entered);
+        let release = Arc::clone(&self.release);
         lash::testing::TestProvider::builder()
             .kind("slack-clone-test")
             .complete(move |request| {
                 let steps = Arc::clone(&steps);
                 let requests = Arc::clone(&requests);
                 let calls = Arc::clone(&calls);
+                let entered = Arc::clone(&entered);
+                let release = Arc::clone(&release);
                 async move {
                     calls.fetch_add(1, Ordering::SeqCst);
                     if let Ok(encoded) = serde_json::to_string(&request) {
@@ -121,7 +149,19 @@ impl Script {
                             .cloned()
                             .unwrap_or(Step::Text("ok".to_string()))
                     };
+                    let step = match step {
+                        Step::Gated(text) => {
+                            // The turn is now live: the input is claimed and the
+                            // session-execution lease is held.
+                            entered.notify_waiters();
+                            entered.notify_one();
+                            release.notified().await;
+                            Step::Text(text)
+                        }
+                        other => other,
+                    };
                     Ok(match step {
+                        Step::Gated(_) => unreachable!("gated steps are unwrapped above"),
                         Step::Text(text) => LlmResponse {
                             full_text: text.clone(),
                             parts: vec![LlmOutputPart::Text {
@@ -375,6 +415,47 @@ pub async fn serve_bot(bot: Arc<ChannelBot>) -> (String, JoinHandle<()>) {
         let _ = axum::serve(listener, router).await;
     });
     (format!("http://{addr}{}", webhook::EVENTS_PATH), handle)
+}
+
+/// Simulate the session-execution lease TTL elapsing.
+///
+/// The defect this guards against only appears inside a previous boot's lease TTL
+/// (30s by default), and the fix's liveness only appears once that TTL passes.
+/// Waiting 30 seconds in a test is not an option, and sleeping is not the property
+/// under test — the property is what the *store state* makes possible. So this
+/// backdates every lease row, which is precisely what wall-clock time does.
+///
+/// Test-only surgery, and deliberately blunt: the bot has no business expiring its
+/// own leases, so this lives here rather than behind a product API.
+pub fn expire_session_leases(bot_dir: &Path) -> usize {
+    let root = bot_dir.join("lash").join("lash-sessions");
+    let mut expired = 0;
+    let mut stack = vec![root];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().and_then(|ext| ext.to_str()) != Some("db") {
+                continue;
+            }
+            let Ok(connection) = rusqlite::Connection::open(&path) else {
+                continue;
+            };
+            expired += connection
+                .execute(
+                    "UPDATE session_execution_leases SET lease_expires_at_ms = 1",
+                    [],
+                )
+                .unwrap_or(0);
+        }
+    }
+    expired
 }
 
 /// A scratch directory that cleans itself up.

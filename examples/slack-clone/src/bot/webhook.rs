@@ -9,7 +9,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::json;
 
-use super::channel::ChannelBot;
+use super::channel::{self, ChannelBot, Disposition};
 use crate::wire::events::{ChallengeResponse, EventRequest, RETRY_NUM_HEADER, RETRY_REASON_HEADER};
 
 /// Path the bot registers as its Events API request URL.
@@ -82,6 +82,22 @@ async fn events(State(bot): State<Arc<ChannelBot>>, headers: HeaderMap, body: St
             let event_id = envelope.event_id.clone();
             tokio::spawn(async move {
                 match bot.ingest(*envelope, retry_num).await {
+                    Ok(Disposition::Deferred { event_id, .. }) => {
+                        // The admission is fenced to a session-execution lease
+                        // generation this boot cannot take yet — a redelivery
+                        // landing inside the previous boot's lease TTL. Slack's own
+                        // retries are bounded and would all fall inside that
+                        // window, so the bot owns this retry.
+                        println!("slack-clone-bot deferred {event_id}; retrying in the background");
+                        if let Err(error) = bot
+                            .retry_deferred(event_id.clone(), channel::DEFERRED_RETRY_DEADLINE)
+                            .await
+                        {
+                            eprintln!(
+                                "slack-clone-bot deferred retry of {event_id} failed: {error:#}"
+                            );
+                        }
+                    }
                     Ok(disposition) => {
                         println!("slack-clone-bot handled {event_id}: {disposition:?}");
                     }
