@@ -223,12 +223,30 @@ shell — that no bot row exists for this mention and the platform is still serv
 
 Restart the bot (`bash scripts/slack-clone-dev.sh up --port <p>` is idempotent and restarts
 the missing process; launch it non-blocking) and poll the bot's `/healthz`. Boot recovery
-walks the unfinished ledger rows. Require:
+walks the unfinished ledger rows.
 
-- the disposition for that event is `Replied` — **record which `source`** resolved it (`Turn`
-  if the queued input was still undrained, `Transcript` if the pre-kill turn had committed,
-  `Ledger` if the text had been recorded) and state why that is consistent with the kill
-  point;
+**The answer is not immediate, and a deferral is not a failure.** A boot that restarts inside
+the previous boot's session-execution lease TTL cannot take that lease, so the interrupted
+turn's admission is still fenced and recovery reports
+`Deferred { reason: "input_claimed_by_live_lease_generation" }` while leaving the ledger row
+**non-terminal**. A background retry then re-attempts on an interval until the lease lapses.
+So gate on the *settled* outcome, and allow at least one lease TTL (30s by default) plus the
+retry interval before declaring anything — a render gate of a few seconds fails a correct bot.
+Expect roughly 30-40s from kill to answer.
+
+**Read the final disposition from the settle line.** Three log shapes carry a disposition, and
+a deferred event's outcome only appears in the third:
+`handled <id>: …`, `recovered event <id> (<kind>, <stage>): …`, and
+`settled deferred event <id>: …`. A parser that knows only the first two reports `Deferred`
+for an event that was in fact answered, which reads as a failure of the very property this
+phase exists to prove. Require:
+
+- the **final** disposition for that event is `Replied` — **record which `source`** resolved it
+  (`Turn` if the queued input was still undrained or was re-drained after the lease lapsed,
+  `Transcript` if the pre-kill turn had committed, `Ledger` if the text had been recorded) and
+  state why that is consistent with the kill point;
+- record the **deferral evidence**: the `Deferred` disposition, how many retry attempts ran,
+  and the kill-to-answer latency, so the deferral is shown to be bounded rather than lucky;
 - **exactly one** bot row for this mention in both tabs, in `messages`, and in the in-page
   recorder's full history — no duplicate at any instant, which is the recorder's whole purpose;
 - `handled_events` for it at `replied` with a `reply_ts` matching that row;
@@ -237,24 +255,29 @@ walks the unfinished ledger rows. Require:
   actually ran (one if recovery re-ran it, unchanged if recovery read it back) — reconcile
   against the reported `source` rather than assuming.
 
-`ReplyLost` here is a **FAIL**: the ledger stages exist precisely so the accepted window is
-resumable. Screenshot `05-recovered-both-tabs.png`.
+`ReplyLost` here is a **FAIL**, and so is **any terminal stage** reached without a reply: the
+ledger stages exist precisely so the accepted window is resumable, and a terminal row is one
+no redelivery and no later boot ever revisits. `Deferred` on its own is not a failure —
+`Deferred` that never settles is. Screenshot `05-recovered-both-tabs.png`.
 
-**The `accepted` window has two halves, and they fail differently — capture which one you hit.**
-Alongside the ledger row, extract the mention's `pending_turn_inputs` row from the bot's
-session store and record `state` *and* `claim_owner_incarnation_id`:
+**The `accepted` window has two halves — capture which one you hit.** Alongside the ledger row,
+extract the mention's `pending_turn_inputs` row from the bot's session store and record `state`
+*and* `claim_owner_incarnation_id`:
 
 - killed **before** the drain claimed the input → the row is unclaimed and still pending, the
-  restarted bot's drain finds it, and the correct outcome is `Replied { source: Turn }`;
+  restarted bot's drain finds it immediately, and the outcome is `Replied { source: Turn }`
+  with no deferral;
 - killed **after** the drain claimed it but **before** the turn committed → the row is still
-  `deferred_next_turn` yet carries a `claim_id` owned by the **dead boot's**
-  incarnation, and there are **no** graph nodes for that turn.
+  `deferred_next_turn` yet carries a `claim_id` owned by the **dead boot's** incarnation, and
+  there are **no** graph nodes for that turn. This is the half that defers, and it is the
+  common one, because the claim is taken at the start of the turn.
 
 In the second half, a `queued_turn().run()` that returns nothing does **not** mean "a previous
-process already answered this" — nothing was committed — so a `ReplyLost` there is a stranded
-claim, not the documented residual. Distinguishing them is the whole point of reading the
-claim owner: `reply_lost_after_commit` is only an honest label when the transcript actually
-holds a committed turn. Report the incarnation ids and the graph-node count for the turn.
+process already answered this" — nothing was committed. The bot must discriminate on committed
+evidence (a turn-input application record) rather than on the ambiguous empty drain:
+`reply_lost_after_commit` is only an honest label when a turn provably consumed the admission.
+Report the incarnation ids, the graph-node count for the turn, and the lease generation the
+claim is pinned to; a stranded claim terminalized as `ReplyLost` is the FIG-1008 regression.
 
 ## Phase 6 — Platform restart: the durable outbox converges
 
