@@ -151,6 +151,22 @@ fn workbench_turn_id_from_user_message_id(message_id: &str) -> Option<&str> {
     message_id.strip_prefix("workbench-user:")
 }
 
+/// The id of the live agent row this workbench publishes when a turn produces a
+/// reply, in the same workbench-owned namespace as the user row above.
+///
+/// The durable copy of that reply is usually the runtime's own terminal
+/// assistant message, minted by the runtime under an id the workbench never
+/// predicts, so this row retires from the product-event log when its turn stops
+/// running rather than when a committed message happens to share its id
+/// (FIG-984).
+fn workbench_turn_assistant_message_id(turn_id: &str) -> String {
+    format!("workbench-assistant:{turn_id}")
+}
+
+fn workbench_turn_id_from_assistant_message_id(message_id: &str) -> Option<&str> {
+    message_id.strip_prefix("workbench-assistant:")
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum TranscriptRow {
@@ -548,9 +564,19 @@ impl SessionEventRegistry {
         let before = history.events.len();
         history.events.retain(|event| match &event.item {
             StreamItem::Message { message } => {
-                !committed_message_ids.contains(&message.id)
-                    && workbench_turn_id_from_user_message_id(&message.id)
-                        .is_none_or(|turn_id| active_turn_ids.contains(turn_id))
+                match workbench_turn_id_from_user_message_id(&message.id)
+                    .or_else(|| workbench_turn_id_from_assistant_message_id(&message.id))
+                {
+                    // A row the workbench owns belongs to a turn, so it retires
+                    // when that turn stops running. Identity is not enough for
+                    // the agent row: the durable copy of the reply is the
+                    // runtime's terminal message on the paths where the runtime
+                    // commits it, and that id is runtime-minted (FIG-984).
+                    Some(turn_id) => active_turn_ids.contains(turn_id),
+                    // Everything else in this lane is a mirror of a committed
+                    // message and retires once that commit is readable.
+                    None => !committed_message_ids.contains(&message.id),
+                }
             }
             StreamItem::Done {
                 turn_id: Some(turn_id),

@@ -692,8 +692,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::Session"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:788#let error = AppError::session_open(lash::EmbedError::Session("
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:798#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:838#let error = AppError::session_open(lash::EmbedError::Session("
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:848#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::EmbedError::Session::0"
@@ -756,8 +756,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::Store"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:776#let error = AppError::session_open(lash::EmbedError::Store("
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:781#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:826#let error = AppError::session_open(lash::EmbedError::Store("
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:831#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::EmbedError::Store::0"
@@ -847,7 +847,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::is_retryable"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:684#let retryable = error.is_retryable();"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:734#let retryable = error.is_retryable();"
 assertion = "examples/agent-workbench/src/restate_tests.rs:201#assert!(!error.retryable);"
 
 [[api]]
@@ -857,7 +857,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::is_terminal"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:685#let terminal = error.is_terminal();"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:735#let terminal = error.is_terminal();"
 assertion = "examples/agent-workbench/src/restate_tests.rs:200#assert!(error.terminal);"
 
 [[api]]
@@ -2674,7 +2674,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelTarget::input_id"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:1110#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
+usage = "examples/agent-workbench/src/restate.rs:1111#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget::source_key"
@@ -3043,7 +3043,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::QueuedTurnBuilder", "lash::turn::QueuedTurnBuilder"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:63#.batch_ids(self.batch_ids.iter().cloned())"
+usage = "examples/agent-workbench/src/restate.rs:64#.batch_ids(self.batch_ids.iter().cloned())"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/restate.rs:63, inside `queued_turn`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/queued_work.rs:322 asserts an unrelated expression in `targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery`, and `queued_turn` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -3062,7 +3062,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::QueuedTurnBuilder::batch_ids", "lash::turn::QueuedTurnBuilder::batch_ids"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:63#.batch_ids(self.batch_ids.iter().cloned())"
+usage = "examples/agent-workbench/src/restate.rs:64#.batch_ids(self.batch_ids.iter().cloned())"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/restate.rs:63, inside `queued_turn`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/queued_work.rs:322 asserts an unrelated expression in `targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery`, and `queued_turn` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -3753,7 +3753,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:712#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:762#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:712, inside `deleted_session_details`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/app_state.rs:686 asserts an unrelated expression in `runtime`, and `deleted_session_details` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -3916,7 +3916,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:712#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:762#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:712, inside `deleted_session_details`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/app_state.rs:686 asserts an unrelated expression in `runtime`, and `deleted_session_details` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -3926,8 +3926,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store::context"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:790#context: format!(\"failed to bind session `{session_id}` to its store\"),"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:798#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:840#context: format!(\"failed to bind session `{session_id}` to its store\"),"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:848#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::SessionError::Store::source"
@@ -3936,8 +3936,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store::source"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:791#source: lash::persistence::StoreError::SessionDeleted {"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:798#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:841#source: lash::persistence::StoreError::SessionDeleted {"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:848#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::SessionSpec"
@@ -16459,8 +16459,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SessionDeleted"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:729#lash::persistence::StoreError::SessionDeleted {"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:781#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:779#lash::persistence::StoreError::SessionDeleted {"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:831#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::persistence::StoreError::SessionDeleted::session_id"
@@ -16469,8 +16469,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SessionDeleted::session_id"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:778#session_id: \"retired-session\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:781#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:828#session_id: \"retired-session\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:831#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::persistence::StoreError::SessionExecutionLeaseExpired"
@@ -45053,8 +45053,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:716#return error.deleted_session_id().map(|session_id| (session_id, None));"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:781#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:766#return error.deleted_session_id().map(|session_id| (session_id, None));"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:831#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::cause"
@@ -45081,8 +45081,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError::deleted_session_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:716#return error.deleted_session_id().map(|session_id| (session_id, None));"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:781#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:766#return error.deleted_session_id().map(|session_id| (session_id, None));"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:831#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::message"
@@ -46542,7 +46542,7 @@ availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:5#let provider = lash::testing::TestProvider::builder()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1449#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1526#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProvider::builder"
@@ -46551,7 +46551,7 @@ availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:5#let provider = lash::testing::TestProvider::builder()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1449#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1526#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProvider::into_handle"
@@ -46560,7 +46560,7 @@ availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:13#.into_handle();"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1449#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1526#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProviderBuilder"
@@ -46569,7 +46569,7 @@ availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:12#.build()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1449#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1526#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProviderBuilder::build"
@@ -46578,7 +46578,7 @@ availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:12#.build()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1449#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1526#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProviderBuilder::complete"
@@ -46594,8 +46594,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1422#.complete_error(INTERNAL_PROVIDER_FAILURE)"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1449#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1499#.complete_error(INTERNAL_PROVIDER_FAILURE)"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1526#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProviderBuilder::kind"
@@ -46603,8 +46603,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1421#.kind(\"recoverable-chat-provider-failure\")"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1449#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1498#.kind(\"recoverable-chat-provider-failure\")"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1526#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProviderBuilder::new"
@@ -59039,7 +59039,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionRecord"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:629#registrant_scope: record.registrant_scope_id(),"
+usage = "examples/agent-workbench/src/main_sections/state.rs:655#registrant_scope: record.registrant_scope_id(),"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionRecord::created_at_ms"
@@ -59156,7 +59156,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionRecord::registrant_scope_id"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:629#registrant_scope: record.registrant_scope_id(),"
+usage = "examples/agent-workbench/src/main_sections/state.rs:655#registrant_scope: record.registrant_scope_id(),"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionRecord::registrant_session_id"

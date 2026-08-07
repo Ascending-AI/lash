@@ -76,7 +76,7 @@
                 .run()
                 .await
                 .expect("commit pre-restart turn");
-            crate::restate::commit_assistant_transcript(
+            crate::commit_assistant_transcript(
                 &first_session,
                 turn_id,
                 output
@@ -88,7 +88,7 @@
             .await
             .expect("commit assistant transcript");
         }
-        crate::restate::commit_assistant_transcript(
+        crate::commit_assistant_transcript(
             &first_session,
             "resume-turn-one",
             "resume answer one".to_string(),
@@ -288,7 +288,7 @@
             .run()
             .await
             .expect("commit resumed turn");
-        crate::restate::commit_assistant_transcript(
+        crate::commit_assistant_transcript(
             &resumed_session,
             "resume-turn-three",
             resumed_output

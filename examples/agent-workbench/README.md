@@ -202,9 +202,18 @@ monotonically preserves, the snapshot cursor. Cursor and dedup state are scoped
 to the returned session id, so reset cannot carry positions into the new
 session. The state endpoint merges product-only rows onto the complete
 canonical Lash transcript by stable id; it never replaces canonical history
-with a partial product log. Canonical assistant rows use
-`workbench-assistant:<turn_id>` in both the live product event and durable
-session transcript, so a live/canonical pair is one row, never two.
+with a partial product log. The live agent row is always
+`workbench-assistant:<turn_id>`, and it retires from the product log when its
+turn stops running rather than when a committed message happens to share its id,
+so a live/canonical pair is one row, never two. Which copy is canonical depends
+on how the turn terminated. A turn that finishes *as* an assistant message —
+bare prose, the shape a queued or wake turn reaches because it runs without
+`require_finish` — already has that reply committed by the runtime as the turn's
+terminal message under a runtime-minted id, and the workbench commits nothing on
+top of it. A turn that finishes with a terminal value — `finish`, which
+`require_finish` forces on the send path — has no runtime-committed assistant
+message, so the workbench commits the reply it renders. Either way a completed
+turn leaves exactly one committed assistant copy.
 
 `turn_input_applied` is the only application signal. The live path consumes
 its typed application objects; snapshot recovery uses
