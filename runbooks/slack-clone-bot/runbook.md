@@ -245,6 +245,16 @@ and mention the bot a second time in the thread. Require the second thread model
 committed transcript to exclude that post-fork channel marker. This is the opposite-direction
 isolation gate; without it the test proves only that the channel cannot see the child.
 
+Two counting traps, both of which turn correct behavior into a false failure:
+
+- **`#threadStream` renders the parent first, then the replies.** Counting `.msg` rows there as
+  replies overcounts by one, and if the root happens to be bot-authored the parent is counted as
+  a bot *reply*. Exclude the first row before counting.
+- **Pick the root by its own marker, not by "the newest message".** By this point the newest
+  message in the channel is the bot's own reply from an earlier phase, and threading on that
+  tests nothing about a human root: the root carries no ambient marker to ask about, so the
+  "inherited context" gate fails while the fork is working correctly.
+
 Save `03T-thread-both-tabs.png` plus four extracts: thread DOM rows/badge; platform parent and
 reply rows; channel and thread session graphs/pending inputs; trace records grouped by session.
 
@@ -379,6 +389,12 @@ the normalized forms. Comparing raw-to-rendered reads as a total row mismatch �
 back to counting a marker's occurrences is not a substitute, because a marker legitimately
 appears three times: in the ambient line, in the mention that quotes it, and in the reply that
 answers it. Exact normalized multiset equality is both stronger and correct.
+
+**Once threads exist, scope the table projection to top-level rows.** The main `#stream`
+deliberately renders no thread reply, so the `messages` rows this multiset is compared against
+must be filtered to `thread_ts IS NULL`. Comparing the main list against every row in the
+channel reads as missing rows equal to the thread traffic — a failure produced entirely by the
+comparison, on a surface that is behaving correctly.
 
 ## Phase 8 — Teardown and score
 
