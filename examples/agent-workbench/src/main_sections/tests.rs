@@ -2366,10 +2366,11 @@ finish initial
                 .iter()
                 .map(|event| (event.sequence, event.event_type.clone()))
                 .collect::<Vec<_>>();
-            let remote_events = lash_remote_protocol::RemoteProcessEventsResponse::from((
+            let remote_events = lash_remote_protocol::RemoteProcessEventsResponse::try_from((
                 process_id.clone(),
                 events,
-            ));
+            ))
+            .expect("process events serialize for the remote protocol");
             remote_events
                 .validate()
                 .expect("remote started process event tail should validate");

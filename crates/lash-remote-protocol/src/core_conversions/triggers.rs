@@ -696,3 +696,14 @@ fn decode_remote_json<T: serde::de::DeserializeOwned>(
         message: format!("invalid {field}: {err}"),
     })
 }
+
+fn encode_remote_json<T: serde::Serialize>(
+    value: T,
+    type_name: &'static str,
+    field: &'static str,
+) -> Result<serde_json::Value, RemoteProtocolError> {
+    serde_json::to_value(value).map_err(|err| RemoteProtocolError::InvalidEnvelope {
+        type_name,
+        message: format!("invalid {field}: {err}"),
+    })
+}
