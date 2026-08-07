@@ -134,13 +134,6 @@ impl PluginSession {
         })
     }
 
-    pub async fn prepare_turn(
-        &self,
-        request: PrepareTurnRequest,
-    ) -> Result<TurnPreparation, PluginError> {
-        self.prepare_turn_with_phase_probe(request, None).await
-    }
-
     pub async fn prepare_turn_with_phase_probe(
         &self,
         request: PrepareTurnRequest,
@@ -206,17 +199,6 @@ impl PluginSession {
             events,
             abort,
         })
-    }
-
-    pub async fn finalize_turn(
-        &self,
-        turn: AssembledTurn,
-        sessions: Arc<dyn SessionStateService>,
-        session_lifecycle: Arc<dyn SessionLifecycleService>,
-        session_graph: Arc<dyn SessionGraphService>,
-    ) -> Result<TurnFinalization, PluginError> {
-        self.finalize_turn_with_phase_probe(turn, sessions, session_lifecycle, session_graph, None)
-            .await
     }
 
     pub async fn finalize_turn_with_phase_probe(

@@ -119,10 +119,6 @@ impl<'run> ProcessEngineRuntimeContext<'run> {
         &self.context
     }
 
-    pub fn context_mut(&mut self) -> &mut crate::RuntimeExecutionContext<'run> {
-        &mut self.context
-    }
-
     pub fn into_parts(
         self,
     ) -> (
@@ -189,10 +185,6 @@ impl ProcessEngineProcessContext {
             clock,
             wake_turn_policy,
         }
-    }
-
-    pub fn process_id(&self) -> &str {
-        &self.process_id
     }
 
     pub async fn record(&self) -> Result<Option<super::model::ProcessRecord>, crate::PluginError> {
