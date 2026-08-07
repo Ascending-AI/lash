@@ -359,6 +359,22 @@ mod asserted_examples {
                 provider_usage: Some(serde_json::json!({ "cached_tokens": 64 })),
                 stream_summary: None,
             },
+            TraceEvent::RollingHistoryCompactionNeeded {
+                context_budget_tokens: 30_000,
+                max_context_tokens: 40_000,
+                threshold_tokens: 20_000,
+            },
+            TraceEvent::RollingHistoryPromptPruned {
+                context_budget_tokens: 30_000,
+                max_context_tokens: 40_000,
+                dropped_prefix_messages: 2,
+                retained_messages: 1,
+            },
+            TraceEvent::RollingHistoryCompactionStarted {
+                source_messages: 3,
+                instructions_present: true,
+            },
+            TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 },
         ];
         let event_wire = serde_json::to_value(&events).expect("trace events must serialize");
         assert_eq!(event_wire[0]["type"], "prompt_built");
@@ -387,5 +403,19 @@ mod asserted_examples {
         assert_eq!(event_wire[5]["duration_ms"], 18);
         assert_eq!(event_wire[6]["plugin_id"], "standard");
         assert_eq!(event_wire[7]["provider_usage"]["cached_tokens"], 64);
+        assert_eq!(event_wire[8]["type"], "rolling_history_compaction_needed");
+        assert_eq!(event_wire[8]["context_budget_tokens"], 30_000);
+        assert_eq!(event_wire[8]["max_context_tokens"], 40_000);
+        assert_eq!(event_wire[8]["threshold_tokens"], 20_000);
+        assert_eq!(event_wire[9]["type"], "rolling_history_prompt_pruned");
+        assert_eq!(event_wire[9]["context_budget_tokens"], 30_000);
+        assert_eq!(event_wire[9]["max_context_tokens"], 40_000);
+        assert_eq!(event_wire[9]["dropped_prefix_messages"], 2);
+        assert_eq!(event_wire[9]["retained_messages"], 1);
+        assert_eq!(event_wire[10]["type"], "rolling_history_compaction_started");
+        assert_eq!(event_wire[10]["source_messages"], 3);
+        assert_eq!(event_wire[10]["instructions_present"], true);
+        assert!(event_wire[11]["type"] == "rolling_history_compaction_completed");
+        assert_eq!(event_wire[11]["summary_nodes"], 1);
     }
 }

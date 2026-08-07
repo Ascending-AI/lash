@@ -13,6 +13,10 @@ fn main() -> AnyhowResult<()> {
 
 async fn async_main() -> AnyhowResult<()> {
     let _ = dotenvy::dotenv();
+    let context_window_tokens = context_window_tokens_from_environment()?;
+    WORKBENCH_CONTEXT_WINDOW_TOKENS
+        .set(context_window_tokens)
+        .map_err(|_| anyhow!("agent-workbench context window was initialized more than once"))?;
 
     let dev_provider_scenario = failure_provider::DevProviderScenario::from_environment()?;
     let api_key = std::env::var(OPENROUTER_API_KEY_ENV).unwrap_or_default();
@@ -89,7 +93,7 @@ async fn async_main() -> AnyhowResult<()> {
     let model_spec = lash::ModelSpec::from_token_limits(
         model.clone(),
         lash::provider::ReasoningSelection::Effort(model_variant.clone()),
-        DEFAULT_CONTEXT_WINDOW_TOKENS,
+        context_window_tokens,
         None,
     )
     .map_err(|err| anyhow!("invalid OPENROUTER_MODEL metadata: {err}"))?;
@@ -324,9 +328,149 @@ fn validate_provider_credentials(
     Ok(())
 }
 
+fn context_window_tokens_from_environment() -> AnyhowResult<usize> {
+    context_window_tokens_from(|name| std::env::var(name))
+}
+
+fn context_window_tokens_from(
+    read_env: impl FnOnce(&str) -> Result<String, std::env::VarError>,
+) -> AnyhowResult<usize> {
+    let raw = match read_env(AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV) {
+        Ok(raw) => raw,
+        Err(std::env::VarError::NotPresent) => return Ok(DEFAULT_CONTEXT_WINDOW_TOKENS),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(anyhow!(
+                "agent-workbench: {AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV} is not valid Unicode"
+            ));
+        }
+    };
+    let context_window_tokens = raw.trim().parse::<usize>().map_err(|_| {
+        invalid_context_window_error(format_args!(
+            "must be an integer of at least {MIN_CONTEXT_WINDOW_TOKENS}"
+        ))
+    })?;
+    if context_window_tokens < MIN_CONTEXT_WINDOW_TOKENS {
+        return Err(invalid_context_window_error(format_args!(
+            "must be at least {MIN_CONTEXT_WINDOW_TOKENS}"
+        )));
+    }
+    Ok(context_window_tokens)
+}
+
+fn invalid_context_window_error(problem: std::fmt::Arguments<'_>) -> anyhow::Error {
+    anyhow!(
+        "agent-workbench: {AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV} {problem}: rolling-history compaction_needed fires at max_context - {ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS}, so the workbench requires a context window at least twice the plugin's compaction buffer"
+    )
+}
+
+fn workbench_context_window_tokens() -> usize {
+    let configured = WORKBENCH_CONTEXT_WINDOW_TOKENS.get().copied();
+    // `async_main` initializes this before constructing AppState. Unit tests
+    // that exercise pure model helpers may intentionally use the default.
+    debug_assert!(
+        configured.is_some() || cfg!(test),
+        "workbench context window must be initialized before model selection"
+    );
+    configured.unwrap_or(DEFAULT_CONTEXT_WINDOW_TOKENS)
+}
+
 #[cfg(test)]
 mod startup_tests {
     use super::*;
+
+    #[test]
+    fn startup_honors_context_window_environment_override() {
+        let context_window_tokens = context_window_tokens_from(|name| {
+            assert_eq!(name, AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV);
+            Ok("42000".to_string())
+        })
+        .expect("valid context-window override should be accepted");
+
+        assert_eq!(context_window_tokens, 42_000);
+    }
+
+    #[test]
+    fn startup_refuses_context_window_below_twice_the_compaction_buffer() {
+        let below_floor = (MIN_CONTEXT_WINDOW_TOKENS - 1).to_string();
+        let error = context_window_tokens_from(|_| Ok(below_floor))
+            .expect_err("a window below twice the compaction buffer must refuse startup");
+
+        let message = error.to_string();
+        assert!(
+            message.contains("AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS"),
+            "unexpected startup refusal: {error:#}"
+        );
+        assert!(
+            message.contains(&format!(
+                "compaction_needed fires at max_context - {ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS}"
+            )),
+            "startup refusal must explain the buffer predicate: {error:#}"
+        );
+        assert!(
+            message.contains(&format!("must be at least {MIN_CONTEXT_WINDOW_TOKENS}")),
+            "startup refusal must state the minimum: {error:#}"
+        );
+    }
+
+    #[test]
+    fn startup_refuses_unparseable_context_window_with_buffer_explanation() {
+        let error = context_window_tokens_from(|_| Ok("tight".to_string()))
+            .expect_err("an unparseable context-window override must refuse startup");
+
+        let message = error.to_string();
+        assert!(
+            message.contains(&format!(
+                "must be an integer of at least {MIN_CONTEXT_WINDOW_TOKENS}"
+            )),
+            "unexpected parse refusal: {error:#}"
+        );
+        assert!(
+            message.contains(&format!(
+                "compaction_needed fires at max_context - {ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS}"
+            )),
+            "parse refusal must explain the buffer predicate: {error:#}"
+        );
+    }
+
+    #[test]
+    fn startup_non_unicode_error_does_not_claim_a_buffer_violation() {
+        let error = context_window_tokens_from(|_| {
+            Err(std::env::VarError::NotUnicode(std::ffi::OsString::from(
+                "not-unicode",
+            )))
+        })
+        .expect_err("a non-Unicode override must refuse startup");
+
+        let message = error.to_string();
+        assert!(message.contains("is not valid Unicode"));
+        assert!(!message.contains("compaction_needed"));
+    }
+
+    #[test]
+    fn startup_accepts_context_window_at_twice_the_compaction_buffer() {
+        let value = context_window_tokens_from(|_| Ok(MIN_CONTEXT_WINDOW_TOKENS.to_string()))
+            .expect("twice the compaction buffer is a useful minimum");
+        assert_eq!(value, MIN_CONTEXT_WINDOW_TOKENS);
+    }
+
+    #[test]
+    fn model_spec_for_request_carries_once_lock_context_window_override() {
+        // OnceLock is process-global and can only be initialized once; keep the
+        // override in this single test and do not assert an unset state elsewhere.
+        let override_tokens = 84_000;
+        WORKBENCH_CONTEXT_WINDOW_TOKENS
+            .set(override_tokens)
+            .expect("this is the sole test that initializes the process override");
+        let selected = ModelSelection {
+            model: "test-model".to_string(),
+            model_variant: None,
+        };
+
+        let model = model_spec_for_request(&selected, None, None)
+            .expect("the request model should use the configured context window");
+
+        assert_eq!(model.context_window_tokens(), override_tokens);
+    }
 
     #[test]
     fn startup_refuses_without_openrouter_key_or_dev_provider_scenario() {

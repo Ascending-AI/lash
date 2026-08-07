@@ -534,23 +534,22 @@ fn new_session_id() -> String {
 }
 
 fn model_spec_for_request(
-    state: &AppState,
+    selected_model: &ModelSelection,
     model: Option<&str>,
     model_variant: Option<&str>,
 ) -> Result<lash::ModelSpec, AppError> {
-    let selected_model = state.selected_model();
     let model = model
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or(selected_model.model.as_str())
         .to_string();
-    let model_variant = model_variant_for_request(&selected_model, model_variant);
+    let model_variant = model_variant_for_request(selected_model, model_variant);
     lash::ModelSpec::from_token_limits(
         model,
         model_variant
             .map(lash::provider::ReasoningSelection::Effort)
             .unwrap_or_default(),
-        DEFAULT_CONTEXT_WINDOW_TOKENS,
+        workbench_context_window_tokens(),
         None,
     )
         .map(with_workbench_model_capability)
@@ -581,7 +580,7 @@ fn model_spec_from_selection(selection: ModelSelection) -> lash::ModelSpec {
             .model_variant
             .map(lash::provider::ReasoningSelection::Effort)
             .unwrap_or_default(),
-        DEFAULT_CONTEXT_WINDOW_TOKENS,
+        workbench_context_window_tokens(),
         None,
     )
     .expect("workbench model selection should use a valid token limit")

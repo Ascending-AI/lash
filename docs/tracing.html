@@ -244,6 +244,10 @@ impl TraceSink for FanoutTraceSink {
               <p><code>PromptBuilt</code>: combined <code>prompt_hash</code>, <code>prompt_chars</code>, per-component fingerprints. The runtime caches rendered prompts by fingerprint; an unexpected hash change flags a drifting plugin contribution, tool list, or template entry.</p>
             </article>
             <article class="panel">
+              <h3>Rolling history</h3>
+              <p><code>RollingHistoryCompactionNeeded</code> and <code>RollingHistoryPromptPruned</code> are turn-scoped decisions; <code>RollingHistoryCompactionStarted</code> and <code>RollingHistoryCompactionCompleted</code> are runtime-operation-scoped because an explicit <code>/compact</code> can run without a turn. <code>dropped_prefix_messages</code> and <code>retained_messages</code> describe only the ephemeral prompt view; durable session history remains unchanged. A needed decision with no valid cut point terminates with a pruned record carrying zero dropped messages. Old attachment payloads can also be elided before the compaction threshold; that attachment-only optimization is deliberately untraced because the placeholder remains visible in the emitted provider request and no durable content changes.</p>
+            </article>
+            <article class="panel">
               <h3>LLM interaction</h3>
               <p><code>LlmCallStarted</code>, <code>LlmCallCompleted</code>, <code>LlmCallFailed</code>. Provider, model, variant, request shape. <code>LlmCallCompleted</code> also carries <code>generation_disposition</code> when the adapter reports one: per generation option, whether the caller requested it and whether the request that ran actually carried it.</p>
             </article>

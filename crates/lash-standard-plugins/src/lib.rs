@@ -9,8 +9,8 @@ use lash_plugin_tool_output_budget::{ToolOutputBudgetPluginFactory, tool_output_
 use lash_tools::files::{edit_provider, glob_provider, read_file_provider, write_provider};
 use lash_tools::shell::StandardShellPluginFactory;
 use lash_tools::web::{fetch_url_provider, web_search_provider};
-pub use rolling_history::RollingHistoryConfig;
 use rolling_history::RollingHistoryPluginFactory;
+pub use rolling_history::{ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS, RollingHistoryConfig};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StandardContextApproachKind {

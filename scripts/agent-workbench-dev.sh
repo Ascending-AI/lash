@@ -36,6 +36,9 @@ Defaults:
   Managed-service ports use a 10-port stride for each workbench-port step from
   3030, unless their environment variables override them.
   Without --port/--addr, AGENT_WORKBENCH_ADDR is used, then 127.0.0.1:3030.
+  AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS sets the model context window; it
+  defaults to 200000 and must be at least twice the plugin's compaction buffer
+  (currently 20,000 tokens).
 USAGE
 }
 

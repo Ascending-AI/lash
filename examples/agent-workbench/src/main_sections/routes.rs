@@ -339,7 +339,7 @@ async fn send_turn(
         },
     };
     let turn_model = model_spec_for_request(
-        &state,
+        &state.selected_model(),
         request.model.as_deref(),
         request.model_variant.as_deref(),
     )?;
@@ -425,7 +425,7 @@ async fn button_trigger(
 ) -> Result<Json<CommandAccepted>, AppError> {
     let session_id = query.resolve(&state)?;
     let turn_model = model_spec_for_request(
-        &state,
+        &state.selected_model(),
         request.model.as_deref(),
         request.model_variant.as_deref(),
     )?;
@@ -703,7 +703,7 @@ async fn inject_message(
     Json(request): Json<InjectMessageRequest>,
 ) -> Result<Json<CommandAccepted>, AppError> {
     let turn_model = model_spec_for_request(
-        &state,
+        &state.selected_model(),
         request.model.as_deref(),
         request.model_variant.as_deref(),
     )?;

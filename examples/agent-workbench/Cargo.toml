@@ -36,6 +36,7 @@ lash-restate = { workspace = true }
 lash-remote-protocol = { workspace = true }
 lash-rlm-types = { workspace = true }
 lash-sqlite-store = { workspace = true }
+lash-standard-plugins = { workspace = true }
 lash-subagents = { workspace = true }
 lash-tools = { path = "../../crates/lash-tools", default-features = false, features = ["lashlang"] }
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }

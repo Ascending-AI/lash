@@ -81,6 +81,22 @@ fn event_samples() -> Vec<TraceEvent> {
             prompt_chars: 12,
             components: Vec::new(),
         },
+        TraceEvent::RollingHistoryCompactionNeeded {
+            context_budget_tokens: 30_000,
+            max_context_tokens: 40_000,
+            threshold_tokens: 20_000,
+        },
+        TraceEvent::RollingHistoryPromptPruned {
+            context_budget_tokens: 30_000,
+            max_context_tokens: 40_000,
+            dropped_prefix_messages: 2,
+            retained_messages: 1,
+        },
+        TraceEvent::RollingHistoryCompactionStarted {
+            source_messages: 3,
+            instructions_present: true,
+        },
+        TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 },
         TraceEvent::LlmCallStarted {
             request: TraceLlmRequest {
                 model: "m".to_string(),
@@ -218,6 +234,10 @@ const ALL_TRACE_EVENT_KINDS: &[&str] = &[
     "session_started",
     "turn_started",
     "prompt_built",
+    "rolling_history_compaction_needed",
+    "rolling_history_prompt_pruned",
+    "rolling_history_compaction_started",
+    "rolling_history_compaction_completed",
     "llm_call_started",
     "llm_call_completed",
     "llm_call_failed",
@@ -253,6 +273,56 @@ fn event_samples_cover_every_variant() {
     assert_eq!(
         sampled, canonical,
         "event_samples must pin exactly one representative per TraceEvent variant"
+    );
+}
+
+#[test]
+fn rolling_history_events_pin_decision_payloads() {
+    let events = [
+        TraceEvent::RollingHistoryCompactionNeeded {
+            context_budget_tokens: 30_000,
+            max_context_tokens: 40_000,
+            threshold_tokens: 20_000,
+        },
+        TraceEvent::RollingHistoryPromptPruned {
+            context_budget_tokens: 30_000,
+            max_context_tokens: 40_000,
+            dropped_prefix_messages: 2,
+            retained_messages: 1,
+        },
+        TraceEvent::RollingHistoryCompactionStarted {
+            source_messages: 3,
+            instructions_present: true,
+        },
+        TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 },
+    ];
+
+    assert_eq!(
+        events.map(|event| serde_json::to_value(event).expect("serialize event")),
+        [
+            json!({
+                "type": "rolling_history_compaction_needed",
+                "context_budget_tokens": 30_000,
+                "max_context_tokens": 40_000,
+                "threshold_tokens": 20_000,
+            }),
+            json!({
+                "type": "rolling_history_prompt_pruned",
+                "context_budget_tokens": 30_000,
+                "max_context_tokens": 40_000,
+                "dropped_prefix_messages": 2,
+                "retained_messages": 1,
+            }),
+            json!({
+                "type": "rolling_history_compaction_started",
+                "source_messages": 3,
+                "instructions_present": true,
+            }),
+            json!({
+                "type": "rolling_history_compaction_completed",
+                "summary_nodes": 1,
+            }),
+        ]
     );
 }
 
