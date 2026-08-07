@@ -273,6 +273,18 @@ where
             }
             TraceEvent::SessionStarted { .. } => self.emit_instant(record, "lash.session", None),
             TraceEvent::PromptBuilt { .. } => self.emit_instant(record, "lash.prompt", None),
+            TraceEvent::RollingHistoryCompactionNeeded { .. } => {
+                self.emit_instant(record, "lash.rolling_history.compaction_needed", None)
+            }
+            TraceEvent::RollingHistoryPromptPruned { .. } => {
+                self.emit_instant(record, "lash.rolling_history.prompt_pruned", None)
+            }
+            TraceEvent::RollingHistoryCompactionStarted { .. } => {
+                self.emit_instant(record, "lash.rolling_history.compaction_started", None)
+            }
+            TraceEvent::RollingHistoryCompactionCompleted { .. } => {
+                self.emit_instant(record, "lash.rolling_history.compaction_completed", None)
+            }
             TraceEvent::ProtocolStep { payload, .. } => {
                 self.emit_instant(record, protocol_step_span_name(payload), None)
             }
@@ -399,6 +411,61 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 "lash.prompt.components_json",
                 components,
             );
+        }
+        TraceEvent::RollingHistoryCompactionNeeded {
+            context_budget_tokens,
+            max_context_tokens,
+            threshold_tokens,
+        } => {
+            attrs.push(KeyValue::new(
+                "lash.rolling_history.context_budget_tokens",
+                *context_budget_tokens as i64,
+            ));
+            attrs.push(KeyValue::new(
+                "lash.rolling_history.max_context_tokens",
+                *max_context_tokens as i64,
+            ));
+            attrs.push(KeyValue::new(
+                "lash.rolling_history.threshold_tokens",
+                *threshold_tokens as i64,
+            ));
+        }
+        TraceEvent::RollingHistoryPromptPruned {
+            context_budget_tokens,
+            max_context_tokens,
+            dropped_prefix_messages,
+        } => {
+            attrs.push(KeyValue::new(
+                "lash.rolling_history.context_budget_tokens",
+                *context_budget_tokens as i64,
+            ));
+            attrs.push(KeyValue::new(
+                "lash.rolling_history.max_context_tokens",
+                *max_context_tokens as i64,
+            ));
+            attrs.push(KeyValue::new(
+                "lash.rolling_history.dropped_prefix_messages",
+                *dropped_prefix_messages as i64,
+            ));
+        }
+        TraceEvent::RollingHistoryCompactionStarted {
+            source_messages,
+            instructions_present,
+        } => {
+            attrs.push(KeyValue::new(
+                "lash.rolling_history.source_messages",
+                *source_messages as i64,
+            ));
+            attrs.push(KeyValue::new(
+                "lash.rolling_history.instructions_present",
+                *instructions_present,
+            ));
+        }
+        TraceEvent::RollingHistoryCompactionCompleted { summary_nodes } => {
+            attrs.push(KeyValue::new(
+                "lash.rolling_history.summary_nodes",
+                *summary_nodes as i64,
+            ));
         }
         TraceEvent::LlmCallStarted { request } => {
             attrs.push(KeyValue::new("gen_ai.request.model", request.model.clone()));
@@ -1035,6 +1102,12 @@ fn event_type(event: &TraceEvent) -> &'static str {
         TraceEvent::SessionStarted { .. } => "session_started",
         TraceEvent::TurnStarted { .. } => "turn_started",
         TraceEvent::PromptBuilt { .. } => "prompt_built",
+        TraceEvent::RollingHistoryCompactionNeeded { .. } => "rolling_history_compaction_needed",
+        TraceEvent::RollingHistoryPromptPruned { .. } => "rolling_history_prompt_pruned",
+        TraceEvent::RollingHistoryCompactionStarted { .. } => "rolling_history_compaction_started",
+        TraceEvent::RollingHistoryCompactionCompleted { .. } => {
+            "rolling_history_compaction_completed"
+        }
         TraceEvent::LlmCallStarted { .. } => "llm_call_started",
         TraceEvent::LlmCallCompleted { .. } => "llm_call_completed",
         TraceEvent::LlmCallFailed { .. } => "llm_call_failed",

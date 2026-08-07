@@ -99,6 +99,11 @@ Configuration is read from `.env` or the process environment:
 - `AGENT_WORKBENCH_TOKIO_STACK_BYTES`: Tokio worker thread stack for the
   workbench process, default `8388608`. Override only when diagnosing stack
   regressions or comparing runtime stack-size lanes.
+- `AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS`: model context window used by every
+  workbench session, default `200000`. Values must be integers greater than
+  `20000`: rolling-history `compaction_needed` fires at `max_context - 20000`,
+  so a window at or below the buffer makes that predicate trivially true and
+  startup refuses it.
 - `AGENT_WORKBENCH_LEASE_HOST_ID`: identity of this workbench's PID namespace
   among every instance sharing the session store. Set it to a unique pod or
   container id when `/etc/machine-id` may be baked into the image; otherwise

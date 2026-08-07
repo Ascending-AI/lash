@@ -550,7 +550,7 @@ fn model_spec_for_request(
         model_variant
             .map(lash::provider::ReasoningSelection::Effort)
             .unwrap_or_default(),
-        DEFAULT_CONTEXT_WINDOW_TOKENS,
+        workbench_context_window_tokens(),
         None,
     )
         .map(with_workbench_model_capability)
@@ -581,7 +581,7 @@ fn model_spec_from_selection(selection: ModelSelection) -> lash::ModelSpec {
             .model_variant
             .map(lash::provider::ReasoningSelection::Effort)
             .unwrap_or_default(),
-        DEFAULT_CONTEXT_WINDOW_TOKENS,
+        workbench_context_window_tokens(),
         None,
     )
     .expect("workbench model selection should use a valid token limit")

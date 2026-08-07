@@ -251,10 +251,8 @@ fn render_event(index: usize, entry: &TraceEntry) -> RenderEvent {
     }
 }
 
-/// Title, summary, and failure flag for a typed event. The match is exhaustive
-/// on `TraceEvent` (no wildcard): a new variant will not compile until it is
-/// given a rendering here — this is the viewer's drift guard against the
-/// schema.
+/// Title, summary, and failure flag for a typed event. This exhaustive match is
+/// the viewer's drift guard: every new `TraceEvent` needs a rendering.
 fn interpret_typed(event: &TraceEvent, raw: &Value) -> (String, String, bool) {
     match event {
         TraceEvent::LlmCallStarted { request } => (
@@ -371,6 +369,41 @@ fn interpret_typed(event: &TraceEvent, raw: &Value) -> (String, String, bool) {
                 .join("\n");
             (format!("{prompt_chars} prompt chars"), summary, false)
         }
+        TraceEvent::RollingHistoryCompactionNeeded {
+            context_budget_tokens,
+            max_context_tokens,
+            threshold_tokens,
+        } => (
+            "rolling-history compaction needed".to_string(),
+            format!(
+                "budget {context_budget_tokens}/{max_context_tokens}; threshold {threshold_tokens}"
+            ),
+            false,
+        ),
+        TraceEvent::RollingHistoryPromptPruned {
+            context_budget_tokens,
+            max_context_tokens,
+            dropped_prefix_messages,
+        } => (
+            "rolling-history prompt pruned".to_string(),
+            format!(
+                "context budget {context_budget_tokens}, max context {max_context_tokens}, dropped {dropped_prefix_messages} prefix messages"
+            ),
+            false,
+        ),
+        TraceEvent::RollingHistoryCompactionStarted {
+            source_messages,
+            instructions_present,
+        } => (
+            "rolling-history compaction started".to_string(),
+            format!("{source_messages} messages; instructions: {instructions_present}"),
+            false,
+        ),
+        TraceEvent::RollingHistoryCompactionCompleted { summary_nodes } => (
+            "rolling-history compaction completed".to_string(),
+            format!("produced {summary_nodes} summary nodes"),
+            false,
+        ),
         TraceEvent::SessionStarted { .. } | TraceEvent::TurnStarted { .. } => {
             (kind_title(event.kind()), default_summary(raw), false)
         }
@@ -1270,6 +1303,21 @@ mod tests {
                 prompt_chars: 42,
                 components: Vec::new(),
             },
+            TraceEvent::RollingHistoryCompactionNeeded {
+                context_budget_tokens: 30_000,
+                max_context_tokens: 40_000,
+                threshold_tokens: 20_000,
+            },
+            TraceEvent::RollingHistoryPromptPruned {
+                context_budget_tokens: 30_000,
+                max_context_tokens: 40_000,
+                dropped_prefix_messages: 2,
+            },
+            TraceEvent::RollingHistoryCompactionStarted {
+                source_messages: 3,
+                instructions_present: true,
+            },
+            TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 },
             TraceEvent::LlmCallStarted {
                 request: sample_request(),
             },

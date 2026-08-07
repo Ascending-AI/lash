@@ -13,6 +13,10 @@ fn main() -> AnyhowResult<()> {
 
 async fn async_main() -> AnyhowResult<()> {
     let _ = dotenvy::dotenv();
+    let context_window_tokens = context_window_tokens_from_environment()?;
+    WORKBENCH_CONTEXT_WINDOW_TOKENS
+        .set(context_window_tokens)
+        .map_err(|_| anyhow!("agent-workbench context window was initialized more than once"))?;
 
     let dev_provider_scenario = failure_provider::DevProviderScenario::from_environment()?;
     let api_key = std::env::var(OPENROUTER_API_KEY_ENV).unwrap_or_default();
@@ -89,7 +93,7 @@ async fn async_main() -> AnyhowResult<()> {
     let model_spec = lash::ModelSpec::from_token_limits(
         model.clone(),
         lash::provider::ReasoningSelection::Effort(model_variant.clone()),
-        DEFAULT_CONTEXT_WINDOW_TOKENS,
+        context_window_tokens,
         None,
     )
     .map_err(|err| anyhow!("invalid OPENROUTER_MODEL metadata: {err}"))?;
@@ -324,9 +328,94 @@ fn validate_provider_credentials(
     Ok(())
 }
 
+fn context_window_tokens_from_environment() -> AnyhowResult<usize> {
+    context_window_tokens_from(|name| std::env::var(name))
+}
+
+fn context_window_tokens_from(
+    read_env: impl FnOnce(&str) -> Result<String, std::env::VarError>,
+) -> AnyhowResult<usize> {
+    let raw = match read_env(AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV) {
+        Ok(raw) => raw,
+        Err(std::env::VarError::NotPresent) => return Ok(DEFAULT_CONTEXT_WINDOW_TOKENS),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(invalid_context_window_error("is not valid Unicode"));
+        }
+    };
+    let context_window_tokens = raw.trim().parse::<usize>().map_err(|_| {
+        invalid_context_window_error("must be an integer greater than 20,000")
+    })?;
+    if context_window_tokens <= 20_000 {
+        return Err(invalid_context_window_error(
+            "must be greater than 20,000; a window <= 20,000 is trivially true",
+        ));
+    }
+    Ok(context_window_tokens)
+}
+
+fn invalid_context_window_error(problem: &str) -> anyhow::Error {
+    anyhow!(
+        "agent-workbench: {AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV} {problem}: rolling-history compaction_needed fires at max_context - 20,000, so the context window must leave room beyond that buffer"
+    )
+}
+
+fn workbench_context_window_tokens() -> usize {
+    WORKBENCH_CONTEXT_WINDOW_TOKENS
+        .get()
+        .copied()
+        .unwrap_or(DEFAULT_CONTEXT_WINDOW_TOKENS)
+}
+
 #[cfg(test)]
 mod startup_tests {
     use super::*;
+
+    #[test]
+    fn startup_honors_context_window_environment_override() {
+        let context_window_tokens = context_window_tokens_from(|name| {
+            assert_eq!(name, AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV);
+            Ok("42000".to_string())
+        })
+        .expect("valid context-window override should be accepted");
+
+        assert_eq!(context_window_tokens, 42_000);
+    }
+
+    #[test]
+    fn startup_refuses_context_window_at_compaction_buffer() {
+        let error = context_window_tokens_from(|_| Ok("20000".to_string()))
+            .expect_err("a window equal to the compaction buffer must refuse startup");
+
+        let message = error.to_string();
+        assert!(
+            message.contains("AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS"),
+            "unexpected startup refusal: {error:#}"
+        );
+        assert!(
+            message.contains("compaction_needed fires at max_context - 20,000"),
+            "startup refusal must explain the buffer predicate: {error:#}"
+        );
+        assert!(
+            message.contains("window <= 20,000 is trivially true"),
+            "startup refusal must explain the invalid range: {error:#}"
+        );
+    }
+
+    #[test]
+    fn startup_refuses_unparseable_context_window_with_buffer_explanation() {
+        let error = context_window_tokens_from(|_| Ok("tight".to_string()))
+            .expect_err("an unparseable context-window override must refuse startup");
+
+        let message = error.to_string();
+        assert!(
+            message.contains("must be an integer greater than 20,000"),
+            "unexpected parse refusal: {error:#}"
+        );
+        assert!(
+            message.contains("compaction_needed fires at max_context - 20,000"),
+            "parse refusal must explain the buffer predicate: {error:#}"
+        );
+    }
 
     #[test]
     fn startup_refuses_without_openrouter_key_or_dev_provider_scenario() {

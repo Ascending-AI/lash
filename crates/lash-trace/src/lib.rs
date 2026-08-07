@@ -2,8 +2,9 @@
 //! record vocabulary.
 //!
 //! A [`TraceSink`] receives one [`TraceRecord`] per runtime event — session and
-//! turn lifecycle, prompt builds, LLM calls, per-tool start/completion, token
-//! usage, protocol steps, and Lashlang execution-graph updates. Each record
+//! turn lifecycle, prompt builds, rolling-history decisions, LLM calls,
+//! per-tool start/completion, token usage, protocol steps, and Lashlang
+//! execution-graph updates. Each record
 //! carries a [`TraceContext`] (session / turn / graph-node identity) plus a
 //! tagged [`TraceEvent`] payload; [`TraceEvent::kind`] is the single source of
 //! truth for the `type` tag string that consumers match on.
@@ -191,6 +192,23 @@ pub enum TraceEvent {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         components: Vec<TracePromptComponent>,
     },
+    RollingHistoryCompactionNeeded {
+        context_budget_tokens: usize,
+        max_context_tokens: usize,
+        threshold_tokens: usize,
+    },
+    RollingHistoryCompactionStarted {
+        source_messages: usize,
+        instructions_present: bool,
+    },
+    RollingHistoryCompactionCompleted {
+        summary_nodes: usize,
+    },
+    RollingHistoryPromptPruned {
+        context_budget_tokens: usize,
+        max_context_tokens: usize,
+        dropped_prefix_messages: usize,
+    },
     LlmCallStarted {
         request: TraceLlmRequest,
     },
@@ -267,6 +285,12 @@ impl TraceEvent {
             Self::SessionStarted { .. } => "session_started",
             Self::TurnStarted { .. } => "turn_started",
             Self::PromptBuilt { .. } => "prompt_built",
+            Self::RollingHistoryCompactionNeeded { .. } => "rolling_history_compaction_needed",
+            Self::RollingHistoryCompactionStarted { .. } => "rolling_history_compaction_started",
+            Self::RollingHistoryCompactionCompleted { .. } => {
+                "rolling_history_compaction_completed"
+            }
+            Self::RollingHistoryPromptPruned { .. } => "rolling_history_prompt_pruned",
             Self::LlmCallStarted { .. } => "llm_call_started",
             Self::LlmCallCompleted { .. } => "llm_call_completed",
             Self::LlmCallFailed { .. } => "llm_call_failed",

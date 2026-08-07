@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use anyhow::{Context, Result as AnyhowResult, anyhow};
@@ -49,6 +49,8 @@ use tokio_stream::wrappers::ReceiverStream;
 
 const SESSION_ID_PREFIX: &str = "workbench";
 const DEFAULT_CONTEXT_WINDOW_TOKENS: usize = 200_000;
+const AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV: &str = "AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS";
+static WORKBENCH_CONTEXT_WINDOW_TOKENS: OnceLock<usize> = OnceLock::new();
 const OPENROUTER_API_KEY_ENV: &str = "OPENROUTER_API_KEY";
 pub(crate) const BUTTON_TRIGGER_RESOURCE: &str = "Button";
 pub(crate) const BUTTON_TRIGGER_ALIAS: &str = "ui.button";

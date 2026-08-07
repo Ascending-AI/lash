@@ -241,7 +241,7 @@ impl TraceSink for FanoutTraceSink {
             </article>
             <article class="panel">
               <h3>Prompt</h3>
-              <p><code>PromptBuilt</code>: combined <code>prompt_hash</code>, <code>prompt_chars</code>, per-component fingerprints. The runtime caches rendered prompts by fingerprint; an unexpected hash change flags a drifting plugin contribution, tool list, or template entry.</p>
+              <p><code>PromptBuilt</code>: combined <code>prompt_hash</code>, <code>prompt_chars</code>, per-component fingerprints. The runtime caches rendered prompts by fingerprint; an unexpected hash change flags a drifting plugin contribution, tool list, or template entry. Rolling-history decisions use <code>RollingHistoryCompactionNeeded</code> (<code>context_budget_tokens</code>, <code>max_context_tokens</code>, <code>threshold_tokens</code>), <code>RollingHistoryPromptPruned</code> (the same budget pair plus <code>dropped_prefix_messages</code>), <code>RollingHistoryCompactionStarted</code> (<code>source_messages</code>, <code>instructions_present</code>), and <code>RollingHistoryCompactionCompleted</code> (<code>summary_nodes</code>).</p>
             </article>
             <article class="panel">
               <h3>LLM interaction</h3>

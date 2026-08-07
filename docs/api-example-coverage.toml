@@ -54511,6 +54511,123 @@ assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:327; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
+symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionCompleted"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::RollingHistoryCompactionCompleted"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming typed rolling-history decisions from the standard plugin; the bundled JSONL sink, trace viewer, and OpenTelemetry sink also consume this variant."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionCompleted::summary_nodes"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::RollingHistoryCompactionCompleted::summary_nodes"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers gating on whether explicit rolling-history compaction produced summary seed nodes."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionNeeded"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::RollingHistoryCompactionNeeded"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming typed rolling-history threshold decisions from the standard plugin."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionNeeded::context_budget_tokens"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::RollingHistoryCompactionNeeded::context_budget_tokens"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers comparing the observed prompt context budget with the rolling-history compaction threshold."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionNeeded::max_context_tokens"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::RollingHistoryCompactionNeeded::max_context_tokens"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers comparing the configured model context window with the rolling-history compaction threshold."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionNeeded::threshold_tokens"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::RollingHistoryCompactionNeeded::threshold_tokens"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers gating on the exact token threshold that caused rolling-history compaction to become necessary."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionStarted"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::RollingHistoryCompactionStarted"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers observing explicit rolling-history compactor invocation."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionStarted::instructions_present"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::RollingHistoryCompactionStarted::instructions_present"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers distinguishing guided from default rolling-history compactor invocation without recording instruction contents."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionStarted::source_messages"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::RollingHistoryCompactionStarted::source_messages"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers recording the source message count presented to the rolling-history compactor."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers observing typed rolling-history prompt-view pruning decisions."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned::context_budget_tokens"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned::context_budget_tokens"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers recording the context budget that caused rolling-history prompt-view pruning."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned::dropped_prefix_messages"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned::dropped_prefix_messages"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers gating on the number of prefix messages removed from the ephemeral prompt view."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned::max_context_tokens"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned::max_context_tokens"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers correlating prompt-view pruning with the configured model context window."
+
+[[api]]
 symbol = "lash::tracing::TraceEvent::ProtocolStep"
 kind = "variant"
 availability = "default+all-features"

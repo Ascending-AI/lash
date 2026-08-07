@@ -137,6 +137,10 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
             set_span(context, None, parent);
         }
         TraceEvent::PromptBuilt { .. }
+        | TraceEvent::RollingHistoryCompactionNeeded { .. }
+        | TraceEvent::RollingHistoryPromptPruned { .. }
+        | TraceEvent::RollingHistoryCompactionStarted { .. }
+        | TraceEvent::RollingHistoryCompactionCompleted { .. }
         | TraceEvent::EffectEnvelopeDiff { .. }
         | TraceEvent::ProtocolStep { .. }
         | TraceEvent::TokenUsage { .. } => set_span(context, None, turn_node),

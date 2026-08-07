@@ -192,8 +192,11 @@ fn compaction_needed(
     let Some(max_context) = max_context_tokens else {
         return false;
     };
-    let usable = max_context.saturating_sub(COMPACTION_BUFFER_TOKENS.min(max_context));
-    usage.context_budget_tokens >= usable
+    usage.context_budget_tokens >= compaction_threshold(max_context)
+}
+
+fn compaction_threshold(max_context_tokens: usize) -> usize {
+    max_context_tokens.saturating_sub(COMPACTION_BUFFER_TOKENS.min(max_context_tokens))
 }
 
 fn compaction_turn_id(parent_turn_id: &str) -> String {
@@ -422,6 +425,26 @@ impl TurnContextTransform for RollingTurnTransform {
             return Ok(input);
         }
 
+        let mut trace_context =
+            lash_core::TraceContext::default().for_session(ctx.session_id.clone());
+        if let Some(turn_id) = ctx.scoped_effect_controller.turn_id() {
+            trace_context = trace_context.for_turn(turn_id);
+        }
+        if needs_compaction
+            && let (Some(usage), Some(max_context_tokens)) = (prompt_usage, max_context_tokens)
+        {
+            ctx.session_graph
+                .emit_trace_event(
+                    trace_context.clone(),
+                    lash_core::TraceEvent::RollingHistoryCompactionNeeded {
+                        context_budget_tokens: usage.context_budget_tokens,
+                        max_context_tokens,
+                        threshold_tokens: compaction_threshold(max_context_tokens),
+                    },
+                )
+                .await?;
+        }
+
         let messages = input.messages.make_mut();
 
         if needs_pruning {
@@ -439,8 +462,23 @@ impl TurnContextTransform for RollingTurnTransform {
             return Ok(input);
         }
 
+        let message_count = messages.len();
         let projected = prompt_tail_window(messages, cut_point);
+        let dropped_prefix_messages = message_count.saturating_sub(projected.len());
         input.messages.replace(projected);
+        let usage = prompt_usage.expect("compaction decision requires prompt usage");
+        let max_context_tokens =
+            max_context_tokens.expect("compaction decision requires max context tokens");
+        ctx.session_graph
+            .emit_trace_event(
+                trace_context,
+                lash_core::TraceEvent::RollingHistoryPromptPruned {
+                    context_budget_tokens: usage.context_budget_tokens,
+                    max_context_tokens,
+                    dropped_prefix_messages,
+                },
+            )
+            .await?;
         Ok(input)
     }
 }
@@ -463,12 +501,30 @@ impl ContextCompactor for RollingContextCompactor {
         &self,
         ctx: &CompactionContext<'_>,
     ) -> Result<Option<ContextCompaction>, ContextError> {
+        let mut trace_context =
+            lash_core::TraceContext::default().for_session(ctx.session_id.clone());
+        if let Some(turn_id) = ctx.scoped_effect_controller.turn_id() {
+            trace_context = trace_context.for_turn(turn_id);
+        }
+        ctx.session_graph
+            .emit_trace_event(
+                trace_context.clone(),
+                lash_core::TraceEvent::RollingHistoryCompactionStarted {
+                    source_messages: ctx.state.messages().len(),
+                    instructions_present: ctx
+                        .instructions
+                        .as_deref()
+                        .is_some_and(|instructions| !instructions.trim().is_empty()),
+                },
+            )
+            .await?;
+
         let session_id = ctx.session_id.clone();
         let sessions = Arc::clone(&ctx.sessions);
         let session_lifecycle = Arc::clone(&ctx.session_lifecycle);
         let scoped_effect_controller = ctx.scoped_effect_controller.clone();
 
-        compact_messages_core(
+        let compaction = compact_messages_core(
             &session_id,
             &ctx.state.to_snapshot(),
             ctx.state.messages(),
@@ -477,13 +533,27 @@ impl ContextCompactor for RollingContextCompactor {
             session_lifecycle,
             scoped_effect_controller,
         )
-        .await
+        .await?;
+        if let Some(compaction) = compaction.as_ref() {
+            ctx.session_graph
+                .emit_trace_event(
+                    trace_context,
+                    lash_core::TraceEvent::RollingHistoryCompactionCompleted {
+                        summary_nodes: compaction.initial_nodes.len(),
+                    },
+                )
+                .await?;
+        }
+        Ok(compaction)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    use lash_core::plugin::SessionGraphService;
     use lash_core::{SessionGraph, SessionPolicy};
     use serde_json::json;
 
@@ -548,12 +618,57 @@ mod tests {
             .with_turn(empty_turn("root", "Compacted work summary"))
     }
 
+    #[derive(Default)]
+    struct RecordingSessionGraph {
+        events: Mutex<Vec<(lash_core::TraceContext, lash_core::TraceEvent)>>,
+    }
+
+    impl RecordingSessionGraph {
+        fn events(&self) -> Vec<(lash_core::TraceContext, lash_core::TraceEvent)> {
+            self.events.lock().expect("trace events lock").clone()
+        }
+    }
+
+    #[async_trait]
+    impl SessionGraphService for RecordingSessionGraph {
+        async fn emit_trace_event(
+            &self,
+            context: lash_core::TraceContext,
+            event: lash_core::TraceEvent,
+        ) -> Result<(), PluginError> {
+            self.events
+                .lock()
+                .expect("trace events lock")
+                .push((context, event));
+            Ok(())
+        }
+    }
+
     fn build_turn_ctx(
         session_id: &str,
         state: SessionSnapshot,
         prompt_usage: Option<PromptUsage>,
         max_context_tokens: Option<usize>,
         manager: Arc<MockSessionManager>,
+    ) -> TurnTransformContext<'static> {
+        let session_graph = manager.clone();
+        build_turn_ctx_with_graph(
+            session_id,
+            state,
+            prompt_usage,
+            max_context_tokens,
+            manager,
+            session_graph,
+        )
+    }
+
+    fn build_turn_ctx_with_graph(
+        session_id: &str,
+        state: SessionSnapshot,
+        prompt_usage: Option<PromptUsage>,
+        max_context_tokens: Option<usize>,
+        manager: Arc<MockSessionManager>,
+        session_graph: Arc<dyn SessionGraphService>,
     ) -> TurnTransformContext<'static> {
         TurnTransformContext {
             session_id: session_id.to_string(),
@@ -562,7 +677,7 @@ mod tests {
             max_context_tokens,
             sessions: manager.clone(),
             session_lifecycle: manager.clone(),
-            session_graph: manager,
+            session_graph,
             scoped_effect_controller: lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
                 lash_core::ExecutionScope::turn(session_id, "rolling-history-test-turn"),
@@ -578,11 +693,12 @@ mod tests {
         }
     }
 
-    fn build_compaction_ctx(
+    fn build_compaction_ctx_with_graph(
         session_id: &str,
         state: SessionSnapshot,
         instructions: Option<String>,
         manager: Arc<MockSessionManager>,
+        session_graph: Arc<dyn SessionGraphService>,
     ) -> CompactionContext<'static> {
         CompactionContext {
             session_id: session_id.to_string(),
@@ -590,7 +706,7 @@ mod tests {
             state: state.read_view(),
             sessions: manager.clone(),
             session_lifecycle: manager.clone(),
-            session_graph: manager,
+            session_graph,
             scoped_effect_controller: lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
                 lash_core::ExecutionScope::runtime_operation("rolling-history-compact-test"),
@@ -696,8 +812,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rolling_turn_transform_traces_threshold_and_prompt_pruning() {
+        let manager = Arc::new(mock_manager());
+        let trace = Arc::new(RecordingSessionGraph::default());
+        let transform = RollingTurnTransform::new(RollingHistoryConfig);
+        let state = SessionSnapshot {
+            session_id: "root".to_string(),
+            policy: SessionPolicy::default(),
+            ..Default::default()
+        };
+        let ctx = build_turn_ctx_with_graph(
+            "root",
+            state,
+            Some(PromptUsage {
+                prompt_context_tokens: 30_000,
+                input_tokens: 30_000,
+                cache_read_input_tokens: 0,
+                cache_write_input_tokens: 0,
+                context_budget_tokens: 30_000,
+            }),
+            Some(40_000),
+            manager,
+            trace.clone(),
+        );
+        let prepared = PreparedContext {
+            messages: vec![
+                text_message("u1", MessageRole::User, "old work"),
+                text_message("a1", MessageRole::Assistant, "assistant old"),
+                text_message("u2", MessageRole::User, "latest request"),
+            ]
+            .into(),
+            ..Default::default()
+        };
+
+        transform
+            .transform(&ctx, prepared)
+            .await
+            .expect("transform should emit its decisions");
+
+        let events = trace.events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].0.session_id.as_deref(), Some("root"));
+        assert_eq!(
+            events[0].0.turn_id.as_deref(),
+            Some("rolling-history-test-turn")
+        );
+        assert_eq!(
+            events[0].1,
+            lash_core::TraceEvent::RollingHistoryCompactionNeeded {
+                context_budget_tokens: 30_000,
+                max_context_tokens: 40_000,
+                threshold_tokens: 20_000,
+            }
+        );
+        assert_eq!(
+            events[1].1,
+            lash_core::TraceEvent::RollingHistoryPromptPruned {
+                context_budget_tokens: 30_000,
+                max_context_tokens: 40_000,
+                dropped_prefix_messages: 2,
+            }
+        );
+    }
+
+    #[tokio::test]
     async fn rolling_compactor_returns_summary_seed_for_new_frame() {
         let manager = Arc::new(mock_manager());
+        let trace = Arc::new(RecordingSessionGraph::default());
         let messages = vec![
             text_message("u1", MessageRole::User, "old work"),
             text_message("a1", MessageRole::Assistant, "assistant old"),
@@ -709,11 +890,12 @@ mod tests {
             session_graph: SessionGraph::from_active_read_state(&messages),
             ..Default::default()
         };
-        let ctx = build_compaction_ctx(
+        let ctx = build_compaction_ctx_with_graph(
             "root",
             state,
             Some("focus on latest request".to_string()),
             manager.clone(),
+            trace.clone(),
         );
         let compactor = RollingContextCompactor::new(RollingHistoryConfig);
 
@@ -758,6 +940,22 @@ mod tests {
                 "root-compaction",
                 "rolling-history-compact-test:rolling-history-compaction"
             )
+        );
+
+        let events = trace.events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].0.session_id.as_deref(), Some("root"));
+        assert_eq!(events[0].0.turn_id, None);
+        assert_eq!(
+            events[0].1,
+            lash_core::TraceEvent::RollingHistoryCompactionStarted {
+                source_messages: 3,
+                instructions_present: true,
+            }
+        );
+        assert_eq!(
+            events[1].1,
+            lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 }
         );
     }
 }
