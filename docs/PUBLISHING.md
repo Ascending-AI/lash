@@ -14,8 +14,7 @@ release publishes them all together, in dependency order.
   `lash-postgres-store`, `lash-s3-store`,
   `lash-restate`), the remote protocol DTOs (`lash-remote-protocol`), and
   a-la-carte capability crates (`lash-tools`, `lash-plugin-mcp`,
-  `lash-subagents`, `lash-plugin-plan-mode`,
-  `lash-plugin-tool-output-budget`, `lash-llm-tools`).
+  `lash-subagents`, `lash-plugin-tool-output-budget`, `lash-llm-tools`).
 - **Not published:** anything marked `publish = false` — examples, E2E
   harnesses, and dev/internal tooling (`lash-perf`, `lash-trace-viewer`). The
   CLI product and its private crates live in

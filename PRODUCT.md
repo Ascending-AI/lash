@@ -52,7 +52,7 @@ signage type.
 ### Design Principles
 
 1. **Accent means action.** Sodium is reserved for the active edge — prompts,
-   plan mode, key labels, plan updates, headings that genuinely matter. If
+   key labels, active controls, headings that genuinely matter. If
    you're tempted to colorize a passive surface, use chalk hierarchy
    instead.
 2. **Structure before ornament.** Every line, rail, and box should clarify
