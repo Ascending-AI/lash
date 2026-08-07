@@ -19,7 +19,7 @@ use lash::tools::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::slack_api::SlackApi;
+use super::slack_api::{HistoryQuery, SlackApi};
 
 /// Name of the channel-listing tool, as the model sees it.
 pub const LIST_CHANNELS: &str = "list_channels";
@@ -62,7 +62,11 @@ struct ChannelHistoryArgs {
 /// `channel_history` output.
 #[derive(Debug, Serialize, JsonSchema)]
 struct ChannelHistoryOutput {
+    /// The canonical channel id (`C…`), even when the model asked by name, so a
+    /// follow-up call and the reply text both name the channel the same way.
     channel: String,
+    /// The name the caller used, echoed so the model can match its own request.
+    requested: String,
     /// Oldest first, so the model reads the excerpt in conversation order even
     /// though the API returns it newest-first.
     messages: Vec<HistoryEntry>,
@@ -130,9 +134,17 @@ impl WorkspaceTools {
 
     async fn channel_history(&self, args: ChannelHistoryArgs) -> ToolResult {
         let limit = args.limit.unwrap_or(20).clamp(1, MAX_HISTORY);
+        // Resolve the caller's spelling to the canonical `C…` id first. The
+        // platform accepts a name, but reporting the id back means the model's
+        // next call and its prose both name the channel the way the rest of the
+        // workspace does.
+        let canonical = match self.resolve_channel(&args.channel).await {
+            Ok(id) => id,
+            Err(error) => return ToolResult::err_fmt(format_args!("{error}")),
+        };
         let history = match self
             .api
-            .conversations_history(&args.channel, limit, false)
+            .conversations_history(&HistoryQuery::latest(&canonical, limit))
             .await
         {
             Ok(history) => history,
@@ -153,9 +165,39 @@ impl WorkspaceTools {
             .collect();
         messages.reverse();
         into_result(&ChannelHistoryOutput {
-            channel: args.channel,
+            channel: canonical,
+            requested: args.channel,
             messages,
         })
+    }
+
+    /// Map a channel id or name onto the canonical id.
+    async fn resolve_channel(&self, requested: &str) -> anyhow::Result<String> {
+        let wanted = requested.trim().trim_start_matches('#');
+        if wanted.is_empty() {
+            anyhow::bail!("channel_not_found");
+        }
+        let mut cursor: Option<String> = None;
+        loop {
+            let page = self
+                .api
+                .conversations_list(cursor.as_deref(), Some(100))
+                .await?;
+            if let Some(found) = page
+                .channels
+                .iter()
+                .find(|channel| channel.id == wanted || channel.name == wanted)
+            {
+                return Ok(found.id.clone());
+            }
+            cursor = page
+                .response_metadata
+                .map(|metadata| metadata.next_cursor)
+                .filter(|next| !next.is_empty());
+            if cursor.is_none() {
+                anyhow::bail!("channel_not_found");
+            }
+        }
     }
 }
 

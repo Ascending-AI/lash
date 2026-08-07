@@ -315,24 +315,28 @@ fn read_channel(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelRow> {
 
 /// Append a message, minting the `ts` that becomes its identity.
 ///
-/// The mint is `max(now, newest_ts + 1)` inside the same transaction as the
-/// insert, so `ts` is unique and strictly increasing per channel even when two
-/// posts land in the same microsecond. Slack guarantees exactly this, and
-/// clients that treat `ts` as an ordering key depend on it.
+/// The mint is `max(now, newest_ts + 1)`, so `ts` is unique and strictly
+/// increasing per channel even when two posts land in the same microsecond.
+/// Slack guarantees exactly this, and clients that treat `ts` as an ordering key
+/// depend on it.
+///
+/// Takes a `Transaction` rather than a `Connection` on purpose: the caller must
+/// commit the message and the Events API rows it implies together, or a crash
+/// between the two commits loses the event forever. The type signature is what
+/// keeps that invariant from being forgotten.
 pub fn append_message(
-    connection: &mut Connection,
+    transaction: &rusqlite::Transaction<'_>,
     channel_id: &str,
     author: Author,
     text: &str,
     thread_ts: Option<Ts>,
     metadata_json: Option<&str>,
 ) -> Result<MessageRow> {
-    let transaction = connection.transaction()?;
-    if channel_by_id(&transaction, channel_id)?.is_none() {
+    if channel_by_id(transaction, channel_id)?.is_none() {
         bail!("channel_not_found");
     }
     if let Some(parent) = thread_ts
-        && !message_exists(&transaction, channel_id, parent)?
+        && !message_exists(transaction, channel_id, parent)?
     {
         bail!("thread_not_found");
     }
@@ -372,7 +376,6 @@ pub fn append_message(
             metadata_json,
         ],
     )?;
-    transaction.commit()?;
     Ok(MessageRow {
         channel_id: channel_id.to_string(),
         ts,

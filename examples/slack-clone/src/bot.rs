@@ -59,7 +59,7 @@ impl BotConfig {
                 .unwrap_or_else(|_| "http://127.0.0.1:3040".to_string()),
             public_url: std::env::var("SLACK_CLONE_BOT_PUBLIC_URL").ok(),
             bot_token: std::env::var("SLACK_CLONE_BOT_TOKEN")
-                .unwrap_or_else(|_| "xoxb-slack-clone-dev-token".to_string()),
+                .unwrap_or_else(|_| "slack-clone-local-dev-token".to_string()),
             verification_token: std::env::var("SLACK_CLONE_VERIFICATION_TOKEN")
                 .unwrap_or_else(|_| "slack-clone-dev-verification".to_string()),
             data_dir: std::env::var("SLACK_CLONE_BOT_DATA_DIR")
@@ -131,10 +131,9 @@ pub async fn run(config: BotConfig) -> Result<()> {
         }
     });
 
-    // Finish a previous process's unfinished work before asking to be sent more.
-    // A platform that already has a verified request URL from an earlier boot may
-    // be redelivering right now, which is safe: recovery and ingest both take the
-    // per-channel lock and both go through the ledger.
+    // Recover before registering, so a previous boot's unfinished work is settled
+    // before the platform is asked to send more. Registration is the last step of
+    // boot for exactly this reason.
     match bot.recover().await {
         Ok(outcomes) if !outcomes.is_empty() => {
             println!(

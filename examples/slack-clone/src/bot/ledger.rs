@@ -6,11 +6,18 @@
 //! or drops work. Both failures are visible to humans in a chat channel, which
 //! is why this ledger is part of the reference and not an afterthought.
 //!
-//! The design choice worth copying is that the ledger records a **stage**, not a
-//! boolean. "Seen it" is not enough: a redelivery of an event the bot accepted
-//! but never finished must *resume*, while a redelivery of an event the bot
-//! finished must be dropped. One `handled` flag cannot tell those apart, and
-//! guessing wrong loses a reply or duplicates one.
+//! Two design choices are worth copying.
+//!
+//! **A stage, not a boolean.** "Seen it" is not enough: a redelivery of an event
+//! the bot accepted but never finished must *resume*, while a redelivery of an
+//! event the bot finished must be dropped. One `handled` flag cannot tell those
+//! apart, and guessing wrong loses a reply or duplicates one.
+//!
+//! **Every write is one statement.** [`EventLedger::claim`] is a single
+//! `INSERT … ON CONFLICT … RETURNING`, and [`EventLedger::advance`] is a single
+//! compare-and-set `UPDATE`. Neither depends on the caller holding a lock to be
+//! correct, which matters because the thing being guarded against is concurrency
+//! the bot does not control.
 
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension as _, params};
@@ -25,6 +32,12 @@ CREATE TABLE IF NOT EXISTS handled_events (
     message_ts    TEXT NOT NULL,
     kind          TEXT NOT NULL,
     stage         TEXT NOT NULL,
+    -- The exact text admitted to the channel session. Recorded so a recovery
+    -- pass can replay the admission byte-for-byte instead of recomposing it:
+    -- Lash keys queued-input idempotence on (source key, submitted content), so
+    -- a recomposition that differed by even a display name would be rejected as
+    -- a source-key conflict rather than deduplicated.
+    input_text    TEXT,
     reply_ts      TEXT,
     detail        TEXT,
     deliveries    INTEGER NOT NULL DEFAULT 0,
@@ -34,12 +47,22 @@ CREATE TABLE IF NOT EXISTS handled_events (
 CREATE INDEX IF NOT EXISTS idx_handled_events_stage ON handled_events(stage);
 ";
 
+/// Columns every read projects, in the order [`read_row`] expects.
+const COLUMNS: &str =
+    "event_id, channel_id, message_ts, kind, stage, input_text, reply_ts, detail, deliveries";
+
+/// Event kind for a message that mentions the bot.
+pub const KIND_APP_MENTION: &str = "app_mention";
+/// Event kind for ordinary channel traffic.
+pub const KIND_MESSAGE: &str = "message";
+
 /// How far the bot got with one event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
     /// Recorded, nothing done yet. Not terminal: a redelivery resumes.
     Accepted,
-    /// The turn is committed (or about to be) and a reply is owed. Not terminal.
+    /// The turn is committed and a reply is owed, with its text in `detail`.
+    /// Not terminal.
     ReplyPending,
     /// Ambient context folded into the channel session. Terminal.
     Folded,
@@ -88,6 +111,8 @@ pub struct EventRecord {
     pub message_ts: String,
     pub kind: String,
     pub stage: Stage,
+    /// The text admitted to the channel session, when one was admitted.
+    pub input_text: Option<String>,
     pub reply_ts: Option<String>,
     pub detail: Option<String>,
     /// How many times the platform has delivered this event. Greater than one
@@ -129,82 +154,95 @@ impl EventLedger {
 
     /// Record a delivery and report whether this caller should do the work.
     ///
-    /// The insert-or-bump is a single statement so two concurrent deliveries of
-    /// the same event cannot both see "fresh": SQLite serializes them, and the
-    /// loser observes the row the winner wrote. `deliveries` is bumped on every
-    /// claim, including the first, so the count is delivery attempts and not
-    /// "retries after the first".
+    /// One `INSERT … ON CONFLICT(event_id) DO UPDATE … RETURNING` statement, so
+    /// the insert-or-bump is atomic without a surrounding transaction or a
+    /// caller-held lock: two concurrent deliveries of the same event are
+    /// serialized by SQLite, and the loser sees the row the winner wrote.
+    ///
+    /// `deliveries` is bumped on every claim including the first, so the value is
+    /// delivery attempts and not "retries after the first" — and `deliveries == 1`
+    /// is exactly the condition for "this caller inserted the row".
     pub async fn claim(
         &self,
         event_id: String,
         channel_id: String,
         message_ts: String,
         kind: String,
+        input_text: Option<String>,
     ) -> Result<Claim> {
-        self.database
+        let record = self
+            .database
             .call(move |connection| {
-                let transaction = connection.transaction()?;
-                let existed = read(&transaction, &event_id)?;
-                match existed {
-                    None => {
-                        transaction.execute(
-                            "INSERT INTO handled_events
-                                (event_id, channel_id, message_ts, kind, stage, deliveries,
-                                 first_seen_at, updated_at)
-                             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6)",
-                            params![
-                                event_id,
-                                channel_id,
-                                message_ts,
-                                kind,
-                                Stage::Accepted.as_str(),
-                                now_seconds(),
-                            ],
-                        )?;
-                        let record = read(&transaction, &event_id)?
-                            .ok_or_else(|| anyhow::anyhow!("ledger row vanished after insert"))?;
-                        transaction.commit()?;
-                        Ok(Claim::Fresh(record))
-                    }
-                    Some(_) => {
-                        transaction.execute(
-                            "UPDATE handled_events
-                             SET deliveries = deliveries + 1, updated_at = ?2
-                             WHERE event_id = ?1",
-                            params![event_id, now_seconds()],
-                        )?;
-                        let record = read(&transaction, &event_id)?
-                            .ok_or_else(|| anyhow::anyhow!("ledger row vanished during claim"))?;
-                        transaction.commit()?;
-                        if record.stage.is_terminal() {
-                            Ok(Claim::Settled(record))
-                        } else {
-                            Ok(Claim::Resume(record))
-                        }
-                    }
-                }
+                let now = now_seconds();
+                let record = connection.query_row(
+                    &format!(
+                        "INSERT INTO handled_events
+                            (event_id, channel_id, message_ts, kind, stage, input_text,
+                             deliveries, first_seen_at, updated_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?7)
+                         ON CONFLICT(event_id) DO UPDATE SET
+                            deliveries = deliveries + 1,
+                            -- Keep the first admission's text: it is what Lash
+                            -- already holds under the source key.
+                            input_text = COALESCE(handled_events.input_text, excluded.input_text),
+                            updated_at = ?7
+                         RETURNING {COLUMNS}"
+                    ),
+                    params![
+                        event_id,
+                        channel_id,
+                        message_ts,
+                        kind,
+                        Stage::Accepted.as_str(),
+                        input_text,
+                        now,
+                    ],
+                    read_row,
+                )?;
+                Ok(record)
             })
-            .await
+            .await?;
+        Ok(if record.deliveries <= 1 {
+            Claim::Fresh(record)
+        } else if record.stage.is_terminal() {
+            Claim::Settled(record)
+        } else {
+            Claim::Resume(record)
+        })
     }
 
-    /// Move an event to a new stage.
+    /// Move an event from `from` to `to`, if it is still at `from`.
+    ///
+    /// The compare-and-set is the point: without it a stale handler — a task from
+    /// a previous boot, or a redelivery racing a recovery pass — could regress a
+    /// `replied` row back to `reply_pending` and cause the duplicate reply this
+    /// whole module exists to prevent. Returns `false` when the row had already
+    /// moved on, which callers treat as "somebody else finished this".
     pub async fn advance(
         &self,
         event_id: String,
-        stage: Stage,
+        from: Stage,
+        to: Stage,
         reply_ts: Option<String>,
         detail: Option<String>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         self.database
             .call(move |connection| {
-                connection.execute(
+                let updated = connection.execute(
                     "UPDATE handled_events
-                     SET stage = ?2, reply_ts = COALESCE(?3, reply_ts),
-                         detail = COALESCE(?4, detail), updated_at = ?5
-                     WHERE event_id = ?1",
-                    params![event_id, stage.as_str(), reply_ts, detail, now_seconds()],
+                     SET stage = ?3, reply_ts = COALESCE(?4, reply_ts),
+                         detail = COALESCE(?5, detail), updated_at = ?6
+                     WHERE event_id = ?1 AND stage = ?2",
+                    params![
+                        event_id,
+                        from.as_str(),
+                        to.as_str(),
+                        reply_ts,
+                        detail,
+                        now_seconds(),
+                    ],
                 )?;
-                Ok(())
+                Ok(updated == 1)
             })
             .await
     }
@@ -224,13 +262,11 @@ impl EventLedger {
     pub async fn unfinished(&self) -> Result<Vec<EventRecord>> {
         self.database
             .call(|connection| {
-                let mut statement = connection.prepare(
-                    "SELECT event_id, channel_id, message_ts, kind, stage, reply_ts, detail,
-                            deliveries
-                     FROM handled_events
+                let mut statement = connection.prepare(&format!(
+                    "SELECT {COLUMNS} FROM handled_events
                      WHERE stage IN ('accepted', 'reply_pending')
-                     ORDER BY first_seen_at",
-                )?;
+                     ORDER BY first_seen_at, message_ts"
+                ))?;
                 let rows = statement
                     .query_map([], read_row)?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -243,8 +279,7 @@ impl EventLedger {
 fn read(connection: &Connection, event_id: &str) -> Result<Option<EventRecord>> {
     Ok(connection
         .query_row(
-            "SELECT event_id, channel_id, message_ts, kind, stage, reply_ts, detail, deliveries
-             FROM handled_events WHERE event_id = ?1",
+            &format!("SELECT {COLUMNS} FROM handled_events WHERE event_id = ?1"),
             params![event_id],
             read_row,
         )
@@ -258,9 +293,10 @@ fn read_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRecord> {
         message_ts: row.get(2)?,
         kind: row.get(3)?,
         stage: Stage::parse(&row.get::<_, String>(4)?),
-        reply_ts: row.get(5)?,
-        detail: row.get(6)?,
-        deliveries: row.get(7)?,
+        input_text: row.get(5)?,
+        reply_ts: row.get(6)?,
+        detail: row.get(7)?,
+        deliveries: row.get(8)?,
     })
 }
 
@@ -269,4 +305,134 @@ fn now_seconds() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs() as i64)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn ledger() -> (tempfile::TempDir, EventLedger) {
+        let scratch = tempfile::tempdir().expect("tempdir");
+        let database =
+            SqliteHandle::open(&scratch.path().join("events.db"), SCHEMA).expect("open ledger");
+        (scratch, EventLedger::new(database))
+    }
+
+    async fn claim(ledger: &EventLedger, event_id: &str) -> Claim {
+        ledger
+            .claim(
+                event_id.to_string(),
+                "C1".to_string(),
+                "1.000001".to_string(),
+                KIND_APP_MENTION.to_string(),
+                Some("ada: hello".to_string()),
+            )
+            .await
+            .expect("claim")
+    }
+
+    #[tokio::test]
+    async fn the_first_claim_is_fresh_and_later_claims_only_count_deliveries() {
+        let (_scratch, ledger) = ledger().await;
+        assert!(matches!(claim(&ledger, "Ev1").await, Claim::Fresh(_)));
+        let second = claim(&ledger, "Ev1").await;
+        assert!(matches!(second, Claim::Resume(_)));
+        assert_eq!(second.record().deliveries, 2);
+        assert_eq!(second.record().stage, Stage::Accepted);
+    }
+
+    #[tokio::test]
+    async fn a_terminal_row_claims_as_settled() {
+        let (_scratch, ledger) = ledger().await;
+        claim(&ledger, "Ev1").await;
+        assert!(
+            ledger
+                .advance(
+                    "Ev1".to_string(),
+                    Stage::Accepted,
+                    Stage::Folded,
+                    None,
+                    None
+                )
+                .await
+                .expect("advance")
+        );
+        assert!(matches!(claim(&ledger, "Ev1").await, Claim::Settled(_)));
+    }
+
+    #[tokio::test]
+    async fn advance_is_a_no_op_when_the_row_has_already_moved_on() {
+        let (_scratch, ledger) = ledger().await;
+        claim(&ledger, "Ev1").await;
+        assert!(
+            ledger
+                .advance(
+                    "Ev1".to_string(),
+                    Stage::Accepted,
+                    Stage::Replied,
+                    Some("1.2".to_string()),
+                    None,
+                )
+                .await
+                .expect("advance")
+        );
+        // A stale handler still believing the row is `accepted` must not be able
+        // to regress it — that is how a duplicate reply gets posted.
+        assert!(
+            !ledger
+                .advance(
+                    "Ev1".to_string(),
+                    Stage::Accepted,
+                    Stage::ReplyPending,
+                    None,
+                    Some("stale text".to_string()),
+                )
+                .await
+                .expect("advance")
+        );
+        let record = ledger
+            .get("Ev1".to_string())
+            .await
+            .expect("get")
+            .expect("row");
+        assert_eq!(record.stage, Stage::Replied);
+        assert_eq!(record.reply_ts.as_deref(), Some("1.2"));
+        assert_eq!(record.detail, None, "the stale detail must not have landed");
+    }
+
+    #[tokio::test]
+    async fn unfinished_lists_only_the_resumable_stages() {
+        let (_scratch, ledger) = ledger().await;
+        for event_id in ["Ev1", "Ev2", "Ev3"] {
+            claim(&ledger, event_id).await;
+        }
+        ledger
+            .advance(
+                "Ev2".to_string(),
+                Stage::Accepted,
+                Stage::Replied,
+                None,
+                None,
+            )
+            .await
+            .expect("advance");
+        ledger
+            .advance(
+                "Ev3".to_string(),
+                Stage::Accepted,
+                Stage::ReplyPending,
+                None,
+                Some("owed".to_string()),
+            )
+            .await
+            .expect("advance");
+        let unfinished: Vec<String> = ledger
+            .unfinished()
+            .await
+            .expect("unfinished")
+            .into_iter()
+            .map(|record| record.event_id)
+            .collect();
+        assert_eq!(unfinished, ["Ev1", "Ev3"]);
+    }
 }

@@ -9,14 +9,25 @@
 
 use std::time::Duration;
 
+use futures_util::StreamExt as _;
 use tokio::task::JoinHandle;
 
 use super::apps::{self, MAX_RETRIES};
 use super::state::PlatformState;
 use crate::wire::events::{RETRY_NUM_HEADER, RETRY_REASON_HEADER};
 
-/// Events claimed per dispatcher pass.
+/// Events read per dispatcher pass.
 const BATCH: usize = 16;
+/// Deliveries in flight at once within a pass.
+///
+/// Sequential delivery would let one unreachable endpoint hold up every other
+/// event for the length of its timeout, and with a 3-second timeout and three
+/// retries that is tens of seconds of head-of-line blocking for messages the bot
+/// could have had immediately. This platform only ever has one registered app, so
+/// the blocking is theoretical *here* — but a reference implementation that a
+/// reader copies into a multi-app product should not carry the bug, and the bound
+/// keeps the concurrency legible rather than unbounded.
+const IN_FLIGHT: usize = 4;
 /// Upper bound on how long the loop sleeps when idle, so a restart still drains
 /// a backlog whose wake-up notification died with the previous process.
 const IDLE_POLL: Duration = Duration::from_millis(500);
@@ -38,63 +49,78 @@ pub fn spawn(state: PlatformState) -> JoinHandle<()> {
 }
 
 /// Attempt every due delivery once. Returns how many were attempted.
+///
+/// Deliveries within a pass run concurrently up to [`IN_FLIGHT`], so a dead
+/// endpoint cannot stall the others. The pass still awaits all of them before
+/// returning, which keeps the loop's "did anything happen?" signal — and
+/// therefore the backoff schedule — meaningful.
 pub async fn deliver_once(state: &PlatformState) -> anyhow::Result<usize> {
     let due = state
         .database()
-        .call(|connection| apps::claim_due_events(connection, BATCH))
+        .call(|connection| apps::due_events(connection, BATCH))
         .await?;
     let attempted = due.len();
-    for row in due {
-        // `attempts` counts completed attempts, so the retry number of the
-        // attempt about to happen is `attempts`, and zero means "first delivery"
-        // — which carries no retry headers at all, exactly as Slack does it.
-        let retry_num = row.attempts;
-        let outcome = post_event(
-            state,
-            &row.request_url,
-            &row.payload_json,
-            retry_num,
-            row.last_reason.as_deref(),
-        )
+    let outcomes = futures_util::stream::iter(due.into_iter().map(|row| deliver_row(state, row)))
+        .buffer_unordered(IN_FLIGHT)
+        .collect::<Vec<_>>()
         .await;
-        let id = row.id;
-        match outcome {
-            Ok(()) => {
-                state
-                    .database()
-                    .call(move |connection| apps::mark_delivered(connection, id))
-                    .await?;
-            }
-            Err(failure) => {
-                let backoff = state
-                    .config()
-                    .retry_backoff
-                    .saturating_mul(1u32 << retry_num.min(4))
-                    .as_millis() as i64;
-                let reason = failure.reason;
-                let message = failure.detail.clone();
-                let attempts = state
-                    .database()
-                    .call(move |connection| {
-                        apps::mark_failed(connection, id, &message, reason, backoff)
-                    })
-                    .await?;
-                let message = format!("{reason}: {failure}");
-                if attempts > MAX_RETRIES {
-                    eprintln!(
-                        "slack-clone-platform abandoned event {} after {attempts} attempts: {message}",
-                        row.event_id
-                    );
-                } else {
-                    eprintln!(
-                        "slack-clone-platform will retry event {} (attempt {attempts}): {message}",
-                        row.event_id
-                    );
-                }
+    for outcome in outcomes {
+        // A store failure is the loop's problem, not one event's: surface it so
+        // the caller backs off rather than spinning.
+        outcome?;
+    }
+    Ok(attempted)
+}
+
+/// Attempt one delivery and record its outcome.
+async fn deliver_row(state: &PlatformState, row: super::db::OutboxRow) -> anyhow::Result<()> {
+    // `attempts` counts completed attempts, so the retry number of the attempt
+    // about to happen is `attempts`, and zero means "first delivery" — which
+    // carries no retry headers at all, exactly as Slack does it.
+    let retry_num = row.attempts;
+    let outcome = post_event(
+        state,
+        &row.request_url,
+        &row.payload_json,
+        retry_num,
+        row.last_reason.as_deref(),
+    )
+    .await;
+    let id = row.id;
+    match outcome {
+        Ok(()) => {
+            state
+                .database()
+                .call(move |connection| apps::mark_delivered(connection, id))
+                .await?;
+        }
+        Err(failure) => {
+            let backoff = state
+                .config()
+                .retry_backoff
+                .saturating_mul(1u32 << retry_num.min(4))
+                .as_millis() as i64;
+            let reason = failure.reason;
+            let detail = failure.detail.clone();
+            let attempts = state
+                .database()
+                .call(move |connection| apps::mark_failed(connection, id, &detail, reason, backoff))
+                .await?;
+            let message = format!("{reason}: {failure}");
+            if attempts > MAX_RETRIES {
+                eprintln!(
+                    "slack-clone-platform abandoned event {} after {attempts} attempts: {message}",
+                    row.event_id
+                );
+            } else {
+                eprintln!(
+                    "slack-clone-platform will retry event {} (attempt {attempts}): {message}",
+                    row.event_id
+                );
             }
         }
     }
-    Ok(attempted)
+    Ok(())
 }
 
 /// A delivery failure, carrying the `x-slack-retry-reason` the next attempt

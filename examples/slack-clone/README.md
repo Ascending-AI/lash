@@ -58,7 +58,9 @@ State lives under `.slack-clone/`. `cargo test -p slack-clone` needs no model ke
 | Mention-triggered turn that drains the queue | `bot/channel.rs::run_mention_turn` |
 | Standard-mode native tool loop | `bot/tools.rs` |
 | Idempotent event consumption | `bot/ledger.rs` |
-| Restart recovery | `bot/channel.rs::recover` |
+| Restart recovery, stage by stage | `bot/channel.rs::recover` |
+| Reading a lost reply back out of the transcript | `bot/channel.rs::reply_from_transcript` |
+| Transactional outbox | `platform/state.rs::post_message` |
 | A liftable API client | `bot/slack_api.rs` |
 | One wire contract for both processes | `wire/methods.rs`, `wire/events.rs` |
 
@@ -131,10 +133,19 @@ Three mechanisms, each doing one job:
 | `ignored` | deliberately not acted on, with a reason | yes |
 
 A boolean cannot distinguish "already answered" (drop it) from "accepted and then
-crashed" (resume it), and guessing wrong loses a reply or duplicates one. Claims
-are a single SQLite statement, so two concurrent deliveries of one event cannot
-both see "fresh". `deliveries` is incremented on every claim, so the retry path
-leaves evidence.
+crashed" (resume it), and guessing wrong loses a reply or duplicates one.
+
+Both ledger writes are single statements, and that is deliberate. A claim is one
+`INSERT … ON CONFLICT(event_id) DO UPDATE … RETURNING`, so insert-or-bump is
+atomic without a surrounding transaction: two concurrent deliveries of one event
+cannot both see "fresh". An advance is one compare-and-set
+`UPDATE … WHERE stage = <expected>`, so a stale handler — a task from a previous
+boot, or a redelivery racing the recovery pass — cannot regress `replied` back to
+`reply_pending` and cause the duplicate this module exists to prevent. Neither
+write depends on the caller holding the per-channel lock to be correct, because
+the concurrency being guarded against is not the bot's to schedule.
+
+`deliveries` is incremented on every claim, so the retry path leaves evidence.
 
 **2. Lash's own admission idempotence**, via the `ts`-derived source keys above.
 Even with the ledger deleted, redelivery does not duplicate the transcript.
@@ -162,35 +173,72 @@ What the bot uses today:
 
 - **SQLite session stores** (`SqliteSessionStoreFactory`). Committed transcripts
   and undrained queued input survive a restart. This is the load-bearing choice.
-- **A durable event ledger** (its own SQLite database).
-- **A durable outbox on the platform side**, so the retries the bot's design
-  assumes actually happen across a platform restart.
+- **A durable event ledger** (its own SQLite database), recording both the text
+  admitted to the session and the reply owed, so a new boot can replay either.
+- **A durable, transactional outbox on the platform side** — the message and the
+  events it implies commit together, so the retries the bot's design assumes
+  actually happen, and no event is lost to a crash between two commits.
 - **Per-boot session-execution leases** (`LeaseOwnerIdentity::opaque` with a fresh
   incarnation), so a new boot reclaims what a crashed boot held instead of
   deadlocking against its own ghost.
 - **`InlineEffectHost`** — process-local effect journalling.
 
-The inline effect host is the honest limit. Effects are journalled *within* a
-boot, not across one, so a turn interrupted between committing and being observed
-does not resume itself:
+### What a crash costs, stage by stage
 
-> A crash in the window between `queued_turn().run()` committing and the ledger
-> recording `reply_pending` loses that reply's text. The transcript is intact and
-> the room is one answer short. The bot reports this as
-> `Disposition::ReplyLost` and marks the event `ignored` with
-> `reply_lost_after_commit` rather than silently dropping it.
+Every stage is resumable because every step is idempotent: the admission by its
+Lash source key, the drain by its `drain_id`, and the post by the `event_id` its
+`metadata` carries. `ChannelBot::recover` walks the unfinished rows at boot and
+finishes each one:
 
-**The upgrade:** replace `InlineEffectHost` with a Restate-backed effect host. The
-drain becomes a journalled, replayable effect — the same `drain_id` yields the
-same result after a restart — and `chat.postMessage` can be journalled with it, so
-the window above closes entirely.
+| Crash point | Ledger stage | What recovery does |
+| --- | --- | --- |
+| Before any work | `accepted` | Re-admits the message; for a mention, runs the turn and posts. |
+| Mid-turn | `accepted` | Same — the queued input was never drained, so the drain still has it. |
+| After the turn committed, before the reply text was recorded | `accepted` | Reads the answer back out of the committed transcript and posts it (`ReplySource::Transcript`). |
+| After the text was recorded, before the post | `reply_pending` | Posts the recorded text without asking the model again (`ReplySource::Ledger`). |
+| After the post, before recording it | `reply_pending` | Finds its own reply by the `event_id` in the reply's `metadata` and records it. **No second post.** |
+
+The third row is the interesting one. When a drain returns nothing because a
+previous process already consumed the input, the answer is still in the session
+transcript, and it can be found without guessing: the committed copy of the
+admission carries Lash's typed `MessageOrigin::TurnInput { turn_id, input_id }`
+provenance, so `reply_from_transcript` matches on `input_id`, takes that message's
+`turn_id`, and reads the last assistant message before the next turn begins. No id
+strings are parsed and no adjacency is assumed.
+
+**The residual gap** is now narrow and specific:
+
+> If a turn committed and its transcript contains no assistant message at all —
+> the drain consumed the input and produced nothing — there is nothing to post and
+> nothing to recover. The bot reports `Disposition::ReplyLost` and marks the event
+> `ignored` with `reply_lost_after_commit` rather than silently dropping it.
+
+### The Restate upgrade, precisely
+
+Replacing `InlineEffectHost` with a Restate-backed effect host is **half** the
+change, and it is worth being exact about which half:
+
+- **`bot/runtime.rs::build_core` — the drain.** The queued drain becomes a
+  journalled, replayable effect: after a restart, re-running with the same
+  `drain_id` replays the recorded result instead of re-executing. This is what
+  removes the "turn committed but its result is gone" case entirely, rather than
+  recovering from it after the fact.
+- **`bot/channel.rs::post_reply` — the post.** This is *not* covered by the
+  builder swap. `chat_post_message` is a plain HTTP call outside any effect scope,
+  so the effect host cannot see it or replay it. Closing the
+  crash-between-post-and-record window durably means wrapping the post as a
+  journaled effect inside the same scope as the drain, so the journal records
+  "posted, ts=…" and a replay returns it instead of posting again.
+
+Until the second half is done, the metadata lookup described above is what keeps
+the post at-most-once — which is why it is a real mechanism here and not a
+placeholder.
 
 `examples/agent-workbench` has the full Restate harness (`restate.rs`,
 `restate_ingress.rs`) and `runbooks/restate-postgres-workers` shows the
 distributed-worker shape. Neither is duplicated here on purpose: this example's
 subject is the *integration* shape, and a Restate deployment alongside it would
-double the reader's setup cost for a property they can read about in one
-paragraph. The swap is `bot/runtime.rs::build_core` and nothing else.
+double the reader's setup cost.
 
 ## Modes: this is the standard-mode reference
 
@@ -233,6 +281,14 @@ string, as `application/x-www-form-urlencoded`, or as JSON, with object argument
 `{"ok": false, "error": "..."}`** — including `invalid_auth`, so a client that
 only checks status codes fails here the way it would fail on Slack.
 
+The platform accepts all three encodings, but the bot's client deliberately does
+not use whichever is convenient. Real Slack accepts form-encoding for *every*
+method and JSON for only some, so `bot/slack_api.rs` form-encodes everything and
+posts JSON only for `chat.postMessage` (which needs it for the `metadata` object).
+A client that JSON-posted `conversations.history` would work here and fail against
+Slack — the worst possible failure mode for an example that advertises a
+migration — so the encoding is asserted by a test, not assumed.
+
 **Web API methods.**
 
 | Method | Notes |
@@ -267,6 +323,8 @@ with **three** retries carrying `x-slack-retry-num: 1|2|3` and
 | `pin_count` is always `0`; `num_members` is the workspace size; `color`, `tz` are fixed | The platform has no pins, no per-channel membership and no timezones. The fields are part of the contract, so they are reported honestly rather than omitted. |
 | `conversations.replies` pages only the replies; the parent is returned on the first page | Pagination the reader can follow, with the wire shape unchanged. |
 | Cursor paging walks the ordered list rather than seeking an index | The whole workspace is smaller than one page here. |
+| The `event_callback` envelope omits `event_context`, `is_ext_shared_channel` and `context_team_id`/`context_enterprise_id` | One workspace, no shared channels and no Enterprise Grid, so there is nothing truthful to put in them. A bot must not require them. |
+| The delivery outbox is read, not leased: exactly one dispatcher per process | Two dispatchers would double-deliver — which the bot's ledger tolerates, since Slack redelivers anyway — but the retry counters and backoff would stop meaning anything. A multi-process platform needs a real claim lease. |
 
 ### Not implemented
 
@@ -298,8 +356,8 @@ rate limiting (`429` / `Retry-After`).
 ## Migrating this bot to real Slack
 
 1. Point `SlackApi::new` at `https://slack.com` and pass a real `xoxb-` token.
-   `bot/slack_api.rs` needs no other change — the method names, arguments and
-   response types already match.
+   `bot/slack_api.rs` needs no other change: the method names, arguments, response
+   types **and body encodings** already match what Slack accepts.
 2. Replace the envelope-`token` check in `ChannelBot::ingest` with
    `X-Slack-Signature` verification.
 3. Delete the `/platform/apps` self-registration call and paste the request URL
@@ -321,6 +379,7 @@ src/
   wire/methods.rs     Web API arguments and responses
   wire/events.rs      Events API envelope and event bodies
   store.rs          async wrapper over one blocking SQLite connection
+  secrets.rs        constant-time comparison for the shared tokens both sides check
 
   platform.rs       config, router, boot          ← no Lash dependency
   platform/db.rs      workspace schema and queries
@@ -341,7 +400,7 @@ src/
 
   tests/platform_wire.rs     wire shapes, asserted on raw JSON keys
   tests/bot_events.rs        dedupe, ambient fold, isolation, tool loop
-  tests/restart_recovery.rs  restart, recovery, delivery retries
+  tests/restart_recovery.rs  restart, every recovery stage, retries, client encoding
   tests/support.rs           harness: real sockets, scripted provider
 ```
 
@@ -360,7 +419,7 @@ that method needs the bot token, and a bot token has no business in a browser.
 | `SLACK_CLONE_BOT_DATA_DIR` | `.slack-clone/bot` | bot |
 | `SLACK_CLONE_API_BASE_URL` | `http://127.0.0.1:3040` | bot |
 | `SLACK_CLONE_BOT_PUBLIC_URL` | `http://<bot addr>/slack/events` | bot |
-| `SLACK_CLONE_BOT_TOKEN` | `xoxb-slack-clone-dev-token` | both |
+| `SLACK_CLONE_BOT_TOKEN` | `slack-clone-local-dev-token` | both |
 | `SLACK_CLONE_VERIFICATION_TOKEN` | `slack-clone-dev-verification` | both |
 | `SLACK_CLONE_BOT_HANDLE` | `lashbot` | platform |
 | `SLACK_CLONE_TEAM_NAME` | `Slack Clone` | platform |
@@ -383,7 +442,10 @@ Tracked for follow-up rather than half-built:
   not. A DM is a different session-mapping question again (per user, not per
   channel).
 - **Socket Mode.** Only relevant once the bot runs somewhere Slack cannot reach.
-- **Restate effect host.** See [the upgrade path](#durability-and-the-upgrade-path).
-  This is what closes the `ReplyLost` window.
+- **Restate effect host, both halves.** The `build_core` swap removes the
+  `ReplyLost` case; journalling `post_reply` as an effect is the separate second
+  half that makes the post durably at-most-once instead of relying on the metadata
+  lookup. See [the upgrade path](#durability-and-the-upgrade-path).
+- **A leased delivery outbox**, for a platform running more than one process.
 - **Judged runbook.** A scripted downstream-host walkthrough, per
   `docs/agents/way-of-working.md`.

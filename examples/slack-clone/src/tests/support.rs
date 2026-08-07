@@ -32,7 +32,10 @@ use crate::wire::events::{EventCallback, EventRequest};
 use crate::wire::methods::MessageObject;
 
 /// The bot token every test uses.
-pub const BOT_TOKEN: &str = "xoxb-test-token";
+///
+/// Deliberately not `xoxb-…`: a checked-in literal shaped like a real Slack bot
+/// token trips secret scanners and teaches the wrong reflex.
+pub const BOT_TOKEN: &str = "slack-clone-test-token";
 /// The verification token every test envelope carries.
 pub const VERIFICATION_TOKEN: &str = "test-verification";
 
@@ -288,6 +291,28 @@ impl TestPlatform {
             .rev()
             .map(|row| crate::platform::web_api::message_object(row, true))
             .collect()
+    }
+
+    /// Remove a message from the workspace.
+    ///
+    /// Not a platform feature — the Slack subset here has no deletions. It exists
+    /// so a test can reconstruct the state left by a crash between committing a
+    /// turn and posting its reply: the transcript has the answer and the channel
+    /// does not.
+    pub async fn delete_message(&self, channel: &str, ts: &str) {
+        let channel = channel.to_string();
+        let micros = Ts::parse(ts).expect("parse ts").micros() as i64;
+        self.state
+            .database()
+            .call(move |connection| {
+                connection.execute(
+                    "DELETE FROM messages WHERE channel_id = ?1 AND ts = ?2",
+                    rusqlite::params![channel, micros],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("delete message");
     }
 
     /// Only the app-authored messages in a channel.

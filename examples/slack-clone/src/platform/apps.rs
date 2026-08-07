@@ -79,13 +79,22 @@ pub fn enqueue_event(
     Ok(())
 }
 
-/// Claim up to `limit` events whose next attempt is due.
+/// Read up to `limit` events whose next attempt is due.
 ///
-/// "Claim" is optimistic rather than leased: one dispatcher loop runs per
-/// platform process, and the row's `attempts` bump is what moves it out of the
-/// ready set. A multi-process platform would need a real lease — noted in the
-/// README's honest-limitations list rather than faked here.
-pub fn claim_due_events(connection: &Connection, limit: usize) -> Result<Vec<OutboxRow>> {
+/// **This reads; it does not claim.** The statement is a plain `SELECT` — no row
+/// is marked, leased or reserved, so two readers would both see the same event
+/// and both deliver it.
+///
+/// What makes that safe here is not this function but its caller: exactly one
+/// dispatcher loop runs per platform process, and it awaits each pass before
+/// starting the next, so a row stays in the ready set only until that same loop
+/// records the attempt. Two dispatchers *would* double-deliver — which the bot's
+/// `event_id` ledger tolerates by design, since Slack redelivers anyway — but the
+/// retry counters would drift and the backoff schedule would stop meaning
+/// anything. A multi-process platform needs a real lease (claim token, owner id,
+/// expiry) exactly as `lash`'s own stores use; that is out of scope for an
+/// example and is listed in the README rather than faked.
+pub fn due_events(connection: &Connection, limit: usize) -> Result<Vec<OutboxRow>> {
     let mut statement = connection.prepare(
         "SELECT outbox.id, outbox.event_id, outbox.payload_json, outbox.attempts,
                 outbox.last_reason, apps.request_url
@@ -125,6 +134,9 @@ pub fn mark_delivered(connection: &Connection, id: i64) -> Result<()> {
 }
 
 /// Record a failed attempt, scheduling the next one or abandoning the event.
+///
+/// Returns the new attempt count from the `UPDATE` itself, so the value cannot
+/// disagree with what was written.
 pub fn mark_failed(
     connection: &Connection,
     id: i64,
@@ -132,14 +144,15 @@ pub fn mark_failed(
     reason: &str,
     backoff_millis: i64,
 ) -> Result<u32> {
-    connection.execute(
+    Ok(connection.query_row(
         "UPDATE event_outbox
          SET attempts = attempts + 1,
              last_error = ?2,
              last_reason = ?3,
              next_attempt_at = ?4,
              abandoned_at = CASE WHEN attempts + 1 > ?5 THEN ?6 ELSE NULL END
-         WHERE id = ?1",
+         WHERE id = ?1
+         RETURNING attempts",
         params![
             id,
             error,
@@ -148,10 +161,6 @@ pub fn mark_failed(
             MAX_RETRIES,
             now_millis(),
         ],
-    )?;
-    Ok(connection.query_row(
-        "SELECT attempts FROM event_outbox WHERE id = ?1",
-        params![id],
         |row| row.get(0),
     )?)
 }

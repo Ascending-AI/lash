@@ -1,7 +1,7 @@
 //! Bot event-semantics tests: dedupe, ambient folding, session isolation, and
 //! the standard-mode tool loop.
 
-use crate::bot::channel::Disposition;
+use crate::bot::channel::{Disposition, ReplySource};
 use crate::bot::ledger::Stage;
 use crate::bot::runtime::session_id;
 use crate::bot::tools::{CHANNEL_HISTORY, LIST_CHANNELS};
@@ -29,12 +29,16 @@ async fn a_mention_runs_one_turn_and_posts_one_reply() {
         .await
         .expect("handle app_mention");
     let Disposition::Replied {
-        reply_ts, turn_ran, ..
+        reply_ts, source, ..
     } = disposition
     else {
         panic!("expected a reply, got {disposition:?}");
     };
-    assert!(turn_ran, "the first delivery must run the model");
+    assert_eq!(
+        source,
+        ReplySource::Turn,
+        "the first delivery must run the model"
+    );
     assert_eq!(script.calls(), 1);
 
     let replies = platform.bot_messages(&channel).await;
@@ -92,7 +96,13 @@ async fn the_same_event_id_delivered_twice_runs_one_turn_and_posts_one_reply() {
         .await
         .expect("second redelivery");
 
-    assert!(matches!(first, Disposition::Replied { turn_ran: true, .. }));
+    assert!(matches!(
+        first,
+        Disposition::Replied {
+            source: ReplySource::Turn,
+            ..
+        }
+    ));
     for redelivery in [&second, &third] {
         let Disposition::Duplicate { stage, .. } = redelivery else {
             panic!("a redelivery must not act: {redelivery:?}");

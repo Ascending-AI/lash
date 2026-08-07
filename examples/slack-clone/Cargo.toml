@@ -39,7 +39,9 @@ futures-util = { workspace = true }
 lash = { workspace = true }
 lash-provider-openai = { workspace = true }
 lash-sqlite-store = { workspace = true }
-reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
+# `form` is not optional here: Slack accepts form-encoded bodies for every Web
+# API method and JSON for only some, so the client's default encoding is form.
+reqwest = { workspace = true, features = ["json", "rustls", "http2", "form"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 schemars = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
@@ -49,6 +51,4 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 
 [dev-dependencies]
 lash = { workspace = true, features = ["testing"] }
-# `form` only for the test that proves Slack's form-encoded argument dialect works.
-reqwest = { workspace = true, features = ["json", "rustls", "http2", "form"] }
 tempfile = { workspace = true }

@@ -23,6 +23,7 @@
 pub mod bot;
 pub mod ids;
 pub mod platform;
+pub mod secrets;
 pub mod store;
 pub mod wire;
 

@@ -33,7 +33,10 @@ pub struct PlatformConfig {
     pub data_dir: PathBuf,
     /// The static bot token the Web API accepts as `Authorization: Bearer …`.
     ///
-    /// Real Slack mints this through OAuth per installation; see the README.
+    /// Real Slack mints this through OAuth per installation; see the README. The
+    /// default deliberately does not start with `xoxb-`: a checked-in string
+    /// shaped like a real bot token trips secret scanners and teaches the wrong
+    /// reflex about where tokens may live.
     pub bot_token: String,
     /// The value stamped into every event envelope's deprecated `token` field.
     pub verification_token: String,
@@ -64,7 +67,7 @@ impl PlatformConfig {
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| PathBuf::from(".slack-clone/platform")),
             bot_token: std::env::var("SLACK_CLONE_BOT_TOKEN")
-                .unwrap_or_else(|_| "xoxb-slack-clone-dev-token".to_string()),
+                .unwrap_or_else(|_| "slack-clone-local-dev-token".to_string()),
             verification_token: std::env::var("SLACK_CLONE_VERIFICATION_TOKEN")
                 .unwrap_or_else(|_| "slack-clone-dev-verification".to_string()),
             bot_handle: std::env::var("SLACK_CLONE_BOT_HANDLE")

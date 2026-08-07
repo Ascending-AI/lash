@@ -13,6 +13,7 @@ use super::args::ApiError;
 use super::db::{self, Author, MessageRow};
 use super::{PlatformConfig, ui};
 use crate::ids::{IdMinter, Ts};
+use crate::secrets::constant_time_eq;
 use crate::store::SqliteHandle;
 use crate::wire::events::{
     self, Authorization, Event, EventCallback, EventRequest, MessageEvent, UrlVerification,
@@ -179,17 +180,28 @@ impl PlatformState {
             .and_then(|value| value.strip_prefix("Bearer "))
             .map(str::trim);
         match presented {
-            Some(token) if token == self.config.bot_token => Ok(()),
+            // Constant-time: a plain `==` leaks how much of the token prefix was
+            // right through how long the rejection took.
+            Some(token) if constant_time_eq(token, &self.config.bot_token) => Ok(()),
             Some(_) => Err(ApiError::new("invalid_auth")),
             None => Err(ApiError::new("not_authed")),
         }
     }
 
-    /// Append a message and fan the resulting events out.
+    /// Append a message and queue the Events API deliveries it implies, in one
+    /// transaction.
     ///
-    /// This is the platform's single write path, and the ordering matters: the
-    /// message is durable *before* any event is queued, so the bot can never be
-    /// told about a message that a crash would have unwritten.
+    /// This is the platform's single write path, and the atomicity is the point.
+    /// Committing the message and the outbox rows separately leaves a window in
+    /// which the message is durable and its events are not — and because nothing
+    /// ever re-derives events from messages, an event lost in that window is lost
+    /// forever: the bot never hears about the message and no retry will ever fix
+    /// it. A transactional outbox is the standard answer and it costs one
+    /// `transaction()` call here.
+    ///
+    /// The live UI frame is published *after* the commit, because it is a cache
+    /// warmer rather than durable state: a dropped frame costs a reconnecting tab
+    /// one history read.
     pub async fn post_message(
         &self,
         channel_id: String,
@@ -198,118 +210,53 @@ impl PlatformState {
         thread_ts: Option<Ts>,
         metadata_json: Option<String>,
     ) -> Result<MessageRow> {
-        let stored = {
-            let channel_id = channel_id.clone();
-            let author = author.clone();
-            let text = text.clone();
-            self.database
-                .call(move |connection| {
-                    db::append_message(
-                        connection,
-                        &channel_id,
-                        author,
-                        &text,
-                        thread_ts,
-                        metadata_json.as_deref(),
-                    )
-                })
-                .await?
-        };
-        self.fan_out(&stored).await?;
-        Ok(stored)
-    }
+        let factory = self.event_factory();
+        let app_id = self.identity.app_id.clone();
+        let stored = self
+            .database
+            .call(move |connection| {
+                let transaction = connection.transaction()?;
+                let stored = db::append_message(
+                    &transaction,
+                    &channel_id,
+                    author,
+                    &text,
+                    thread_ts,
+                    metadata_json.as_deref(),
+                )?;
+                for envelope in factory.envelopes_for(&stored) {
+                    let payload = serde_json::to_string(&EventRequest::EventCallback(Box::new(
+                        envelope.clone(),
+                    )))
+                    .context("encode event envelope")?;
+                    apps::enqueue_event(&transaction, &app_id, &envelope.event_id, &payload)?;
+                }
+                transaction.commit()?;
+                Ok(stored)
+            })
+            .await?;
 
-    /// Queue the Events API deliveries for a stored message and publish the
-    /// live UI frame.
-    async fn fan_out(&self, stored: &MessageRow) -> Result<()> {
         let (author_id, author_name, is_bot) = self.describe_author(&stored.author).await?;
         self.publish_live(LiveEvent::Message {
             channel: stored.channel_id.clone(),
             ts: stored.ts.to_string(),
-            author_id: author_id.clone(),
+            author_id,
             author_name,
             is_bot,
             text: stored.text.clone(),
             thread_ts: stored.thread_ts.map(|ts| ts.to_string()),
         });
-
-        let mut envelopes = Vec::new();
-        // Slack delivers a `message` event for *every* message in a subscribed
-        // channel, including an app's own posts (which carry `bot_id`). The
-        // platform does the same rather than filtering here, so the bot has to
-        // own the self-message guard — the real integration hazard.
-        envelopes.push(self.envelope(Event::Message(MessageEvent {
-            channel: stored.channel_id.clone(),
-            user: match &stored.author {
-                Author::User { user_id } => Some(user_id.clone()),
-                Author::App { .. } => None,
-            },
-            bot_id: match &stored.author {
-                Author::App { bot_id, .. } => Some(bot_id.clone()),
-                Author::User { .. } => None,
-            },
-            subtype: matches!(stored.author, Author::App { .. }).then(|| "bot_message".to_string()),
-            text: stored.text.clone(),
-            ts: stored.ts.to_string(),
-            channel_type: "channel".to_string(),
-            thread_ts: stored.thread_ts.map(|ts| ts.to_string()),
-            event_ts: stored.ts.to_string(),
-        })));
-        // …and, when both subscriptions are active, a *second* event with its
-        // own `event_id` for a mention. Reproduced deliberately: "my bot
-        // answered twice" is the classic consequence, and the guard belongs in
-        // the reference bot.
-        if let Author::User { user_id } = &stored.author
-            && events::mentions(&stored.text, &self.identity.bot_user_id)
-        {
-            envelopes.push(self.envelope(Event::AppMention(events::AppMentionEvent {
-                user: user_id.clone(),
-                text: stored.text.clone(),
-                ts: stored.ts.to_string(),
-                channel: stored.channel_id.clone(),
-                thread_ts: stored.thread_ts.map(|ts| ts.to_string()),
-                event_ts: stored.ts.to_string(),
-            })));
-        }
-
-        let app_id = self.identity.app_id.clone();
-        let queued = envelopes
-            .into_iter()
-            .map(|envelope| {
-                let payload =
-                    serde_json::to_string(&EventRequest::EventCallback(Box::new(envelope.clone())))
-                        .context("encode event envelope")?;
-                Ok((envelope.event_id, payload))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        self.database
-            .call(move |connection| {
-                for (event_id, payload) in &queued {
-                    apps::enqueue_event(connection, &app_id, event_id, payload)?;
-                }
-                Ok(())
-            })
-            .await
-            .context("queue events")?;
         self.notify_delivery();
-        Ok(())
+        Ok(stored)
     }
 
-    /// Wrap an event body in the callback envelope.
-    fn envelope(&self, event: Event) -> EventCallback {
-        EventCallback {
-            token: self.config.verification_token.clone(),
-            team_id: self.identity.team_id.clone(),
-            api_app_id: self.identity.app_id.clone(),
-            event,
-            event_id: self.ids.mint("Ev"),
-            event_time: Ts::now().epoch_seconds(),
-            authorizations: vec![Authorization {
-                team_id: self.identity.team_id.clone(),
-                user_id: self.identity.bot_user_id.clone(),
-                is_bot: true,
-                is_enterprise_install: false,
-            }],
+    /// A `Send + 'static` envelope builder, so envelope construction can happen
+    /// inside the write transaction instead of around it.
+    fn event_factory(&self) -> EventFactory {
+        EventFactory {
+            identity: Arc::clone(&self.identity),
+            ids: Arc::clone(&self.ids),
+            verification_token: self.config.verification_token.clone(),
         }
     }
 
@@ -374,5 +321,81 @@ impl PlatformState {
     /// The UI document, so the router can stay declarative.
     pub fn index_html(&self) -> &'static str {
         ui::INDEX_HTML
+    }
+}
+
+/// Builds Events API envelopes for a stored message.
+///
+/// Separated from [`PlatformState`] so it can be moved into the blocking write
+/// closure: it owns cloned handles rather than borrowing the state, which is what
+/// lets envelope construction sit inside the same transaction as the message
+/// insert.
+#[derive(Clone)]
+struct EventFactory {
+    identity: Arc<WorkspaceIdentity>,
+    ids: Arc<IdMinter>,
+    verification_token: String,
+}
+
+impl EventFactory {
+    /// Every envelope a stored message implies.
+    fn envelopes_for(&self, stored: &MessageRow) -> Vec<EventCallback> {
+        let mut envelopes = Vec::with_capacity(2);
+        // Slack delivers a `message` event for *every* message in a subscribed
+        // channel, including an app's own posts (which carry `bot_id`). The
+        // platform does the same rather than filtering here, so the bot has to
+        // own the self-message guard — the real integration hazard.
+        envelopes.push(self.envelope(Event::Message(MessageEvent {
+            channel: stored.channel_id.clone(),
+            user: match &stored.author {
+                Author::User { user_id } => Some(user_id.clone()),
+                Author::App { .. } => None,
+            },
+            bot_id: match &stored.author {
+                Author::App { bot_id, .. } => Some(bot_id.clone()),
+                Author::User { .. } => None,
+            },
+            subtype: matches!(stored.author, Author::App { .. }).then(|| "bot_message".to_string()),
+            text: stored.text.clone(),
+            ts: stored.ts.to_string(),
+            channel_type: "channel".to_string(),
+            thread_ts: stored.thread_ts.map(|ts| ts.to_string()),
+            event_ts: stored.ts.to_string(),
+        })));
+        // …and, when both subscriptions are active, a *second* event with its
+        // own `event_id` for a mention. Reproduced deliberately: "my bot
+        // answered twice" is the classic consequence, and the guard belongs in
+        // the reference bot.
+        if let Author::User { user_id } = &stored.author
+            && events::mentions(&stored.text, &self.identity.bot_user_id)
+        {
+            envelopes.push(self.envelope(Event::AppMention(events::AppMentionEvent {
+                user: user_id.clone(),
+                text: stored.text.clone(),
+                ts: stored.ts.to_string(),
+                channel: stored.channel_id.clone(),
+                thread_ts: stored.thread_ts.map(|ts| ts.to_string()),
+                event_ts: stored.ts.to_string(),
+            })));
+        }
+        envelopes
+    }
+
+    /// Wrap an event body in the callback envelope.
+    fn envelope(&self, event: Event) -> EventCallback {
+        EventCallback {
+            token: self.verification_token.clone(),
+            team_id: self.identity.team_id.clone(),
+            api_app_id: self.identity.app_id.clone(),
+            event,
+            event_id: self.ids.mint("Ev"),
+            event_time: Ts::now().epoch_seconds(),
+            authorizations: vec![Authorization {
+                team_id: self.identity.team_id.clone(),
+                user_id: self.identity.bot_user_id.clone(),
+                is_bot: true,
+                is_enterprise_install: false,
+            }],
+        }
     }
 }

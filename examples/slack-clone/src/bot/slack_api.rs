@@ -4,13 +4,21 @@
 //! after the Slack method it calls (`chat_post_message` for
 //! `chat.postMessage`), takes the same arguments, and returns the same response
 //! type from [`crate::wire::methods`]. Moving this bot onto real Slack is
-//! therefore a contained swap: point [`SlackApi::base_url`] at
-//! `https://slack.com`, hand it a real `xoxb-` token, and delete nothing else.
+//! therefore a contained swap: point [`SlackApi::new`] at `https://slack.com`,
+//! hand it a real `xoxb-` token, and the transport needs no other change.
 //!
-//! The one behaviour worth reading carefully is [`SlackApi::call`]: Slack
-//! answers failures with **HTTP 200** and `{"ok": false, "error": "..."}`, so
-//! checking the status code is not checking for success. Every call goes through
-//! the same `ok` gate.
+//! Two behaviours here are load-bearing and easy to get wrong.
+//!
+//! **Encoding.** Slack accepts `application/x-www-form-urlencoded` for *every*
+//! Web API method, and JSON for only some — mostly writes. So this client
+//! form-encodes by default and uses JSON only for `chat.postMessage`, which needs
+//! it for the `metadata` object. Sending JSON to `conversations.history` works
+//! against a permissive server and fails against real Slack, which is the worst
+//! possible failure mode for an example that advertises a migration.
+//!
+//! **Success.** Slack answers failures with **HTTP 200** and
+//! `{"ok": false, "error": "..."}`, so checking the status code is not checking
+//! for success. Every call goes through the same `ok` gate in [`SlackApi::call`].
 
 use std::time::Duration;
 
@@ -32,6 +40,9 @@ use crate::wire::methods::{
 /// so recovery is a read (`conversations.history` with
 /// `include_all_metadata=true`) rather than a guess.
 pub const REPLY_METADATA_EVENT_TYPE: &str = "slack_clone_bot_reply";
+
+/// Slack's maximum `limit` for `conversations.history`.
+const MAX_HISTORY_LIMIT: u32 = 999;
 
 /// A typed client for one workspace.
 #[derive(Clone, Debug)]
@@ -62,16 +73,20 @@ impl SlackApi {
 
     /// `auth.test` — resolve the app's own identity.
     pub async fn auth_test(&self) -> Result<AuthTestResponse> {
-        self.call("auth.test", &Value::Object(Default::default()))
-            .await
+        self.call_form("auth.test", &[]).await
     }
 
     /// `chat.postMessage`.
+    ///
+    /// The one JSON call. Slack accepts JSON for this method, and `metadata` is
+    /// an object — form-encoding it would mean serializing the object into a
+    /// string argument, which Slack allows but which is strictly more code and
+    /// strictly less clear.
     pub async fn chat_post_message(
         &self,
         request: &ChatPostMessageRequest,
     ) -> Result<ChatPostMessageResponse> {
-        self.call("chat.postMessage", request).await
+        self.call_json("chat.postMessage", request).await
     }
 
     /// `conversations.list`.
@@ -80,33 +95,36 @@ impl SlackApi {
         cursor: Option<&str>,
         limit: Option<u32>,
     ) -> Result<ConversationsListResponse> {
-        self.call(
-            "conversations.list",
-            &serde_json::json!({
-                "exclude_archived": true,
-                "cursor": cursor.unwrap_or_default(),
-                "limit": limit.unwrap_or(100),
-            }),
-        )
-        .await
+        let mut args = vec![
+            ("exclude_archived".to_string(), "true".to_string()),
+            ("limit".to_string(), limit.unwrap_or(100).to_string()),
+        ];
+        push_optional(&mut args, "cursor", cursor);
+        self.call_form("conversations.list", &args).await
     }
 
     /// `conversations.history`.
     pub async fn conversations_history(
         &self,
-        channel: &str,
-        limit: u32,
-        include_all_metadata: bool,
+        query: &HistoryQuery,
     ) -> Result<ConversationsHistoryResponse> {
-        self.call(
-            "conversations.history",
-            &serde_json::json!({
-                "channel": channel,
-                "limit": limit,
-                "include_all_metadata": include_all_metadata,
-            }),
-        )
-        .await
+        let mut args = vec![
+            ("channel".to_string(), query.channel.clone()),
+            (
+                "limit".to_string(),
+                query.limit.clamp(1, MAX_HISTORY_LIMIT).to_string(),
+            ),
+        ];
+        if query.include_all_metadata {
+            args.push(("include_all_metadata".to_string(), "true".to_string()));
+        }
+        if query.inclusive {
+            args.push(("inclusive".to_string(), "true".to_string()));
+        }
+        push_optional(&mut args, "oldest", query.oldest.as_deref());
+        push_optional(&mut args, "latest", query.latest.as_deref());
+        push_optional(&mut args, "cursor", query.cursor.as_deref());
+        self.call_form("conversations.history", &args).await
     }
 
     /// `conversations.replies`.
@@ -121,37 +139,67 @@ impl SlackApi {
         ts: &str,
         limit: u32,
     ) -> Result<ConversationsRepliesResponse> {
-        self.call(
+        self.call_form(
             "conversations.replies",
-            &serde_json::json!({ "channel": channel, "ts": ts, "limit": limit }),
+            &[
+                ("channel".to_string(), channel.to_string()),
+                ("ts".to_string(), ts.to_string()),
+                ("limit".to_string(), limit.to_string()),
+            ],
         )
         .await
     }
 
     /// `users.list`.
     pub async fn users_list(&self, cursor: Option<&str>) -> Result<UsersListResponse> {
-        self.call(
-            "users.list",
-            &serde_json::json!({ "cursor": cursor.unwrap_or_default(), "limit": 200 }),
-        )
-        .await
+        let mut args = vec![("limit".to_string(), "200".to_string())];
+        push_optional(&mut args, "cursor", cursor);
+        self.call_form("users.list", &args).await
     }
 
-    /// POST a Web API method and enforce Slack's `ok` contract.
-    async fn call<A, R>(&self, method: &str, args: &A) -> Result<R>
+    /// POST a method with a form-encoded body — the encoding every Slack method
+    /// accepts.
+    async fn call_form<R>(&self, method: &str, args: &[(String, String)]) -> Result<R>
+    where
+        R: DeserializeOwned,
+    {
+        let response = self
+            .http
+            .post(self.method_url(method))
+            .bearer_auth(&self.token)
+            .form(args)
+            .send()
+            .await
+            .with_context(|| format!("call {method}"))?;
+        self.finish(method, response).await
+    }
+
+    /// POST a method with a JSON body.
+    async fn call_json<A, R>(&self, method: &str, args: &A) -> Result<R>
     where
         A: Serialize + ?Sized,
         R: DeserializeOwned,
     {
-        let url = format!("{}/api/{method}", self.base_url);
         let response = self
             .http
-            .post(&url)
+            .post(self.method_url(method))
             .bearer_auth(&self.token)
             .json(args)
             .send()
             .await
             .with_context(|| format!("call {method}"))?;
+        self.finish(method, response).await
+    }
+
+    fn method_url(&self, method: &str) -> String {
+        format!("{}/api/{method}", self.base_url)
+    }
+
+    /// Enforce Slack's `ok` contract and decode.
+    async fn finish<R>(&self, method: &str, response: reqwest::Response) -> Result<R>
+    where
+        R: DeserializeOwned,
+    {
         let status = response.status();
         let body: Value = response
             .json()
@@ -171,6 +219,69 @@ impl SlackApi {
             bail!("{method} returned HTTP {status}");
         }
         serde_json::from_value(body).with_context(|| format!("decode {method} payload"))
+    }
+}
+
+fn push_optional(args: &mut Vec<(String, String)>, name: &str, value: Option<&str>) {
+    if let Some(value) = value.filter(|value| !value.is_empty()) {
+        args.push((name.to_string(), value.to_string()));
+    }
+}
+
+/// Arguments for [`SlackApi::conversations_history`].
+///
+/// A struct rather than eight positional parameters because the bot's recovery
+/// path needs the `ts` bounds and its tools do not, and a call site that reads
+/// `HistoryQuery::since(channel, ts)` says what it means.
+#[derive(Clone, Debug)]
+pub struct HistoryQuery {
+    pub channel: String,
+    pub limit: u32,
+    pub include_all_metadata: bool,
+    pub oldest: Option<String>,
+    pub latest: Option<String>,
+    pub inclusive: bool,
+    pub cursor: Option<String>,
+}
+
+impl HistoryQuery {
+    /// The newest `limit` messages in a channel.
+    pub fn latest(channel: impl Into<String>, limit: u32) -> Self {
+        Self {
+            channel: channel.into(),
+            limit,
+            include_all_metadata: false,
+            oldest: None,
+            latest: None,
+            inclusive: false,
+            cursor: None,
+        }
+    }
+
+    /// Everything at or after `ts`, with metadata, one full page at a time.
+    ///
+    /// Bounding the scan by *message identity* rather than by a message count is
+    /// what makes the recovery lookup sound: a fixed "newest 50" window can miss
+    /// the bot's own reply in a busy channel and so cause the duplicate it was
+    /// added to prevent.
+    pub fn since(channel: impl Into<String>, ts: impl Into<String>) -> Self {
+        Self {
+            channel: channel.into(),
+            limit: MAX_HISTORY_LIMIT,
+            include_all_metadata: true,
+            oldest: Some(ts.into()),
+            latest: None,
+            inclusive: true,
+            cursor: None,
+        }
+    }
+
+    /// The same query continued from `cursor`.
+    pub fn at_cursor(&self, cursor: impl Into<String>) -> Self {
+        Self {
+            cursor: Some(cursor.into()),
+            ..self.clone()
+        }
     }
 }
 
@@ -224,4 +335,34 @@ pub fn find_reply_for_event(
             })
         })
         .map(|message| message.ts.clone())
+}
+
+/// Walk every page at or after `message_ts` looking for this bot's reply to
+/// `event_id`.
+///
+/// Follows the pagination cursor to exhaustion within the `ts` window, so the
+/// answer does not depend on how busy the channel has been since.
+pub async fn find_posted_reply(
+    api: &SlackApi,
+    bot_id: &str,
+    channel: &str,
+    message_ts: &str,
+    event_id: &str,
+) -> Result<Option<String>> {
+    let query = HistoryQuery::since(channel, message_ts);
+    let mut page = api.conversations_history(&query).await?;
+    loop {
+        if let Some(reply_ts) = find_reply_for_event(&page, bot_id, event_id) {
+            return Ok(Some(reply_ts));
+        }
+        let next = page
+            .response_metadata
+            .as_ref()
+            .map(|metadata| metadata.next_cursor.clone())
+            .filter(|cursor| !cursor.is_empty());
+        let Some(cursor) = next.filter(|_| page.has_more) else {
+            return Ok(None);
+        };
+        page = api.conversations_history(&query.at_cursor(cursor)).await?;
+    }
 }
