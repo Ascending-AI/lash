@@ -17,6 +17,13 @@ impl LeaseClaimNonce {
         Self(uuid::Uuid::new_v4().to_string())
     }
 
+    /// Constructs a fixed nonce for deterministic durable-store fixtures.
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    pub fn for_testing(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
     /// Returns the opaque bytes a backend persists and compares on retry.
     pub fn as_str(&self) -> &str {
         &self.0

@@ -1,12 +1,5 @@
 use crate::*;
 
-pub(crate) fn current_epoch_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
-
 /// Read the authoritative lease clock from PostgreSQL.
 ///
 /// Distributed lease decisions must not depend on the wall clock of whichever
@@ -392,18 +385,18 @@ pub(crate) async fn commit_attachment_refs_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
     attachment_ids: &[AttachmentId],
+    now_epoch_ms: u64,
 ) -> Result<(), StoreError> {
     if attachment_ids.is_empty() {
         return Ok(());
     }
-    let now = current_epoch_ms() as i64;
     for id in attachment_ids {
         sqlx::query(
             "UPDATE lash_attachment_manifest
              SET committed_at_ms = COALESCE(committed_at_ms, $1)
              WHERE attachment_id = $2 AND session_id = $3",
         )
-        .bind(now)
+        .bind(now_epoch_ms as i64)
         .bind(id.as_str())
         .bind(session_id)
         .execute(&mut **tx)

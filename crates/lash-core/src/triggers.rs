@@ -14,11 +14,12 @@ pub use memory::InMemoryTriggerStore;
 pub use memory::RawTriggerStateForTesting;
 use memory::{
     InMemoryTriggerDeliveryRecord, InMemoryTriggerEventState, apply_in_memory_trigger_command,
+    apply_in_memory_trigger_command_with_incarnation,
 };
-pub use mutation::evaluate_trigger_mutation;
 use mutation::{
     ensure_live_revision, mutate_enabled, subscription_conflict, subscription_record_from_draft,
 };
+pub use mutation::{evaluate_trigger_mutation, evaluate_trigger_mutation_with_incarnation};
 pub use router::*;
 use router::{default_enabled, reserve_in_memory_for_occurrence};
 use router::{

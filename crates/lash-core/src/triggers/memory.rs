@@ -450,6 +450,17 @@ pub(super) fn apply_in_memory_trigger_command(
     command: TriggerCommand,
     now: u64,
 ) -> TriggerEffectResult {
+    apply_in_memory_trigger_command_with_incarnation(state, command, now, &mut || {
+        uuid::Uuid::new_v4().to_string()
+    })
+}
+
+pub(super) fn apply_in_memory_trigger_command_with_incarnation(
+    state: &mut InMemoryTriggerEventState,
+    command: TriggerCommand,
+    now: u64,
+    new_incarnation: &mut dyn FnMut() -> String,
+) -> TriggerEffectResult {
     match command {
         TriggerCommand::List {
             owner_scope,
@@ -519,7 +530,7 @@ pub(super) fn apply_in_memory_trigger_command(
                 actor,
                 draft,
                 subscription_id.clone(),
-                uuid::Uuid::new_v4().to_string(),
+                new_incarnation(),
                 1,
                 definition_fingerprint,
                 true,
@@ -663,7 +674,7 @@ pub(super) fn apply_in_memory_trigger_command(
                 actor,
                 draft,
                 subscription_id.clone(),
-                uuid::Uuid::new_v4().to_string(),
+                new_incarnation(),
                 existing.revision.saturating_add(1),
                 requested_hash,
                 true,

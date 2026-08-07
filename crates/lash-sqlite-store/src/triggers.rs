@@ -9,6 +9,7 @@ use super::*;
 pub struct SqliteTriggerStore {
     conn: SqliteConnection,
     clock: Arc<dyn lash_core::Clock>,
+    fixed_incarnation: Option<String>,
 }
 
 impl SqliteTriggerStore {
@@ -23,7 +24,11 @@ impl SqliteTriggerStore {
         let conn = SqliteConnection::open(path).await?;
         ensure_trigger_schema(&conn).await?;
         apply_pragmas(&conn, StoreBacking::File).await?;
-        Ok(Self { conn, clock })
+        Ok(Self {
+            conn,
+            clock,
+            fixed_incarnation: None,
+        })
     }
 
     pub async fn memory() -> tokio_rusqlite::Result<Self> {
@@ -36,7 +41,18 @@ impl SqliteTriggerStore {
         let conn = SqliteConnection::open_in_memory().await?;
         ensure_trigger_schema(&conn).await?;
         apply_pragmas(&conn, StoreBacking::Memory).await?;
-        Ok(Self { conn, clock })
+        Ok(Self {
+            conn,
+            clock,
+            fixed_incarnation: None,
+        })
+    }
+
+    /// Pin otherwise-random trigger incarnation identity for durable fixture generation.
+    #[doc(hidden)]
+    pub fn with_incarnation_for_testing(mut self, incarnation: impl Into<String>) -> Self {
+        self.fixed_incarnation = Some(incarnation.into());
+        self
     }
 
     fn encode_json<T: serde::Serialize>(value: &T) -> Result<String, lash_core::PluginError> {
@@ -161,6 +177,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
             operation_id,
         );
         let request_fingerprint = lash_core::facade_support::trigger_command_fingerprint(&command);
+        let fixed_incarnation = self.fixed_incarnation.clone();
         let owner_scope = command.owner_scope().clone();
         let subscription_key = command.subscription_key().unwrap_or_default().to_string();
         let subscription_id = lash_core::facade_support::deterministic_subscription_id(
@@ -241,7 +258,18 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                             .map_err(process_sqlite_error)?
                             .map(Self::decode_subscription)
                             .transpose()?;
-                        lash_core::facade_support::evaluate_trigger_mutation(current, command, now)?
+                        if let Some(incarnation) = fixed_incarnation {
+                            lash_core::facade_support::evaluate_trigger_mutation_with_incarnation(
+                                current,
+                                command,
+                                now,
+                                incarnation,
+                            )?
+                        } else {
+                            lash_core::facade_support::evaluate_trigger_mutation(
+                                current, command, now,
+                            )?
+                        }
                     };
                     let records = match &result {
                         Ok(lash_core::TriggerCommandOutcome::Mutation { receipt }) => {

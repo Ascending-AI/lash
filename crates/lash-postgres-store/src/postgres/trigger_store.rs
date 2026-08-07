@@ -62,7 +62,7 @@ impl TriggerStore for PostgresTriggerStore {
             return serde_json::from_str(&result_json).map_err(process_decode_error);
         }
 
-        let now = current_epoch_ms();
+        let now = self.clock.timestamp_ms();
         let result = if let lash_core::TriggerCommand::Prune {
             owner_scope,
             actor,
@@ -103,7 +103,16 @@ impl TriggerStore for PostgresTriggerStore {
             let current = current_json
                 .map(|json| serde_json::from_str(&json).map_err(process_decode_error))
                 .transpose()?;
-            lash_core::facade_support::evaluate_trigger_mutation(current, command, now)?
+            if let Some(incarnation) = &self.fixed_incarnation {
+                lash_core::facade_support::evaluate_trigger_mutation_with_incarnation(
+                    current,
+                    command,
+                    now,
+                    incarnation.clone(),
+                )?
+            } else {
+                lash_core::facade_support::evaluate_trigger_mutation(current, command, now)?
+            }
         };
         let records = match &result {
             Ok(lash_core::TriggerCommandOutcome::Mutation { receipt }) => {
@@ -227,7 +236,7 @@ impl TriggerStore for PostgresTriggerStore {
         .fetch_all(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;
-        let now = current_epoch_ms();
+        let now = self.clock.timestamp_ms();
         for row in &rows {
             let subscription_id: String = row.get(0);
             let json: String = row.get(1);
@@ -299,7 +308,7 @@ impl TriggerStore for PostgresTriggerStore {
                 idempotency_key: request.idempotency_key,
                 source: request.source,
                 session_id: request.session_id,
-                occurred_at_ms: current_epoch_ms(),
+                occurred_at_ms: self.clock.timestamp_ms(),
             };
             sqlx::query(
                 "INSERT INTO lash_trigger_occurrences (
@@ -319,7 +328,7 @@ impl TriggerStore for PostgresTriggerStore {
             (occurrence, true)
         };
         let reservations = if is_new {
-            reserve_postgres_deliveries(&mut tx, &occurrence).await?
+            reserve_postgres_deliveries(&mut tx, &occurrence, self.clock.timestamp_ms()).await?
         } else {
             postgres_delivery_snapshots(&mut tx, &occurrence).await?
         };
@@ -491,6 +500,7 @@ impl TriggerStore for PostgresTriggerStore {
 async fn reserve_postgres_deliveries(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     occurrence: &TriggerOccurrenceRecord,
+    created_at_ms: u64,
 ) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
     let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
         "SELECT subscription_id, record_json FROM lash_trigger_subscriptions
@@ -511,7 +521,6 @@ async fn reserve_postgres_deliveries(
         .fetch_all(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
-    let created_at_ms = current_epoch_ms();
     let mut reservations = Vec::new();
     for row in rows {
         let subscription_id: String = row.get(0);

@@ -166,8 +166,9 @@ pub(crate) async fn nearest_frame_node_id_tx(
 async fn enqueue_queued_work_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     batch: &QueuedWorkBatchDraft,
+    now: u64,
 ) -> Result<QueuedWorkBatch, StoreError> {
-    enqueue_queued_work_with_outcome_tx(tx, batch)
+    enqueue_queued_work_with_outcome_tx(tx, batch, now)
         .await
         .map(QueuedWorkEnqueueOutcome::into_batch)
 }
@@ -175,6 +176,7 @@ async fn enqueue_queued_work_tx(
 async fn enqueue_queued_work_with_outcome_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     batch: &QueuedWorkBatchDraft,
+    now: u64,
 ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
     batch
         .validate_process_wake_source()
@@ -223,7 +225,6 @@ async fn enqueue_queued_work_with_outcome_tx(
             allocation_floor: allocation_floor as u64,
         });
     }
-    let now = current_epoch_ms();
     let enqueue_seq: i64 = sqlx::query_scalar(
         "SELECT nextval(pg_get_serial_sequence(
             'lash_queued_work_batches',
@@ -896,6 +897,7 @@ impl SessionCommitStore for PostgresSessionStore {
             &mut tx,
             &commit.session_id,
             &commit.committed_attachment_ids,
+            now,
         )
         .await?;
         if let Some(turn_id) = commit.turn_commit.operation.turn_id() {
@@ -922,7 +924,7 @@ impl SessionCommitStore for PostgresSessionStore {
                     attempted_session_id: batch.session_id.clone(),
                 });
             }
-            enqueued_queue_batches.push(enqueue_queued_work_tx(&mut tx, batch).await?);
+            enqueued_queue_batches.push(enqueue_queued_work_tx(&mut tx, batch, now).await?);
         }
         let result = RuntimeCommitResult {
             head_revision: next_revision,
@@ -1415,7 +1417,7 @@ impl QueuedWorkStore for PostgresSessionStore {
     ) -> Result<QueuedWorkBatch, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, &batch.session_id).await?;
-        let queued = enqueue_queued_work_tx(&mut tx, &batch).await?;
+        let queued = enqueue_queued_work_tx(&mut tx, &batch, self.clock.timestamp_ms()).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(queued)
     }
@@ -1426,7 +1428,8 @@ impl QueuedWorkStore for PostgresSessionStore {
     ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, &batch.session_id).await?;
-        let queued = enqueue_queued_work_with_outcome_tx(&mut tx, &batch).await?;
+        let queued =
+            enqueue_queued_work_with_outcome_tx(&mut tx, &batch, self.clock.timestamp_ms()).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(queued)
     }
@@ -1995,7 +1998,7 @@ impl TurnInputStore for PostgresSessionStore {
     ) -> Result<lash_core::PendingTurnInput, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, &draft.session_id).await?;
-        let now = current_epoch_ms();
+        let now = self.clock.timestamp_ms();
         let input_id = draft.input_id.clone().unwrap_or_else(|| {
             derive_pending_turn_input_id(&draft.session_id, draft.source_key.as_deref(), now)
         });
