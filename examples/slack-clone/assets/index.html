@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Slack Clone — Lash bot workspace</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: oklch(0.94 0.008 265);
+      --muted: oklch(0.72 0.018 265);
+      --dim: oklch(0.56 0.02 265);
+      --line: oklch(0.32 0.022 265);
+      --shell: oklch(0.19 0.028 288);
+      --panel: oklch(0.16 0.014 265);
+      --raised: oklch(0.22 0.016 265);
+      --accent: oklch(0.72 0.15 305);
+      --bot: oklch(0.78 0.13 190);
+      --bad: oklch(0.66 0.18 25);
+
+      /* One family, Slack's own idiom. Hierarchy therefore has to come entirely
+         from size and weight, so the scale is explicit and each step is a
+         deliberate 1.25x rather than a nudge. */
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+      --text-meta: 0.6875rem;   /* 11px  timestamps, tags, hints */
+      --text-small: 0.8125rem;  /* 13px  secondary controls, sidebar rows */
+      --text-body: 1rem;        /* 16px  message text: the thing you read */
+      --text-name: 1.0625rem;   /* 17px  message author */
+      --text-title: 1.375rem;   /* 22px  channel title */
+      --text-display: 1.75rem;  /* 28px  workspace name */
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--panel); color: var(--ink); }
+    button, input { font: inherit; color: inherit; }
+    .app { display: grid; grid-template-columns: 260px minmax(0, 1fr); height: 100vh; height: 100dvh; }
+
+    aside { background: var(--shell); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; }
+    .brand { padding: 20px 18px 16px; border-bottom: 1px solid var(--line); }
+    .brand h1 { margin: 0; font-size: var(--text-display); font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+    .brand p { margin: 6px 0 0; font-size: var(--text-small); font-weight: 400; color: var(--muted); line-height: 1.4; }
+    .section-label { padding: 18px 18px 6px; font-size: var(--text-meta); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--dim); }
+    .channels { overflow-y: auto; flex: 1; padding: 0 8px 8px; }
+    .channel { display: block; width: 100%; text-align: left; padding: 7px 10px; margin: 1px 0; border: 0; border-radius: 6px; background: transparent; cursor: pointer; font-size: var(--text-small); font-weight: 500; color: var(--muted); }
+    .channel:hover { background: oklch(0.25 0.02 288); color: var(--ink); }
+    .channel[aria-current="true"] { background: var(--accent); color: oklch(0.16 0.02 305); font-weight: 700; }
+    .sidebar-foot { border-top: 1px solid var(--line); padding: 14px 18px; font-size: var(--text-meta); font-weight: 400; color: var(--muted); display: grid; gap: 6px; line-height: 1.45; }
+    .sidebar-foot code { color: var(--bot); font-size: var(--text-meta); }
+    .sidebar-foot b { color: var(--ink); font-weight: 600; }
+    .new-channel { display: flex; gap: 6px; padding: 8px; }
+    .new-channel input { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); font-size: var(--text-small); }
+    .new-channel button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); cursor: pointer; font-size: var(--text-small); font-weight: 500; }
+
+    main { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; }
+    .topbar { padding: 16px 22px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    .topbar strong { font-size: var(--text-title); font-weight: 700; letter-spacing: -0.015em; line-height: 1.15; }
+    .topbar span { font-size: var(--text-meta); font-weight: 400; color: var(--dim); font-variant-numeric: tabular-nums; }
+    .topbar .who { margin-left: auto; font-size: var(--text-meta); color: var(--muted); }
+
+    .stream { overflow-y: auto; padding: 18px 22px 8px; display: flex; flex-direction: column; gap: 14px; }
+    .msg { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 10px; }
+    .avatar { width: 34px; height: 34px; border-radius: 7px; display: grid; place-items: center; font-size: var(--text-small); font-weight: 700; background: var(--raised); color: var(--muted); }
+    .msg.is-bot .avatar { background: color-mix(in oklch, var(--bot), transparent 78%); color: var(--bot); }
+    .msg-head { display: flex; align-items: baseline; gap: 8px; }
+    .msg-head b { font-size: var(--text-name); font-weight: 700; letter-spacing: -0.01em; }
+    .msg-head .tag { font-size: var(--text-meta); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; padding: 0 5px; border-radius: 4px; background: color-mix(in oklch, var(--bot), transparent 80%); color: var(--bot); }
+    .msg-head time { font-size: var(--text-meta); font-weight: 400; color: var(--dim); font-variant-numeric: tabular-nums; }
+    .msg-body { font-size: var(--text-body); font-weight: 400; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .msg-body .mention { color: var(--accent); background: color-mix(in oklch, var(--accent), transparent 86%); border-radius: 4px; padding: 0 3px; }
+    .empty { color: var(--dim); font-size: var(--text-small); padding: 8px 0; }
+
+    .composer { border-top: 1px solid var(--line); padding: 14px 22px 18px; display: grid; gap: 8px; }
+    .composer form { display: flex; gap: 8px; }
+    .composer input { flex: 1; min-width: 0; padding: 11px 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--shell); font-size: var(--text-body); }
+    .composer input:focus { outline: 2px solid color-mix(in oklch, var(--accent), transparent 55%); outline-offset: 1px; }
+    .composer button { padding: 11px 18px; border: 0; border-radius: 8px; background: var(--accent); color: oklch(0.16 0.02 305); font-size: var(--text-small); font-weight: 700; cursor: pointer; }
+    .composer button:disabled { opacity: 0.5; cursor: default; }
+    .hint { font-size: var(--text-meta); font-weight: 400; color: var(--dim); line-height: 1.5; max-width: 62ch; }
+    .hint b { color: var(--muted); font-weight: 700; }
+    .error { color: var(--bad); font-size: var(--text-meta); font-weight: 500; }
+
+    dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--shell); color: var(--ink); padding: 0; max-width: 380px; }
+    dialog::backdrop { background: oklch(0.12 0.02 265 / 0.72); }
+    dialog form { padding: 22px; display: grid; gap: 12px; }
+    dialog h2 { margin: 0; font-size: var(--text-title); font-weight: 700; letter-spacing: -0.015em; }
+    dialog p { margin: 0; font-size: var(--text-small); font-weight: 400; color: var(--muted); line-height: 1.5; }
+    dialog input { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: var(--text-body); }
+    dialog button { padding: 10px; border: 0; border-radius: 8px; background: var(--accent); color: oklch(0.16 0.02 305); font-size: var(--text-small); font-weight: 700; cursor: pointer; }
+
+    @media (max-width: 720px) {
+      :root { --text-title: 1.25rem; --text-name: 1rem; --text-body: 0.9375rem; }
+      .app { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+      aside { flex-direction: row; align-items: center; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      .brand, .section-label, .sidebar-foot, .new-channel { display: none; }
+      .channels { display: flex; gap: 4px; padding: 8px; }
+      .channel { width: auto; white-space: nowrap; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside>
+      <div class="brand">
+        <h1>Slack Clone</h1>
+        <p>A chat product with a Lash bot as a guest.</p>
+      </div>
+      <div class="section-label">Channels</div>
+      <div class="channels" id="channels"></div>
+      <div class="new-channel">
+        <input id="newChannelName" placeholder="new-channel" aria-label="New channel name" />
+        <button id="newChannelCreate" type="button">Add</button>
+      </div>
+      <div class="sidebar-foot">
+        <div>You are <b id="whoami">…</b></div>
+        <div>Mention the bot with <code id="botMention">…</code></div>
+      </div>
+    </aside>
+
+    <main>
+      <div class="topbar">
+        <strong id="channelName">#…</strong>
+        <span id="channelId"></span>
+        <span class="who" id="memberCount"></span>
+      </div>
+      <div class="stream" id="stream"></div>
+      <div class="composer">
+        <form id="composer">
+          <input id="text" placeholder="Message" autocomplete="off" aria-label="Message" disabled />
+          <button id="send" type="submit" disabled>Send</button>
+        </form>
+        <div class="hint">
+          Messages without a mention are folded into the bot's channel session as
+          context and get <b>no reply</b>. Mention the bot to make it answer.
+        </div>
+        <div class="error" id="error" hidden></div>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="namePicker">
+    <form id="nameForm" method="dialog">
+      <h2>Pick a display name</h2>
+      <p>
+        There is no authentication here — a name is an identity. Open a second tab
+        with a different name to be a second person in the workspace.
+      </p>
+      <input id="nameInput" placeholder="ada" autocomplete="off" required aria-label="Display name" />
+      <button type="submit">Join the workspace</button>
+    </form>
+  </dialog>
+
+  <script type="module">
+    const state = {
+      identity: null,
+      me: null,
+      channels: [],
+      users: new Map(),
+      channel: null,
+      seen: new Set(),
+      stream: null,
+    };
+
+    const el = (id) => document.getElementById(id);
+    const streamNode = el('stream');
+
+    function showError(message) {
+      const node = el('error');
+      node.textContent = message ?? '';
+      node.hidden = !message;
+    }
+
+    async function api(path, options) {
+      const response = await fetch(path, options);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body.error) {
+        throw new Error(body.error ?? `HTTP ${response.status}`);
+      }
+      return body;
+    }
+
+    // Slack renders `<@U…>` as a mention chip; so does this client, which is also
+    // how a human discovers the syntax the bot listens for.
+    function renderText(text) {
+      const fragment = document.createDocumentFragment();
+      const pattern = /<@([A-Z0-9]+)(\|[^>]*)?>/g;
+      let cursor = 0;
+      let match;
+      while ((match = pattern.exec(text)) !== null) {
+        if (match.index > cursor) {
+          fragment.append(text.slice(cursor, match.index));
+        }
+        const chip = document.createElement('span');
+        chip.className = 'mention';
+        const user = state.users.get(match[1]);
+        chip.textContent = `@${user ? user.display_name : match[1]}`;
+        fragment.append(chip);
+        cursor = match.index + match[0].length;
+      }
+      fragment.append(text.slice(cursor));
+      return fragment;
+    }
+
+    function renderMessage(message) {
+      if (state.seen.has(message.ts)) return;
+      state.seen.add(message.ts);
+      const row = document.createElement('div');
+      row.className = message.is_bot ? 'msg is-bot' : 'msg';
+
+      const avatar = document.createElement('div');
+      avatar.className = 'avatar';
+      avatar.textContent = (message.author_name || '?').slice(0, 2).toLowerCase();
+
+      const column = document.createElement('div');
+      const head = document.createElement('div');
+      head.className = 'msg-head';
+      const name = document.createElement('b');
+      name.textContent = message.author_name;
+      head.append(name);
+      if (message.is_bot) {
+        const tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.textContent = 'app';
+        head.append(tag);
+      }
+      const stamp = document.createElement('time');
+      // `ts` is epoch seconds with a microsecond fraction, and it is the
+      // message's identity — never reformat it before sending it back.
+      stamp.dateTime = new Date(Number(message.ts.split('.')[0]) * 1000).toISOString();
+      stamp.textContent = new Date(Number(message.ts.split('.')[0]) * 1000)
+        .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      head.append(stamp);
+
+      const body = document.createElement('div');
+      body.className = 'msg-body';
+      body.append(renderText(message.text));
+
+      column.append(head, body);
+      row.append(avatar, column);
+      streamNode.append(row);
+      streamNode.scrollTop = streamNode.scrollHeight;
+    }
+
+    function renderChannels() {
+      const list = el('channels');
+      list.replaceChildren();
+      for (const channel of state.channels) {
+        const button = document.createElement('button');
+        button.className = 'channel';
+        button.type = 'button';
+        button.textContent = `# ${channel.name}`;
+        button.setAttribute('aria-current', String(channel.id === state.channel?.id));
+        button.addEventListener('click', () => selectChannel(channel));
+        list.append(button);
+      }
+    }
+
+    // Reads the product's own surface, not `conversations.history`: that method
+    // needs the bot token, and a bot token has no business in a browser.
+    async function loadHistory(channel) {
+      const body = await api(
+        `/platform/history?channel=${encodeURIComponent(channel.id)}`,
+      ).catch(() => ({ messages: [] }));
+      return body.messages ?? [];
+    }
+
+    async function selectChannel(channel) {
+      state.channel = channel;
+      state.seen = new Set();
+      streamNode.replaceChildren();
+      el('channelName').textContent = `# ${channel.name}`;
+      el('channelId').textContent = channel.id;
+      renderChannels();
+
+      const history = await loadHistory(channel);
+      if (history.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = 'Nothing here yet. Say hello, or mention the bot.';
+        streamNode.append(empty);
+      }
+      for (const message of history) {
+        renderMessage(message);
+      }
+      follow(channel);
+    }
+
+    // One NDJSON response, read line by line. No second protocol, no framing.
+    async function follow(channel) {
+      state.stream?.abort();
+      const controller = new AbortController();
+      state.stream = controller;
+      try {
+        const response = await fetch(
+          `/platform/stream?channel=${encodeURIComponent(channel.id)}`,
+          { signal: controller.signal },
+        );
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let newline;
+          while ((newline = buffer.indexOf('\n')) >= 0) {
+            const line = buffer.slice(0, newline).trim();
+            buffer = buffer.slice(newline + 1);
+            if (line) handleLive(JSON.parse(line));
+          }
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        showError(`Live stream dropped: ${error.message}. Reconnecting…`);
+        setTimeout(() => {
+          if (state.channel?.id === channel.id) follow(channel);
+        }, 1000);
+        return;
+      }
+      if (state.channel?.id === channel.id) setTimeout(() => follow(channel), 500);
+    }
+
+    function handleLive(event) {
+      if (event.type === 'message') {
+        streamNode.querySelector('.empty')?.remove();
+        renderMessage(event);
+        showError(null);
+      } else if (event.type === 'channel_created') {
+        if (!state.channels.some((channel) => channel.id === event.channel)) {
+          state.channels.push({ id: event.channel, name: event.name });
+          renderChannels();
+        }
+      }
+    }
+
+    async function bootstrap() {
+      const data = await api('/platform/bootstrap');
+      state.identity = data.identity;
+      state.channels = data.channels;
+      state.users = new Map(data.users.map((user) => [user.id, user]));
+      el('botMention').textContent = `<@${data.identity.bot_user_id}>`;
+      el('memberCount').textContent = `${data.users.length} members`;
+    }
+
+    async function join(name) {
+      const me = await api('/platform/identify', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      state.me = me;
+      localStorage.setItem('slack-clone-name', name);
+      el('whoami').textContent = me.display_name;
+      el('text').disabled = false;
+      el('send').disabled = false;
+      await bootstrap();
+      renderChannels();
+      if (state.channels.length > 0) await selectChannel(state.channels[0]);
+    }
+
+    el('nameForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const name = el('nameInput').value.trim();
+      if (!name) return;
+      try {
+        await join(name);
+        el('namePicker').close();
+      } catch (error) {
+        showError(error.message);
+      }
+    });
+
+    el('composer').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const input = el('text');
+      const text = input.value.trim();
+      if (!text || !state.channel || !state.me) return;
+      input.value = '';
+      try {
+        await api('/platform/messages', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            channel: state.channel.id,
+            user_id: state.me.user_id,
+            text,
+          }),
+        });
+        showError(null);
+      } catch (error) {
+        input.value = text;
+        showError(error.message);
+      }
+    });
+
+    el('newChannelCreate').addEventListener('click', async () => {
+      const input = el('newChannelName');
+      const name = input.value.trim();
+      if (!name || !state.me) return;
+      input.value = '';
+      try {
+        const channel = await api('/platform/channels', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name, user_id: state.me.user_id }),
+        });
+        if (!state.channels.some((existing) => existing.id === channel.id)) {
+          state.channels.push(channel);
+        }
+        await selectChannel(channel);
+      } catch (error) {
+        showError(error.message);
+      }
+    });
+
+    await bootstrap();
+    const remembered = localStorage.getItem('slack-clone-name');
+    if (remembered) {
+      try {
+        await join(remembered);
+      } catch {
+        el('namePicker').showModal();
+      }
+    } else {
+      el('namePicker').showModal();
+    }
+  </script>
+</body>
+</html>
