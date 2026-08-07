@@ -294,7 +294,7 @@ async fn send_turn(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
     Json(request): Json<TurnRequest>,
-) -> Result<Json<CommandAccepted>, AppError> {
+) -> Result<Json<TurnAccepted>, AppError> {
     let text = request.text.trim().to_string();
     if text.is_empty() {
         return Err(AppError::bad_request("message text is required"));
@@ -321,13 +321,14 @@ async fn send_turn(
                 state.session_admission_error(&session_id, "api.turn", error)
             })?,
     );
-    if let Some(attachment_id) = attachment_id.as_deref() {
-        match state
+    let attachment = match attachment_id.as_deref() {
+        None => None,
+        Some(attachment_id) => match state
             .attachment_store
             .get(&lash::attachments::AttachmentId::new(attachment_id))
             .await
         {
-            Ok(_) => {}
+            Ok(stored) => Some(stored),
             Err(lash::persistence::AttachmentStoreError::NotFound(_)) => {
                 return Err(AppError::not_found(format!(
                     "attachment `{attachment_id}` was not found"
@@ -335,8 +336,8 @@ async fn send_turn(
             }
             // Audited: the content-addressed attachment store has no session identity or tombstone error variant.
             Err(err) => return Err(AppError::internal(err)),
-        }
-    }
+        },
+    };
     let turn_model = model_spec_for_request(
         &state,
         request.model.as_deref(),
@@ -352,6 +353,45 @@ async fn send_turn(
         }),
     );
     state.set_selected_model(ModelSelection::from_spec(&turn_model));
+    // A session runs one turn at a time, and the durable authorities say so: the
+    // session execution lease and the commit CAS refuse the second writer. So a
+    // send that arrives while a turn is running cannot start one, and answering
+    // `accepted` while starting a doomed turn is a lie the browser then renders
+    // (FIG-1000). Admit it as the next turn's input instead: the message is held
+    // durably, every viewer sees a queued receipt, and the queued-work drain
+    // that runs at terminalization answers it as its own turn.
+    //
+    // This check is advisory, exactly like `/api/turn/input`'s: two sends can
+    // both read an idle session and race. The lease and the CAS remain the
+    // authority, and the loser's failure is surfaced by `record_turn_failure`.
+    // It reads the same `active_turns` signal `WorkbenchQueuedWorkSubmitter`
+    // already trusts to decide whether a drain may start, so admission and drain
+    // cannot disagree about whether the session is busy.
+    if !state.active_turns.for_session(&session_id).is_empty() {
+        state
+            .authorization
+            .authorize(WorkbenchAuthorizationAction::EnqueueTurnInput {
+                session_id: session_id.clone(),
+            })?;
+        let mut input = lash::TurnInput::text(text.clone());
+        if let Some(attachment) = attachment {
+            input = input.with_attachment(lash::direct::AttachmentSource::inline(
+                lash::attachments::MediaType::parse("image/png")
+                    .expect("workbench uploads only PNG"),
+                attachment.bytes,
+            ));
+        }
+        let receipt = admit_turn_input(
+            &state,
+            &session_id,
+            text,
+            input,
+            lash::persistence::TurnInputIngress::next_turn(),
+            "api.turn",
+        )
+        .await?;
+        return Ok(Json(TurnAccepted::queued(receipt)));
+    }
     let turn_id = format!("workbench-turn-{}", uuid::Uuid::new_v4());
     state.push_message_with_id_for_session(
         &session_id,
@@ -375,120 +415,7 @@ async fn send_turn(
         state.active_turns.remove(&session_id, &turn_id);
         return Err(err);
     }
-    Ok(Json(CommandAccepted { accepted: true }))
-}
-
-async fn enqueue_turn_input(
-    State(state): State<AppState>,
-    Query(query): Query<SessionQuery>,
-    Json(request): Json<TurnInputRequest>,
-) -> Result<Json<TurnInputReceipt>, AppError> {
-    let text = request.text.trim().to_string();
-    if text.is_empty() {
-        return Err(AppError::bad_request("message text is required"));
-    }
-    let session_id = query.resolve(&state)?;
-    state
-        .authorization
-        .authorize(WorkbenchAuthorizationAction::EnqueueTurnInput {
-            session_id: session_id.clone(),
-        })?;
-    let ingress = match request.ingress {
-        TurnInputIngressRequest::ActiveTurn => {
-            let active = state.active_turns.for_session(&session_id);
-            let [address] = active.as_slice() else {
-                return Err(AppError::conflict(
-                    "inject now requires exactly one running turn",
-                ));
-            };
-            lash::persistence::TurnInputIngress::active_turn(
-                address.turn_id.clone(),
-                lash::persistence::TurnInputCheckpointBoundary::AfterWork,
-            )
-        }
-        TurnInputIngressRequest::NextTurn => lash::persistence::TurnInputIngress::next_turn(),
-    };
-    let source_id = format!("workbench-turn-input-{}", uuid::Uuid::new_v4());
-    let acceptance = state
-        .core
-        .enqueue_turn_input(
-            session_id.clone(),
-            lash::TurnInput::text(text.clone()),
-            ingress,
-            Some(source_id),
-        )
-        .await
-        .map_err(|error| {
-            state.session_admission_error(&session_id, "api.turn.input", error)
-        })?;
-    reject_if_active_turn_settled(&state, &acceptance).await?;
-    let accepted_state = match acceptance.ingress {
-        lash::persistence::TurnInputIngress::ActiveTurn { .. } => {
-            lash::persistence::TurnInputState::PendingActive
-        }
-        lash::persistence::TurnInputIngress::NextTurn => {
-            lash::persistence::TurnInputState::DeferredNextTurn
-        }
-    };
-    let receipt = TurnInputReceipt {
-        accepted: true,
-        input_id: acceptance.input_id.clone(),
-        ingress: acceptance.ingress.clone(),
-        state: accepted_state,
-        text,
-    };
-    state.trace_for_session(
-        &session_id,
-        "turn_input.enqueued",
-        serde_json::to_value(&receipt).unwrap_or(Value::Null),
-    );
-    state.publish_for_session_identified(
-        &session_id,
-        format!("turn-input:{}", receipt.input_id),
-        StreamItem::TurnInput {
-            receipt: receipt.clone(),
-        },
-    );
-    Ok(Json(receipt))
-}
-
-async fn reject_if_active_turn_settled(
-    state: &AppState,
-    acceptance: &lash::TurnInputAcceptanceReceipt,
-) -> Result<(), AppError> {
-    let Some(turn_id) = acceptance.ingress.active_turn_id() else {
-        return Ok(());
-    };
-    if state
-        .active_turns
-        .contains(&acceptance.session_id, turn_id)
-    {
-        return Ok(());
-    }
-
-    let session = state
-        .core
-        .session(acceptance.session_id.clone())
-        .open()
-        .await
-        .map_err(AppError::runtime)?;
-    let outcome = session
-        .cancel_pending_turn_input(&acceptance.input_id)
-        .await
-        .map_err(AppError::runtime)?;
-    match outcome {
-        lash::PendingTurnInputCancelOutcome::Cancelled(_)
-        | lash::PendingTurnInputCancelOutcome::AlreadyCancelled(_) => Err(AppError::conflict(
-            "the running turn settled before the input could be injected",
-        )),
-        lash::PendingTurnInputCancelOutcome::AlreadyClaimed { .. }
-        | lash::PendingTurnInputCancelOutcome::AlreadyCompleted(_) => Ok(()),
-        // Audited: this is a locally synthesized reconciliation-invariant failure, not a propagated store error.
-        lash::PendingTurnInputCancelOutcome::NotFound => Err(AppError::internal(format!(
-            "active-turn input `{}` disappeared during settle reconciliation",
-            acceptance.input_id
-        ))),
-    }
+    Ok(Json(TurnAccepted::started()))
 }
 
 async fn button_trigger(

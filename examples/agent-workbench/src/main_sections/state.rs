@@ -222,6 +222,38 @@ struct TurnInputRequest {
     ingress: TurnInputIngressRequest,
 }
 
+/// What `/api/turn` did with a send.
+///
+/// A session runs one turn at a time, so "accepted" alone cannot describe the
+/// outcome: a send that arrives while a turn is running is admitted as the next
+/// turn's input rather than started now, and the caller has to be able to tell
+/// the two apart (FIG-1000).
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct TurnAccepted {
+    accepted: bool,
+    queued: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    queued_input: Option<TurnInputReceipt>,
+}
+
+impl TurnAccepted {
+    fn started() -> Self {
+        Self {
+            accepted: true,
+            queued: false,
+            queued_input: None,
+        }
+    }
+
+    fn queued(receipt: TurnInputReceipt) -> Self {
+        Self {
+            accepted: true,
+            queued: true,
+            queued_input: Some(receipt),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct TurnInputReceipt {
     accepted: bool,
@@ -329,7 +361,25 @@ enum StreamItem {
     Done {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         turn_id: Option<String>,
+        /// How the turn ended. A viewer that already rendered this turn's
+        /// UI-owned rows needs this to know whether they still stand for
+        /// anything (FIG-1000): a failed turn's rows have been retired from the
+        /// lane and the viewer must re-derive from the authoritative snapshot.
+        #[serde(default)]
+        outcome: TurnDoneOutcome,
     },
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum TurnDoneOutcome {
+    /// The turn reached a terminal outcome of its own — finished, stopped, or
+    /// cancelled. Whatever it committed is durable truth.
+    #[default]
+    Completed,
+    /// The turn never reached its own outcome: it failed before or at commit,
+    /// so nothing it optimistically claimed is durable.
+    Failed,
 }
 
 const PUBLIC_TURN_FAILURE_MESSAGE: &str = "turn could not be completed";
@@ -580,12 +630,57 @@ impl SessionEventRegistry {
             }
             StreamItem::Done {
                 turn_id: Some(turn_id),
+                ..
             } => active_turn_ids.contains(turn_id),
-            StreamItem::TurnInput { .. } | StreamItem::Done { turn_id: None } => true,
+            StreamItem::TurnInput { .. }
+            | StreamItem::Done {
+                turn_id: None,
+                ..
+            } => true,
         });
         if history.events.len() != before {
             self.persist_snapshot(&histories);
         }
+    }
+
+    /// Retire the product rows this workbench published on behalf of `turn_id`,
+    /// reporting the message ids it removed.
+    ///
+    /// A turn that failed has no outcome for its optimistic rows to stand for —
+    /// the losing side of a commit race commits nothing at all — so leaving them
+    /// in the lane would broadcast, and replay to every later viewer, a
+    /// conversation row durable truth does not have (FIG-1000). Provenance comes
+    /// from the ids the workbench itself minted for the turn, never from parsing
+    /// a runtime-minted id (FIG-972).
+    ///
+    /// Retirement drops the events and keeps their identities, exactly as
+    /// settlement compaction does: a Restate replay that re-publishes the same
+    /// row must be a no-op, not a resurrection of the row this just retired.
+    fn retire_turn_rows(&self, session_id: &str, turn_id: &str) -> BTreeSet<String> {
+        let mut retired = BTreeSet::new();
+        let mut histories = self
+            .histories
+            .lock()
+            .expect("product event history lock");
+        let Some(history) = histories.get_mut(session_id) else {
+            return retired;
+        };
+        history.events.retain(|event| {
+            let StreamItem::Message { message } = &event.item else {
+                return true;
+            };
+            let owned_by_turn = workbench_turn_id_from_user_message_id(&message.id)
+                .or_else(|| workbench_turn_id_from_assistant_message_id(&message.id))
+                .is_some_and(|owner| owner == turn_id);
+            if owned_by_turn {
+                retired.insert(message.id.clone());
+            }
+            !owned_by_turn
+        });
+        if !retired.is_empty() {
+            self.persist_snapshot(&histories);
+        }
+        retired
     }
 
     fn remove(&self, session_id: &str) {

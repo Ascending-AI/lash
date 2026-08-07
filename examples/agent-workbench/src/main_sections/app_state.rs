@@ -88,6 +88,40 @@ impl AppState {
             format!("turn:{turn_id}:done"),
             StreamItem::Done {
                 turn_id: Some(turn_id.to_string()),
+                outcome: TurnDoneOutcome::Completed,
+            },
+        );
+    }
+
+    /// Report a turn that never reached an outcome of its own: retire the rows
+    /// the workbench published for it, render one failure row, and close it out
+    /// as failed.
+    ///
+    /// Order is the contract (FIG-1000). The retirement runs first so no viewer
+    /// can read the failure and still find the retired row behind it, and the
+    /// `Failed` outcome runs last so a viewer that already rendered those rows
+    /// knows to re-derive from the authoritative snapshot instead of keeping a
+    /// phantom whose commit was refused.
+    fn publish_turn_failed(&self, session_id: &str, turn_id: &str) {
+        let retired = self.event_tx.retire_turn_rows(session_id, turn_id);
+        if !retired.is_empty() {
+            self.messages
+                .lock()
+                .expect("messages lock")
+                .retain(|message| !retired.contains(&message.id));
+        }
+        self.push_message_with_id_for_session(
+            session_id,
+            format!("turn:{turn_id}:failed"),
+            "event",
+            PUBLIC_TURN_FAILURE_MESSAGE,
+        );
+        self.publish_for_session_identified(
+            session_id,
+            format!("turn:{turn_id}:done"),
+            StreamItem::Done {
+                turn_id: Some(turn_id.to_string()),
+                outcome: TurnDoneOutcome::Failed,
             },
         );
     }
@@ -97,7 +131,10 @@ impl AppState {
             self.publish_for_session_identified(
                 session_id,
                 format!("operation:{operation_id}:done"),
-                StreamItem::Done { turn_id: None },
+                StreamItem::Done {
+                    turn_id: None,
+                    outcome: TurnDoneOutcome::Completed,
+                },
             );
         }
     }
@@ -306,7 +343,10 @@ impl AppState {
             self.publish_for_session_identified(
                 session_id,
                 format!("turn-cancel:{}:done", operation_ids.join(",")),
-                StreamItem::Done { turn_id: None },
+                StreamItem::Done {
+                    turn_id: None,
+                    outcome: TurnDoneOutcome::Completed,
+                },
             );
         }
         Ok(receipts)

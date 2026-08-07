@@ -446,6 +446,7 @@ mod tests {
             Ok(ProductEvent {
                 item: StreamItem::Done {
                     turn_id: Some(turn_id),
+                    outcome: TurnDoneOutcome::Completed,
                 },
                 ..
             }) if turn_id == "transient-turn"
@@ -531,7 +532,10 @@ mod tests {
         assert!(matches!(
             events.try_recv(),
             Ok(ProductEvent {
-                item: StreamItem::Done { turn_id: None },
+                item: StreamItem::Done {
+                    turn_id: None,
+                    outcome: TurnDoneOutcome::Completed,
+                },
                 ..
             })
         ));
@@ -2481,4 +2485,5 @@ finish initial
     include!("tests/attachments_usage.rs");
     include!("tests/turn_input_application.rs");
     include!("tests/tool_control.rs");
+    include!("tests/concurrent_send.rs");
 }
