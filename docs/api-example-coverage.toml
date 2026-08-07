@@ -1283,6 +1283,16 @@ disposition = "unused-add"
 reason = "The current example use of lash::LashCore::session_delete_scope is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::LashCore::session_was_deleted"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::prelude::LashCore::session_was_deleted"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/restate_cron.rs:66#.session_was_deleted(session_id)"
+assertion = "examples/agent-workbench/src/restate_cron_tests.rs:313#\"decision_basis\": \"deleted_session_tombstone\","
+
+[[api]]
 symbol = "lash::LashCore::session_lease_diagnostics"
 kind = "function"
 availability = "default+all-features"
@@ -1436,7 +1446,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCoreBuilder::lease_timings"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:1863#.lease_timings(lease_timings)"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:1866#.lease_timings(lease_timings)"
 assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1666#takeover_latency < default_ttl,"
 
 [[api]]
@@ -2684,7 +2694,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelTarget::input_id"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:1100#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
+usage = "examples/agent-workbench/src/restate.rs:1124#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget::source_key"
@@ -23622,8 +23632,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2299#definition: None,"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2322#.any(|process| process.process_id == *process_id),"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2302#definition: None,"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2325#.any(|process| process.process_id == *process_id),"
 
 [[api]]
 symbol = "lash::process::ProcessListFilter::caused_by_occurrence_id"
@@ -23679,7 +23689,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter::definition"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2299#definition: None,"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2302#definition: None,"
 
 [[api]]
 symbol = "lash::process::ProcessListFilter::identity_kind"
@@ -23749,7 +23759,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter::waiting"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2301#waiting: None,"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2304#waiting: None,"
 
 [[api]]
 symbol = "lash::process::ProcessListMode"
@@ -26399,8 +26409,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2306#.list(&filter)"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2323#\"remote process list did not include started process {process_id}\""
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2309#.list(&filter)"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2326#\"remote process list did not include started process {process_id}\""
 
 [[api]]
 symbol = "lash::process::Processes::list_observed_by"
@@ -26459,8 +26469,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2329#.session_snapshot(session_id)"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2340#assert_eq!(round_trip_snapshot.session_id, session_id);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2332#.session_snapshot(session_id)"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2343#assert_eq!(round_trip_snapshot.session_id, session_id);"
 
 [[api]]
 symbol = "lash::process::Processes::signal"
@@ -37909,8 +37919,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2257#.validate(\"WorkbenchTriggerSubscription\")"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2262#assert_eq!(&round_trip_record, record);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2260#.validate(\"WorkbenchTriggerSubscription\")"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2265#assert_eq!(&round_trip_record, record);"
 
 [[api]]
 symbol = "lash::remote::triggers::RemoteTriggerSubscriptionRecord::created_at_ms"
@@ -38102,8 +38112,8 @@ kind = "function"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2257#.validate(\"WorkbenchTriggerSubscription\")"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2262#assert_eq!(&round_trip_record, record);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2260#.validate(\"WorkbenchTriggerSubscription\")"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2265#assert_eq!(&round_trip_record, record);"
 
 [[api]]
 symbol = "lash::remote::triggers::RemoteTriggerSubscriptionRecord::wake_target"
@@ -45958,8 +45968,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ScopedEffectController"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2415#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2384#assert_eq!(round_trip_tail, expected_tail);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2418#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2387#assert_eq!(round_trip_tail, expected_tail);"
 
 [[api]]
 symbol = "lash::runtime::ScopedEffectController::borrowed"
@@ -45996,7 +46006,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ScopedEffectController::shared"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2415#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2418#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
 assertion = "examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs:74#assert_eq!(first_report.started_process_ids().len(), 1);"
 
 [[api]]

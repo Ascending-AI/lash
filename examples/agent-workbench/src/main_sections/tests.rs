@@ -1568,6 +1568,7 @@ finish initial
     }
 
     include!("tests/restate_recovery.rs");
+    include!("tests/restate_cron.rs");
 
     #[test]
     #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
@@ -1622,15 +1623,23 @@ finish initial
         .await;
         wait_for_restate_cron_sync(&harness.state, &harness.trace_path, Duration::from_secs(30))
             .await;
+        let cron_session_id = rotate_cron_session_out_of_current(&harness.state);
+        let cron_job_key = cron_job_key_for_session(&harness.state, &cron_session_id);
+        // Pin this session's exact Restate object before observing either tick.
+        // Another cron job may legitimately share the trace file and key set;
+        // every decision assertion below must stay scoped to this session and
+        // object instead of accepting an unrelated whole-file match.
         wait_for_workbench_message(
             &harness.state,
             "cron tick observed",
             Duration::from_secs(60),
         )
         .await;
-        wait_for_trace_event_count(
+        wait_for_cron_trace_record_count(
             &harness.trace_path,
             "agent_workbench.cron.restate.run",
+            &cron_session_id,
+            &cron_job_key,
             1,
             Duration::from_secs(30),
         )
@@ -1651,17 +1660,11 @@ finish initial
         // idempotency key must be unique per tick and run() must re-arm, so a
         // SECOND tick has to fire. The original bug passed any single-tick
         // assertion and died silently on tick two.
-        wait_for_trace_event_count(
-            &harness.trace_path,
-            "agent_workbench.cron.restate.run",
-            2,
-            Duration::from_secs(30),
-        )
-        .await;
-        let _ = restate::cancel_cron_jobs_for_session(
+        assert_two_live_ticks_then_retire(
             &harness.state,
-            &harness.state.current_session_id(),
-            "live_e2e_cleanup",
+            &harness.trace_path,
+            &cron_session_id,
+            &cron_job_key,
         )
         .await;
         assert_no_active_lash_restate_invocations(&harness.state, Duration::from_secs(10)).await;

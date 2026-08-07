@@ -341,6 +341,24 @@ impl LashCore {
         Ok(store.load_session_meta().await?.is_some())
     }
 
+    /// Report whether the durable single-use tombstone for `session_id` exists.
+    /// A `false` result means only "no tombstone"; it is not evidence that the session is live.
+    /// Tombstones are monotonic: once this returns `true`, the session id cannot become live again.
+    /// Compose this read with [`Self::session_exists`] when deciding live/retired/unknown disposition.
+    pub async fn session_was_deleted(&self, session_id: impl AsRef<str>) -> Result<bool> {
+        let session_id = session_id.as_ref();
+        let Some(store_factory) = self.store_factory.as_ref() else {
+            return Err(EmbedError::MissingSessionStoreFactory);
+        };
+        store_factory
+            .session_was_deleted(session_id)
+            .await
+            .map_err(|message| EmbedError::StoreFactory {
+                session_id: session_id.to_string(),
+                message,
+            })
+    }
+
     /// Build the effect scope required to delete the stored session.
     pub async fn session_delete_scope(
         &self,
