@@ -21,45 +21,47 @@ reconciled them:
   two by id *shape* rather than by `MessageOrigin::TurnInput` left both rendered. See the
   contract note above `WORKBENCH_USER_MESSAGE_ID` in
   [`state.rs`](../../examples/agent-workbench/src/main_sections/state.rs).
-- **FIG-984** — one trigger-button press rendered the agent reply **twice**. Two committed
-  assistant copies of one turn's text reach the browser: the runtime's terminal commit
-  `m_turn_<turn_id>_assistant`, materialized by `materialize_terminal_output` in
-  [`materialize.rs`](../../crates/lash-core/src/runtime/turn_boundary/materialize.rs) for a
+- **FIG-984** (fixed, merged) — one trigger-button press rendered the agent reply **twice**.
+  Two committed assistant copies of one turn's text reached the browser: the runtime's
+  terminal commit `m_turn_<turn_id>_assistant`, materialized by `materialize_terminal_output`
+  in [`materialize.rs`](../../crates/lash-core/src/runtime/turn_boundary/materialize.rs) for a
   `TurnFinish::AssistantMessage` outcome, and the workbench's own
-  `commit_assistant_transcript` copy `workbench-assistant:<turn_id>` in
-  [`restate.rs`](../../examples/agent-workbench/src/restate.rs). That helper's idempotence
-  guard only looks for **its own** id, so it never sees the runtime's copy. The browser
-  deduplicates by message id (`renderedMessages` in
+  `commit_assistant_transcript` copy `workbench-assistant:<turn_id>`. That helper's
+  idempotence guard only looked for **its own** id, so it never saw the runtime's copy. The
+  browser deduplicates by message id (`renderedMessages` in
   [`index.html`](../../examples/agent-workbench/assets/index.html)), so two ids carrying one
-  text render as two rows.
+  text rendered as two rows.
 
-  The discriminator is the turn's **termination**, not the trigger path: the runtime writes
-  its terminal copy only for a `TurnFinish::AssistantMessage` outcome, which the trace
-  records as `done_reason: "assistant_message"`. A turn that finishes through Lashlang
-  (`done_reason: "final_value"`) leaves only the workbench's copy and renders correctly. The
-  trigger wake is the *reliable* repro because a wake with nothing to execute answers as bare
-  prose; treat the button path as the reproduction, and `done_reason` as the mechanism.
+  The discriminator was the turn's **termination**, not the trigger path. `record_turn_output`
+  now commits the reply only for the terminations the runtime leaves uncommitted, so exactly
+  one committed copy survives either way — but **which id holds it depends on the
+  termination**, and this runbook must never assume one:
+
+  | trace `done_reason` | reached by | the single committed assistant id | part kind |
+  |---|---|---|---|
+  | `assistant_message` | a queued/wake turn, which runs without `require_finish` and answers as bare prose | `m_turn_<turn_id>_assistant` (runtime) | `Prose` |
+  | `final_value` | a composer send, where `require_finish` forces the answer through `finish` | `workbench-assistant:<turn_id>` (workbench) | `Text` |
 
 Both defects share one shape: **two id namespaces projecting one logical message**. The
 gate is therefore not "does the reply look right" but "does every layer agree on how many
 messages exist".
 
-**The invariant this runbook referees** is already documented in
-[the example's README](../../examples/agent-workbench/README.md): *"Canonical assistant rows
-use `workbench-assistant:<turn_id>` in both the live product event and durable session
-transcript, so a live/canonical pair is one row, never two."* The user side enforces it in
-code — `suppressed_turn_input_message_ids` in
+**The invariant this runbook referees** is documented in
+[the example's README](../../examples/agent-workbench/README.md): *"Either way a completed
+turn leaves exactly one committed assistant copy."* The user side has an analogous rule
+enforced in code — `suppressed_turn_input_message_ids` in
 [`chat_projection.rs`](../../examples/agent-workbench/src/main_sections/chat_projection.rs)
-suppresses the runtime's duplicate user copy by matching `MessageOrigin::TurnInput`. There is
-no assistant-side equivalent. The unit suite does not close the gap either: it asserts the
-`workbench-assistant:*` id is unique **within the product-event log**, which stays true while
-a second assistant row exists in the durable transcript under a different id. That is exactly
-why this scenario counts across layers instead of within one.
+suppresses the runtime's duplicate user copy by matching `MessageOrigin::TurnInput`, never an
+id shape (FIG-972). Both regimes now carry unit coverage; this runbook is the judged
+browser-surface layer over it, and it exists because the unit tests assert within one surface
+while both defects were only visible **between** surfaces.
 
 **Real tokens.** Turns and the wake go through OpenRouter, so prose and termination style
-are nondeterministic. No exact model wording is an answer key. The answer key is **counts
-and identities**: rendered rows per role, committed conversation messages per role,
-projected messages, and completed turn executions.
+are nondeterministic. No exact model wording is an answer key. The answer key is **counts per
+role**: rendered rows, committed conversation messages, projected messages, and completed turn
+executions. Because termination style is model-dependent, and termination decides which
+namespace mints the committed id, a gate that requires a specific id is nondeterministic by
+construction. Record ids as evidence; gate on counts.
 
 ## Scenario-specific golden rules
 
@@ -171,6 +173,15 @@ the settle gate. Require **exactly**:
   the session graph;
 - 3 `turn_completed` records — one wake, not two.
 
+The wake's single committed copy is the **runtime's** `m_turn_<turn_id>_assistant` (a `Prose`
+part), and there is **no** `workbench-assistant:<turn_id>` row in the graph for it — see the
+termination table above. Count rows by role; never gate on a particular id being present, or
+the gate fails on correct behavior. Two id-level traps here: `/api/state.messages` carries the
+runtime id for this turn while the two composer turns carry workbench ids, and the
+product-event log still lists `message:workbench-assistant:<wake_turn_id>` — that is the
+**live** agent row, which retires when its turn stops running and has no durable counterpart.
+Comparing ids across those two surfaces is therefore invalid; compare counts.
+
 Screenshot `03-after-red-press.png` with the newest rows scrolled into view. If the
 assistant count exceeds the `turn_completed` count, capture the **ids** of the surplus
 messages from `/api/state` and the store before anything else: the id shapes name the two
@@ -181,11 +192,11 @@ part, the workbench copy a `Text` part) and the wake turn's `done_reason`. Save
 `03-red-press-{dom,state,store,trace}.json` and the duplicate ids as
 `03-duplicate-ids.json`.
 
-Note which layers agreed: a duplicate that reaches the store means the DOM, `/api/state`,
-and `graph_nodes` will **all** report the surplus and only the trace dissents. That is a
-commit-side defect faithfully rendered — the RCA stage is turn terminalization, not render.
-The product-event log is a third opinion worth capturing: it records only the workbench's
-own publishes, so it can undercount the rendered rows even while the render is correct.
+Note which layers agreed. A duplicate that reaches the store means the DOM, `/api/state`, and
+`graph_nodes` **all** report the surplus and only the trace dissents — a commit-side defect
+faithfully rendered, so the RCA stage is turn terminalization, not render. A surplus the store
+does **not** show is the opposite: a render-side defect, and the RCA stage is the event stream
+or the browser's id dedupe. Do not report "two rows" without naming which of these it is.
 
 ## Phase 3 — Reload and require an identical multiset
 
