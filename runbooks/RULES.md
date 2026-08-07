@@ -107,6 +107,20 @@ waiting assertion with an explicit timeout (`expect(locator).to_be_visible(timeo
 or polling an app API until a condition holds) — never a fixed sleep to decide async work
 finished. A timeout at a gate is a hard failure → Abort/RCA.
 
+## Don't blind yourself with the fault you inject
+
+Browser runbooks inject faults with shell commands — stop a container, replace a process. While
+your driver is inside that command it cannot poll the page, so any state that exists **only**
+during the fault is invisible to a driver-side loop: an outage banner, a degraded pill, a
+transient affordance. Its absence from your evidence then proves nothing about the app. These
+windows are short — a workbench web-process restart is about two seconds — so this is the
+normal case, not an edge case.
+
+Move the observation into the page (an interval recording the state into an array the driver
+reads afterwards) or launch the injecting command non-blocking. If an affordance must be *used*
+during the fault, arm the click in the page too. "The degraded state was never rendered" is a
+finding only once you can prove the observer was able to see it.
+
 ## Gate objectively before you judge
 
 Prefer an objective signal over eyeballing. In order of authority:
