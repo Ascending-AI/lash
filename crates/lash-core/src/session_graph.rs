@@ -706,6 +706,20 @@ fn validate_graph_parent_topology(
 }
 
 impl SessionNodeRecord {
+    /// Borrow the message identity carried by a conversation node.
+    ///
+    /// Protocol-event, plugin-state, and frame-boundary nodes return `None`.
+    pub fn message_id(&self) -> Option<&str> {
+        match &self.payload {
+            SessionNodePayload::Event {
+                event: SessionHistoryRecord::Conversation(message),
+            } => Some(message.id.as_str()),
+            SessionNodePayload::Event { .. }
+            | SessionNodePayload::Plugin { .. }
+            | SessionNodePayload::FrameOpen { .. } => None,
+        }
+    }
+
     /// Encode only immutable node content for `node_json`.
     ///
     /// Identity and graph structure are columns so SQL can index, join, and

@@ -37,6 +37,8 @@ use super::threads;
 use crate::secrets::constant_time_eq;
 use crate::wire::events::{self, Event, EventCallback};
 
+type SessionLockRegistry = Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>;
+
 /// How long [`ChannelBot::retry_deferred`] waits between attempts.
 ///
 /// Short relative to the lease TTL it is waiting out, so the mention is answered
@@ -146,7 +148,7 @@ pub struct ChannelBot {
     session_owner: LeaseOwnerIdentity,
     /// One lock per routed session. Channels preserve admission order, while
     /// independent threads in the same channel remain fully parallel.
-    session_locks: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+    session_locks: SessionLockRegistry,
     /// `U…` to display name, so `<@U…>` renders as something a model can reason
     /// about. Filled from `users.list` and refreshed on a miss.
     directory: Arc<RwLock<HashMap<String, String>>>,
@@ -187,6 +189,14 @@ impl ChannelBot {
     /// The core, for the shutdown trace flush.
     pub fn core(&self) -> &LashCore {
         &self.core
+    }
+
+    #[cfg(test)]
+    pub fn session_lock_count(&self) -> usize {
+        self.session_locks
+            .lock()
+            .expect("session lock map is never poisoned")
+            .len()
     }
 
     /// Whether an envelope's `token` is the one this bot expects.
@@ -238,7 +248,7 @@ impl ChannelBot {
         let unfinished = self.ledger.unfinished().await?;
         let mut report = RecoveryReport::default();
         for record in unfinished {
-            let guard = self.session_lock(&record).await;
+            let guard = self.session_lock(&record);
             let _held = guard.lock().await;
             let outcome = match record.stage {
                 // The turn is done and its text is on record: only the post is
@@ -301,7 +311,7 @@ impl ChannelBot {
                 });
             }
             let attempt = {
-                let guard = self.session_lock(&record).await;
+                let guard = self.session_lock(&record);
                 let _held = guard.lock().await;
                 match record.stage {
                     Stage::ReplyPending => self.settle_reply_debt(&record).await,
@@ -412,7 +422,7 @@ impl ChannelBot {
             });
         }
 
-        let guard = self.session_lock(claim.record()).await;
+        let guard = self.session_lock(claim.record());
         let _held = guard.lock().await;
 
         let record = claim.record();
@@ -876,7 +886,7 @@ impl ChannelBot {
         user_id.to_string()
     }
 
-    async fn session_lock(&self, record: &EventRecord) -> Arc<tokio::sync::Mutex<()>> {
+    fn session_lock(&self, record: &EventRecord) -> SessionLockLease {
         let key = record.thread_ts.as_deref().map_or_else(
             || session_id(&record.channel_id),
             |thread_ts| super::runtime::thread_session_id(&record.channel_id, thread_ts),
@@ -885,11 +895,50 @@ impl ChannelBot {
             .session_locks
             .lock()
             .expect("session lock map is never poisoned");
-        Arc::clone(
+        let lock = Arc::clone(
             locks
-                .entry(key)
+                .entry(key.clone())
                 .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
-        )
+        );
+        drop(locks);
+        SessionLockLease {
+            key,
+            lock,
+            registry: Arc::clone(&self.session_locks),
+        }
+    }
+}
+
+/// One scoped reference to a routed-session lock.
+///
+/// The registry entry disappears after the last holder or waiter finishes, so
+/// a long-lived bot does not retain one allocation for every thread ever seen.
+struct SessionLockLease {
+    key: String,
+    lock: Arc<tokio::sync::Mutex<()>>,
+    registry: SessionLockRegistry,
+}
+
+impl SessionLockLease {
+    async fn lock(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.lock.lock().await
+    }
+}
+
+impl Drop for SessionLockLease {
+    fn drop(&mut self) {
+        let mut registry = self
+            .registry
+            .lock()
+            .expect("session lock map is never poisoned");
+        let is_current = registry
+            .get(&self.key)
+            .is_some_and(|registered| Arc::ptr_eq(registered, &self.lock));
+        // The registry plus this lease are the final two strong references.
+        // Holding the registry mutex closes the race with a new clone.
+        if is_current && Arc::strong_count(&self.lock) == 2 {
+            registry.remove(&self.key);
+        }
     }
 }
 

@@ -32,17 +32,32 @@ pub async fn open_thread_session(
     let thread_id = thread_session_id(&record.channel_id, thread_ts);
     let channel = open_channel_session(core, owner, &record.channel_id).await?;
 
-    let exists = core
-        .fork_points()
+    let child_exists = core
+        .session_exists(&thread_id)
         .await
-        .context("list forkable sessions")?
-        .iter()
-        .any(|point| point.source_session_id == thread_id);
-    if !exists {
-        let root = ledger
+        .context("check whether the thread child session exists")?;
+    if !child_exists {
+        let mut root = ledger
             .channel_message(record.channel_id.clone(), thread_ts.to_string())
             .await
             .context("locate thread-root admission")?;
+        if let Some(input_id) = root
+            .as_ref()
+            .filter(|root| root.fork_node_id.is_none())
+            .and_then(|root| root.input_id.clone())
+        {
+            // A turn application is durable even if the process died after
+            // pinning its boundary and before projecting that node into the
+            // Slack ledger. Repair that projection before considering the
+            // honest current-head fallbacks below.
+            retain_applied_turn_boundary(core, ledger, &channel, &input_id)
+                .await
+                .context("re-derive committed thread-root boundary")?;
+            root = ledger
+                .channel_message(record.channel_id.clone(), thread_ts.to_string())
+                .await
+                .context("reload repaired thread-root admission")?;
+        }
         let fork_node = root
             .as_ref()
             .and_then(|root| root.fork_node_id.clone())
@@ -100,9 +115,7 @@ pub async fn retain_applied_turn_boundary(
     else {
         return Ok(());
     };
-    let Some(leaf) = channel_snapshot_leaf(session) else {
-        bail!("committed turn has no graph leaf");
-    };
+    let leaf = committed_turn_boundary(session, &applications, &turn_id)?;
     core.pin(&leaf)
         .await
         .with_context(|| format!("pin committed channel turn boundary {leaf}"))?;
@@ -115,6 +128,78 @@ pub async fn retain_applied_turn_boundary(
         .record_fork_node_for_inputs(input_ids, leaf)
         .await
         .context("record fork boundary for committed Slack inputs")
+}
+
+/// Resolve the graph boundary committed by `turn_id`, even when later turns
+/// have advanced the session head.
+///
+/// Application records name the committed user message for every turn. On the
+/// active graph path, the parent of the next turn's first application is the
+/// exact leaf selected by this turn. When there is no later application, the
+/// current leaf is still this turn's boundary (the ordinary under-lock path).
+fn committed_turn_boundary(
+    session: &LashSession,
+    applications: &[lash::TurnInputApplication],
+    turn_id: &lash::persistence::TurnId,
+) -> Result<String> {
+    let graph = session.read_view().session_graph().clone();
+    let nodes_by_id: std::collections::HashMap<&str, _> = graph
+        .nodes
+        .iter()
+        .map(|node| (node.node_id.as_str(), node))
+        .collect();
+    let mut active_path = Vec::new();
+    let mut cursor = graph.leaf_node_id.as_deref();
+    let mut visited = HashSet::new();
+    while let Some(node_id) = cursor {
+        if !visited.insert(node_id) {
+            bail!("channel session graph contains a cycle at {node_id}");
+        }
+        let node = nodes_by_id
+            .get(node_id)
+            .with_context(|| format!("channel graph leaf path is missing node {node_id}"))?;
+        active_path.push(*node);
+        cursor = node.parent_node_id.as_deref();
+    }
+    active_path.reverse();
+
+    let target_message_ids: HashSet<&str> = applications
+        .iter()
+        .filter(|application| &application.turn_id == turn_id)
+        .map(|application| application.committed_message_id.as_str())
+        .collect();
+    let target_index = active_path
+        .iter()
+        .enumerate()
+        .filter_map(|(index, node)| {
+            node_message_id(node)
+                .filter(|message_id| target_message_ids.contains(message_id))
+                .map(|_| index)
+        })
+        .next_back()
+        .context("committed turn application message is absent from the active channel graph")?;
+
+    let later_application_ids: HashSet<&str> = applications
+        .iter()
+        .filter(|application| &application.turn_id != turn_id)
+        .map(|application| application.committed_message_id.as_str())
+        .collect();
+    if let Some(next_turn) = active_path.iter().skip(target_index + 1).find(|node| {
+        node_message_id(node).is_some_and(|message_id| later_application_ids.contains(message_id))
+    }) {
+        return next_turn
+            .parent_node_id
+            .clone()
+            .context("a later committed turn has no preceding graph boundary");
+    }
+    graph
+        .leaf_node_id
+        .clone()
+        .context("committed turn has no graph leaf")
+}
+
+fn node_message_id(node: &lash::persistence::SessionNodeRecord) -> Option<&str> {
+    node.message_id()
 }
 
 async fn open_channel_session(

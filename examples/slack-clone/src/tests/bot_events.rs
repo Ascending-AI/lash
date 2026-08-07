@@ -359,11 +359,9 @@ async fn a_thread_forks_on_its_first_reply_and_inherits_uncommitted_root_context
     let thread_id = thread_session_id(&channel, &root.to_string());
     assert!(
         bot.core()
-            .fork_points()
+            .session_exists(&thread_id)
             .await
-            .expect("list fork points")
-            .iter()
-            .any(|point| point.source_session_id == thread_id),
+            .expect("check child session existence"),
         "the deterministic child session must exist"
     );
     assert_eq!(
@@ -444,6 +442,221 @@ async fn a_thread_fork_shares_a_committed_channel_turn_by_provenance() {
 }
 
 #[tokio::test]
+async fn recovery_records_the_applied_turns_boundary_after_a_later_turn_commits() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let bot_dir = bot_dir(scratch.path());
+    let script = Script::new([
+        Step::Text("Older answer.".to_string()),
+        Step::Text("Later answer.".to_string()),
+    ]);
+    let bot = start_bot(&platform, &bot_dir, &script).await;
+    let channel = platform.channel("recovery-retains-applied-turn").await;
+    let ada = platform.identify("ada").await;
+
+    let root = platform.say(&channel, &ada, "older retained fact").await;
+    let root_event = only_event(&platform.drain_envelopes().await, "message");
+    bot.ingest(root_event.clone(), None)
+        .await
+        .expect("fold older root");
+    platform
+        .say(
+            &channel,
+            &ada,
+            &format!("{} commit older turn", platform.mention()),
+        )
+        .await;
+    let older_mention = only_event(&platform.drain_envelopes().await, "app_mention");
+    let older_reply = bot
+        .ingest(older_mention.clone(), None)
+        .await
+        .expect("commit older turn");
+    let Disposition::Replied {
+        reply_ts: older_reply_ts,
+        ..
+    } = older_reply
+    else {
+        panic!("older mention must reply: {older_reply:?}");
+    };
+    let older_boundary = bot
+        .ledger()
+        .get(root_event.event_id.clone())
+        .await
+        .expect("read older root")
+        .expect("older root row")
+        .fork_node_id
+        .expect("older turn boundary was initially recorded");
+
+    // Reconstruct a crash after pinning the committed boundary but before the
+    // additive ledger write records it. The reply and terminal stage are also
+    // absent, so the next boot must take the committed empty-drain path.
+    platform.delete_message(&channel, &older_reply_ts).await;
+    bot.ledger()
+        .advance(
+            older_mention.event_id.clone(),
+            Stage::Replied,
+            Stage::Accepted,
+            None,
+            None,
+        )
+        .await
+        .expect("rewind older event to the crash window");
+    rusqlite::Connection::open(bot_dir.join("events.db"))
+        .expect("open ledger for crash staging")
+        .execute(
+            "UPDATE event_routes SET fork_node_id = NULL WHERE fork_node_id = ?1",
+            rusqlite::params![older_boundary],
+        )
+        .expect("remove the unrecorded boundary");
+
+    platform
+        .say(
+            &channel,
+            &ada,
+            &format!("{} commit later turn", platform.mention()),
+        )
+        .await;
+    let later_mention = only_event(&platform.drain_envelopes().await, "app_mention");
+    bot.ingest(later_mention.clone(), None)
+        .await
+        .expect("commit later turn");
+    let later_boundary = bot
+        .ledger()
+        .get(later_mention.event_id)
+        .await
+        .expect("read later mention")
+        .expect("later mention row")
+        .fork_node_id
+        .expect("later turn boundary");
+    assert_ne!(
+        older_boundary, later_boundary,
+        "the scenario must stage two distinct committed turn boundaries"
+    );
+
+    let recovered = bot.recover().await.expect("recover older turn").settled;
+    assert_eq!(recovered.len(), 1, "only the older turn was unfinished");
+    let recovered_root = bot
+        .ledger()
+        .get(root_event.event_id)
+        .await
+        .expect("read recovered root")
+        .expect("recovered root row");
+    assert_eq!(
+        recovered_root.fork_node_id.as_deref(),
+        Some(older_boundary.as_str()),
+        "recovery must retain the older applied turn, not the channel's current head"
+    );
+    assert_ne!(
+        recovered_root.fork_node_id.as_deref(),
+        Some(later_boundary.as_str()),
+        "post-root channel content must not become part of the root fork"
+    );
+    assert_eq!(root.to_string(), recovered_root.message_ts);
+}
+
+#[tokio::test]
+async fn thread_open_rederives_a_missing_root_boundary_from_its_application() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let bot_dir = bot_dir(scratch.path());
+    let script = Script::new([
+        Step::Text("Root turn answer.".to_string()),
+        Step::Text("Later channel answer.".to_string()),
+        Step::Text("Thread answer.".to_string()),
+    ]);
+    let bot = start_bot(&platform, &bot_dir, &script).await;
+    let channel = platform.channel("thread-rederives-root-boundary").await;
+    let ada = platform.identify("ada").await;
+
+    let root = platform.say(&channel, &ada, "root fact before fork").await;
+    let root_event = only_event(&platform.drain_envelopes().await, "message");
+    bot.ingest(root_event.clone(), None)
+        .await
+        .expect("fold root fact");
+    platform
+        .say(
+            &channel,
+            &ada,
+            &format!("{} commit root turn", platform.mention()),
+        )
+        .await;
+    let root_turn = only_event(&platform.drain_envelopes().await, "app_mention");
+    bot.ingest(root_turn, None).await.expect("commit root turn");
+    let recorded_root = bot
+        .ledger()
+        .get(root_event.event_id.clone())
+        .await
+        .expect("read committed root")
+        .expect("committed root row");
+    let root_boundary = recorded_root
+        .fork_node_id
+        .expect("root boundary initially recorded");
+    assert!(
+        recorded_root.input_id.is_some(),
+        "root keeps durable input identity"
+    );
+
+    // Crash between pin and record_fork_node_for_inputs: the retained point and
+    // application survive, but this root route lacks its fork-node projection.
+    rusqlite::Connection::open(bot_dir.join("events.db"))
+        .expect("open ledger for crash staging")
+        .execute(
+            "UPDATE event_routes SET fork_node_id = NULL WHERE event_id = ?1",
+            rusqlite::params![root_event.event_id],
+        )
+        .expect("remove root fork-node projection");
+
+    platform
+        .say(
+            &channel,
+            &ada,
+            &format!("{} later channel turn", platform.mention()),
+        )
+        .await;
+    let later_turn = only_event(&platform.drain_envelopes().await, "app_mention");
+    bot.ingest(later_turn, None)
+        .await
+        .expect("commit later channel turn");
+
+    platform
+        .say_thread(
+            &channel,
+            &ada,
+            root,
+            &format!("{} open from root", platform.mention()),
+        )
+        .await;
+    let thread_turn = only_event(&platform.drain_envelopes().await, "app_mention");
+    bot.ingest(thread_turn, None)
+        .await
+        .expect("open thread from rederived root");
+
+    let requests = script.requests();
+    assert_eq!(requests.len(), 3);
+    assert!(
+        requests[2].contains("root fact before fork"),
+        "the rederived boundary includes the root turn: {}",
+        requests[2]
+    );
+    assert!(
+        !requests[2].contains("later channel turn"),
+        "thread-open must not silently degrade a repairable root to the current head: {}",
+        requests[2]
+    );
+    let repaired_root = bot
+        .ledger()
+        .get(root_event.event_id)
+        .await
+        .expect("read repaired root")
+        .expect("repaired root row");
+    assert_eq!(
+        repaired_root.fork_node_id.as_deref(),
+        Some(root_boundary.as_str()),
+        "thread-open repairs the durable root projection"
+    );
+}
+
+#[tokio::test]
 async fn thread_and_channel_traffic_are_isolated_after_the_fork() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
@@ -502,7 +715,10 @@ async fn thread_and_channel_traffic_are_isolated_after_the_fork() {
     );
 
     let channel_text = channel_session_text(&bot, &channel).await;
-    assert!(channel_text.contains("shared before fork") || channel_text.is_empty());
+    assert_eq!(
+        channel_text, "",
+        "queued channel inputs and thread turns must not become committed channel transcript"
+    );
     assert!(!channel_text.contains("first thread turn"));
     assert!(!channel_text.contains("second thread turn"));
     let channel_session = bot
@@ -519,6 +735,11 @@ async fn thread_and_channel_traffic_are_isolated_after_the_fork() {
             .len(),
         2,
         "the root and post-fork channel traffic remain queued only on the channel session"
+    );
+    assert_eq!(
+        bot.session_lock_count(),
+        0,
+        "uncontended routed-session locks are scoped to active handling"
     );
 }
 

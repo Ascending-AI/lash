@@ -128,18 +128,23 @@ The ledger records the `input_id` returned by Lash for every Slack admission.
 After a channel turn commits, the bot reads `turn_input_applications`, finds the
 application for that `input_id`, groups every application with the same typed
 `turn_id`, pins the committed leaf, and records that boundary for those Slack
-messages. Nothing parses an input, turn, message, or node id.
+messages. If a crash lands after the pin but before that ledger write, thread-open
+uses the durable application to re-derive and repair the missing boundary before
+it forks. Nothing parses an input, turn, message, or node id.
 
-Queued ambient input presents one honest wrinkle: a message has reached the
-channel session but has no committed graph node until a later mention drains it.
-A newly opened channel therefore has a non-message baseline commit so it is
-forkable without spending a token. If the thread starts while its root is still
-queued, the child forks at the channel's current committed head and copies the
-top-level admissions through the root that are not already present in the
-child's graph. They remain queued and are folded by the thread's first mention.
-The same current-head fallback covers a bot that joined after the root was
-posted; in that case there is no admission to copy, and claiming older history
-would be dishonest.
+A newly opened channel has a non-message baseline commit, so every honest
+fallback is forkable without spending a token. Thread-open chooses as follows:
+
+| Durable root evidence | Fork boundary and context policy |
+| --- | --- |
+| Recorded `fork_node_id` | Fork at that retained turn boundary. |
+| `input_id` with a committed application, but no `fork_node_id` | Re-derive the applied turn boundary, repair the ledger row, then fork there. |
+| `input_id` with no application record | The root is still queued: fork at the current committed head and copy top-level admissions through the root that are not already in the child graph. |
+| No root admission (for example, the bot joined after the root was posted) | Fork at the current committed head and invent no older context. |
+
+Copied admissions remain queued and are folded by the thread's first mention.
+The current-head fallback is deliberately limited to cases where the durable
+application needed to name an older committed boundary is absent.
 
 Fork isolation is directional in both cases and is asserted against the real
 store semantics:
@@ -153,9 +158,11 @@ The staged event ledger carries `thread_ts`, so recovery opens the same child
 session, takes the same per-session lock, and applies the same accepted / reply
 pending / terminal protocol. Locks are keyed by routed session id: events in one
 thread serialize, while sibling threads and their channel can progress in
-parallel. A deleted thread id is a permanent single-use tombstone; attempting to
-re-engage it settles as `thread_session_retired` rather than silently creating an
-unrelated conversation under the same id.
+parallel. An idle lock entry is removed after its last holder or waiter finishes,
+so old thread ids do not accumulate in memory. A deleted thread id is a permanent
+single-use tombstone; attempting to re-engage it settles as
+`thread_session_retired` rather than silently creating an unrelated conversation
+under the same id.
 
 On the platform side, clicking a parent opens the right-hand thread panel,
 replies stay out of the main list, and the parent carries a reply count. Slack's
