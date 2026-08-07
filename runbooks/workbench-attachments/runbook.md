@@ -24,8 +24,12 @@ cross-surface identity, not the quality of the model's image description.
    does not prove the affordance.
 2. **One id across host surfaces.** The upload response's `attachment.id`, the next
    `/api/turn.attachment_id`, the retrieval response's `x-lash-attachment-id`, and the
-   retrieval URL must agree. The trace deliberately records bytes SHA-256/length/MIME
-   rather than the host attachment id; reconcile those content facts separately.
+   retrieval URL must agree. Durable effects normalize inline bytes to a stored source
+   before `llm_call_started`, so correlate three trace records: the upload event carries
+   id/byte length/MIME, `llm_call_started` carries the stored source/MIME and the exact
+   reference in the rendered prompt, and `provider_request` carries the serialized wire
+   body's length and SHA-256. `bytes_sha256`/`bytes_len` on a trace attachment are
+   inline-source fields and are intentionally absent after this normalization.
 3. **Compare bytes, not availability.** Save the source and both retrievals; SHA-256 and
    byte length must match exactly before and after restart.
 4. **Replace the web process.** Use `just agent-workbench-restart <port>` and require the
@@ -104,10 +108,16 @@ Complete the three-layer attachment cross-check before continuing:
    the expected `attachments/sha256/` path; hash and length must match the source.
 
 From the matching trace turn, save the `llm_call_started` record as
-`02-provider-request.json`. Require one request attachment with MIME `image/png`, source
-byte length, and `bytes_sha256` equal to the source hash. A plausible visual answer without
-this provider-request evidence is not a pass. Save `/api/state` as `02-state.json` and
-screenshot the settled scrolled transcript as `02-referenced-turn.png`.
+`02-provider-request.json`. Require one request attachment with `source: stored` and MIME
+`image/png`, and require the request's rendered attachment descriptor to contain the upload
+id as its `reference`. Save the matching `agent_workbench.api.attachment.uploaded` record as
+`02-upload-trace.json` and require its id, MIME, and byte length to match the source. Save
+the `provider_request` record with the same `llm_call_id` as `02-provider-wire.json`; require
+a non-empty serialized body with a SHA-256 digest. These correlated records prove the exact
+stored source reached a real provider request while the upload/retrieval/blob checks prove
+its content facts. A plausible visual answer without this trace chain is not a pass. Save
+`/api/state` as `02-state.json` and screenshot the settled scrolled transcript as
+`02-referenced-turn.png`.
 
 ## Phase 3 — Replace the process and retrieve again
 
@@ -137,7 +147,7 @@ are gone.
 | Deterministic companion | SQLite + Postgres gate command exits zero | | command log |
 | Rendered upload | attached filename is visible before send | | `01-attached.png`, upload JSON |
 | Byte fidelity | source and pre-restart retrieval hashes/lengths agree | | source, `01-before-restart.png` |
-| Turn reference | `/api/turn` carries the upload id; trace carries matching content facts | | request capture, `02-provider-request.json` |
+| Turn reference | `/api/turn` carries the upload id; correlated upload/request/wire traces carry matching reference and content facts | | request capture, `02-upload-trace.json`, `02-provider-request.json`, `02-provider-wire.json` |
 | Live image render | optimistic user row has one loaded, bounded, linked image; retrieval is 200 | | `02-rendered-image.png`, DOM capture, headers |
 | Committed turn | one settled UI row and `/api/state` attachment ref agree with committed manifest/blob | | `02-referenced-turn.png`, `02-state.json`, manifest query |
 | Restart persistence | PID changed; image reloads from the committed ref and retrieval is byte-identical | | `03-restarted.png`, `03-state.json`, `03-after-restart.png`, command log |
