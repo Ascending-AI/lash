@@ -79,6 +79,7 @@ dependencies = [
  "lash-rlm-types",
  "lash-runtime",
  "lash-sqlite-store",
+ "lash-standard-plugins",
  "lash-subagents",
  "lash-tools",
  "lashlang",

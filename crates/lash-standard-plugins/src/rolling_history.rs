@@ -24,7 +24,7 @@ use lash_core::{
 };
 
 const PRUNE_RECENT_USER_TURNS: usize = 2;
-const COMPACTION_BUFFER_TOKENS: usize = 20_000;
+pub const ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS: usize = 20_000;
 const COMPACTION_KEEP_RECENT_TOKENS: usize = 20_000;
 const PRUNE_CONTEXT_THRESHOLD: f64 = 0.6;
 /// Marker `plugin_id` stamped on compaction summary messages so the
@@ -196,7 +196,8 @@ fn compaction_needed(
 }
 
 fn compaction_threshold(max_context_tokens: usize) -> usize {
-    max_context_tokens.saturating_sub(COMPACTION_BUFFER_TOKENS.min(max_context_tokens))
+    max_context_tokens
+        .saturating_sub(ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS.min(max_context_tokens))
 }
 
 fn compaction_turn_id(parent_turn_id: &str) -> String {
@@ -424,15 +425,16 @@ impl TurnContextTransform for RollingTurnTransform {
         if !needs_pruning && !needs_compaction {
             return Ok(input);
         }
+        let (Some(usage), Some(max_context_tokens)) = (prompt_usage, max_context_tokens) else {
+            unreachable!("rolling-history decisions require prompt usage and a context window")
+        };
 
         let mut trace_context =
             lash_core::TraceContext::default().for_session(ctx.session_id.clone());
         if let Some(turn_id) = ctx.scoped_effect_controller.turn_id() {
             trace_context = trace_context.for_turn(turn_id);
         }
-        if needs_compaction
-            && let (Some(usage), Some(max_context_tokens)) = (prompt_usage, max_context_tokens)
-        {
+        if needs_compaction {
             ctx.session_graph
                 .emit_trace_event(
                     trace_context.clone(),
@@ -459,16 +461,25 @@ impl TurnContextTransform for RollingTurnTransform {
         let prefix_len = leading_system_prefix_len(messages);
         let cut_point = find_compaction_cut_point(messages, prefix_len);
         if cut_point <= prefix_len {
+            ctx.session_graph
+                .emit_trace_event(
+                    trace_context,
+                    lash_core::TraceEvent::RollingHistoryPromptPruned {
+                        context_budget_tokens: usage.context_budget_tokens,
+                        max_context_tokens,
+                        dropped_prefix_messages: 0,
+                        retained_messages: messages.len(),
+                    },
+                )
+                .await?;
             return Ok(input);
         }
 
         let message_count = messages.len();
         let projected = prompt_tail_window(messages, cut_point);
         let dropped_prefix_messages = message_count.saturating_sub(projected.len());
+        let retained_messages = projected.len();
         input.messages.replace(projected);
-        let usage = prompt_usage.expect("compaction decision requires prompt usage");
-        let max_context_tokens =
-            max_context_tokens.expect("compaction decision requires max context tokens");
         ctx.session_graph
             .emit_trace_event(
                 trace_context,
@@ -476,6 +487,7 @@ impl TurnContextTransform for RollingTurnTransform {
                     context_budget_tokens: usage.context_budget_tokens,
                     max_context_tokens,
                     dropped_prefix_messages,
+                    retained_messages,
                 },
             )
             .await?;
@@ -533,18 +545,19 @@ impl ContextCompactor for RollingContextCompactor {
             session_lifecycle,
             scoped_effect_controller,
         )
-        .await?;
-        if let Some(compaction) = compaction.as_ref() {
-            ctx.session_graph
-                .emit_trace_event(
-                    trace_context,
-                    lash_core::TraceEvent::RollingHistoryCompactionCompleted {
-                        summary_nodes: compaction.initial_nodes.len(),
-                    },
-                )
-                .await?;
-        }
-        Ok(compaction)
+        .await;
+        let summary_nodes = compaction
+            .as_ref()
+            .ok()
+            .and_then(Option::as_ref)
+            .map_or(0, |compaction| compaction.initial_nodes.len());
+        ctx.session_graph
+            .emit_trace_event(
+                trace_context,
+                lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes },
+            )
+            .await?;
+        compaction
     }
 }
 
@@ -553,7 +566,7 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    use lash_core::plugin::SessionGraphService;
+    use lash_core::plugin::{SessionGraphService, SessionLifecycleService, SessionStateService};
     use lash_core::{SessionGraph, SessionPolicy};
     use serde_json::json;
 
@@ -700,18 +713,51 @@ mod tests {
         manager: Arc<MockSessionManager>,
         session_graph: Arc<dyn SessionGraphService>,
     ) -> CompactionContext<'static> {
+        let sessions = manager.clone();
+        build_compaction_ctx_with_services(
+            session_id,
+            state,
+            instructions,
+            sessions,
+            manager,
+            session_graph,
+        )
+    }
+
+    fn build_compaction_ctx_with_services(
+        session_id: &str,
+        state: SessionSnapshot,
+        instructions: Option<String>,
+        sessions: Arc<dyn SessionStateService>,
+        session_lifecycle: Arc<dyn SessionLifecycleService>,
+        session_graph: Arc<dyn SessionGraphService>,
+    ) -> CompactionContext<'static> {
         CompactionContext {
             session_id: session_id.to_string(),
             instructions,
             state: state.read_view(),
-            sessions: manager.clone(),
-            session_lifecycle: manager.clone(),
+            sessions,
+            session_lifecycle,
             session_graph,
             scoped_effect_controller: lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
                 lash_core::ExecutionScope::runtime_operation("rolling-history-compact-test"),
             )
             .expect("test scoped effect controller"),
+        }
+    }
+
+    struct FailingSessionLifecycle;
+
+    #[async_trait]
+    impl SessionLifecycleService for FailingSessionLifecycle {
+        async fn create_session(
+            &self,
+            _request: SessionCreateRequest,
+        ) -> Result<lash_core::plugin::SessionHandle, PluginError> {
+            Err(PluginError::Session(
+                "scripted compaction-session failure".to_string(),
+            ))
         }
     }
 
@@ -871,6 +917,58 @@ mod tests {
                 context_budget_tokens: 30_000,
                 max_context_tokens: 40_000,
                 dropped_prefix_messages: 2,
+                retained_messages: 1,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn rolling_turn_transform_records_needed_when_no_cut_point_exists() {
+        let manager = Arc::new(mock_manager());
+        let trace = Arc::new(RecordingSessionGraph::default());
+        let transform = RollingTurnTransform::new(RollingHistoryConfig);
+        let state = SessionSnapshot {
+            session_id: "root".to_string(),
+            policy: SessionPolicy::default(),
+            ..Default::default()
+        };
+        let ctx = build_turn_ctx_with_graph(
+            "root",
+            state,
+            Some(PromptUsage {
+                prompt_context_tokens: 30_000,
+                input_tokens: 30_000,
+                cache_read_input_tokens: 0,
+                cache_write_input_tokens: 0,
+                context_budget_tokens: 30_000,
+            }),
+            Some(40_000),
+            manager,
+            trace.clone(),
+        );
+        let prepared = PreparedContext {
+            messages: vec![
+                text_message("s1", MessageRole::System, "policy"),
+                text_message("s2", MessageRole::System, "more policy"),
+            ]
+            .into(),
+            ..Default::default()
+        };
+
+        transform
+            .transform(&ctx, prepared)
+            .await
+            .expect("no-cut-point decision should be traced");
+
+        let events = trace.events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            events[1].1,
+            lash_core::TraceEvent::RollingHistoryPromptPruned {
+                context_budget_tokens: 30_000,
+                max_context_tokens: 40_000,
+                dropped_prefix_messages: 0,
+                retained_messages: 2,
             }
         );
     }
@@ -956,6 +1054,70 @@ mod tests {
         assert_eq!(
             events[1].1,
             lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 }
+        );
+    }
+
+    #[tokio::test]
+    async fn rolling_compactor_records_zero_node_completion_for_none() {
+        let manager = Arc::new(mock_manager());
+        let trace = Arc::new(RecordingSessionGraph::default());
+        let state = SessionSnapshot {
+            session_id: "root".to_string(),
+            policy: SessionPolicy::default(),
+            ..Default::default()
+        };
+        let ctx = build_compaction_ctx_with_graph("root", state, None, manager, trace.clone());
+
+        let compaction = RollingContextCompactor::new(RollingHistoryConfig)
+            .compact(&ctx)
+            .await
+            .expect("empty history is a successful no-op");
+
+        assert!(compaction.is_none());
+        assert_eq!(
+            trace.events()[1].1,
+            lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 0 }
+        );
+    }
+
+    #[tokio::test]
+    async fn rolling_compactor_records_zero_node_completion_before_error() {
+        let manager = Arc::new(mock_manager());
+        let trace = Arc::new(RecordingSessionGraph::default());
+        let messages = vec![
+            text_message("u1", MessageRole::User, "old work"),
+            text_message("a1", MessageRole::Assistant, "assistant old"),
+            text_message("u2", MessageRole::User, "latest request"),
+        ];
+        let state = SessionSnapshot {
+            session_id: "root".to_string(),
+            policy: SessionPolicy::default(),
+            session_graph: SessionGraph::from_active_read_state(&messages),
+            ..Default::default()
+        };
+        let sessions = manager as Arc<dyn SessionStateService>;
+        let ctx = build_compaction_ctx_with_services(
+            "root",
+            state,
+            None,
+            sessions,
+            Arc::new(FailingSessionLifecycle),
+            trace.clone(),
+        );
+
+        let error = RollingContextCompactor::new(RollingHistoryConfig)
+            .compact(&ctx)
+            .await
+            .expect_err("scripted lifecycle failure must propagate");
+
+        assert!(
+            error
+                .to_string()
+                .contains("scripted compaction-session failure")
+        );
+        assert_eq!(
+            trace.events()[1].1,
+            lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 0 }
         );
     }
 }

@@ -42,6 +42,7 @@ use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatiblePr
 use lash_remote_protocol::{
     RemoteLiveReplayGap, RemoteSessionObservation, RemoteSessionObservationEvent,
 };
+use lash_standard_plugins::ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc};
@@ -50,6 +51,7 @@ use tokio_stream::wrappers::ReceiverStream;
 const SESSION_ID_PREFIX: &str = "workbench";
 const DEFAULT_CONTEXT_WINDOW_TOKENS: usize = 200_000;
 const AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV: &str = "AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS";
+const MIN_CONTEXT_WINDOW_TOKENS: usize = ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS * 2;
 static WORKBENCH_CONTEXT_WINDOW_TOKENS: OnceLock<usize> = OnceLock::new();
 const OPENROUTER_API_KEY_ENV: &str = "OPENROUTER_API_KEY";
 pub(crate) const BUTTON_TRIGGER_RESOURCE: &str = "Button";

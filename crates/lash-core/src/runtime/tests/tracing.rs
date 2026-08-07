@@ -46,6 +46,45 @@ where
 }
 
 #[tokio::test]
+async fn runtime_session_graph_service_routes_rolling_history_event_to_real_sink() {
+    let trace_path = std::env::temp_dir().join(format!(
+        "lash-runtime-plugin-trace-{}-{}.jsonl",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let runtime = standard_runtime_with_transport_and_host(
+        mock_provider(Vec::new()),
+        test_host_config_with_trace_path(trace_path.clone()),
+    )
+    .await;
+    let graph = runtime
+        .session_graph_service()
+        .expect("resident runtime exposes its graph service");
+
+    graph
+        .emit_trace_event(
+            crate::TraceContext::default().for_session("emitter-supplied-id"),
+            crate::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 0 },
+        )
+        .await
+        .expect("runtime graph service should route trace records");
+
+    let logged = std::fs::read_to_string(&trace_path).expect("read runtime trace sink");
+    let record: crate::TraceRecord =
+        serde_json::from_str(logged.lines().next().expect("one trace record"))
+            .expect("typed trace record");
+    assert_eq!(record.context.session_id.as_deref(), Some("root"));
+    assert!(matches!(
+        record.event,
+        crate::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 0 }
+    ));
+    let _ = std::fs::remove_file(trace_path);
+}
+
+#[tokio::test]
 async fn provider_spans_are_children_of_the_turn_span() {
     let provider = TestProvider::builder()
         .kind("mock")

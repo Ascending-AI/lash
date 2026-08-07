@@ -90,6 +90,7 @@ fn event_samples() -> Vec<TraceEvent> {
             context_budget_tokens: 30_000,
             max_context_tokens: 40_000,
             dropped_prefix_messages: 2,
+            retained_messages: 1,
         },
         TraceEvent::RollingHistoryCompactionStarted {
             source_messages: 3,
@@ -287,6 +288,7 @@ fn rolling_history_events_pin_decision_payloads() {
             context_budget_tokens: 30_000,
             max_context_tokens: 40_000,
             dropped_prefix_messages: 2,
+            retained_messages: 1,
         },
         TraceEvent::RollingHistoryCompactionStarted {
             source_messages: 3,
@@ -309,6 +311,7 @@ fn rolling_history_events_pin_decision_payloads() {
                 "context_budget_tokens": 30_000,
                 "max_context_tokens": 40_000,
                 "dropped_prefix_messages": 2,
+                "retained_messages": 1,
             }),
             json!({
                 "type": "rolling_history_compaction_started",

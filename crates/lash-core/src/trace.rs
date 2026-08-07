@@ -139,11 +139,13 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
         TraceEvent::PromptBuilt { .. }
         | TraceEvent::RollingHistoryCompactionNeeded { .. }
         | TraceEvent::RollingHistoryPromptPruned { .. }
-        | TraceEvent::RollingHistoryCompactionStarted { .. }
-        | TraceEvent::RollingHistoryCompactionCompleted { .. }
         | TraceEvent::EffectEnvelopeDiff { .. }
         | TraceEvent::ProtocolStep { .. }
         | TraceEvent::TokenUsage { .. } => set_span(context, None, turn_node),
+        TraceEvent::RollingHistoryCompactionStarted { .. }
+        | TraceEvent::RollingHistoryCompactionCompleted { .. } => {
+            set_span(context, None, turn_node.or(session_node));
+        }
         // Events that already carry their own node identity in the payload, and
         // host-defined custom events, keep whatever the emitter set.
         _ => {}
@@ -601,6 +603,24 @@ mod span_identity_tests {
         assert_eq!(
             context.parent_graph_node_id.as_deref(),
             Some("turn:sess:turn-1")
+        );
+    }
+
+    #[test]
+    fn turnless_rolling_history_record_parents_under_session() {
+        let mut context = TraceContext::default().for_session("compact-session");
+        assign_span_identity(
+            &mut context,
+            &TraceEvent::RollingHistoryCompactionStarted {
+                source_messages: 3,
+                instructions_present: false,
+            },
+        );
+
+        assert_eq!(context.graph_node_id, None);
+        assert_eq!(
+            context.parent_graph_node_id.as_deref(),
+            Some("session:compact-session")
         );
     }
 }

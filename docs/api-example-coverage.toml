@@ -692,8 +692,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::Session"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:968#let error = AppError::session_open(lash::EmbedError::Session("
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:978#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:967#let error = AppError::session_open(lash::EmbedError::Session("
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:977#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::EmbedError::Session::0"
@@ -756,8 +756,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::Store"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:956#let error = AppError::session_open(lash::EmbedError::Store("
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:961#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:955#let error = AppError::session_open(lash::EmbedError::Store("
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:960#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::EmbedError::Store::0"
@@ -847,7 +847,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::is_retryable"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:864#let retryable = error.is_retryable();"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:863#let retryable = error.is_retryable();"
 assertion = "examples/agent-workbench/src/restate_tests.rs:201#assert!(!error.retryable);"
 
 [[api]]
@@ -857,7 +857,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::is_terminal"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:865#let terminal = error.is_terminal();"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:864#let terminal = error.is_terminal();"
 assertion = "examples/agent-workbench/src/restate_tests.rs:200#assert!(error.terminal);"
 
 [[api]]
@@ -3763,7 +3763,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:892#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:891#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:712, inside `deleted_session_details`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/app_state.rs:686 asserts an unrelated expression in `runtime`, and `deleted_session_details` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -3926,7 +3926,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:892#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:891#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:712, inside `deleted_session_details`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/app_state.rs:686 asserts an unrelated expression in `runtime`, and `deleted_session_details` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -3936,8 +3936,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store::context"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:970#context: format!(\"failed to bind session `{session_id}` to its store\"),"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:978#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:969#context: format!(\"failed to bind session `{session_id}` to its store\"),"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:977#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::SessionError::Store::source"
@@ -3946,8 +3946,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store::source"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:971#source: lash::persistence::StoreError::SessionDeleted {"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:978#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:970#source: lash::persistence::StoreError::SessionDeleted {"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:977#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::SessionSpec"
@@ -16479,8 +16479,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SessionDeleted"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:909#lash::persistence::StoreError::SessionDeleted {"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:961#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:908#lash::persistence::StoreError::SessionDeleted {"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:960#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::persistence::StoreError::SessionDeleted::session_id"
@@ -16489,8 +16489,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SessionDeleted::session_id"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:958#session_id: \"retired-session\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:961#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:957#session_id: \"retired-session\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:960#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::persistence::StoreError::SessionExecutionLeaseExpired"
@@ -45079,8 +45079,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:896#return error.deleted_session_id().map(|session_id| (session_id, None));"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:961#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:895#return error.deleted_session_id().map(|session_id| (session_id, None));"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:960#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::cause"
@@ -45107,8 +45107,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError::deleted_session_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:896#return error.deleted_session_id().map(|session_id| (session_id, None));"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:961#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:895#return error.deleted_session_id().map(|session_id| (session_id, None));"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:960#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::message"
@@ -54390,7 +54390,7 @@ aliases = ["lash_core::TraceEvent::LlmCallCompleted::provider_usage"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:359#provider_usage: Some(serde_json::json!({ \"cached_tokens\": 64 })),"
-assertion = "examples/docs-snippets/src/tracing.rs:389#assert_eq!(event_wire[7][\"provider_usage\"][\"cached_tokens\"], 64);"
+assertion = "examples/docs-snippets/src/tracing.rs:405#assert_eq!(event_wire[7][\"provider_usage\"][\"cached_tokens\"], 64);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:359; the assertion at examples/docs-snippets/src/tracing.rs:389 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[7][\"provider_usage\"][\"cached_tokens\"]` equals `64`."
 
 [[api]]
@@ -54474,7 +54474,7 @@ aliases = ["lash_core::TraceEvent::PromptBuilt"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:326#TraceEvent::PromptBuilt {"
-assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:326; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -54485,7 +54485,7 @@ aliases = ["lash_core::TraceEvent::PromptBuilt::components"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:329#components: vec![component],"
-assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:329; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -54496,7 +54496,7 @@ aliases = ["lash_core::TraceEvent::PromptBuilt::prompt_chars"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:328#prompt_chars: 2_048,"
-assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:328; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -54507,7 +54507,7 @@ aliases = ["lash_core::TraceEvent::PromptBuilt::prompt_hash"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:327#prompt_hash: \"sha256:prompt\".to_string(),"
-assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:327; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -54516,8 +54516,9 @@ kind = "variant"
 availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionCompleted"]
 area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: custom observability sink implementers consuming typed rolling-history decisions from the standard plugin; the bundled JSONL sink, trace viewer, and OpenTelemetry sink also consume this variant."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:377#TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 },"
+assertion = "examples/docs-snippets/src/tracing.rs:418#assert!(event_wire[11][\"type\"] == \"rolling_history_compaction_completed\");"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionCompleted::summary_nodes"
@@ -54525,8 +54526,9 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionCompleted::summary_nodes"]
 area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: custom observability sink implementers gating on whether explicit rolling-history compaction produced summary seed nodes."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:377#TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 },"
+assertion = "examples/docs-snippets/src/tracing.rs:419#assert_eq!(event_wire[11][\"summary_nodes\"], 1);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionNeeded"
@@ -54534,8 +54536,9 @@ kind = "variant"
 availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionNeeded"]
 area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: custom observability sink implementers consuming typed rolling-history threshold decisions from the standard plugin."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:362#TraceEvent::RollingHistoryCompactionNeeded {"
+assertion = "examples/docs-snippets/src/tracing.rs:406#assert_eq!(event_wire[8][\"type\"], \"rolling_history_compaction_needed\");"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionNeeded::context_budget_tokens"
@@ -54543,8 +54546,9 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionNeeded::context_budget_tokens"]
 area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: custom observability sink implementers comparing the observed prompt context budget with the rolling-history compaction threshold."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:363#context_budget_tokens: 30_000,"
+assertion = "examples/docs-snippets/src/tracing.rs:407#assert_eq!(event_wire[8][\"context_budget_tokens\"], 30_000);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionNeeded::max_context_tokens"
@@ -54552,8 +54556,9 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionNeeded::max_context_tokens"]
 area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: custom observability sink implementers comparing the configured model context window with the rolling-history compaction threshold."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:364#max_context_tokens: 40_000,"
+assertion = "examples/docs-snippets/src/tracing.rs:408#assert_eq!(event_wire[8][\"max_context_tokens\"], 40_000);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionNeeded::threshold_tokens"
@@ -54561,8 +54566,9 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionNeeded::threshold_tokens"]
 area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: custom observability sink implementers gating on the exact token threshold that caused rolling-history compaction to become necessary."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:365#threshold_tokens: 20_000,"
+assertion = "examples/docs-snippets/src/tracing.rs:409#assert_eq!(event_wire[8][\"threshold_tokens\"], 20_000);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionStarted"
@@ -54570,8 +54576,9 @@ kind = "variant"
 availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionStarted"]
 area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: custom observability sink implementers observing explicit rolling-history compactor invocation."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:373#TraceEvent::RollingHistoryCompactionStarted {"
+assertion = "examples/docs-snippets/src/tracing.rs:415#assert_eq!(event_wire[10][\"type\"], \"rolling_history_compaction_started\");"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionStarted::instructions_present"
@@ -54579,8 +54586,9 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionStarted::instructions_present"]
 area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: custom observability sink implementers distinguishing guided from default rolling-history compactor invocation without recording instruction contents."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:375#instructions_present: true,"
+assertion = "examples/docs-snippets/src/tracing.rs:417#assert_eq!(event_wire[10][\"instructions_present\"], true);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionStarted::source_messages"
@@ -54588,8 +54596,9 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionStarted::source_messages"]
 area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: custom observability sink implementers recording the source message count presented to the rolling-history compactor."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:374#source_messages: 3,"
+assertion = "examples/docs-snippets/src/tracing.rs:416#assert_eq!(event_wire[10][\"source_messages\"], 3);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned"
@@ -54597,8 +54606,9 @@ kind = "variant"
 availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned"]
 area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: custom observability sink implementers observing typed rolling-history prompt-view pruning decisions."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:367#TraceEvent::RollingHistoryPromptPruned {"
+assertion = "examples/docs-snippets/src/tracing.rs:410#assert_eq!(event_wire[9][\"type\"], \"rolling_history_prompt_pruned\");"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned::context_budget_tokens"
@@ -54606,8 +54616,9 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned::context_budget_tokens"]
 area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: custom observability sink implementers recording the context budget that caused rolling-history prompt-view pruning."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:368#context_budget_tokens: 30_000,"
+assertion = "examples/docs-snippets/src/tracing.rs:411#assert_eq!(event_wire[9][\"context_budget_tokens\"], 30_000);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned::dropped_prefix_messages"
@@ -54615,8 +54626,9 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned::dropped_prefix_messages"]
 area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: custom observability sink implementers gating on the number of prefix messages removed from the ephemeral prompt view."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:370#dropped_prefix_messages: 2,"
+assertion = "examples/docs-snippets/src/tracing.rs:413#assert_eq!(event_wire[9][\"dropped_prefix_messages\"], 2);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned::max_context_tokens"
@@ -54624,8 +54636,19 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned::max_context_tokens"]
 area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: custom observability sink implementers correlating prompt-view pruning with the configured model context window."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:369#max_context_tokens: 40_000,"
+assertion = "examples/docs-snippets/src/tracing.rs:412#assert_eq!(event_wire[9][\"max_context_tokens\"], 40_000);"
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned::retained_messages"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned::retained_messages"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/tracing.rs:371#retained_messages: 1,"
+assertion = "examples/docs-snippets/src/tracing.rs:414#assert_eq!(event_wire[9][\"retained_messages\"], 1);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::ProtocolStep"
@@ -54653,7 +54676,7 @@ aliases = ["lash_core::TraceEvent::ProtocolStep::plugin_id"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:347#plugin_id: \"standard\".to_string(),"
-assertion = "examples/docs-snippets/src/tracing.rs:388#assert_eq!(event_wire[6][\"plugin_id\"], \"standard\");"
+assertion = "examples/docs-snippets/src/tracing.rs:404#assert_eq!(event_wire[6][\"plugin_id\"], \"standard\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:347; the assertion at examples/docs-snippets/src/tracing.rs:388 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[6][\"plugin_id\"]` equals `\"standard\"`."
 
 [[api]]
@@ -54664,7 +54687,7 @@ aliases = ["lash_core::TraceEvent::ProviderRequest"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:331#TraceEvent::ProviderRequest {"
-assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:331; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -54675,7 +54698,7 @@ aliases = ["lash_core::TraceEvent::ProviderRequest::event"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:332#event: provider_request,"
-assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:332; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -54686,7 +54709,7 @@ aliases = ["lash_core::TraceEvent::ProviderStreamEvent"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:334#TraceEvent::ProviderStreamEvent {"
-assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:334; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -54697,7 +54720,7 @@ aliases = ["lash_core::TraceEvent::ProviderStreamEvent::event"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:335#event: provider_stream,"
-assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:335; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -54837,7 +54860,7 @@ aliases = ["lash_core::TraceEvent::ToolCallStarted"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:340#TraceEvent::ToolCallStarted {"
-assertion = "examples/docs-snippets/src/tracing.rs:378#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
+assertion = "examples/docs-snippets/src/tracing.rs:394#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:340; the assertion at examples/docs-snippets/src/tracing.rs:378 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[4][\"args\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -54848,7 +54871,7 @@ aliases = ["lash_core::TraceEvent::ToolCallStarted::args"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:343#args: serde_json::json!({ \"query\": \"release notes\" }),"
-assertion = "examples/docs-snippets/src/tracing.rs:378#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
+assertion = "examples/docs-snippets/src/tracing.rs:394#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:343; the assertion at examples/docs-snippets/src/tracing.rs:378 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[4][\"args\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -54859,7 +54882,7 @@ aliases = ["lash_core::TraceEvent::ToolCallStarted::call_id"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:341#call_id: Some(\"call-7\".to_string()),"
-assertion = "examples/docs-snippets/src/tracing.rs:378#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
+assertion = "examples/docs-snippets/src/tracing.rs:394#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:341; the assertion at examples/docs-snippets/src/tracing.rs:378 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[4][\"args\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -54870,7 +54893,7 @@ aliases = ["lash_core::TraceEvent::ToolCallStarted::name"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:342#name: \"search_docs\".to_string(),"
-assertion = "examples/docs-snippets/src/tracing.rs:378#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
+assertion = "examples/docs-snippets/src/tracing.rs:394#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:342; the assertion at examples/docs-snippets/src/tracing.rs:378 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[4][\"args\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -56279,7 +56302,7 @@ aliases = ["lash_core::TracePromptComponent"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:137#let component = TracePromptComponent {"
-assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:137; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -56290,7 +56313,7 @@ aliases = ["lash_core::TracePromptComponent::chars"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:146#assert_eq!(component.chars, Some(42));"
-assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:146; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -56301,7 +56324,7 @@ aliases = ["lash_core::TracePromptComponent::hash"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:145#assert_eq!(component.hash, \"sha256:prompt-policy\");"
-assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:145; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -56312,7 +56335,7 @@ aliases = ["lash_core::TracePromptComponent::id"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:143#assert_eq!(component.id, \"plugin:policy\");"
-assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:143; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -56323,7 +56346,7 @@ aliases = ["lash_core::TracePromptComponent::kind"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:144#assert_eq!(component.kind, \"guidance\");"
-assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:144; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -56334,7 +56357,7 @@ aliases = ["lash_core::TraceProviderRequestEvent"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:237#let provider_request = TraceProviderRequestEvent {"
-assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:237; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56345,7 +56368,7 @@ aliases = ["lash_core::TraceProviderRequestEvent::body_json"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:254#provider_request.body_json.as_ref().unwrap()[\"model\"],"
-assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:254; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56356,7 +56379,7 @@ aliases = ["lash_core::TraceProviderRequestEvent::body_json_omitted_reason"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:257#assert!(provider_request.body_json_omitted_reason.is_none());"
-assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:257; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56367,7 +56390,7 @@ aliases = ["lash_core::TraceProviderRequestEvent::body_len"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:251#assert_eq!(provider_request.body_len, 128);"
-assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:251; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56378,7 +56401,7 @@ aliases = ["lash_core::TraceProviderRequestEvent::body_sha256"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:252#assert_eq!(provider_request.body_sha256, \"sha256:request\");"
-assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:252; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56389,7 +56412,7 @@ aliases = ["lash_core::TraceProviderRequestEvent::elapsed_ms"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:249#assert_eq!(provider_request.elapsed_ms, 35);"
-assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:249; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56400,7 +56423,7 @@ aliases = ["lash_core::TraceProviderRequestEvent::endpoint"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:250#assert_eq!(provider_request.endpoint, \"/v1/responses\");"
-assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:250; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56411,7 +56434,7 @@ aliases = ["lash_core::TraceProviderRequestEvent::provider"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:247#assert_eq!(provider_request.provider, \"provider:test\");"
-assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:247; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56422,7 +56445,7 @@ aliases = ["lash_core::TraceProviderRequestEvent::sequence"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:248#assert_eq!(provider_request.sequence, 4);"
-assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:248; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56433,7 +56456,7 @@ aliases = ["lash_core::TraceProviderStreamEvent"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:259#let provider_stream = TraceProviderStreamEvent {"
-assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:259; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56444,7 +56467,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::elapsed_ms"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:272#assert_eq!(provider_stream.elapsed_ms, 52);"
-assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:272; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56455,7 +56478,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::event_name"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:273#assert_eq!(provider_stream.event_name, \"response.output_item.added\");"
-assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:273; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56466,7 +56489,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::item_id"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:274#assert_eq!(provider_stream.item_id.as_deref(), Some(\"item-3\"));"
-assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:274; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56477,7 +56500,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::output_index"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:275#assert_eq!(provider_stream.output_index, Some(0));"
-assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:275; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56488,7 +56511,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::provider"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:270#assert_eq!(provider_stream.provider, \"provider:test\");"
-assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:270; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56499,7 +56522,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::raw_json"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:279#provider_stream.raw_json.as_ref().unwrap()[\"type\"],"
-assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:279; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56510,7 +56533,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::raw_len"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:276#assert_eq!(provider_stream.raw_len, 96);"
-assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:276; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56521,7 +56544,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::raw_sha256"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:277#assert_eq!(provider_stream.raw_sha256, \"sha256:event\");"
-assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:277; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56532,7 +56555,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::sequence"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:271#assert_eq!(provider_stream.sequence, 5);"
-assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:271; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]

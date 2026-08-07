@@ -100,10 +100,9 @@ Configuration is read from `.env` or the process environment:
   workbench process, default `8388608`. Override only when diagnosing stack
   regressions or comparing runtime stack-size lanes.
 - `AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS`: model context window used by every
-  workbench session, default `200000`. Values must be integers greater than
-  `20000`: rolling-history `compaction_needed` fires at `max_context - 20000`,
-  so a window at or below the buffer makes that predicate trivially true and
-  startup refuses it.
+  workbench session, default `200000`. Values must be integers of at least
+  `40000`, twice the plugin's compaction buffer (currently 20,000), so the
+  threshold leaves a useful prompt band before compaction.
 - `AGENT_WORKBENCH_LEASE_HOST_ID`: identity of this workbench's PID namespace
   among every instance sharing the session store. Set it to a unique pod or
   container id when `/etc/machine-id` may be baked into the image; otherwise

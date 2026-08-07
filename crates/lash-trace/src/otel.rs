@@ -434,6 +434,7 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             context_budget_tokens,
             max_context_tokens,
             dropped_prefix_messages,
+            retained_messages,
         } => {
             attrs.push(KeyValue::new(
                 "lash.rolling_history.context_budget_tokens",
@@ -446,6 +447,10 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             attrs.push(KeyValue::new(
                 "lash.rolling_history.dropped_prefix_messages",
                 *dropped_prefix_messages as i64,
+            ));
+            attrs.push(KeyValue::new(
+                "lash.rolling_history.retained_messages",
+                *retained_messages as i64,
             ));
         }
         TraceEvent::RollingHistoryCompactionStarted {

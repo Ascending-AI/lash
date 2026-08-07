@@ -208,6 +208,7 @@ pub enum TraceEvent {
         context_budget_tokens: usize,
         max_context_tokens: usize,
         dropped_prefix_messages: usize,
+        retained_messages: usize,
     },
     LlmCallStarted {
         request: TraceLlmRequest,
