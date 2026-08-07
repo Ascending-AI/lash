@@ -24,7 +24,7 @@ fn ui_owned_user_rows(
         if turn_ids.contains(&address.turn_id) {
             continue;
         }
-        let Some(text) = state
+        let Some(prompt) = state
             .active_turns
             .prompt_for(&address.session_id, &address.turn_id)
         else {
@@ -34,9 +34,13 @@ fn ui_owned_user_rows(
         replayed_prompts.push(ChatMessage {
             id: workbench_turn_user_message_id(&address.turn_id),
             role: "user".to_string(),
-            text,
+            text: prompt.text,
             at: String::new(),
-            attachments: Vec::new(),
+            attachments: prompt
+                .attachment_id
+                .into_iter()
+                .map(ChatAttachment::from_id)
+                .collect(),
         });
     }
     (turn_ids, replayed_prompts)

@@ -19,6 +19,13 @@ assert.ok(
   triggerIdentities,
   "LASH_WORKBENCH_TRIGGER_IDENTITIES must come from the Rust projection gate",
 );
+const multiAttachmentMessage = JSON.parse(
+  process.env.LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE ?? "null",
+);
+assert.ok(
+  multiAttachmentMessage,
+  "LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE must come from the Rust projection gate",
+);
 
 function expectedSubscriptionIdDetail(value) {
   const prefix = "trigger-subscription:v2:sha256:";
@@ -730,6 +737,42 @@ test("message attachments render as linked images and degrade visibly on load fa
   assert.equal(image.hidden, true);
   assert.equal(broken.hidden, false);
   assert.equal(broken.textContent, "Image unavailable · open original");
+});
+
+test("a committed RLM printed-image message numbers multiple image alt labels", () => {
+  function element(tagName) {
+    return {
+      tagName,
+      children: [],
+      dataset: {},
+      hidden: false,
+      append(...children) {
+        this.children.push(...children);
+      },
+      appendChild(child) {
+        this.children.push(child);
+      },
+      addEventListener() {},
+    };
+  }
+
+  const body = element("div");
+  const renderContext = {
+    document: { createElement: element },
+    body,
+    attachments: multiAttachmentMessage.attachments,
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_MESSAGE_ATTACHMENTS", "WORKBENCH_MESSAGE_ATTACHMENTS")}
+     renderMessageAttachments(body, attachments);`,
+    renderContext,
+  );
+
+  const [first, second] = body.children[0].children;
+  assert.equal(first.children[0].alt, "Uploaded image attachment 1");
+  assert.equal(second.children[0].alt, "Uploaded image attachment 2");
+  assert.equal(first.dataset.attachmentId, "sha256:rlm-printed-image-a");
+  assert.equal(second.dataset.attachmentId, "sha256:rlm-printed-image-b");
 });
 
 test("a Done product event behaviorally retracts the provisional draft", () => {

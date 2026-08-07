@@ -2719,6 +2719,8 @@
     // BEGIN WORKBENCH_MESSAGE_ATTACHMENTS
     function renderMessageAttachments(body, attachments) {
       if (!Array.isArray(attachments) || attachments.length === 0) return;
+      // The server derives every retrieval URL from its stored attachment id;
+      // browser clients only render that projection and never supply a URL.
       const gallery = document.createElement("div");
       gallery.className = "message-attachments";
       for (const [index, attachment] of attachments.entries()) {

@@ -149,10 +149,18 @@ impl ChatAttachment {
     fn from_id(attachment_id: impl Into<String>) -> Self {
         let attachment_id = attachment_id.into();
         Self {
-            retrieve_url: format!("/api/attachments/{attachment_id}"),
+            retrieve_url: attachment_retrieve_url(&attachment_id),
             attachment_id,
         }
     }
+}
+
+fn attachment_retrieve_url(attachment_id: &str) -> String {
+    let encoded = percent_encoding::utf8_percent_encode(
+        attachment_id,
+        percent_encoding::NON_ALPHANUMERIC,
+    );
+    format!("/api/attachments/{encoded}")
 }
 
 /// The id of the optimistic user row this workbench publishes when a send is
@@ -383,7 +391,7 @@ enum StreamItem {
         /// UI-owned rows needs this to know whether they still stand for
         /// anything (FIG-1000): a failed turn's rows have been retired from the
         /// lane and the viewer must re-derive from the authoritative snapshot.
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "TurnDoneOutcome::is_completed")]
         outcome: TurnDoneOutcome,
     },
 }
@@ -398,6 +406,12 @@ enum TurnDoneOutcome {
     /// The turn never reached its own outcome: it failed before or at commit,
     /// so nothing it optimistically claimed is durable.
     Failed,
+}
+
+impl TurnDoneOutcome {
+    fn is_completed(&self) -> bool {
+        *self == Self::Completed
+    }
 }
 
 const PUBLIC_TURN_FAILURE_MESSAGE: &str = "turn could not be completed";
@@ -779,8 +793,14 @@ struct TriggerMutationResponse {
 #[derive(Clone, Default)]
 struct ActiveTurns {
     inner: Arc<Mutex<BTreeSet<(String, String)>>>,
-    prompts: Arc<Mutex<BTreeMap<(String, String), String>>>,
+    prompts: Arc<Mutex<BTreeMap<(String, String), ActiveTurnPrompt>>>,
     path: Option<Arc<PathBuf>>,
+}
+
+#[derive(Clone, Debug)]
+struct ActiveTurnPrompt {
+    text: String,
+    attachment_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -805,6 +825,8 @@ struct PersistedActiveTurnPrompt {
     session_id: String,
     turn_id: String,
     prompt: String,
+    #[serde(default)]
+    attachment_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -812,6 +834,8 @@ struct PersistedActiveTurnPromptRef<'a> {
     session_id: &'a str,
     turn_id: &'a str,
     prompt: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attachment_id: Option<&'a str>,
 }
 
 impl ActiveTurns {
@@ -824,7 +848,15 @@ impl ActiveTurns {
                     turns,
                     prompts
                         .into_iter()
-                        .map(|prompt| ((prompt.session_id, prompt.turn_id), prompt.prompt))
+                        .map(|prompt| {
+                            (
+                                (prompt.session_id, prompt.turn_id),
+                                ActiveTurnPrompt {
+                                    text: prompt.prompt,
+                                    attachment_id: prompt.attachment_id,
+                                },
+                            )
+                        })
                         .collect(),
                 ),
                 PersistedActiveTurns::Legacy(turns) => (turns, BTreeMap::new()),
@@ -847,7 +879,7 @@ impl ActiveTurns {
     }
 
     fn insert(&self, session_id: impl Into<String>, turn_id: impl Into<String>) {
-        self.insert_with_prompt(session_id, turn_id, None);
+        self.insert_with_prompt(session_id, turn_id, None, None);
     }
 
     fn insert_with_prompt(
@@ -855,13 +887,20 @@ impl ActiveTurns {
         session_id: impl Into<String>,
         turn_id: impl Into<String>,
         prompt: Option<String>,
+        attachment_id: Option<String>,
     ) {
         let key = (session_id.into(), turn_id.into());
         let mut active = self.inner.lock().expect("active turn lock");
         let mut prompts = self.prompts.lock().expect("active turn prompt lock");
         active.insert(key.clone());
         if let Some(prompt) = prompt {
-            prompts.insert(key, prompt);
+            prompts.insert(
+                key,
+                ActiveTurnPrompt {
+                    text: prompt,
+                    attachment_id,
+                },
+            );
         }
         self.persist_snapshot(&active, &prompts);
     }
@@ -892,7 +931,7 @@ impl ActiveTurns {
             .collect()
     }
 
-    fn prompt_for(&self, session_id: &str, turn_id: &str) -> Option<String> {
+    fn prompt_for(&self, session_id: &str, turn_id: &str) -> Option<ActiveTurnPrompt> {
         self.prompts
             .lock()
             .expect("active turn prompt lock")
@@ -909,7 +948,7 @@ impl ActiveTurns {
     fn persist_snapshot(
         &self,
         active: &BTreeSet<(String, String)>,
-        prompts: &BTreeMap<(String, String), String>,
+        prompts: &BTreeMap<(String, String), ActiveTurnPrompt>,
     ) {
         let Some(path) = self.path.as_deref() else {
             return;
@@ -920,7 +959,8 @@ impl ActiveTurns {
                 |((session_id, turn_id), prompt)| PersistedActiveTurnPromptRef {
                     session_id,
                     turn_id,
-                    prompt,
+                    prompt: &prompt.text,
+                    attachment_id: prompt.attachment_id.as_deref(),
                 },
             )
             .collect();

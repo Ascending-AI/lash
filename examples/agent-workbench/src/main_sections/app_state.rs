@@ -144,9 +144,15 @@ impl AppState {
         self.active_turns.insert(session_id, turn_id);
     }
 
-    fn track_turn_prompt(&self, session_id: &str, turn_id: &str, prompt: String) {
+    fn track_turn_prompt(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        prompt: String,
+        attachment_id: Option<String>,
+    ) {
         self.active_turns
-            .insert_with_prompt(session_id, turn_id, Some(prompt));
+            .insert_with_prompt(session_id, turn_id, Some(prompt), attachment_id);
     }
 
     /// Delete `session_id`, reclaim the finished work it left behind, and report

@@ -566,7 +566,7 @@ async fn submit_workbench_turn_via_restate(
         model: state.selected_model(),
         attachment_id: None,
     };
-    state.track_turn_prompt(&session_id, &turn_id, text.to_string());
+    state.track_turn_prompt(&session_id, &turn_id, text.to_string(), None);
     let session = state
         .core
         .session(&session_id)

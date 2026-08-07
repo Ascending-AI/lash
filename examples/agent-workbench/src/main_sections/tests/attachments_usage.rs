@@ -439,6 +439,20 @@ async fn assert_retrieved_attachment(
         response.headers().get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok()),
         Some("image/png")
     );
+    assert_eq!(
+        response
+            .headers()
+            .get("x-content-type-options")
+            .and_then(|value| value.to_str().ok()),
+        Some("nosniff")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("x-lash-attachment-id")
+            .and_then(|value| value.to_str().ok()),
+        Some(attachment_id.to_string().as_str())
+    );
     let bytes = axum::body::to_bytes(response.into_body(), MAX_WORKBENCH_ATTACHMENT_BYTES)
         .await
         .expect("read retrieved attachment body");
