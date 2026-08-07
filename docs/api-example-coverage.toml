@@ -692,8 +692,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::Session"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:967#let error = AppError::session_open(lash::EmbedError::Session("
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:977#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:986#let error = AppError::session_open(lash::EmbedError::Session("
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:996#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::EmbedError::Session::0"
@@ -756,8 +756,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::Store"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:955#let error = AppError::session_open(lash::EmbedError::Store("
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:960#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:974#let error = AppError::session_open(lash::EmbedError::Store("
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:979#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::EmbedError::Store::0"
@@ -847,7 +847,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::is_retryable"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:863#let retryable = error.is_retryable();"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:882#let retryable = error.is_retryable();"
 assertion = "examples/agent-workbench/src/restate_tests.rs:201#assert!(!error.retryable);"
 
 [[api]]
@@ -857,7 +857,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::is_terminal"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:864#let terminal = error.is_terminal();"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:883#let terminal = error.is_terminal();"
 assertion = "examples/agent-workbench/src/restate_tests.rs:200#assert!(error.terminal);"
 
 [[api]]
@@ -1260,8 +1260,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::session"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:955#.session(session_id.clone())"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:998#.map(|message| (message.id.as_str(), message.text.as_str()))"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:958#.session(session_id.clone())"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1001#.map(|message| (message.id.as_str(), message.text.as_str()))"
 
 [[api]]
 symbol = "lash::LashCore::session_exists"
@@ -1436,7 +1436,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCoreBuilder::lease_timings"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:1863#.lease_timings(lease_timings)"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:1864#.lease_timings(lease_timings)"
 assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1666#takeover_latency < default_ttl,"
 
 [[api]]
@@ -1705,8 +1705,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashSession::admin"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:960#.admin()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:998#.map(|message| (message.id.as_str(), message.text.as_str()))"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:963#.admin()"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1001#.map(|message| (message.id.as_str(), message.text.as_str()))"
 
 [[api]]
 symbol = "lash::LashSession::await_queued_work_batch"
@@ -1778,8 +1778,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashSession::close"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:976#session.close().await.expect(\"close canonical session\");"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:998#.map(|message| (message.id.as_str(), message.text.as_str()))"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:979#session.close().await.expect(\"close canonical session\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1001#.map(|message| (message.id.as_str(), message.text.as_str()))"
 
 [[api]]
 symbol = "lash::LashSession::commands"
@@ -1788,7 +1788,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashSession::commands"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:673#.commands()"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:679#.commands()"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:816, inside `enqueue_tool_catalog_refresh`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:184 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `enqueue_tool_catalog_refresh` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -1910,8 +1910,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashSession::read_view"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1402#.read_view()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1425#assistant_events.len(),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1582#.read_view()"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1605#assistant_events.len(),"
 
 [[api]]
 symbol = "lash::LashSession::refresh_background_graph"
@@ -1957,8 +1957,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashSession::session_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1229#crate::restate::settle_workbench_turn(&run_state, &session.session_id(), &run_turn_id)"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1235#provider_entered_rx.recv().await,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1409#crate::restate::settle_workbench_turn(&run_state, &session.session_id(), &run_turn_id)"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1415#provider_entered_rx.recv().await,"
 
 [[api]]
 symbol = "lash::LashSession::set_turn_phase_probe"
@@ -1995,8 +1995,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashSession::turn"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1210#.turn(lash::TurnInput::text(turn_text))"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1237#\"the first provider call must be blocked before the mid-turn read\""
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1390#.turn(lash::TurnInput::text(turn_text))"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1417#\"the first provider call must be blocked before the mid-turn read\""
 
 [[api]]
 symbol = "lash::LashSession::turn_address"
@@ -2033,7 +2033,7 @@ aliases = ["lash::prelude::LashSession::usage_report"]
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/routes.rs:92#let usage = session.usage_report();"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:275#assert!(before_restart.usage.usage.total_tokens >= call_total);"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:279#assert!(before_restart.usage.usage.total_tokens >= call_total);"
 
 [[api]]
 symbol = "lash::LlmCallRecord"
@@ -3256,7 +3256,7 @@ aliases = ["lash::prelude::SessionBuilder"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:343#.open()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:998#.map(|message| (message.id.as_str(), message.text.as_str()))"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1001#.map(|message| (message.id.as_str(), message.text.as_str()))"
 
 [[api]]
 symbol = "lash::SessionBuilder::open"
@@ -3266,7 +3266,7 @@ aliases = ["lash::prelude::SessionBuilder::open"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:343#.open()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:998#.map(|message| (message.id.as_str(), message.text.as_str()))"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1001#.map(|message| (message.id.as_str(), message.text.as_str()))"
 
 [[api]]
 symbol = "lash::SessionBuilder::open_with_state"
@@ -3401,7 +3401,7 @@ availability = "default+all-features"
 aliases = ["lash::admin::SessionCommandAdmin", "lash::prelude::SessionCommandAdmin"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:674#.refresh_tool_catalog("
+usage = "examples/agent-workbench/src/main_sections/routes.rs:680#.refresh_tool_catalog("
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:817, inside `enqueue_tool_catalog_refresh`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:184 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `enqueue_tool_catalog_refresh` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -3411,7 +3411,7 @@ availability = "default+all-features"
 aliases = ["lash::admin::SessionCommandAdmin::refresh_tool_catalog", "lash::prelude::SessionCommandAdmin::refresh_tool_catalog"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:674#.refresh_tool_catalog("
+usage = "examples/agent-workbench/src/main_sections/routes.rs:680#.refresh_tool_catalog("
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:817, inside `enqueue_tool_catalog_refresh`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:184 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `enqueue_tool_catalog_refresh` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -3763,7 +3763,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:891#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:910#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:712, inside `deleted_session_details`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/app_state.rs:686 asserts an unrelated expression in `runtime`, and `deleted_session_details` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -3926,7 +3926,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:891#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:910#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:712, inside `deleted_session_details`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/app_state.rs:686 asserts an unrelated expression in `runtime`, and `deleted_session_details` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -3936,8 +3936,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store::context"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:969#context: format!(\"failed to bind session `{session_id}` to its store\"),"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:977#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:988#context: format!(\"failed to bind session `{session_id}` to its store\"),"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:996#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::SessionError::Store::source"
@@ -3946,8 +3946,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store::source"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:970#source: lash::persistence::StoreError::SessionDeleted {"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:977#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:989#source: lash::persistence::StoreError::SessionDeleted {"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:996#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::SessionSpec"
@@ -4358,8 +4358,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivity::independent", "lash_core::TurnActivity::independent"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1310#sink.emit(TurnActivity::independent("
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1330#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1316#sink.emit(TurnActivity::independent("
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1336#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnActivity::new"
@@ -4368,8 +4368,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivity::new", "lash_core::TurnActivity::new"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1296#sink.emit(TurnActivity::new("
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1330#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1302#sink.emit(TurnActivity::new("
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1336#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnActivityFanout"
@@ -4396,8 +4396,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivityId", "lash_core::TurnActivityId"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1297#lash::TurnActivityId::new(\"prior\"),"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1330#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1303#lash::TurnActivityId::new(\"prior\"),"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1336#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnActivityId::0"
@@ -4415,8 +4415,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivityId::new", "lash_core::TurnActivityId::new"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1297#lash::TurnActivityId::new(\"prior\"),"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1330#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1303#lash::TurnActivityId::new(\"prior\"),"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1336#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnActivitySink"
@@ -4626,8 +4626,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnBuilder::run", "lash::turn::TurnBuilder::run"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1331#.run()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1340#receipts.as_slice(),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1511#.run()"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1520#receipts.as_slice(),"
 
 [[api]]
 symbol = "lash::TurnBuilder::stream"
@@ -4645,8 +4645,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnBuilder::stream_to", "lash::turn::TurnBuilder::stream_to"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1214#.stream_to(&ChannelTurnEvents {"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1235#provider_entered_rx.recv().await,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1394#.stream_to(&ChannelTurnEvents {"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1415#provider_entered_rx.recv().await,"
 
 [[api]]
 symbol = "lash::TurnBuilder::turn_id"
@@ -4655,8 +4655,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnBuilder::turn_id", "lash::turn::TurnBuilder::turn_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1211#.turn_id(run_turn_id.clone())"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1235#provider_entered_rx.recv().await,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1391#.turn_id(run_turn_id.clone())"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1415#provider_entered_rx.recv().await,"
 
 [[api]]
 symbol = "lash::TurnBuilder::with_plugin_input"
@@ -4697,8 +4697,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1342#outcome: lash::TurnCancelOutcome::CompletionWonRace,"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1358#done_ids.len(),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1522#outcome: lash::TurnCancelOutcome::CompletionWonRace,"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1538#done_ids.len(),"
 
 [[api]]
 symbol = "lash::TurnCancelOutcome::Requested"
@@ -4730,8 +4730,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1341#[TurnCancelReceipt {"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1358#done_ids.len(),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1521#[TurnCancelReceipt {"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1538#done_ids.len(),"
 
 [[api]]
 symbol = "lash::TurnCancelReceipt::outcome"
@@ -4739,8 +4739,8 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1342#outcome: lash::TurnCancelOutcome::CompletionWonRace,"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1358#done_ids.len(),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1522#outcome: lash::TurnCancelOutcome::CompletionWonRace,"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1538#done_ids.len(),"
 
 [[api]]
 symbol = "lash::TurnCancelRequest"
@@ -4904,8 +4904,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::AssistantProseDelta", "lash_core::TurnEvent::AssistantProseDelta"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1267#TurnEvent::AssistantProseDelta {"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1330#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1273#TurnEvent::AssistantProseDelta {"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1336#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnEvent::AssistantProseDelta::text"
@@ -4914,8 +4914,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::AssistantProseDelta::text", "lash_core::TurnEvent::AssistantProseDelta::text"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1299#text: \"kept \".into(),"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1330#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1305#text: \"kept \".into(),"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1336#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnEvent::ChildUsage"
@@ -5131,8 +5131,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ModelAttemptReset", "lash_core::TurnEvent::ModelAttemptReset"]
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1273#TurnEvent::ModelAttemptReset {"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1330#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1279#TurnEvent::ModelAttemptReset {"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1336#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnEvent::ModelAttemptReset::assistant_prose_correlation_ids"
@@ -5141,8 +5141,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ModelAttemptReset::assistant_prose_correlation_ids", "lash_core::TurnEvent::ModelAttemptReset::assistant_prose_correlation_ids"]
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1312#assistant_prose_correlation_ids: vec![lash::TurnActivityId::new(\"failed\")],"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1330#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1318#assistant_prose_correlation_ids: vec![lash::TurnActivityId::new(\"failed\")],"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1336#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnEvent::ModelAttemptReset::reasoning_correlation_ids"
@@ -5151,8 +5151,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ModelAttemptReset::reasoning_correlation_ids", "lash_core::TurnEvent::ModelAttemptReset::reasoning_correlation_ids"]
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1313#reasoning_correlation_ids: Vec::new(),"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1330#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1319#reasoning_correlation_ids: Vec::new(),"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1336#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnEvent::ModelRequestStarted"
@@ -5665,8 +5665,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnInput::text", "lash_core::TurnInput::text"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1210#.turn(lash::TurnInput::text(turn_text))"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1235#provider_entered_rx.recv().await,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1390#.turn(lash::TurnInput::text(turn_text))"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1415#provider_entered_rx.recv().await,"
 
 [[api]]
 symbol = "lash::TurnInput::trace_turn_id"
@@ -6573,8 +6573,8 @@ kind = "function"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:961#.state()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:998#.map(|message| (message.id.as_str(), message.text.as_str()))"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:964#.state()"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1001#.map(|message| (message.id.as_str(), message.text.as_str()))"
 
 [[api]]
 symbol = "lash::admin::SessionAdmin::tools"
@@ -6655,8 +6655,8 @@ availability = "default+all-features"
 aliases = ["lash::process::SessionProcessAdmin"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:1539#.list()"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:1534#.session(snapshot.settings.session_id)"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:1540#.list()"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:1535#.session(snapshot.settings.session_id)"
 
 [[api]]
 symbol = "lash::admin::SessionProcessAdmin::await_output"
@@ -6710,8 +6710,8 @@ availability = "default+all-features"
 aliases = ["lash::process::SessionProcessAdmin::list"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:1539#.list()"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:1534#.session(snapshot.settings.session_id)"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:1540#.list()"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:1535#.session(snapshot.settings.session_id)"
 
 [[api]]
 symbol = "lash::admin::SessionProcessAdmin::list_all"
@@ -6765,8 +6765,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:962#.append_messages(vec!["
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:998#.map(|message| (message.id.as_str(), message.text.as_str()))"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:965#.append_messages(vec!["
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1001#.map(|message| (message.id.as_str(), message.text.as_str()))"
 
 [[api]]
 symbol = "lash::admin::SessionStateAdmin::append_messages"
@@ -6774,8 +6774,8 @@ kind = "function"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:962#.append_messages(vec!["
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:998#.map(|message| (message.id.as_str(), message.text.as_str()))"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:965#.append_messages(vec!["
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1001#.map(|message| (message.id.as_str(), message.text.as_str()))"
 
 [[api]]
 symbol = "lash::admin::SessionStateAdmin::append_plugin_body"
@@ -6849,7 +6849,7 @@ aliases = ["lash_core::AttachmentCreateMeta"]
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/routes.rs:159#lash::attachments::AttachmentCreateMeta::new("
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:169#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:172#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
 
 [[api]]
 symbol = "lash::attachments::AttachmentCreateMeta::label"
@@ -6868,7 +6868,7 @@ aliases = ["lash_core::AttachmentCreateMeta::media_type"]
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/routes.rs:130#let media_type = lash::attachments::MediaType::parse(&request.mime).map_err(|_| {"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:169#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:172#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
 
 [[api]]
 symbol = "lash::attachments::AttachmentCreateMeta::new"
@@ -6878,7 +6878,7 @@ aliases = ["lash_core::AttachmentCreateMeta::new"]
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/routes.rs:159#lash::attachments::AttachmentCreateMeta::new("
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:169#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:172#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
 
 [[api]]
 symbol = "lash::attachments::AttachmentCreateMeta::type_metadata"
@@ -6888,7 +6888,7 @@ aliases = ["lash_core::AttachmentCreateMeta::type_metadata"]
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/routes.rs:152#let type_metadata = png_dimensions(&bytes).map(|(width, height)| {"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:174#assert_eq!((*width, *height), (Some(1), Some(1)));"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:177#assert_eq!((*width, *height), (Some(1), Some(1)));"
 
 [[api]]
 symbol = "lash::attachments::AttachmentId"
@@ -6897,8 +6897,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentId"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:115#let missing_id = lash::attachments::AttachmentId::new(\"missing-workbench-attachment\");"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:114#assert!(lash::attachments::MediaType::parse(\"image//png\").is_err());"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:118#let missing_id = lash::attachments::AttachmentId::new(\"missing-workbench-attachment\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:117#assert!(lash::attachments::MediaType::parse(\"image//png\").is_err());"
 
 [[api]]
 symbol = "lash::attachments::AttachmentId::as_str"
@@ -6907,8 +6907,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentId::as_str"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:113#assert_eq!(normalized_media_type.as_str(), \"image/png\");"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:113#assert_eq!(normalized_media_type.as_str(), \"image/png\");"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:116#assert_eq!(normalized_media_type.as_str(), \"image/png\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:116#assert_eq!(normalized_media_type.as_str(), \"image/png\");"
 
 [[api]]
 symbol = "lash::attachments::AttachmentId::new"
@@ -6917,8 +6917,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentId::new"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:115#let missing_id = lash::attachments::AttachmentId::new(\"missing-workbench-attachment\");"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:114#assert!(lash::attachments::MediaType::parse(\"image//png\").is_err());"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:118#let missing_id = lash::attachments::AttachmentId::new(\"missing-workbench-attachment\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:117#assert!(lash::attachments::MediaType::parse(\"image//png\").is_err());"
 
 [[api]]
 symbol = "lash::attachments::AttachmentMeta"
@@ -6926,8 +6926,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:183#let metadata = lash::attachments::AttachmentMeta::new("
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:182#assert_eq!(stored.bytes, png_bytes);"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:186#let metadata = lash::attachments::AttachmentMeta::new("
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:185#assert_eq!(stored.bytes, png_bytes);"
 
 [[api]]
 symbol = "lash::attachments::AttachmentMeta::as_ref"
@@ -6935,8 +6935,8 @@ kind = "function"
 availability = "default+all-features"
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:172#match uploaded.attachment.type_metadata.as_ref() {"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:171#assert_eq!(uploaded.attachment.label.as_deref(), Some(\"usage-gate.png\"));"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:175#match uploaded.attachment.type_metadata.as_ref() {"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:174#assert_eq!(uploaded.attachment.label.as_deref(), Some(\"usage-gate.png\"));"
 
 [[api]]
 symbol = "lash::attachments::AttachmentMeta::byte_len"
@@ -6944,8 +6944,8 @@ kind = "field"
 availability = "default+all-features"
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:170#assert_eq!(uploaded.attachment.byte_len, png_bytes.len() as u64);"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:170#assert_eq!(uploaded.attachment.byte_len, png_bytes.len() as u64);"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:173#assert_eq!(uploaded.attachment.byte_len, png_bytes.len() as u64);"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:173#assert_eq!(uploaded.attachment.byte_len, png_bytes.len() as u64);"
 
 [[api]]
 symbol = "lash::attachments::AttachmentMeta::id"
@@ -6953,8 +6953,8 @@ kind = "field"
 availability = "default+all-features"
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:179#.get(&uploaded.attachment.id)"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:176#other => panic!(\"uploaded PNG must retain image dimensions, got {other:?}\"),"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:182#.get(&uploaded.attachment.id)"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:179#other => panic!(\"uploaded PNG must retain image dimensions, got {other:?}\"),"
 
 [[api]]
 symbol = "lash::attachments::AttachmentMeta::label"
@@ -6962,8 +6962,8 @@ kind = "field"
 availability = "default+all-features"
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:171#assert_eq!(uploaded.attachment.label.as_deref(), Some(\"usage-gate.png\"));"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:171#assert_eq!(uploaded.attachment.label.as_deref(), Some(\"usage-gate.png\"));"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:174#assert_eq!(uploaded.attachment.label.as_deref(), Some(\"usage-gate.png\"));"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:174#assert_eq!(uploaded.attachment.label.as_deref(), Some(\"usage-gate.png\"));"
 
 [[api]]
 symbol = "lash::attachments::AttachmentMeta::media_type"
@@ -6971,8 +6971,8 @@ kind = "field"
 availability = "default+all-features"
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:169#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:169#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:172#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:172#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
 
 [[api]]
 symbol = "lash::attachments::AttachmentMeta::new"
@@ -6980,8 +6980,8 @@ kind = "function"
 availability = "default+all-features"
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:183#let metadata = lash::attachments::AttachmentMeta::new("
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:182#assert_eq!(stored.bytes, png_bytes);"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:186#let metadata = lash::attachments::AttachmentMeta::new("
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:185#assert_eq!(stored.bytes, png_bytes);"
 
 [[api]]
 symbol = "lash::attachments::AttachmentMeta::type_metadata"
@@ -6989,8 +6989,8 @@ kind = "field"
 availability = "default+all-features"
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:172#match uploaded.attachment.type_metadata.as_ref() {"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:171#assert_eq!(uploaded.attachment.label.as_deref(), Some(\"usage-gate.png\"));"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:175#match uploaded.attachment.type_metadata.as_ref() {"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:174#assert_eq!(uploaded.attachment.label.as_deref(), Some(\"usage-gate.png\"));"
 
 [[api]]
 symbol = "lash::attachments::AttachmentRef"
@@ -6999,8 +6999,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentRef"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:168#let uploaded_ref: &lash::attachments::AttachmentRef = &uploaded.attachment;"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:169#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:171#let uploaded_ref: &lash::attachments::AttachmentRef = &uploaded.attachment;"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:172#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
 
 [[api]]
 symbol = "lash::attachments::AttachmentRef::byte_len"
@@ -7009,8 +7009,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentRef::byte_len"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:170#assert_eq!(uploaded.attachment.byte_len, png_bytes.len() as u64);"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:170#assert_eq!(uploaded.attachment.byte_len, png_bytes.len() as u64);"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:173#assert_eq!(uploaded.attachment.byte_len, png_bytes.len() as u64);"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:173#assert_eq!(uploaded.attachment.byte_len, png_bytes.len() as u64);"
 
 [[api]]
 symbol = "lash::attachments::AttachmentRef::id"
@@ -7019,8 +7019,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentRef::id"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:179#.get(&uploaded.attachment.id)"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:176#other => panic!(\"uploaded PNG must retain image dimensions, got {other:?}\"),"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:182#.get(&uploaded.attachment.id)"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:179#other => panic!(\"uploaded PNG must retain image dimensions, got {other:?}\"),"
 
 [[api]]
 symbol = "lash::attachments::AttachmentRef::label"
@@ -7029,8 +7029,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentRef::label"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:171#assert_eq!(uploaded.attachment.label.as_deref(), Some(\"usage-gate.png\"));"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:171#assert_eq!(uploaded.attachment.label.as_deref(), Some(\"usage-gate.png\"));"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:174#assert_eq!(uploaded.attachment.label.as_deref(), Some(\"usage-gate.png\"));"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:174#assert_eq!(uploaded.attachment.label.as_deref(), Some(\"usage-gate.png\"));"
 
 [[api]]
 symbol = "lash::attachments::AttachmentRef::media_type"
@@ -7039,8 +7039,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentRef::media_type"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:169#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:169#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:172#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:172#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
 
 [[api]]
 symbol = "lash::attachments::AttachmentRef::media_type"
@@ -7049,8 +7049,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentRef::media_type"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:169#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:169#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:172#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:172#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
 
 [[api]]
 symbol = "lash::attachments::AttachmentRef::type_metadata"
@@ -7059,8 +7059,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentRef::type_metadata"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:172#match uploaded.attachment.type_metadata.as_ref() {"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:171#assert_eq!(uploaded.attachment.label.as_deref(), Some(\"usage-gate.png\"));"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:175#match uploaded.attachment.type_metadata.as_ref() {"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:174#assert_eq!(uploaded.attachment.label.as_deref(), Some(\"usage-gate.png\"));"
 
 [[api]]
 symbol = "lash::attachments::AttachmentTypeMetadata"
@@ -7069,8 +7069,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentTypeMetadata"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:173#Some(lash::attachments::AttachmentTypeMetadata::Image { width, height }) => {"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:174#assert_eq!((*width, *height), (Some(1), Some(1)));"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:176#Some(lash::attachments::AttachmentTypeMetadata::Image { width, height }) => {"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:177#assert_eq!((*width, *height), (Some(1), Some(1)));"
 
 [[api]]
 symbol = "lash::attachments::AttachmentTypeMetadata::Image"
@@ -7079,8 +7079,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentTypeMetadata::Image"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:173#Some(lash::attachments::AttachmentTypeMetadata::Image { width, height }) => {"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:174#assert_eq!((*width, *height), (Some(1), Some(1)));"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:176#Some(lash::attachments::AttachmentTypeMetadata::Image { width, height }) => {"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:177#assert_eq!((*width, *height), (Some(1), Some(1)));"
 
 [[api]]
 symbol = "lash::attachments::AttachmentTypeMetadata::Image::height"
@@ -7089,8 +7089,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentTypeMetadata::Image::height"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:173#Some(lash::attachments::AttachmentTypeMetadata::Image { width, height }) => {"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:174#assert_eq!((*width, *height), (Some(1), Some(1)));"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:176#Some(lash::attachments::AttachmentTypeMetadata::Image { width, height }) => {"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:177#assert_eq!((*width, *height), (Some(1), Some(1)));"
 
 [[api]]
 symbol = "lash::attachments::AttachmentTypeMetadata::Image::width"
@@ -7099,8 +7099,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentTypeMetadata::Image::width"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:173#Some(lash::attachments::AttachmentTypeMetadata::Image { width, height }) => {"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:174#assert_eq!((*width, *height), (Some(1), Some(1)));"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:176#Some(lash::attachments::AttachmentTypeMetadata::Image { width, height }) => {"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:177#assert_eq!((*width, *height), (Some(1), Some(1)));"
 
 [[api]]
 symbol = "lash::attachments::AttachmentTypeMetadata::image"
@@ -7110,7 +7110,7 @@ aliases = ["lash_core::AttachmentTypeMetadata::image"]
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/routes.rs:153#lash::attachments::AttachmentTypeMetadata::image(Some(width), Some(height))"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:169#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:172#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
 
 [[api]]
 symbol = "lash::attachments::MediaType"
@@ -7119,8 +7119,8 @@ availability = "default+all-features"
 aliases = ["lash_core::MediaType"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:109#let normalized_media_type = lash::attachments::MediaType::parse(\" IMAGE/PNG \")"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:111#assert!(normalized_media_type.is_image());"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:112#let normalized_media_type = lash::attachments::MediaType::parse(\" IMAGE/PNG \")"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:114#assert!(normalized_media_type.is_image());"
 
 [[api]]
 symbol = "lash::attachments::MediaType::as_str"
@@ -7129,8 +7129,8 @@ availability = "default+all-features"
 aliases = ["lash_core::MediaType::as_str"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:258#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:258#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:261#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:261#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
 
 [[api]]
 symbol = "lash::attachments::MediaType::family"
@@ -7139,8 +7139,8 @@ availability = "default+all-features"
 aliases = ["lash_core::MediaType::family"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:112#assert_eq!(normalized_media_type.family(), \"image\");"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:112#assert_eq!(normalized_media_type.family(), \"image\");"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:115#assert_eq!(normalized_media_type.family(), \"image\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:115#assert_eq!(normalized_media_type.family(), \"image\");"
 
 [[api]]
 symbol = "lash::attachments::MediaType::is_image"
@@ -7149,8 +7149,8 @@ availability = "default+all-features"
 aliases = ["lash_core::MediaType::is_image"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:111#assert!(normalized_media_type.is_image());"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:111#assert!(normalized_media_type.is_image());"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:114#assert!(normalized_media_type.is_image());"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:114#assert!(normalized_media_type.is_image());"
 
 [[api]]
 symbol = "lash::attachments::MediaType::parse"
@@ -7159,8 +7159,8 @@ availability = "default+all-features"
 aliases = ["lash_core::MediaType::parse"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:109#let normalized_media_type = lash::attachments::MediaType::parse(\" IMAGE/PNG \")"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:111#assert!(normalized_media_type.is_image());"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:112#let normalized_media_type = lash::attachments::MediaType::parse(\" IMAGE/PNG \")"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:114#assert!(normalized_media_type.is_image());"
 
 [[api]]
 symbol = "lash::direct::AttachmentSource"
@@ -7168,8 +7168,9 @@ kind = "enum"
 availability = "default+all-features"
 aliases = ["lash_core::AttachmentSource"]
 area = "attachments"
-disposition = "unused-justify"
-reason = "Retained as integrator surface under ADR 0051; the in-repo example consumer moved to its facade home in FIG-863 wave B, so the core spelling is now reached only by store/effect-host/protocol-engine implementors and the conformance suite."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1164#.push(lash::direct::AttachmentSource::stored(attachment));"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1201#user_row_attachments(&settled),"
 
 [[api]]
 symbol = "lash::direct::AttachmentSource::ExternalUrl"
@@ -7267,8 +7268,9 @@ kind = "variant"
 availability = "default+all-features"
 aliases = ["lash_core::AttachmentSource::Stored"]
 area = "attachments"
-disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1164#.push(lash::direct::AttachmentSource::stored(attachment));"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1201#user_row_attachments(&settled),"
 
 [[api]]
 symbol = "lash::direct::AttachmentSource::Stored::attachment_ref"
@@ -7304,8 +7306,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentSource::media_type"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:258#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:258#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:261#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:261#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
 
 [[api]]
 symbol = "lash::direct::AttachmentSource::provider_file"
@@ -7322,8 +7324,9 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::AttachmentSource::stored"]
 area = "attachments"
-disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1164#.push(lash::direct::AttachmentSource::stored(attachment));"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1201#user_row_attachments(&settled),"
 
 [[api]]
 symbol = "lash::direct::AttachmentSource::stored_ref"
@@ -7332,8 +7335,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentSource::stored_ref"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:261#source.stored_ref().map(|reference| &reference.id),"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:259#assert_eq!(requests[0].attachment_bytes(source), Some(png_bytes.as_slice()));"
+usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:91#.filter_map(|part| part.attachment.as_ref()?.source.stored_ref())"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:264#source.stored_ref().map(|reference| &reference.id),"
 
 [[api]]
 symbol = "lash::direct::DirectCompletion"
@@ -8166,8 +8169,8 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmOutputPart::Reasoning"]
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1156#lash::direct::LlmOutputPart::Reasoning {"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1282#if text == \"durable reasoning disclosure\""
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1336#lash::direct::LlmOutputPart::Reasoning {"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1462#if text == \"durable reasoning disclosure\""
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart::Reasoning::replay"
@@ -8176,8 +8179,8 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmOutputPart::Reasoning::replay"]
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1158#replay: None,"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1282#if text == \"durable reasoning disclosure\""
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1338#replay: None,"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1462#if text == \"durable reasoning disclosure\""
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart::Reasoning::text"
@@ -8186,8 +8189,8 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmOutputPart::Reasoning::text"]
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1157#text: \"durable reasoning disclosure\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1282#if text == \"durable reasoning disclosure\""
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1337#text: \"durable reasoning disclosure\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1462#if text == \"durable reasoning disclosure\""
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart::Text"
@@ -9588,7 +9591,7 @@ aliases = ["lash_core::Message::id"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:831#id: committed_id.to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:853#assert_eq!(reconciled.cursor, 2);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:854#assert_eq!(reconciled.cursor, 2);"
 
 [[api]]
 symbol = "lash::messages::Message::is_transient"
@@ -9606,8 +9609,8 @@ availability = "default+all-features"
 aliases = ["lash_core::Message::origin"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:64#message.origin.as_ref()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1076#\"the UI-owned row renders once and the committed copy stays provenance\""
+usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:65#message.origin.as_ref()"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1079#\"the UI-owned row renders once and the committed copy stays provenance\""
 
 [[api]]
 symbol = "lash::messages::Message::parts"
@@ -9626,7 +9629,7 @@ aliases = ["lash_core::Message::role"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:832#role: \"user\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:853#assert_eq!(reconciled.cursor, 2);"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:854#assert_eq!(reconciled.cursor, 2);"
 
 [[api]]
 symbol = "lash::messages::MessageOrigin"
@@ -9635,8 +9638,8 @@ availability = "default+all-features"
 aliases = ["lash_core::MessageOrigin"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:63#let Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) ="
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1076#\"the UI-owned row renders once and the committed copy stays provenance\""
+usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:64#let Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) ="
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1079#\"the UI-owned row renders once and the committed copy stays provenance\""
 
 [[api]]
 symbol = "lash::messages::MessageOrigin::Plugin"
@@ -9726,8 +9729,8 @@ availability = "default+all-features"
 aliases = ["lash_core::MessageOrigin::TurnInput"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:63#let Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) ="
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1076#\"the UI-owned row renders once and the committed copy stays provenance\""
+usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:64#let Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) ="
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1079#\"the UI-owned row renders once and the committed copy stays provenance\""
 
 [[api]]
 symbol = "lash::messages::MessageOrigin::TurnInput::input_id"
@@ -9736,8 +9739,8 @@ availability = "default+all-features"
 aliases = ["lash_core::MessageOrigin::TurnInput::input_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1042#input_id: Some(\"workbench-input-1\".to_string()),"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1076#\"the UI-owned row renders once and the committed copy stays provenance\""
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1045#input_id: Some(\"workbench-input-1\".to_string()),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1079#\"the UI-owned row renders once and the committed copy stays provenance\""
 
 [[api]]
 symbol = "lash::messages::MessageOrigin::TurnInput::turn_id"
@@ -9746,8 +9749,8 @@ availability = "default+all-features"
 aliases = ["lash_core::MessageOrigin::TurnInput::turn_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:63#let Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) ="
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1076#\"the UI-owned row renders once and the committed copy stays provenance\""
+usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:64#let Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) ="
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1079#\"the UI-owned row renders once and the committed copy stays provenance\""
 
 [[api]]
 symbol = "lash::messages::MessageRole"
@@ -9756,8 +9759,8 @@ availability = "default+all-features"
 aliases = ["lash_core::MessageRole"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:969#lash::messages::MessageRole::Assistant,"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:998#.map(|message| (message.id.as_str(), message.text.as_str()))"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:972#lash::messages::MessageRole::Assistant,"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1001#.map(|message| (message.id.as_str(), message.text.as_str()))"
 
 [[api]]
 symbol = "lash::messages::MessageRole::Assistant"
@@ -9766,8 +9769,8 @@ availability = "default+all-features"
 aliases = ["lash_core::MessageRole::Assistant"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:969#lash::messages::MessageRole::Assistant,"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1002#(\"canonical-assistant\", \"canonical answer\"),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:972#lash::messages::MessageRole::Assistant,"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1005#(\"canonical-assistant\", \"canonical answer\"),"
 
 [[api]]
 symbol = "lash::messages::MessageRole::Event"
@@ -9794,8 +9797,8 @@ availability = "default+all-features"
 aliases = ["lash_core::MessageRole::User"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:964#lash::messages::MessageRole::User,"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1001#(\"canonical-user\", \"canonical question\"),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:967#lash::messages::MessageRole::User,"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1004#(\"canonical-user\", \"canonical question\"),"
 
 [[api]]
 symbol = "lash::messages::MessageSequence"
@@ -10878,8 +10881,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentStoreError"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:117#Err(lash::persistence::AttachmentStoreError::NotFound(id)) => {"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:118#assert_eq!(id, missing_id);"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:120#Err(lash::persistence::AttachmentStoreError::NotFound(id)) => {"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:121#assert_eq!(id, missing_id);"
 
 [[api]]
 symbol = "lash::persistence::AttachmentStoreError::Backend"
@@ -10951,8 +10954,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentStoreError::NotFound"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:117#Err(lash::persistence::AttachmentStoreError::NotFound(id)) => {"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:118#assert_eq!(id, missing_id);"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:120#Err(lash::persistence::AttachmentStoreError::NotFound(id)) => {"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:121#assert_eq!(id, missing_id);"
 
 [[api]]
 symbol = "lash::persistence::AttachmentStoreError::NotFound::0"
@@ -10961,8 +10964,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentStoreError::NotFound::0"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:117#Err(lash::persistence::AttachmentStoreError::NotFound(id)) => {"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:118#assert_eq!(id, missing_id);"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:120#Err(lash::persistence::AttachmentStoreError::NotFound(id)) => {"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:121#assert_eq!(id, missing_id);"
 
 [[api]]
 symbol = "lash::persistence::AttachmentStorePersistence"
@@ -10971,8 +10974,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentStorePersistence"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:107#lash::persistence::AttachmentStorePersistence::Durable"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:107#lash::persistence::AttachmentStorePersistence::Durable"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:110#lash::persistence::AttachmentStorePersistence::Durable"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:110#lash::persistence::AttachmentStorePersistence::Durable"
 
 [[api]]
 symbol = "lash::persistence::AttachmentStorePersistence::Durable"
@@ -10981,8 +10984,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentStorePersistence::Durable"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:107#lash::persistence::AttachmentStorePersistence::Durable"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:107#lash::persistence::AttachmentStorePersistence::Durable"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:110#lash::persistence::AttachmentStorePersistence::Durable"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:110#lash::persistence::AttachmentStorePersistence::Durable"
 
 [[api]]
 symbol = "lash::persistence::AttachmentStorePersistence::Ephemeral"
@@ -15260,7 +15263,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionReadView::chronological_projection"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:95#.chronological_projection()"
+usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:102#.chronological_projection()"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:238, inside `transcript_rows_from_committed`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1121 asserts an unrelated expression in `send_turn_state_projection_stays_readable_and_settles_to_durable_truth`, and `transcript_rows_from_committed` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -15306,8 +15309,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionReadView::messages"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1403#.messages()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1425#assistant_events.len(),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1583#.messages()"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1605#assistant_events.len(),"
 
 [[api]]
 symbol = "lash::persistence::SessionReadView::policy"
@@ -15558,8 +15561,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionStoreFactory"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:37#)) as Arc<dyn lash::persistence::SessionStoreFactory>;"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:312#assert_eq!(after_restart.usage, persisted_usage);"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:40#)) as Arc<dyn lash::persistence::SessionStoreFactory>;"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:317#assert_eq!(after_restart.usage, persisted_usage);"
 
 [[api]]
 symbol = "lash::persistence::SessionStoreFactory::create_store"
@@ -16479,8 +16482,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SessionDeleted"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:908#lash::persistence::StoreError::SessionDeleted {"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:960#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:927#lash::persistence::StoreError::SessionDeleted {"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:979#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::persistence::StoreError::SessionDeleted::session_id"
@@ -16489,8 +16492,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SessionDeleted::session_id"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:957#session_id: \"retired-session\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:960#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:976#session_id: \"retired-session\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:979#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::persistence::StoreError::SessionExecutionLeaseExpired"
@@ -16787,8 +16790,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoredAttachment"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:178#let stored: lash::persistence::StoredAttachment = attachment_store"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:176#other => panic!(\"uploaded PNG must retain image dimensions, got {other:?}\"),"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:181#let stored: lash::persistence::StoredAttachment = attachment_store"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:179#other => panic!(\"uploaded PNG must retain image dimensions, got {other:?}\"),"
 
 [[api]]
 symbol = "lash::persistence::StoredAttachment::bytes"
@@ -16797,8 +16800,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoredAttachment::bytes"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:181#.expect(\"read uploaded bytes from workbench attachment store\");"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:182#assert_eq!(stored.bytes, png_bytes);"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:184#.expect(\"read uploaded bytes from workbench attachment store\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:185#assert_eq!(stored.bytes, png_bytes);"
 
 [[api]]
 symbol = "lash::persistence::StoredBlobRef"
@@ -19024,8 +19027,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginMessage"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:963#lash::plugins::PluginMessage::text("
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:998#.map(|message| (message.id.as_str(), message.text.as_str()))"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:966#lash::plugins::PluginMessage::text("
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1001#.map(|message| (message.id.as_str(), message.text.as_str()))"
 
 [[api]]
 symbol = "lash::plugins::PluginMessage::attachments"
@@ -19097,8 +19100,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginMessage::text"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:963#lash::plugins::PluginMessage::text("
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:998#.map(|message| (message.id.as_str(), message.text.as_str()))"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:966#lash::plugins::PluginMessage::text("
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1001#.map(|message| (message.id.as_str(), message.text.as_str()))"
 
 [[api]]
 symbol = "lash::plugins::PluginMessage::with_id"
@@ -19107,8 +19110,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginMessage::with_id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:967#.with_id(\"canonical-user\"),"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:998#.map(|message| (message.id.as_str(), message.text.as_str()))"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:970#.with_id(\"canonical-user\"),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1001#.map(|message| (message.id.as_str(), message.text.as_str()))"
 
 [[api]]
 symbol = "lash::plugins::PluginMessage::with_origin"
@@ -22244,7 +22247,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessAwaitOutput::terminal_status"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1096#\"terminal_state\": format!(\"{:?}\", outcome.terminal_status()),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1102#\"terminal_state\": format!(\"{:?}\", outcome.terminal_status()),"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:206#assert_eq!(failed.process.status_label, \"failed\");"
 
 [[api]]
@@ -23622,8 +23625,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2299#definition: None,"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2322#.any(|process| process.process_id == *process_id),"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2300#definition: None,"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2323#.any(|process| process.process_id == *process_id),"
 
 [[api]]
 symbol = "lash::process::ProcessListFilter::caused_by_occurrence_id"
@@ -23679,7 +23682,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter::definition"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2299#definition: None,"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2300#definition: None,"
 
 [[api]]
 symbol = "lash::process::ProcessListFilter::identity_kind"
@@ -23739,7 +23742,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter::status"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:849#status: lash::process::ProcessStatusFilter::Any,"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:855#status: lash::process::ProcessStatusFilter::Any,"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:206#assert_eq!(failed.process.status_label, \"failed\");"
 
 [[api]]
@@ -23749,7 +23752,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter::waiting"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2301#waiting: None,"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2302#waiting: None,"
 
 [[api]]
 symbol = "lash::process::ProcessListMode"
@@ -25740,7 +25743,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessStatusFilter"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:849#status: lash::process::ProcessStatusFilter::Any,"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:855#status: lash::process::ProcessStatusFilter::Any,"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:206#assert_eq!(failed.process.status_label, \"failed\");"
 
 [[api]]
@@ -25759,7 +25762,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessStatusFilter::Any"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:849#status: lash::process::ProcessStatusFilter::Any,"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:855#status: lash::process::ProcessStatusFilter::Any,"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:206#assert_eq!(failed.process.status_label, \"failed\");"
 
 [[api]]
@@ -26116,7 +26119,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::process_work_driver::ProcessWorkDriver"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1066#state.process_work_driver.await_terminal(&process_id),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1072#state.process_work_driver.await_terminal(&process_id),"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:147#lash::process::ProcessAwaitOutput::Success { value, .. } if value == &json!(\"done\")"
 
 [[api]]
@@ -26135,7 +26138,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::process_work_driver::ProcessWorkDriver::await_terminal"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1066#state.process_work_driver.await_terminal(&process_id),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1072#state.process_work_driver.await_terminal(&process_id),"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:147#lash::process::ProcessAwaitOutput::Success { value, .. } if value == &json!(\"done\")"
 
 [[api]]
@@ -26286,7 +26289,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:848#.snapshot_all(&lash::process::ProcessListFilter {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:854#.snapshot_all(&lash::process::ProcessListFilter {"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:206#assert_eq!(failed.process.status_label, \"failed\");"
 
 [[api]]
@@ -26399,8 +26402,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2306#.list(&filter)"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2323#\"remote process list did not include started process {process_id}\""
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2307#.list(&filter)"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2324#\"remote process list did not include started process {process_id}\""
 
 [[api]]
 symbol = "lash::process::Processes::list_observed_by"
@@ -26459,8 +26462,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2329#.session_snapshot(session_id)"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2340#assert_eq!(round_trip_snapshot.session_id, session_id);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2330#.session_snapshot(session_id)"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2341#assert_eq!(round_trip_snapshot.session_id, session_id);"
 
 [[api]]
 symbol = "lash::process::Processes::signal"
@@ -27985,8 +27988,8 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::attachment_bytes"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:259#assert_eq!(requests[0].attachment_bytes(source), Some(png_bytes.as_slice()));"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:259#assert_eq!(requests[0].attachment_bytes(source), Some(png_bytes.as_slice()));"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:262#assert_eq!(requests[0].attachment_bytes(source), Some(png_bytes.as_slice()));"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:262#assert_eq!(requests[0].attachment_bytes(source), Some(png_bytes.as_slice()));"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::attachments"
@@ -29870,7 +29873,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1178#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1184#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:704#assert_eq!(gap.requested_cursor, requested_cursor);"
 
 [[api]]
@@ -29879,7 +29882,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1178#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1184#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:1321, inside `forward_session_observations`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:184 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `forward_session_observations` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -29888,7 +29891,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1178#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1184#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:1321, inside `forward_session_observations`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:184 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `forward_session_observations` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -29905,7 +29908,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1209#Ok(lash::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1215#Ok(lash::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:704#assert_eq!(gap.requested_cursor, requested_cursor);"
 
 [[api]]
@@ -29914,7 +29917,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1219#gap: Box::new(gap),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1225#gap: Box::new(gap),"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:704#assert_eq!(gap.requested_cursor, requested_cursor);"
 
 [[api]]
@@ -29923,7 +29926,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1209#Ok(lash::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1215#Ok(lash::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:704#assert_eq!(gap.requested_cursor, requested_cursor);"
 
 [[api]]
@@ -32277,7 +32280,7 @@ kind = "function"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1179#let event = RemoteSessionObservationEvent::from_core(sequence, event);"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1185#let event = RemoteSessionObservationEvent::from_core(sequence, event);"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:1322, inside `forward_session_observations`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:184 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `forward_session_observations` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -37909,8 +37912,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2257#.validate(\"WorkbenchTriggerSubscription\")"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2262#assert_eq!(&round_trip_record, record);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2258#.validate(\"WorkbenchTriggerSubscription\")"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2263#assert_eq!(&round_trip_record, record);"
 
 [[api]]
 symbol = "lash::remote::triggers::RemoteTriggerSubscriptionRecord::created_at_ms"
@@ -38102,8 +38105,8 @@ kind = "function"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2257#.validate(\"WorkbenchTriggerSubscription\")"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2262#assert_eq!(&round_trip_record, record);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2258#.validate(\"WorkbenchTriggerSubscription\")"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2263#assert_eq!(&round_trip_record, record);"
 
 [[api]]
 symbol = "lash::remote::triggers::RemoteTriggerSubscriptionRecord::wake_target"
@@ -41304,8 +41307,8 @@ kind = "function"
 availability = "all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1212#.require_finish()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1235#provider_entered_rx.recv().await,"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1392#.require_finish()"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1415#provider_entered_rx.recv().await,"
 
 [[api]]
 symbol = "lash::rlm::RlmTurnBuilderExt::require_finish_schema"
@@ -41798,8 +41801,8 @@ availability = "default+all-features"
 aliases = ["lash_core::Clock"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:144#Arc::clone(&system_clock) as Arc<dyn lash::runtime::Clock>,"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:120#other => panic!(\"missing attachment must return NotFound, got {other:?}\"),"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:147#Arc::clone(&system_clock) as Arc<dyn lash::runtime::Clock>,"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:123#other => panic!(\"missing attachment must return NotFound, got {other:?}\"),"
 
 [[api]]
 symbol = "lash::runtime::Clock::now"
@@ -41844,8 +41847,8 @@ availability = "default+all-features"
 aliases = ["lash_core::Clock::timestamp_ms"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:206#let runtime_window_start_ms = lash::runtime::Clock::timestamp_ms(system_clock.as_ref());"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:248#(runtime_window_start_ms..=runtime_window_end_ms).contains(&latest_node_ms),"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:209#let runtime_window_start_ms = lash::runtime::Clock::timestamp_ms(system_clock.as_ref());"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:251#(runtime_window_start_ms..=runtime_window_end_ms).contains(&latest_node_ms),"
 
 [[api]]
 symbol = "lash::runtime::Clock::timestamp_rfc3339"
@@ -45079,8 +45082,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:895#return error.deleted_session_id().map(|session_id| (session_id, None));"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:960#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:914#return error.deleted_session_id().map(|session_id| (session_id, None));"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:979#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::cause"
@@ -45107,8 +45110,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError::deleted_session_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:895#return error.deleted_session_id().map(|session_id| (session_id, None));"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:960#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:914#return error.deleted_session_id().map(|session_id| (session_id, None));"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:979#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::message"
@@ -45958,8 +45961,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ScopedEffectController"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2415#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2384#assert_eq!(round_trip_tail, expected_tail);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2416#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2385#assert_eq!(round_trip_tail, expected_tail);"
 
 [[api]]
 symbol = "lash::runtime::ScopedEffectController::borrowed"
@@ -45996,7 +45999,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ScopedEffectController::shared"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2415#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2416#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
 assertion = "examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs:74#assert_eq!(first_report.started_process_ids().len(), 1);"
 
 [[api]]
@@ -46342,8 +46345,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:138#let system_clock = Arc::new(lash::runtime::SystemClock);"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:120#other => panic!(\"missing attachment must return NotFound, got {other:?}\"),"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:141#let system_clock = Arc::new(lash::runtime::SystemClock);"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:123#other => panic!(\"missing attachment must return NotFound, got {other:?}\"),"
 
 [[api]]
 symbol = "lash::runtime::TurnContext"
@@ -46568,7 +46571,7 @@ availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:5#let provider = lash::testing::TestProvider::builder()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1541#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1721#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProvider::builder"
@@ -46577,7 +46580,7 @@ availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:5#let provider = lash::testing::TestProvider::builder()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1541#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1721#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProvider::into_handle"
@@ -46586,7 +46589,7 @@ availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:13#.into_handle();"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1541#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1721#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProviderBuilder"
@@ -46595,7 +46598,7 @@ availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:12#.build()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1541#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1721#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProviderBuilder::build"
@@ -46604,7 +46607,7 @@ availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:12#.build()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1541#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1721#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProviderBuilder::complete"
@@ -46620,8 +46623,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1514#.complete_error(INTERNAL_PROVIDER_FAILURE)"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1541#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1694#.complete_error(INTERNAL_PROVIDER_FAILURE)"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1721#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProviderBuilder::kind"
@@ -46629,8 +46632,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1513#.kind(\"recoverable-chat-provider-failure\")"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1541#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1693#.kind(\"recoverable-chat-provider-failure\")"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1721#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProviderBuilder::new"
@@ -53999,7 +54002,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceContext::for_session"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:431#.map(|session_id| TraceContext::default().for_session(session_id))"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:449#.map(|session_id| TraceContext::default().for_session(session_id))"
 
 [[api]]
 symbol = "lash::tracing::TraceContext::for_turn"
@@ -54314,7 +54317,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::Custom"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:435#TraceEvent::Custom {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:453#TraceEvent::Custom {"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::Custom::name"
@@ -54323,7 +54326,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::Custom::name"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:436#name: format!(\"agent_workbench.{name}\"),"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:454#name: format!(\"agent_workbench.{name}\"),"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::Custom::payload"
@@ -54379,8 +54382,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::LlmCallCompleted"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:444#TraceEvent::LlmCallCompleted { usage, .. } => usage,"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:272#assert_eq!(call_usage.len(), 1);"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:471#TraceEvent::LlmCallCompleted { usage, .. } => usage,"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:276#assert_eq!(call_usage.len(), 1);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::LlmCallCompleted::provider_usage"
@@ -54390,7 +54393,7 @@ aliases = ["lash_core::TraceEvent::LlmCallCompleted::provider_usage"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:359#provider_usage: Some(serde_json::json!({ \"cached_tokens\": 64 })),"
-assertion = "examples/docs-snippets/src/tracing.rs:405#assert_eq!(event_wire[7][\"provider_usage\"][\"cached_tokens\"], 64);"
+assertion = "examples/docs-snippets/src/tracing.rs:389#assert_eq!(event_wire[7][\"provider_usage\"][\"cached_tokens\"], 64);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:359; the assertion at examples/docs-snippets/src/tracing.rs:389 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[7][\"provider_usage\"][\"cached_tokens\"]` equals `64`."
 
 [[api]]
@@ -54418,8 +54421,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::LlmCallCompleted::usage"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:444#TraceEvent::LlmCallCompleted { usage, .. } => usage,"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:272#assert_eq!(call_usage.len(), 1);"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:471#TraceEvent::LlmCallCompleted { usage, .. } => usage,"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:276#assert_eq!(call_usage.len(), 1);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::LlmCallFailed"
@@ -54474,7 +54477,7 @@ aliases = ["lash_core::TraceEvent::PromptBuilt"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:326#TraceEvent::PromptBuilt {"
-assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:326; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -54485,7 +54488,7 @@ aliases = ["lash_core::TraceEvent::PromptBuilt::components"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:329#components: vec![component],"
-assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:329; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -54496,7 +54499,7 @@ aliases = ["lash_core::TraceEvent::PromptBuilt::prompt_chars"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:328#prompt_chars: 2_048,"
-assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:328; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -54507,148 +54510,8 @@ aliases = ["lash_core::TraceEvent::PromptBuilt::prompt_hash"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:327#prompt_hash: \"sha256:prompt\".to_string(),"
-assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:327; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionCompleted"
-kind = "variant"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::RollingHistoryCompactionCompleted"]
-area = "observation-admin"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:377#TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 },"
-assertion = "examples/docs-snippets/src/tracing.rs:418#assert!(event_wire[11][\"type\"] == \"rolling_history_compaction_completed\");"
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionCompleted::summary_nodes"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::RollingHistoryCompactionCompleted::summary_nodes"]
-area = "observation-admin"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:377#TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 },"
-assertion = "examples/docs-snippets/src/tracing.rs:419#assert_eq!(event_wire[11][\"summary_nodes\"], 1);"
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionNeeded"
-kind = "variant"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::RollingHistoryCompactionNeeded"]
-area = "observation-admin"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:362#TraceEvent::RollingHistoryCompactionNeeded {"
-assertion = "examples/docs-snippets/src/tracing.rs:406#assert_eq!(event_wire[8][\"type\"], \"rolling_history_compaction_needed\");"
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionNeeded::context_budget_tokens"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::RollingHistoryCompactionNeeded::context_budget_tokens"]
-area = "observation-admin"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:363#context_budget_tokens: 30_000,"
-assertion = "examples/docs-snippets/src/tracing.rs:407#assert_eq!(event_wire[8][\"context_budget_tokens\"], 30_000);"
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionNeeded::max_context_tokens"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::RollingHistoryCompactionNeeded::max_context_tokens"]
-area = "observation-admin"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:364#max_context_tokens: 40_000,"
-assertion = "examples/docs-snippets/src/tracing.rs:408#assert_eq!(event_wire[8][\"max_context_tokens\"], 40_000);"
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionNeeded::threshold_tokens"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::RollingHistoryCompactionNeeded::threshold_tokens"]
-area = "observation-admin"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:365#threshold_tokens: 20_000,"
-assertion = "examples/docs-snippets/src/tracing.rs:409#assert_eq!(event_wire[8][\"threshold_tokens\"], 20_000);"
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionStarted"
-kind = "variant"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::RollingHistoryCompactionStarted"]
-area = "observation-admin"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:373#TraceEvent::RollingHistoryCompactionStarted {"
-assertion = "examples/docs-snippets/src/tracing.rs:415#assert_eq!(event_wire[10][\"type\"], \"rolling_history_compaction_started\");"
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionStarted::instructions_present"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::RollingHistoryCompactionStarted::instructions_present"]
-area = "observation-admin"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:375#instructions_present: true,"
-assertion = "examples/docs-snippets/src/tracing.rs:417#assert_eq!(event_wire[10][\"instructions_present\"], true);"
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionStarted::source_messages"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::RollingHistoryCompactionStarted::source_messages"]
-area = "observation-admin"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:374#source_messages: 3,"
-assertion = "examples/docs-snippets/src/tracing.rs:416#assert_eq!(event_wire[10][\"source_messages\"], 3);"
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned"
-kind = "variant"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned"]
-area = "observation-admin"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:367#TraceEvent::RollingHistoryPromptPruned {"
-assertion = "examples/docs-snippets/src/tracing.rs:410#assert_eq!(event_wire[9][\"type\"], \"rolling_history_prompt_pruned\");"
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned::context_budget_tokens"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned::context_budget_tokens"]
-area = "observation-admin"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:368#context_budget_tokens: 30_000,"
-assertion = "examples/docs-snippets/src/tracing.rs:411#assert_eq!(event_wire[9][\"context_budget_tokens\"], 30_000);"
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned::dropped_prefix_messages"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned::dropped_prefix_messages"]
-area = "observation-admin"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:370#dropped_prefix_messages: 2,"
-assertion = "examples/docs-snippets/src/tracing.rs:413#assert_eq!(event_wire[9][\"dropped_prefix_messages\"], 2);"
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned::max_context_tokens"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned::max_context_tokens"]
-area = "observation-admin"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:369#max_context_tokens: 40_000,"
-assertion = "examples/docs-snippets/src/tracing.rs:412#assert_eq!(event_wire[9][\"max_context_tokens\"], 40_000);"
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned::retained_messages"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned::retained_messages"]
-area = "observation-admin"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:371#retained_messages: 1,"
-assertion = "examples/docs-snippets/src/tracing.rs:414#assert_eq!(event_wire[9][\"retained_messages\"], 1);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::ProtocolStep"
@@ -54676,7 +54539,7 @@ aliases = ["lash_core::TraceEvent::ProtocolStep::plugin_id"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:347#plugin_id: \"standard\".to_string(),"
-assertion = "examples/docs-snippets/src/tracing.rs:404#assert_eq!(event_wire[6][\"plugin_id\"], \"standard\");"
+assertion = "examples/docs-snippets/src/tracing.rs:388#assert_eq!(event_wire[6][\"plugin_id\"], \"standard\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:347; the assertion at examples/docs-snippets/src/tracing.rs:388 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[6][\"plugin_id\"]` equals `\"standard\"`."
 
 [[api]]
@@ -54687,7 +54550,7 @@ aliases = ["lash_core::TraceEvent::ProviderRequest"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:331#TraceEvent::ProviderRequest {"
-assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:331; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -54698,7 +54561,7 @@ aliases = ["lash_core::TraceEvent::ProviderRequest::event"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:332#event: provider_request,"
-assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:332; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -54709,7 +54572,7 @@ aliases = ["lash_core::TraceEvent::ProviderStreamEvent"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:334#TraceEvent::ProviderStreamEvent {"
-assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:334; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -54720,7 +54583,7 @@ aliases = ["lash_core::TraceEvent::ProviderStreamEvent::event"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:335#event: provider_stream,"
-assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:335; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -54860,7 +54723,7 @@ aliases = ["lash_core::TraceEvent::ToolCallStarted"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:340#TraceEvent::ToolCallStarted {"
-assertion = "examples/docs-snippets/src/tracing.rs:394#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
+assertion = "examples/docs-snippets/src/tracing.rs:378#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:340; the assertion at examples/docs-snippets/src/tracing.rs:378 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[4][\"args\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -54871,7 +54734,7 @@ aliases = ["lash_core::TraceEvent::ToolCallStarted::args"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:343#args: serde_json::json!({ \"query\": \"release notes\" }),"
-assertion = "examples/docs-snippets/src/tracing.rs:394#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
+assertion = "examples/docs-snippets/src/tracing.rs:378#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:343; the assertion at examples/docs-snippets/src/tracing.rs:378 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[4][\"args\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -54882,7 +54745,7 @@ aliases = ["lash_core::TraceEvent::ToolCallStarted::call_id"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:341#call_id: Some(\"call-7\".to_string()),"
-assertion = "examples/docs-snippets/src/tracing.rs:394#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
+assertion = "examples/docs-snippets/src/tracing.rs:378#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:341; the assertion at examples/docs-snippets/src/tracing.rs:378 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[4][\"args\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -54893,7 +54756,7 @@ aliases = ["lash_core::TraceEvent::ToolCallStarted::name"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:342#name: \"search_docs\".to_string(),"
-assertion = "examples/docs-snippets/src/tracing.rs:394#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
+assertion = "examples/docs-snippets/src/tracing.rs:378#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:342; the assertion at examples/docs-snippets/src/tracing.rs:378 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[4][\"args\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -55858,7 +55721,7 @@ kind = "function"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1115#state.lashlang_execution.graphs(),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1121#state.lashlang_execution.graphs(),"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:1258, inside `list_lashlang_graphs`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:184 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `list_lashlang_graphs` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -56302,7 +56165,7 @@ aliases = ["lash_core::TracePromptComponent"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:137#let component = TracePromptComponent {"
-assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:137; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -56313,7 +56176,7 @@ aliases = ["lash_core::TracePromptComponent::chars"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:146#assert_eq!(component.chars, Some(42));"
-assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:146; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -56324,7 +56187,7 @@ aliases = ["lash_core::TracePromptComponent::hash"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:145#assert_eq!(component.hash, \"sha256:prompt-policy\");"
-assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:145; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -56335,7 +56198,7 @@ aliases = ["lash_core::TracePromptComponent::id"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:143#assert_eq!(component.id, \"plugin:policy\");"
-assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:143; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -56346,7 +56209,7 @@ aliases = ["lash_core::TracePromptComponent::kind"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:144#assert_eq!(component.kind, \"guidance\");"
-assertion = "examples/docs-snippets/src/tracing.rs:383#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:367#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:144; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -56357,7 +56220,7 @@ aliases = ["lash_core::TraceProviderRequestEvent"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:237#let provider_request = TraceProviderRequestEvent {"
-assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:237; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56368,7 +56231,7 @@ aliases = ["lash_core::TraceProviderRequestEvent::body_json"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:254#provider_request.body_json.as_ref().unwrap()[\"model\"],"
-assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:254; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56379,7 +56242,7 @@ aliases = ["lash_core::TraceProviderRequestEvent::body_json_omitted_reason"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:257#assert!(provider_request.body_json_omitted_reason.is_none());"
-assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:257; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56390,7 +56253,7 @@ aliases = ["lash_core::TraceProviderRequestEvent::body_len"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:251#assert_eq!(provider_request.body_len, 128);"
-assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:251; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56401,7 +56264,7 @@ aliases = ["lash_core::TraceProviderRequestEvent::body_sha256"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:252#assert_eq!(provider_request.body_sha256, \"sha256:request\");"
-assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:252; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56412,7 +56275,7 @@ aliases = ["lash_core::TraceProviderRequestEvent::elapsed_ms"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:249#assert_eq!(provider_request.elapsed_ms, 35);"
-assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:249; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56423,7 +56286,7 @@ aliases = ["lash_core::TraceProviderRequestEvent::endpoint"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:250#assert_eq!(provider_request.endpoint, \"/v1/responses\");"
-assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:250; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56434,7 +56297,7 @@ aliases = ["lash_core::TraceProviderRequestEvent::provider"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:247#assert_eq!(provider_request.provider, \"provider:test\");"
-assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:247; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56445,7 +56308,7 @@ aliases = ["lash_core::TraceProviderRequestEvent::sequence"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:248#assert_eq!(provider_request.sequence, 4);"
-assertion = "examples/docs-snippets/src/tracing.rs:386#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:370#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:248; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56456,7 +56319,7 @@ aliases = ["lash_core::TraceProviderStreamEvent"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:259#let provider_stream = TraceProviderStreamEvent {"
-assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:259; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56467,7 +56330,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::elapsed_ms"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:272#assert_eq!(provider_stream.elapsed_ms, 52);"
-assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:272; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56478,7 +56341,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::event_name"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:273#assert_eq!(provider_stream.event_name, \"response.output_item.added\");"
-assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:273; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56489,7 +56352,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::item_id"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:274#assert_eq!(provider_stream.item_id.as_deref(), Some(\"item-3\"));"
-assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:274; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56500,7 +56363,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::output_index"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:275#assert_eq!(provider_stream.output_index, Some(0));"
-assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:275; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56511,7 +56374,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::provider"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:270#assert_eq!(provider_stream.provider, \"provider:test\");"
-assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:270; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56522,7 +56385,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::raw_json"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:279#provider_stream.raw_json.as_ref().unwrap()[\"type\"],"
-assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:279; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56533,7 +56396,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::raw_len"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:276#assert_eq!(provider_stream.raw_len, 96);"
-assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:276; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56544,7 +56407,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::raw_sha256"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:277#assert_eq!(provider_stream.raw_sha256, \"sha256:event\");"
-assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:277; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -56555,7 +56418,7 @@ aliases = ["lash_core::TraceProviderStreamEvent::sequence"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tracing.rs:271#assert_eq!(provider_stream.sequence, 5);"
-assertion = "examples/docs-snippets/src/tracing.rs:390#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/tracing.rs:374#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:271; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -58367,7 +58230,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceRequest::for_session"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1394#.for_session(session_id),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1400#.for_session(session_id),"
 assertion = "examples/agent-workbench/src/main_sections/tests/session_isolation.rs:118#assert_eq!(report_a.started_process_ids().len(), 1);"
 
 [[api]]
@@ -59085,7 +58948,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionFilter"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:473#.list_subscriptions(lash::triggers::TriggerSubscriptionFilter::for_session("
+usage = "examples/agent-workbench/src/main_sections/routes.rs:479#.list_subscriptions(lash::triggers::TriggerSubscriptionFilter::for_session("
 assertion = "examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs:55#assert_eq!(trigger_records.len(), 1);"
 
 [[api]]
@@ -59122,7 +58985,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionFilter::for_session"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:473#.list_subscriptions(lash::triggers::TriggerSubscriptionFilter::for_session("
+usage = "examples/agent-workbench/src/main_sections/routes.rs:479#.list_subscriptions(lash::triggers::TriggerSubscriptionFilter::for_session("
 assertion = "examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs:55#assert_eq!(trigger_records.len(), 1);"
 
 [[api]]
@@ -59213,7 +59076,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionRecord"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:750#registrant_scope: record.registrant_scope_id(),"
+usage = "examples/agent-workbench/src/main_sections/state.rs:768#registrant_scope: record.registrant_scope_id(),"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionRecord::created_at_ms"
@@ -59330,7 +59193,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionRecord::registrant_scope_id"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:750#registrant_scope: record.registrant_scope_id(),"
+usage = "examples/agent-workbench/src/main_sections/state.rs:768#registrant_scope: record.registrant_scope_id(),"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionRecord::registrant_session_id"
@@ -59495,7 +59358,7 @@ kind = "function"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1369#let source_key = lash::triggers::empty_trigger_source_key(BUTTON_TRIGGER_SOURCE_TYPE)"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1375#let source_key = lash::triggers::empty_trigger_source_key(BUTTON_TRIGGER_SOURCE_TYPE)"
 assertion = "examples/agent-workbench/src/main_sections/tests/session_isolation.rs:118#assert_eq!(report_a.started_process_ids().len(), 1);"
 
 [[api]]

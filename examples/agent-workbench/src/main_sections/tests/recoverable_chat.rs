@@ -832,6 +832,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                 role: "user".to_string(),
                 text: "settled prompt".to_string(),
                 at: String::new(),
+                attachments: Vec::new(),
             },
         },
     );
@@ -874,6 +875,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                 role: "event".to_string(),
                 text: "host event".to_string(),
                 at: String::new(),
+                attachments: Vec::new(),
             },
         },
     );
@@ -910,6 +912,7 @@ async fn product_event_route_lag_emits_durable_ordered_resync() {
                     role: "event".to_string(),
                     text: format!("event {sequence}"),
                     at: String::new(),
+                    attachments: Vec::new(),
                 },
             },
         );
@@ -1101,6 +1104,159 @@ async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_rec
     );
 }
 
+#[tokio::test]
+async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill() {
+    let data_dir = tempfile::tempdir().expect("attachment backfill tempdir");
+    let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+    let session_id = state.current_session_id();
+    let turn_id = "workbench-turn-fig994";
+    let attachment = lash::attachments::AttachmentRef {
+        id: lash::attachments::AttachmentId::new("sha256:fig994-backfill"),
+        media_type: lash::attachments::MediaType::parse("image/png")
+            .expect("valid test media type"),
+        byte_len: 68,
+        type_metadata: Some(lash::attachments::AttachmentTypeMetadata::image(
+            Some(1),
+            Some(1),
+        )),
+        label: Some("backfill.png".to_string()),
+    };
+    let expected_attachment = (
+        attachment.id.to_string(),
+        format!("/api/attachments/{}", attachment.id),
+    );
+
+    state.track_turn_prompt(&session_id, turn_id, "one attached send".to_string());
+    state.push_message_with_id_and_attachments_for_session(
+        &session_id,
+        workbench_turn_user_message_id(turn_id),
+        "user",
+        "one attached send",
+        vec![ChatAttachment::from_id(attachment.id.to_string())],
+    );
+
+    let Json(optimistic) = Box::pin(app_state(
+        State(state.clone()),
+        Query(SessionQuery::default()),
+    ))
+    .await
+    .expect("materialize optimistic attachment snapshot");
+    assert_eq!(
+        user_row_attachments(&optimistic),
+        vec![(
+            workbench_turn_user_message_id(turn_id),
+            vec![expected_attachment.clone()],
+        )],
+        "the live UI-owned row carries the uploaded attachment reference once"
+    );
+
+    let mut committed = lash::plugins::PluginMessage::text(
+        lash::messages::MessageRole::User,
+        "one attached send",
+    )
+    .with_id("m_ingress_workbench-input-fig994")
+    .with_origin(lash::messages::MessageOrigin::TurnInput {
+        turn_id: turn_id.to_string(),
+        input_id: Some("workbench-input-fig994".to_string()),
+    });
+    committed
+        .attachments
+        .push(lash::direct::AttachmentSource::stored(attachment));
+    let session = state
+        .core
+        .session(session_id.clone())
+        .open()
+        .await
+        .expect("open attachment backfill session");
+    session
+        .admin()
+        .state()
+        .append_messages(vec![committed])
+        .await
+        .expect("commit attached turn input");
+    session.close().await.expect("close attachment backfill session");
+
+    let Json(running) = Box::pin(app_state(
+        State(state.clone()),
+        Query(SessionQuery::default()),
+    ))
+    .await
+    .expect("materialize running attachment snapshot");
+    assert_eq!(
+        user_row_attachments(&running),
+        vec![(
+            workbench_turn_user_message_id(turn_id),
+            vec![expected_attachment.clone()],
+        )],
+        "the committed copy stays suppressed while the attached UI row survives"
+    );
+
+    crate::restate::settle_workbench_turn(&state, &session_id, turn_id)
+        .await
+        .expect("settle attached workbench turn");
+    let Json(settled) = Box::pin(app_state(State(state), Query(SessionQuery::default())))
+        .await
+        .expect("materialize settled attachment snapshot");
+    assert_eq!(
+        user_row_attachments(&settled),
+        vec![(
+            "m_ingress_workbench-input-fig994".to_string(),
+            vec![expected_attachment],
+        )],
+        "the committed attachment reference backfills after the UI row retires"
+    );
+}
+
+#[tokio::test]
+async fn committed_attachment_ref_is_exposed_in_the_workbench_snapshot() {
+    let data_dir = tempfile::tempdir().expect("committed attachment snapshot tempdir");
+    let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+    let session_id = state.current_session_id();
+    let attachment = lash::attachments::AttachmentRef {
+        id: lash::attachments::AttachmentId::new("sha256:fig994-committed"),
+        media_type: lash::attachments::MediaType::parse("image/png")
+            .expect("valid test media type"),
+        byte_len: 68,
+        type_metadata: Some(lash::attachments::AttachmentTypeMetadata::image(
+            Some(1),
+            Some(1),
+        )),
+        label: Some("committed.png".to_string()),
+    };
+    let mut message =
+        lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, "see image")
+            .with_id("committed-attachment-message");
+    message
+        .attachments
+        .push(lash::direct::AttachmentSource::stored(attachment.clone()));
+    let session = state
+        .core
+        .session(session_id)
+        .open()
+        .await
+        .expect("open committed attachment session");
+    session
+        .admin()
+        .state()
+        .append_messages(vec![message])
+        .await
+        .expect("append committed attachment message");
+    session.close().await.expect("close committed attachment session");
+
+    let Json(snapshot) = Box::pin(app_state(State(state), Query(SessionQuery::default())))
+        .await
+        .expect("read committed attachment snapshot");
+    let wire = serde_json::to_value(snapshot).expect("serialize workbench snapshot");
+    assert_eq!(
+        wire["messages"][0]["attachments"],
+        json!([{
+            "attachment_id": attachment.id,
+            "retrieve_url": format!("/api/attachments/{}", attachment.id),
+        }]),
+        "the committed message must expose the stored attachment reference"
+    );
+}
+
 fn user_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
     snapshot
         .state
@@ -1122,6 +1278,30 @@ fn transcript_user_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
             TranscriptRow::Message { .. }
             | TranscriptRow::Reasoning { .. }
             | TranscriptRow::CodeBlock { .. } => None,
+        })
+        .collect()
+}
+
+fn user_row_attachments(snapshot: &StateReadSnapshot) -> Vec<(String, Vec<(String, String)>)> {
+    snapshot
+        .state
+        .messages
+        .iter()
+        .filter(|message| message.role == "user")
+        .map(|message| {
+            (
+                message.id.clone(),
+                message
+                    .attachments
+                    .iter()
+                    .map(|attachment| {
+                        (
+                            attachment.attachment_id.clone(),
+                            attachment.retrieve_url.clone(),
+                        )
+                    })
+                    .collect(),
+            )
         })
         .collect()
 }

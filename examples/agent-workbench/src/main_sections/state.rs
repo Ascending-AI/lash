@@ -135,6 +135,24 @@ struct ChatMessage {
     role: String,
     text: String,
     at: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    attachments: Vec<ChatAttachment>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct ChatAttachment {
+    attachment_id: String,
+    retrieve_url: String,
+}
+
+impl ChatAttachment {
+    fn from_id(attachment_id: impl Into<String>) -> Self {
+        let attachment_id = attachment_id.into();
+        Self {
+            retrieve_url: format!("/api/attachments/{attachment_id}"),
+            attachment_id,
+        }
+    }
 }
 
 /// The id of the optimistic user row this workbench publishes when a send is

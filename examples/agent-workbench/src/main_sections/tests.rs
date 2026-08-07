@@ -1418,6 +1418,7 @@ finish initial
                 role: "user".to_string(),
                 text: "before reset".to_string(),
                 at: "2026-05-27T00:00:00Z".to_string(),
+                attachments: Vec::new(),
             }])),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),

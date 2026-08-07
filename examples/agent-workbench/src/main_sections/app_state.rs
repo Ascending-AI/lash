@@ -395,11 +395,29 @@ impl AppState {
         role: impl Into<String>,
         text: impl Into<String>,
     ) -> ChatMessage {
+        self.push_message_with_id_and_attachments_for_session(
+            session_id,
+            id,
+            role,
+            text,
+            Vec::new(),
+        )
+    }
+
+    fn push_message_with_id_and_attachments_for_session(
+        &self,
+        session_id: &str,
+        id: impl Into<String>,
+        role: impl Into<String>,
+        text: impl Into<String>,
+        attachments: Vec<ChatAttachment>,
+    ) -> ChatMessage {
         let message = ChatMessage {
             id: id.into(),
             role: role.into(),
             text: text.into(),
             at: Utc::now().to_rfc3339(),
+            attachments,
         };
         let inserted = self.event_tx.publish_identified(
             session_id,

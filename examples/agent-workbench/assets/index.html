@@ -874,6 +874,42 @@
       color: var(--chalk);
     }
 
+    .message-attachments {
+      display: grid;
+      gap: var(--space-xs);
+      margin-top: var(--space-sm);
+    }
+
+    .message-attachment {
+      display: block;
+      width: fit-content;
+      max-width: 100%;
+      color: var(--ash-text);
+      text-decoration: none;
+    }
+
+    .message-attachment img {
+      display: block;
+      width: auto;
+      height: auto;
+      max-width: min(100%, 640px);
+      max-height: 420px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel-muted);
+      object-fit: contain;
+    }
+
+    .attachment-broken {
+      padding: var(--space-xs) var(--space-sm);
+      border: 1px dashed var(--line-strong);
+      border-radius: 6px;
+      font-family: var(--font-ui);
+      font-size: 0.75rem;
+    }
+
+    .attachment-broken[hidden] { display: none; }
+
     .message.assistant .msg-body {
       color: var(--chalk-mid);
       white-space: normal;
@@ -2680,6 +2716,41 @@
       }
     }
 
+    // BEGIN WORKBENCH_MESSAGE_ATTACHMENTS
+    function renderMessageAttachments(body, attachments) {
+      if (!Array.isArray(attachments) || attachments.length === 0) return;
+      const gallery = document.createElement("div");
+      gallery.className = "message-attachments";
+      for (const [index, attachment] of attachments.entries()) {
+        const retrieveUrl = String(attachment?.retrieve_url || "").trim();
+        if (!retrieveUrl) continue;
+        const link = document.createElement("a");
+        link.className = "message-attachment";
+        link.href = retrieveUrl;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.dataset.attachmentId = String(attachment?.attachment_id || "");
+
+        const image = document.createElement("img");
+        image.src = retrieveUrl;
+        image.alt = attachments.length === 1
+          ? "Uploaded image attachment"
+          : `Uploaded image attachment ${index + 1}`;
+        const broken = document.createElement("span");
+        broken.className = "attachment-broken";
+        broken.hidden = true;
+        broken.textContent = "Image unavailable · open original";
+        image.addEventListener("error", () => {
+          image.hidden = true;
+          broken.hidden = false;
+        }, { once: true });
+        link.append(image, broken);
+        gallery.appendChild(link);
+      }
+      if (gallery.children.length > 0) body.appendChild(gallery);
+    }
+    // END WORKBENCH_MESSAGE_ATTACHMENTS
+
     function renderMessage(message) {
       if (renderedMessages.has(message.id)) return;
       renderedMessages.add(message.id);
@@ -2700,6 +2771,7 @@
       const body = document.createElement("div");
       body.className = "msg-body";
       setMessageBody(body, message.role, message.text);
+      renderMessageAttachments(body, message.attachments);
       node.append(role, body);
       timeline.appendChild(node);
       scrollToEnd();

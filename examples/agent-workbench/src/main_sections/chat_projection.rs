@@ -36,6 +36,7 @@ fn ui_owned_user_rows(
             role: "user".to_string(),
             text,
             at: String::new(),
+            attachments: Vec::new(),
         });
     }
     (turn_ids, replayed_prompts)
@@ -84,6 +85,12 @@ fn chat_message_from_committed(message: &lash::messages::Message) -> ChatMessage
         // timestamp. The workbench does not render this field, so keep the
         // established wire shape without fabricating a time during resume.
         at: String::new(),
+        attachments: message
+            .parts
+            .iter()
+            .filter_map(|part| part.attachment.as_ref()?.source.stored_ref())
+            .map(|attachment| ChatAttachment::from_id(attachment.id.to_string()))
+            .collect(),
     }
 }
 

@@ -393,11 +393,17 @@ async fn send_turn(
         return Ok(Json(TurnAccepted::queued(receipt)));
     }
     let turn_id = format!("workbench-turn-{}", uuid::Uuid::new_v4());
-    state.push_message_with_id_for_session(
+    let chat_attachments = attachment_id
+        .iter()
+        .cloned()
+        .map(ChatAttachment::from_id)
+        .collect();
+    state.push_message_with_id_and_attachments_for_session(
         &session_id,
         workbench_turn_user_message_id(&turn_id),
         "user",
         text.clone(),
+        chat_attachments,
     );
     state.track_turn_prompt(&session_id, &turn_id, text.clone());
     if let Err(err) = restate::submit_user_turn(
