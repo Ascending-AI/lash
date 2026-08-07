@@ -16,8 +16,9 @@
 //! `reclaim_process_lease`, `renew_process_lease`, `complete_process_with_lease`
 //! — never accepts an absolute wall-clock instant; it takes only a TTL
 //! *duration* (`lease_ttl_ms`). Inside each method `now` comes from
-//! `process_lease_now_epoch_ms_tx` (the DB clock), and `guard_lease` compares
-//! the *DB-persisted* lease's `expires_at_epoch_ms` against DB-now — never the
+//! `process_lease_now_epoch_ms_tx` (the DB clock), and the shared fence
+//! (`registry_transitions::process_lease_still_holds`) compares the
+//! *DB-persisted* lease's `expires_at_epoch_ms` against DB-now — never the
 //! caller's copy of the lease. The `expires_at_epoch_ms` / `claimed_at_epoch_ms`
 //! fields carried inside a `ProcessLease` handed back to the client are outputs,
 //! not validity inputs: on renew/complete only the `(owner, lease_token,

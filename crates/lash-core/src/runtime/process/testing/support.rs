@@ -6,9 +6,9 @@ use tokio::sync::Mutex;
 use crate::plugin::PluginError;
 
 use super::super::{
-    PROCESS_LEASE_SCHEMA_VERSION, ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease,
-    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessRecord, ProcessRegistry,
-    ProcessStartOutcome, ProcessStarted, WaitState,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease, ProcessLeaseClaimOutcome,
+    ProcessLeaseCompletion, ProcessRecord, ProcessRegistry, ProcessStartOutcome, ProcessStarted,
+    WaitState,
 };
 use super::{ManagedLeaseMap, TestLocalProcessRegistry};
 
@@ -244,27 +244,6 @@ impl ExecutionWritePauseHandle {
 
     pub fn resume(&self) {
         self.resume.notify_one();
-    }
-}
-
-pub(super) fn acquire_test_lease(
-    process_id: &str,
-    owner: &crate::LeaseOwnerIdentity,
-    fencing_token: u64,
-    now: u64,
-    lease_ttl_ms: u64,
-) -> ProcessLease {
-    ProcessLease {
-        schema_version: PROCESS_LEASE_SCHEMA_VERSION,
-        process_id: process_id.to_string(),
-        owner: owner.clone(),
-        lease_token: format!(
-            "{process_id}:{}:{}:{now}:{fencing_token}",
-            owner.owner_id, owner.incarnation_id
-        ),
-        fencing_token,
-        claimed_at_epoch_ms: now,
-        expires_at_epoch_ms: now.saturating_add(lease_ttl_ms),
     }
 }
 

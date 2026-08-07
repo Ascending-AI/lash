@@ -76,9 +76,8 @@ use lash_core::{
     SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionMeta,
     SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
-    TurnInputStore, VacuumReport, facade_support::MergeKey,
-    facade_support::PROCESS_LEASE_SCHEMA_VERSION, facade_support::ProcessStartPlan,
-    facade_support::SessionPickerInfo,
+    TurnInputStore, VacuumReport, facade_support::MergeKey, facade_support::ProcessStartPlan,
+    facade_support::SessionPickerInfo, facade_support::registry_transitions,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
@@ -92,7 +91,6 @@ mod conn;
 mod effect_replay;
 mod forks;
 mod graph;
-mod leases;
 mod lifecycle;
 mod pending_turn_inputs;
 mod persistence;
@@ -110,7 +108,6 @@ pub use effect_replay::{
     SqliteEffectHost, SqliteEffectReplayOptions, SqliteRuntimeEffectController,
 };
 use forks::*;
-use leases::*;
 use pending_turn_inputs::*;
 use queued_work::*;
 use schema::{

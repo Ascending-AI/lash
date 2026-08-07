@@ -10,6 +10,7 @@ mod observer_intent;
 mod op_scope;
 mod references;
 mod registry;
+pub mod registry_transitions;
 mod service;
 #[cfg(any(test, feature = "testing"))]
 mod testing;

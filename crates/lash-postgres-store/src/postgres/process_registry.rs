@@ -291,9 +291,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
 
     async fn observers_for_process(&self, process_id: &str) -> Result<Vec<String>, PluginError> {
         if self.get_process(process_id).await?.is_none() {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
+            return Err(registry_transitions::unknown_process(process_id));
         }
         sqlx::query_scalar(
             "SELECT session_id FROM lash_process_observers
@@ -446,6 +444,10 @@ impl ProcessRegistry for PostgresProcessRegistry {
             &mut tx, process_id, &record, authority, None, now_ms,
         )
         .await?;
+        // `occurred_at_ms` provenance is inconsistent in this backend: four
+        // mutating paths stamp it from the server clock while the others (like
+        // this one) use the injected clock. Decision-inert today — no fence or
+        // retention predicate reads it — tracked as FIG-971.
         let occurred_at_ms = self.clock.timestamp_ms();
         let result = append_process_event_tx(
             &mut tx,
@@ -465,9 +467,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         after_sequence: u64,
     ) -> Result<Vec<ProcessEvent>, PluginError> {
         if self.get_process(process_id).await?.is_none() {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
+            return Err(registry_transitions::unknown_process(process_id));
         }
         let rows = sqlx::query(
             "SELECT event_json FROM lash_process_events
@@ -494,9 +494,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         up_to_sequence: u64,
     ) -> Result<u64, PluginError> {
         if self.get_process(process_id).await?.is_none() {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
+            return Err(registry_transitions::unknown_process(process_id));
         }
         let row = sqlx::query(
             "SELECT COUNT(*) FROM lash_process_events
@@ -518,9 +516,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         limit: usize,
     ) -> Result<Vec<ProcessEvent>, PluginError> {
         if self.get_process(process_id).await?.is_none() {
-            return Err(PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
+            return Err(registry_transitions::unknown_process(process_id));
         }
         let rows = sqlx::query(
             "SELECT event_json FROM lash_process_events
@@ -690,14 +686,12 @@ impl ProcessRegistry for PostgresProcessRegistry {
         }
 
         let current = load_process_lease_tx(&mut tx, process_id).await?;
-        if !guard_lease(current.as_ref(), &lease.lease_token, now)
-            || !current.as_ref().is_some_and(|current| {
-                current.owner.same_incarnation(&lease.owner)
-                    && current.fencing_token == lease.fencing_token
-            })
-        {
-            return Err(process_lease_expired(process_id));
-        }
+        registry_transitions::authorize_process_lease_write(
+            process_id,
+            lease,
+            current.as_ref(),
+            now,
+        )?;
 
         let facade_support::ProcessEventAppendPlan::Insert {
             event,
@@ -748,7 +742,14 @@ impl ProcessRegistry for PostgresProcessRegistry {
         .map_err(plugin_sqlx_error)?
         .rows_affected();
         if released != 1 {
-            return Err(process_lease_expired(process_id));
+            // PostgreSQL-only post-write assertion: the row is held under the
+            // `FOR UPDATE` taken by `load_process_lease_tx`, so a fence that
+            // authorized the write above cannot have moved. Preserved as it
+            // shipped rather than mirrored onto SQLite, whose `BEGIN IMMEDIATE`
+            // write lock makes the same guarantee positionally.
+            return Err(PluginError::ProcessLeaseSuperseded {
+                process_id: process_id.to_string(),
+            });
         }
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(lash_core::ProcessCompletionOutcome::Committed(record))
@@ -917,10 +918,12 @@ impl ProcessRegistry for PostgresProcessRegistry {
         .await
         .map_err(plugin_sqlx_error)?;
         if let Some(row) = row {
-            return Err(PluginError::ProcessNoLongerRetained {
-                terminal_label: row.get(0),
-                pruned_at_ms: row.get::<i64, _>(1) as u64,
-            });
+            return Err(registry_transitions::process_no_longer_retained(
+                registry_transitions::ProcessTombstoneStamp {
+                    terminal_label: row.get(0),
+                    pruned_at_ms: row.get::<i64, _>(1) as u64,
+                },
+            ));
         }
         Ok(None)
     }
@@ -1243,36 +1246,38 @@ impl ProcessRegistry for PostgresProcessRegistry {
         require_process_tx(&mut tx, process_id).await?;
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
         let current = load_process_lease_tx(&mut tx, process_id).await?;
-        if let Some(current) = current.as_ref()
-            && current.expires_at_epoch_ms > now
-        {
-            if current.owner.same_incarnation(owner) {
+        let fencing_token = match registry_transitions::decide_process_lease_claim(
+            current.as_ref(),
+            owner,
+            now,
+            lease_ttl_ms,
+        ) {
+            registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {
                 // Same incarnation re-enters its own live lease: extend the
                 // expiry, keep token and fencing token.
-                let expires_at = now.saturating_add(lease_ttl_ms);
                 sqlx::query(
                     "UPDATE lash_process_leases
                      SET lease_expires_at_ms = $2
                      WHERE process_id = $1",
                 )
                 .bind(process_id)
-                .bind(expires_at as i64)
+                .bind(lease.expires_at_epoch_ms as i64)
                 .execute(&mut *tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
                 tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(lash_core::ProcessLeaseClaimOutcome::Acquired(
-                    ProcessLease {
-                        expires_at_epoch_ms: expires_at,
-                        ..current.clone()
-                    },
-                ));
+                return Ok(lash_core::ProcessLeaseClaimOutcome::Acquired(lease));
             }
-            let holder = current.clone();
-            tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(lash_core::ProcessLeaseClaimOutcome::Busy { holder });
-        }
-        let fencing_token = retained_process_lease_fencing_token(&mut tx, process_id).await? + 1;
+            registry_transitions::ProcessLeaseClaimDecision::ReportBusy { holder } => {
+                tx.commit().await.map_err(plugin_sqlx_error)?;
+                return Ok(lash_core::ProcessLeaseClaimOutcome::Busy { holder });
+            }
+            registry_transitions::ProcessLeaseClaimDecision::AcquireOnRetainedFence => {
+                registry_transitions::next_process_lease_fencing_token(
+                    retained_process_lease_fencing_token(&mut tx, process_id).await?,
+                )
+            }
+        };
         let lease =
             acquire_process_lease_tx(&mut tx, process_id, owner, fencing_token, now, lease_ttl_ms)
                 .await?;
@@ -1291,38 +1296,28 @@ impl ProcessRegistry for PostgresProcessRegistry {
         require_process_tx(&mut tx, process_id).await?;
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
         let current = load_process_lease_tx(&mut tx, process_id).await?;
-        let Some(current) = current else {
-            // Free (or released) lease: acquire on the retained fencing token
-            // like a plain claim would.
-            let fencing_token =
-                retained_process_lease_fencing_token(&mut tx, process_id).await? + 1;
-            let lease = acquire_process_lease_tx(
-                &mut tx,
-                process_id,
-                owner,
-                fencing_token,
-                now,
-                lease_ttl_ms,
-            )
-            .await?;
-            tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(lash_core::ProcessLeaseClaimOutcome::Acquired(lease));
-        };
-        if current.expires_at_epoch_ms <= now {
-            let lease = acquire_process_lease_tx(
-                &mut tx,
-                process_id,
-                owner,
-                current.fencing_token.saturating_add(1),
-                now,
-                lease_ttl_ms,
-            )
-            .await?;
-            tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(lash_core::ProcessLeaseClaimOutcome::Acquired(lease));
-        }
+        let fencing_token =
+            match registry_transitions::decide_process_lease_reclaim(current.as_ref(), now) {
+                registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence => {
+                    // Free (or released) lease: acquire on the retained fencing
+                    // token like a plain claim would.
+                    registry_transitions::next_process_lease_fencing_token(
+                        retained_process_lease_fencing_token(&mut tx, process_id).await?,
+                    )
+                }
+                registry_transitions::ProcessLeaseReclaimDecision::AcquireOnObservedFence {
+                    fencing_token,
+                } => fencing_token,
+                registry_transitions::ProcessLeaseReclaimDecision::ReportBusy { holder } => {
+                    tx.commit().await.map_err(plugin_sqlx_error)?;
+                    return Ok(lash_core::ProcessLeaseClaimOutcome::Busy { holder });
+                }
+            };
+        let lease =
+            acquire_process_lease_tx(&mut tx, process_id, owner, fencing_token, now, lease_ttl_ms)
+                .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(lash_core::ProcessLeaseClaimOutcome::Busy { holder: current })
+        Ok(lash_core::ProcessLeaseClaimOutcome::Acquired(lease))
     }
 
     async fn renew_process_lease(
@@ -1333,14 +1328,12 @@ impl ProcessRegistry for PostgresProcessRegistry {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
         let current = load_process_lease_tx(&mut tx, &lease.process_id).await?;
-        if !guard_lease(current.as_ref(), &lease.lease_token, now)
-            || !current.as_ref().is_some_and(|current| {
-                current.owner.same_incarnation(&lease.owner)
-                    && current.fencing_token == lease.fencing_token
-            })
-        {
-            return Err(process_lease_expired(&lease.process_id));
-        }
+        registry_transitions::authorize_process_lease_write(
+            &lease.process_id,
+            lease,
+            current.as_ref(),
+            now,
+        )?;
         let renewed = ProcessLease {
             expires_at_epoch_ms: now.saturating_add(lease_ttl_ms),
             ..lease.clone()

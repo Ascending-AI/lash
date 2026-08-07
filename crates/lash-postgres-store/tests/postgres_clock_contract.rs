@@ -23,6 +23,7 @@ use support::{SharedDatabaseLock, database_url};
 const CLOCK_SKEW_MS: u64 = 10 * 365 * 24 * 60 * 60 * 1_000;
 const RUNTIME_PERSISTENCE_SOURCE: &str = include_str!("../src/postgres/runtime_persistence.rs");
 const PROCESS_REGISTRY_SOURCE: &str = include_str!("../src/postgres/process_registry.rs");
+const PROCESS_HELPERS_SOURCE: &str = include_str!("../src/postgres/process_helpers.rs");
 const EFFECT_REPLAY_SOURCE: &str = include_str!("../src/postgres/effect_replay.rs");
 
 fn unique_id(prefix: &str) -> String {
@@ -136,6 +137,36 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
             "async fn commit_runtime_state(",
             "async fn save_session_meta(",
         ),
+        // The PostgreSQL process-lease atoms. They read and write
+        // `lease_claimed_at_ms`/`lease_expires_at_ms` and compare a stored lease
+        // against `now`, so the server clock must reach all of them. The shared
+        // transition table (`lash_core::facade_support::registry_transitions`)
+        // takes `now_ms` as an input and cannot verify which clock produced it;
+        // this fence is what fails if a host clock ever supplies it.
+        // `process_lease_now_epoch_ms_tx` — the one sanctioned clock read — is
+        // covered by a dedicated end-of-file region after this loop: it must
+        // read the SERVER clock, so the client-clock ban applies to its body
+        // too, and appending helpers after it cannot escape the fence.
+        (
+            PROCESS_HELPERS_SOURCE,
+            "async fn load_process_lease_tx(",
+            "async fn acquire_process_lease_tx(",
+        ),
+        (
+            PROCESS_HELPERS_SOURCE,
+            "async fn acquire_process_lease_tx(",
+            "async fn retained_process_lease_fencing_token(",
+        ),
+        (
+            PROCESS_HELPERS_SOURCE,
+            "async fn retained_process_lease_fencing_token(",
+            "async fn validate_process_execution_authority_tx(",
+        ),
+        (
+            PROCESS_HELPERS_SOURCE,
+            "async fn validate_process_execution_authority_tx(",
+            "async fn process_lease_now_epoch_ms_tx(",
+        ),
         // Effect-replay leases fence exactly-once execution across hosts, so
         // the persistence adapter's claim/finalize/renew atoms read the server
         // clock like every other lease path. The shared `EffectReplayDriver`
@@ -193,6 +224,29 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
             );
         }
     }
+
+    // The sanctioned clock read itself. It sits after every fenced region, so
+    // without this tail check its body (and anything appended after it) would
+    // be the one unfenced spot in the file: a client-clock body here passed the
+    // fence before this assertion existed. The region runs to end-of-file,
+    // which also self-enforces the "nothing after the sanctioned read"
+    // convention — a helper appended below it lands inside this region.
+    let sanctioned_start = "async fn process_lease_now_epoch_ms_tx(";
+    let sanctioned_index = PROCESS_HELPERS_SOURCE
+        .find(sanctioned_start)
+        .unwrap_or_else(|| panic!("missing source marker `{sanctioned_start}`"));
+    let sanctioned_tail = &PROCESS_HELPERS_SOURCE[sanctioned_index..];
+    for read in CLIENT_CLOCK_READS {
+        assert!(
+            !sanctioned_tail.contains(read),
+            "lexical clock fence: the sanctioned lease clock read (and everything \
+             after it) must not use the client wall clock (`{read}`)"
+        );
+    }
+    assert!(
+        sanctioned_tail.contains("clock_timestamp()"),
+        "the sanctioned lease clock read must sample the PostgreSQL server clock"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

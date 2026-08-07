@@ -59,7 +59,7 @@ use lash_core::{
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord,
     SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
     TokenLedgerEntry, TurnInputStore, VacuumReport, facade_support::MergeKey,
-    facade_support::ProcessStartPlan,
+    facade_support::ProcessStartPlan, facade_support::registry_transitions,
 };
 use lash_core::{
     PluginError, TriggerDeliveryReservation, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
@@ -152,7 +152,6 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // usage payloads use shared framing, while redundant process/trigger hashes
 // are replaced by structural conflict checks.
 const SCHEMA_VERSION: i32 = 38;
-const PROCESS_LEASE_SCHEMA_VERSION: u32 = lash_core::facade_support::PROCESS_LEASE_SCHEMA_VERSION;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
