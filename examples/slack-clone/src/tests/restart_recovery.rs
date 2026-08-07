@@ -19,7 +19,7 @@ use crate::store::SqliteHandle;
 use crate::wire::events::{RETRY_NUM_HEADER, RETRY_REASON_HEADER};
 
 use super::support::{
-    BOT_TOKEN, Script, TestPlatform, bot_dir, only_event, scratch, serve_bot, start_bot,
+    BOT_TOKEN, Script, Step, TestPlatform, bot_dir, only_event, scratch, serve_bot, start_bot,
 };
 
 #[tokio::test]
@@ -65,7 +65,7 @@ async fn a_restarted_bot_keeps_the_channel_transcript_and_does_not_reply_twice()
     // --- Second process: same durable stores, brand new in-memory state. ---
     let second_script = Script::prose("After the restart.");
     let bot = start_bot(&platform, &bot_dir, &second_script).await;
-    let recovered = bot.recover().await.expect("recovery pass");
+    let recovered = bot.recover().await.expect("recovery pass").settled;
     assert!(
         recovered.is_empty(),
         "nothing was left unfinished: {recovered:?}"
@@ -179,7 +179,7 @@ async fn a_reply_owed_at_crash_time_is_posted_by_the_next_boots_recovery_pass() 
 
     let script = Script::prose("should never run");
     let bot = start_bot(&platform, &bot_dir, &script).await;
-    let recovered = bot.recover().await.expect("recovery pass");
+    let recovered = bot.recover().await.expect("recovery pass").settled;
     assert_eq!(recovered.len(), 1);
     assert!(
         matches!(
@@ -251,7 +251,7 @@ async fn a_crash_between_posting_and_recording_does_not_produce_a_second_reply()
         .await
         .expect("rewind the ledger");
 
-    let recovered = bot.recover().await.expect("recovery pass");
+    let recovered = bot.recover().await.expect("recovery pass").settled;
     assert_eq!(recovered.len(), 1);
     assert!(
         matches!(
@@ -471,7 +471,7 @@ async fn an_event_accepted_before_a_crash_is_answered_by_the_next_boots_recovery
     // The next boot.
     let script = Script::prose("Because the cache is cold.");
     let bot = start_bot(&platform, &bot_dir, &script).await;
-    let recovered = bot.recover().await.expect("recovery pass");
+    let recovered = bot.recover().await.expect("recovery pass").settled;
     assert_eq!(recovered.len(), 2, "both accepted rows are picked up");
 
     let folded = recovered
@@ -566,7 +566,7 @@ async fn a_reply_lost_with_its_process_is_recovered_from_the_committed_transcrip
         .await
         .expect("rewind the ledger");
 
-    let recovered = bot.recover().await.expect("recovery pass");
+    let recovered = bot.recover().await.expect("recovery pass").settled;
     assert_eq!(recovered.len(), 1);
     assert!(
         matches!(
@@ -695,4 +695,234 @@ async fn the_api_client_form_encodes_read_methods_and_uses_json_only_for_posting
     );
     let posted: serde_json::Value = serde_json::from_str(&body).expect("json body");
     assert_eq!(posted["metadata"]["event_payload"]["event_id"], "Ev1");
+}
+
+/// Stage the state a process killed mid-mention-turn actually leaves behind, and
+/// return the blocked bot's turn task plus the mention envelope.
+///
+/// The dead boot is modelled by a bot whose turn is *held open inside the model
+/// call*. From the store's point of view that is indistinguishable from a killed
+/// process during its lease TTL, which is the window the defect lives in: the
+/// queued input is claimed, the claim is pinned to a live lease generation, and
+/// that lease is owned by a different incarnation than any new boot's.
+async fn stage_interrupted_mention_turn(
+    platform: &TestPlatform,
+    bot_dir: &std::path::Path,
+) -> (
+    Arc<crate::bot::channel::ChannelBot>,
+    Script,
+    tokio::task::JoinHandle<()>,
+    crate::wire::events::EventCallback,
+    String,
+) {
+    let channel = platform.channel("interrupted").await;
+    let ada = platform.identify("ada").await;
+    let mention = platform.mention();
+    platform
+        .say(&channel, &ada, "the queue backed up overnight")
+        .await;
+    platform
+        .say(&channel, &ada, &format!("{mention} what is going on?"))
+        .await;
+    let envelopes = platform.drain_envelopes().await;
+    let app_mention = only_event(&envelopes, "app_mention");
+
+    // The dying boot: ambient context folded, then a mention turn that never
+    // returns.
+    let script = Script::new([Step::Gated("never delivered".to_string())]);
+    let dying = start_bot(platform, bot_dir, &script).await;
+    for envelope in envelopes {
+        if super::support::event_kind(&envelope) == "message"
+            && !envelope.event.text().contains(&mention)
+        {
+            dying.ingest(envelope, None).await.expect("fold ambient");
+        }
+    }
+    let turn = tokio::spawn({
+        let dying = Arc::clone(&dying);
+        let app_mention = app_mention.clone();
+        async move {
+            let _ = dying.ingest(app_mention, None).await;
+        }
+    });
+    // Wait for the runtime to be *inside* the turn: input claimed, lease held.
+    script.wait_gated().await;
+    (dying, script, turn, app_mention, channel)
+}
+
+#[tokio::test]
+async fn a_mention_interrupted_mid_turn_is_deferred_and_never_terminalized() {
+    // RED-PROOF for FIG-1008. Before the fix, the new boot's recovery pass read
+    // the empty drain as "a previous process committed this turn", found an empty
+    // transcript, and wrote stage `ignored` / `reply_lost_after_commit` — terminal,
+    // so no redelivery and no later boot ever retried, and the mention was
+    // permanently unanswered.
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let bot_dir = bot_dir(scratch.path());
+    let (_dying, dying_script, turn, app_mention, channel) =
+        stage_interrupted_mention_turn(&platform, &bot_dir).await;
+
+    // The new boot, inside the dead boot's lease TTL.
+    let script = Script::prose("Recovered answer.");
+    let reborn = start_bot(&platform, &bot_dir, &script).await;
+    let report = reborn.recover().await.expect("recovery pass");
+
+    assert_eq!(
+        report.deferred,
+        vec![app_mention.event_id.clone()],
+        "the interrupted mention must be deferred, not settled: {:?}",
+        report.settled
+    );
+    assert!(
+        matches!(
+            report.settled.first(),
+            Some(Disposition::Deferred {
+                reason: "input_claimed_by_live_lease_generation",
+                ..
+            })
+        ),
+        "{:?}",
+        report.settled
+    );
+    // The load-bearing assertion: the row is still resumable.
+    let record = reborn
+        .ledger()
+        .get(app_mention.event_id.clone())
+        .await
+        .expect("read ledger")
+        .expect("ledger row");
+    assert!(
+        !record.stage.is_terminal(),
+        "a deferred event must stay resumable, found stage {} detail {:?}",
+        record.stage.as_str(),
+        record.detail
+    );
+    assert_eq!(record.stage, Stage::Accepted);
+    assert_eq!(script.calls(), 0, "no turn ran on the new boot yet");
+    assert!(platform.bot_messages(&channel).await.is_empty());
+
+    dying_script.release_gate();
+    turn.abort();
+}
+
+#[tokio::test]
+async fn a_deferred_mention_is_answered_once_the_dead_boots_lease_lapses() {
+    // The other half: deferral is only correct if something later settles it.
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let bot_dir = bot_dir(scratch.path());
+    let (_dying, dying_script, turn, app_mention, channel) =
+        stage_interrupted_mention_turn(&platform, &bot_dir).await;
+
+    let script = Script::prose("The queue backed up; it is draining now.");
+    let reborn = start_bot(&platform, &bot_dir, &script).await;
+    let report = reborn.recover().await.expect("recovery pass");
+    assert_eq!(report.deferred, vec![app_mention.event_id.clone()]);
+
+    // The dead boot really is gone, and its lease TTL elapses.
+    turn.abort();
+    dying_script.release_gate();
+    assert!(
+        super::support::expire_session_leases(&bot_dir) > 0,
+        "a session-execution lease row should have been expired"
+    );
+
+    let outcome = reborn
+        .retry_deferred(
+            app_mention.event_id.clone(),
+            std::time::Duration::from_secs(30),
+        )
+        .await
+        .expect("deferred retry");
+    // The interrupted turn never committed, so there is nothing to recover from
+    // the transcript: the retry runs the turn the dead boot never finished.
+    assert!(
+        matches!(
+            outcome,
+            Disposition::Replied {
+                source: ReplySource::Turn,
+                ..
+            }
+        ),
+        "the deferred mention must be answered by a fresh turn: {outcome:?}"
+    );
+    assert_eq!(script.calls(), 1);
+
+    let replies = platform.bot_messages(&channel).await;
+    assert_eq!(replies.len(), 1, "exactly one reply, and it exists");
+    assert_eq!(replies[0].text, "The queue backed up; it is draining now.");
+    assert!(
+        script.saw("the queue backed up overnight"),
+        "the ambient context folded by the dead boot survives: {:?}",
+        script.requests()
+    );
+
+    // And the event is terminal now, so redeliveries are inert.
+    let disposition = reborn
+        .ingest(app_mention, Some(3))
+        .await
+        .expect("redelivery after the retry");
+    assert!(
+        matches!(
+            disposition,
+            Disposition::Duplicate {
+                stage: Stage::Replied,
+                ..
+            }
+        ),
+        "{disposition:?}"
+    );
+    assert_eq!(platform.bot_messages(&channel).await.len(), 1);
+}
+
+#[tokio::test]
+async fn reply_lost_still_reports_a_committed_turn_that_produced_no_text() {
+    // `ReplyLost` must remain reachable for the one state it honestly describes:
+    // an input a committed turn provably consumed, with no assistant text anywhere.
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let bot_dir = bot_dir(scratch.path());
+    let channel = platform.channel("silent-commit").await;
+    let ada = platform.identify("ada").await;
+    let mention = platform.mention();
+    platform
+        .say(&channel, &ada, &format!("{mention} anything?"))
+        .await;
+    let app_mention = only_event(&platform.drain_envelopes().await, "app_mention");
+
+    // An empty answer still commits the turn and consumes the input.
+    let script = Script::prose("   ");
+    let bot = start_bot(&platform, &bot_dir, &script).await;
+    let disposition = bot
+        .ingest(app_mention.clone(), None)
+        .await
+        .expect("handle mention");
+    assert!(
+        matches!(disposition, Disposition::Silent { .. }),
+        "{disposition:?}"
+    );
+
+    // Rewind to `accepted` so recovery re-examines a consumed input.
+    bot.ledger()
+        .advance(
+            app_mention.event_id.clone(),
+            Stage::Folded,
+            Stage::Accepted,
+            None,
+            None,
+        )
+        .await
+        .expect("rewind the ledger");
+    let report = bot.recover().await.expect("recovery pass");
+    assert!(
+        report.deferred.is_empty(),
+        "a consumed input is not deferred: {report:?}"
+    );
+    assert!(
+        matches!(report.settled.first(), Some(Disposition::ReplyLost { .. })),
+        "{:?}",
+        report.settled
+    );
+    assert!(platform.bot_messages(&channel).await.is_empty());
 }

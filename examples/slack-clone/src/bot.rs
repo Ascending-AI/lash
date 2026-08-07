@@ -134,14 +134,33 @@ pub async fn run(config: BotConfig) -> Result<()> {
     // Recover before registering, so a previous boot's unfinished work is settled
     // before the platform is asked to send more. Registration is the last step of
     // boot for exactly this reason.
+    //
+    // The pass cannot settle everything synchronously. A boot that restarts inside
+    // the previous boot's session-execution lease TTL cannot take that lease, so an
+    // interrupted turn's admission is still fenced and its event comes back
+    // deferred. Those are retried on a background task rather than blocking boot
+    // for the length of a lease TTL — the endpoint has live traffic to serve.
     match bot.recover().await {
-        Ok(outcomes) if !outcomes.is_empty() => {
-            println!(
-                "slack-clone-bot recovered {} unfinished events",
-                outcomes.len()
-            );
+        Ok(report) => {
+            if !report.settled.is_empty() {
+                println!(
+                    "slack-clone-bot recovery settled {} event(s), deferred {}",
+                    report.settled.len() - report.deferred.len(),
+                    report.deferred.len()
+                );
+            }
+            for event_id in report.deferred {
+                let bot = Arc::clone(&bot);
+                tokio::spawn(async move {
+                    if let Err(error) = bot
+                        .retry_deferred(event_id.clone(), channel::DEFERRED_RETRY_DEADLINE)
+                        .await
+                    {
+                        eprintln!("slack-clone-bot deferred retry of {event_id} failed: {error:#}");
+                    }
+                });
+            }
         }
-        Ok(_) => {}
         Err(error) => eprintln!("slack-clone-bot recovery pass failed: {error:#}"),
     }
 

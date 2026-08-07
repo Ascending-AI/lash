@@ -21,6 +21,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result};
 use lash::messages::{MessageOrigin, MessageRole};
@@ -34,6 +35,19 @@ use super::runtime::session_id;
 use super::slack_api::{ChatPostMessageRequest, SlackApi, find_posted_reply};
 use crate::secrets::constant_time_eq;
 use crate::wire::events::{self, Event, EventCallback};
+
+/// How long [`ChannelBot::retry_deferred`] waits between attempts.
+///
+/// Short relative to the lease TTL it is waiting out, so the mention is answered
+/// promptly once the lease lapses, and long enough that the poll costs nothing.
+const RETRY_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Default deadline for [`ChannelBot::retry_deferred`].
+///
+/// Four times the default 30s session-execution lease TTL: enough for a lease
+/// whose owner died just after a renewal, with margin, and finite so a genuinely
+/// stuck row is reported instead of retried forever.
+pub const DEFERRED_RETRY_DEADLINE: Duration = Duration::from_secs(120);
 
 /// The app's own identity in the workspace, from `auth.test`.
 #[derive(Clone, Debug)]
@@ -87,16 +101,37 @@ pub enum Disposition {
         reply_ts: String,
         source: ReplySource,
     },
+    /// The work is real and unfinished, but this attempt could not reach it: the
+    /// admission is claimed under a session-execution lease generation this boot
+    /// cannot take yet. **Never terminal** — the ledger row is left resumable and
+    /// [`ChannelBot::retry_deferred`] re-attempts it.
+    Deferred {
+        event_id: String,
+        channel: String,
+        reason: &'static str,
+    },
     /// A turn ran but produced no text to post.
     Silent {
         event_id: String,
         channel: String,
         reason: &'static str,
     },
-    /// A turn committed in a previous process, its reply text is not in the
-    /// ledger, and the committed transcript holds no answer either. Surfaced
-    /// rather than swallowed; see the README's durability section.
+    /// A turn provably committed this admission — there is a turn-input
+    /// application record for it — and neither the ledger nor the committed
+    /// transcript holds any assistant text. Surfaced rather than swallowed; see
+    /// the README's durability section.
     ReplyLost { event_id: String, channel: String },
+}
+
+/// What a boot recovery pass settled, and what it could not.
+#[derive(Debug, Default)]
+pub struct RecoveryReport {
+    /// Events this pass finished, for logging.
+    pub settled: Vec<Disposition>,
+    /// Events whose admission is still claimed under a lease generation this boot
+    /// cannot take. Their ledger rows remain resumable; hand these to
+    /// [`ChannelBot::retry_deferred`].
+    pub deferred: Vec<String>,
 }
 
 /// The bot.
@@ -199,9 +234,9 @@ impl ChannelBot {
     /// This pass is not a formality. The platform's retries are bounded, and a
     /// ledger row makes every later redelivery look handled, so an event accepted
     /// a moment before a crash is finished here or never.
-    pub async fn recover(&self) -> Result<Vec<Disposition>> {
+    pub async fn recover(&self) -> Result<RecoveryReport> {
         let unfinished = self.ledger.unfinished().await?;
-        let mut outcomes = Vec::with_capacity(unfinished.len());
+        let mut report = RecoveryReport::default();
         for record in unfinished {
             let guard = self.channel_lock(&record.channel_id).await;
             let _held = guard.lock().await;
@@ -220,9 +255,94 @@ impl ChannelBot {
                 record.kind,
                 record.stage.as_str()
             );
-            outcomes.push(outcome);
+            if let Disposition::Deferred { event_id, .. } = &outcome {
+                report.deferred.push(event_id.clone());
+            }
+            report.settled.push(outcome);
         }
-        Ok(outcomes)
+        Ok(report)
+    }
+
+    /// Re-attempt a deferred event until it settles or `deadline` passes.
+    ///
+    /// The blocker is always the same: a previous boot's session-execution lease
+    /// is still live, so this boot cannot acquire it and the interrupted turn's
+    /// admission stays fenced to that lease's generation. Only when the lease
+    /// *lapses* does an acquisition bump the generation, which is what makes the
+    /// stale claim stealable — so the wait is bounded by the lease TTL
+    /// ([`lash::persistence::LeaseTimings`], 30s by default) and nothing shorter
+    /// will do.
+    ///
+    /// Each iteration is a real, idempotent attempt whose *result* is the state
+    /// test — this polls typed runtime state, it does not sleep for a duration and
+    /// then assume. [`RETRY_INTERVAL`] only keeps the loop from spinning.
+    ///
+    /// On deadline exhaustion the row is still left resumable rather than
+    /// terminalized: a later boot's recovery pass is a better outcome than a
+    /// silently dropped mention.
+    pub async fn retry_deferred(
+        &self,
+        event_id: String,
+        deadline: Duration,
+    ) -> Result<Disposition> {
+        let started = Instant::now();
+        loop {
+            let Some(record) = self.ledger.get(event_id.clone()).await? else {
+                return Ok(Disposition::Ignored {
+                    event_id,
+                    reason: "ledger_row_vanished",
+                });
+            };
+            if record.stage.is_terminal() {
+                return Ok(Disposition::Duplicate {
+                    event_id,
+                    stage: record.stage,
+                    reply_ts: record.reply_ts,
+                });
+            }
+            let attempt = {
+                let guard = self.channel_lock(&record.channel_id).await;
+                let _held = guard.lock().await;
+                match record.stage {
+                    Stage::ReplyPending => self.settle_reply_debt(&record).await,
+                    _ => self.drive_accepted(&record, true).await,
+                }
+            };
+            // A transient failure (an unreachable platform, a network blip on
+            // the history scan) is a reason to try again, not to abandon the
+            // bounded persistence this loop exists to provide. A failed attempt
+            // either leaves the ledger row where it was or has advanced it to a
+            // stage whose handler the next iteration selects (a post that failed
+            // after `advance(→ReplyPending)` is settled as reply debt), so
+            // retrying is safe; only the deadline ends the loop.
+            let outcome = match attempt {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    eprintln!(
+                        "slack-clone-bot retry attempt for event {event_id} failed \
+                         (will retry until the deadline): {error:#}"
+                    );
+                    Disposition::Deferred {
+                        event_id: event_id.clone(),
+                        channel: record.channel_id.clone(),
+                        reason: "retry_attempt_failed",
+                    }
+                }
+            };
+            if !matches!(outcome, Disposition::Deferred { .. }) {
+                eprintln!("slack-clone-bot settled deferred event {event_id}: {outcome:?}");
+                return Ok(outcome);
+            }
+            if started.elapsed() >= deadline {
+                eprintln!(
+                    "slack-clone-bot gave up retrying event {event_id} after {:?}; its ledger row \
+                     stays resumable for the next boot",
+                    started.elapsed()
+                );
+                return Ok(outcome);
+            }
+            tokio::time::sleep(RETRY_INTERVAL).await;
+        }
     }
 
     /// Handle one Events API delivery.
@@ -388,40 +508,20 @@ impl ChannelBot {
             .await
             .context("run channel mention turn")?;
 
-        let reply = match &output {
-            Some(output) => output
-                .result
-                .assistant_message()
-                .map(str::trim)
-                .filter(|text| !text.is_empty())
-                .map(str::to_string),
-            // Nothing was pending: a previous process already drained this
-            // mention's input and committed the turn. The answer is in the
-            // transcript even though the process that produced it is gone.
-            None => reply_from_transcript(session, input_id),
-        };
-        let source = if output.is_some() {
-            ReplySource::Turn
-        } else {
-            ReplySource::Transcript
+        let Some(output) = output else {
+            // `None` is ambiguous and must not be guessed at. It means either
+            // "a committed turn already consumed this input" or "this drain could
+            // not reach the input", and the two demand opposite responses.
+            return self.settle_empty_drain(session, record, input_id).await;
         };
 
-        let Some(reply) = reply else {
-            if output.is_none() {
-                // Drained, committed, and the transcript holds no assistant
-                // answer for that turn. Nothing to post and nothing to recover.
-                self.settle(
-                    record,
-                    Stage::Ignored,
-                    None,
-                    Some("reply_lost_after_commit".to_string()),
-                )
-                .await?;
-                return Ok(Disposition::ReplyLost {
-                    event_id: record.event_id.clone(),
-                    channel: record.channel_id.clone(),
-                });
-            }
+        let Some(reply) = output
+            .result
+            .assistant_message()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+        else {
             self.settle(
                 record,
                 Stage::Folded,
@@ -435,7 +535,87 @@ impl ChannelBot {
                 reason: "empty_model_reply",
             });
         };
+        self.owe_and_post(record, reply, ReplySource::Turn).await
+    }
 
+    /// Decide what an empty queued drain means, using committed-turn evidence.
+    ///
+    /// A drain returns `None` for two unrelated reasons, and reading one as the
+    /// other is how a mention gets abandoned:
+    ///
+    /// * **A committed turn already consumed the input.** The answer exists (or
+    ///   provably does not) in the transcript. Terminal either way.
+    /// * **This drain never reached the input.** `stream_queued_work` requires the
+    ///   session-execution lease and returns `Ok(None)` when it is busy, and a
+    ///   claim pinned to a still-live lease generation is not stealable. A boot
+    ///   that restarts inside the previous boot's lease TTL hits exactly this.
+    ///   Nothing was consumed, so the work is **retryable and never terminal**.
+    ///
+    /// The discriminator is [`LashSession::turn_input_applications`]: an
+    /// application record is written only when a turn *commits*, and it names the
+    /// `input_id` it consumed. Its absence is positive proof that no turn has
+    /// taken this admission. (`pending_turn_inputs` cannot answer this — it hides
+    /// rows whose claim is pinned to a currently-live lease generation, which is
+    /// precisely the state under investigation.)
+    async fn settle_empty_drain(
+        &self,
+        session: &LashSession,
+        record: &EventRecord,
+        input_id: &str,
+    ) -> Result<Disposition> {
+        let applications = session
+            .turn_input_applications()
+            .await
+            .context("read committed turn-input applications")?;
+        let consumed = applications
+            .iter()
+            .any(|application| application.input_id == input_id);
+        if !consumed {
+            // Retryable. The ledger row is deliberately left at its current
+            // non-terminal stage: terminalizing here is what made an interrupted
+            // mention permanently unanswered, because no redelivery and no later
+            // boot ever revisits a terminal row.
+            eprintln!(
+                "slack-clone-bot deferring event {}: its admission is claimed by an \
+                 execution lease this boot cannot take yet",
+                record.event_id
+            );
+            return Ok(Disposition::Deferred {
+                event_id: record.event_id.clone(),
+                channel: record.channel_id.clone(),
+                reason: "input_claimed_by_live_lease_generation",
+            });
+        }
+        match reply_from_transcript(session, input_id) {
+            Some(reply) => {
+                self.owe_and_post(record, reply, ReplySource::Transcript)
+                    .await
+            }
+            None => {
+                // A turn really did commit this input and left no assistant text.
+                // This is the only route to `ReplyLost`.
+                self.settle(
+                    record,
+                    Stage::Ignored,
+                    None,
+                    Some("reply_lost_after_commit".to_string()),
+                )
+                .await?;
+                Ok(Disposition::ReplyLost {
+                    event_id: record.event_id.clone(),
+                    channel: record.channel_id.clone(),
+                })
+            }
+        }
+    }
+
+    /// Record the reply debt, post it, and mark the event replied.
+    async fn owe_and_post(
+        &self,
+        record: &EventRecord,
+        reply: String,
+        source: ReplySource,
+    ) -> Result<Disposition> {
         // Record the debt before incurring it. A failed post, an unreachable
         // platform or a crash now all leave a row that says exactly what is owed
         // and to whom — which is what makes recovery a read rather than a guess.

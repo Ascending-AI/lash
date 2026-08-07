@@ -59,6 +59,8 @@ State lives under `.slack-clone/`. `cargo test -p slack-clone` needs no model ke
 | Standard-mode native tool loop | `bot/tools.rs` |
 | Idempotent event consumption | `bot/ledger.rs` |
 | Restart recovery, stage by stage | `bot/channel.rs::recover` |
+| Telling "already committed" from "cannot reach it yet" | `bot/channel.rs::settle_empty_drain` |
+| Bounded retry of work fenced by a dead boot's lease | `bot/channel.rs::retry_deferred` |
 | Reading a lost reply back out of the transcript | `bot/channel.rs::reply_from_transcript` |
 | Transactional outbox | `platform/state.rs::post_message` |
 | A liftable API client | `bot/slack_api.rs` |
@@ -193,25 +195,80 @@ finishes each one:
 | Crash point | Ledger stage | What recovery does |
 | --- | --- | --- |
 | Before any work | `accepted` | Re-admits the message; for a mention, runs the turn and posts. |
-| Mid-turn | `accepted` | Same — the queued input was never drained, so the drain still has it. |
+| **Mid-turn, inside the dead boot's lease TTL** | `accepted` | **Defers.** The dead turn claimed the input and the claim is fenced to a lease this boot cannot take yet. Retried until the lease lapses; never terminalized. |
+| Mid-turn, after the dead boot's lease lapsed | `accepted` | Steals the stale claim and runs the turn (`ReplySource::Turn`). |
 | After the turn committed, before the reply text was recorded | `accepted` | Reads the answer back out of the committed transcript and posts it (`ReplySource::Transcript`). |
 | After the text was recorded, before the post | `reply_pending` | Posts the recorded text without asking the model again (`ReplySource::Ledger`). |
 | After the post, before recording it | `reply_pending` | Finds its own reply by the `event_id` in the reply's `metadata` and records it. **No second post.** |
 
-The third row is the interesting one. When a drain returns nothing because a
-previous process already consumed the input, the answer is still in the session
-transcript, and it can be found without guessing: the committed copy of the
-admission carries Lash's typed `MessageOrigin::TurnInput { turn_id, input_id }`
-provenance, so `reply_from_transcript` matches on `input_id`, takes that message's
-`turn_id`, and reads the last assistant message before the next turn begins. No id
-strings are parsed and no adjacency is assumed.
+#### An empty drain is ambiguous, and guessing costs a reply
+
+`queued_turn().run()` returning `None` means one of two opposite things, and this
+is the single most important thing to get right in a host that recovers queued
+work:
+
+- **A committed turn already consumed the input.** Terminal: the answer is in the
+  transcript, or provably nowhere.
+- **This drain never reached the input.** `stream_queued_work` requires the
+  session-execution lease and returns `Ok(None)` when it is busy. A boot that
+  restarts inside the previous boot's lease TTL cannot acquire that lease —
+  `try_claim_session_execution_lease_with_token` returns `Busy` for a live lease
+  held by a *different* incarnation — so nothing was consumed and the work is
+  **retryable**.
+
+`settle_empty_drain` discriminates with `session.turn_input_applications()`, which
+records an entry only when a turn *commits* and names the `input_id` it consumed.
+Its absence is positive proof that no turn has taken the admission.
+`pending_turn_inputs()` cannot answer this: it hides rows whose claim is pinned to
+a currently-live lease generation, which is exactly the state in question.
+
+Getting this wrong is not hypothetical — it was FIG-1008, found by the judged
+runbook. Reading the ambiguous `None` as "committed" terminalized the row as
+`ignored` / `reply_lost_after_commit`, and because a terminal row is never
+revisited by a redelivery or a later boot, the mention was **permanently**
+unanswered.
+
+#### Why the deferral has to wait, and for how long
+
+The lease generation is what fences the stale claim, and it only moves when the
+old lease **lapses**: `acquire_session_execution_lease_conn` sets
+`fencing_token = previous + 1`, and it is reached only after the previous lease
+has expired. A new boot therefore cannot shortcut the wait by acquiring the lease
+first — while the dead lease is live it gets `Busy`, and lash exposes no
+host-supplied liveness assertion that would let a bot declare its own previous
+incarnation dead. So the wait is bounded by the session-execution lease TTL
+(`LeaseTimings`, **30s** by default, host-configurable) and nothing shorter will do.
+
+`ChannelBot::retry_deferred` therefore re-attempts on an interval with a finite
+deadline. Each attempt is a real, idempotent attempt whose *result* is the state
+test — it polls typed runtime state rather than sleeping for a duration and then
+assuming. Boot does not block on it: the immediate pass settles everything it can,
+registration proceeds, and deferred rows are retried on a background task, because
+an endpoint with live traffic should not wait out a lease TTL before serving. If
+the deadline is exhausted the row is *still* left resumable — a later boot picking
+it up beats a silently dropped mention. Be clear about what that means in
+practice, though: nothing in the *running* process re-attempts an exhausted row.
+Until the bot restarts (or the platform redelivers, which its bounded retries
+will not do this late), the mention stays unanswered. A transient failure inside
+an attempt — an unreachable platform, a network blip on the history scan — counts
+as a retryable iteration, not an abort: the ledger row is untouched by a failed
+attempt, so only the deadline ends the loop.
+
+One caveat on the discriminator: a turn-input application record is written only
+for admissions with non-empty content, so "no record" means "not consumed" only
+because this bot never admits empty input (`compose` always yields
+`author: text`). A host that admits empty inputs would see such a row defer to
+the deadline and stay resumable — a bounded livelock, not a wrong answer — and
+should filter empty admissions the way this bot does.
 
 **The residual gap** is now narrow and specific:
 
-> If a turn committed and its transcript contains no assistant message at all —
-> the drain consumed the input and produced nothing — there is nothing to post and
-> nothing to recover. The bot reports `Disposition::ReplyLost` and marks the event
-> `ignored` with `reply_lost_after_commit` rather than silently dropping it.
+> If a turn provably committed an admission — there is a turn-input application
+> record for it — and neither the ledger nor the committed transcript holds any
+> assistant text, there is nothing to post and nothing to recover. The bot reports
+> `Disposition::ReplyLost` and marks the event `ignored` with
+> `reply_lost_after_commit` rather than silently dropping it. This is now the
+> *only* route to `ReplyLost`.
 
 ### The Restate upgrade, precisely
 
@@ -447,5 +504,9 @@ Tracked for follow-up rather than half-built:
   half that makes the post durably at-most-once instead of relying on the metadata
   lookup. See [the upgrade path](#durability-and-the-upgrade-path).
 - **A leased delivery outbox**, for a platform running more than one process.
+- **Shortening the recovery wait.** An interrupted mention is answered within one
+  session-execution lease TTL (30s by default). A bot that wanted faster resumption
+  would lower `LeaseTimings`, trading recovery latency against the risk of losing a
+  live lease during a slow model call.
 - **Judged runbook.** A scripted downstream-host walkthrough, per
   `docs/agents/way-of-working.md`.
