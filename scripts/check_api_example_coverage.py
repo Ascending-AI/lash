@@ -33,7 +33,7 @@ noticed.  Adding, removing, or moving any path fails the gate; only the
 *disposition* is centralized, never the path set.  `--dump-surface` prints the
 same projection the check compares against.
 
-Evidence prose carries five lints, because the prose is the evidence:
+Evidence prose carries six lints, because the prose is the evidence:
 
 * No machine-local paths.  `/workspace/...`, `~/...`, and `C:\...` are one
   developer's checkout, not a contract another reader can verify.  Evidence
@@ -61,6 +61,10 @@ Evidence prose carries five lints, because the prose is the evidence:
   it hid 904 rows' actual contract behind boilerplate.  The same goes for the
   `used-unasserted` wording on a row that names an assertion.  See
   `stale_disposition_reason`.
+* No missing repository paths.  A `crates/...`, `examples/...`, `runbooks/...`,
+  `scripts/...`, or `docs/...` file cited in reason prose must still exist in
+  the repository; a `:line` anchor is metadata and does not change which file
+  must exist.  See `missing_repository_path`.
 
 Three exclusions are deliberate, and each is enforced structurally rather than
 by a hand-maintained list:
@@ -804,6 +808,11 @@ UNASSERTED_REASON = re.compile(
     r"|before claiming asserted usage",
     re.IGNORECASE,
 )
+#: Repository-relative source and documentation paths that reason prose may cite.
+REPOSITORY_FILE_PATH = re.compile(
+    r"^(?:\./)?(?:crates|examples|runbooks|scripts|docs)/"
+    r"[^\s]+\.[A-Za-z][A-Za-z0-9]*(?::[0-9]+)?$"
+)
 
 
 def path_tokens(text: str) -> list[str]:
@@ -832,6 +841,25 @@ def machine_local_path(text: str) -> str | None:
         if not MACHINE_LOCAL_ROOT.match(token):
             continue
         if "/" in token[1:] or "\\" in token[1:]:
+            return token
+    return None
+
+
+def missing_repository_path(text: str) -> str | None:
+    """The first repository-relative file citation that no longer exists.
+
+    Reason prose is durable evidence only while the file it points to remains
+    in the repository.  Line anchors deliberately are not checked: moving code
+    within a surviving file does not make the repository path itself false.
+    """
+    repository = REPO.resolve()
+    for token in path_tokens(text):
+        if not REPOSITORY_FILE_PATH.match(token):
+            continue
+        relative = token.removeprefix("./")
+        relative = re.sub(r":[0-9]+$", "", relative)
+        path = (REPO / relative).resolve()
+        if not path.is_relative_to(repository) or not path.is_file():
             return token
     return None
 
@@ -1152,6 +1180,12 @@ def check() -> int:
         stale = stale_disposition_reason(disposition or "", reason)
         if stale:
             errors.append(f"{symbol}: reason {stale}")
+        missing = missing_repository_path(reason)
+        if missing:
+            errors.append(
+                f"{symbol}: reason cites missing repository file {missing!r}; "
+                "cited evidence paths must exist"
+            )
         migration = impossible_facade_migration(reason, facade_dirs)
         if migration:
             errors.append(

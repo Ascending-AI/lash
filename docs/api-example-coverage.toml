@@ -18002,8 +18002,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::CheckpointHookContext::checkpoint"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::checkpoint` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer class: first-party plugin crates and the RLM protocol crate -- this field is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:582, crates/lash-plugin-plan-mode/tests/integration.rs:585, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::CheckpointHookContext::checkpoint to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::CheckpointHookContext::session_graph"
@@ -18012,7 +18012,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::CheckpointHookContext::session_graph"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::session_graph` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer class: the RLM protocol crate and first-party plugin crates -- this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:380, crates/lash-plugin-plan-mode/tests/integration.rs:589, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::session_graph` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer evidence: this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:380, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::CheckpointHookContext::session_id"
@@ -18030,7 +18030,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::CheckpointHookContext::session_lifecycle"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::session_lifecycle` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer class: the RLM protocol crate and first-party plugin crates -- this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:379, crates/lash-plugin-plan-mode/tests/integration.rs:588, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::session_lifecycle` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer evidence: this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:379, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::CheckpointHookContext::sessions"
@@ -18038,8 +18038,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::CheckpointHookContext::sessions"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::sessions` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer class: first-party plugin crates and the RLM protocol crate -- this field is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:387, crates/lash-plugin-plan-mode/tests/integration.rs:483, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::CheckpointHookContext::sessions to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::CheckpointHookContext::state"
@@ -18243,7 +18243,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::tool_catalog::PluginDirective::AbortTurn"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::AbortTurn` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: core runtime internals and first-party plugin crates -- this variant is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs:64, crates/lash-plugin-plan-mode/src/plan_mode.rs:574, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::AbortTurn` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer evidence: this variant is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs:64, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::AbortTurn::code"
@@ -18251,8 +18251,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::tool_catalog::PluginDirective::AbortTurn::code"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::AbortTurn::code` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/src/plan_mode.rs:575, crates/lash-plugin-plan-mode/src/plan_mode.rs:590, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginDirective::AbortTurn::code to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::AbortTurn::message"
@@ -18260,8 +18260,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::tool_catalog::PluginDirective::AbortTurn::message"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::AbortTurn::message` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/src/plan_mode.rs:576, crates/lash-plugin-plan-mode/src/plan_mode.rs:586, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginDirective::AbortTurn::message to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::CreateSession"
@@ -18288,7 +18288,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::tool_catalog::PluginDirective::EmitRuntimeEvents"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EmitRuntimeEvents` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: the RLM protocol crate and first-party plugin crates -- this variant is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:385, crates/lash-plugin-plan-mode/tests/integration.rs:407, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EmitRuntimeEvents` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer evidence: this variant is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:385, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::EmitRuntimeEvents::events"
@@ -18341,8 +18341,8 @@ kind = "variant"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::tool_catalog::PluginDirective::EnqueueMessages"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EnqueueMessages` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: first-party plugin crates and core runtime internals -- this variant is exercised in-repo at crates/lash-plugin-plan-mode/src/plan_mode.rs:511, crates/lash-plugin-plan-mode/src/plan_mode.rs:540, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginDirective::EnqueueMessages to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::EnqueueMessages::messages"
@@ -18350,8 +18350,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::tool_catalog::PluginDirective::EnqueueMessages::messages"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EnqueueMessages::messages` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/src/plan_mode.rs:512, crates/lash-plugin-plan-mode/src/plan_mode.rs:541, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginDirective::EnqueueMessages::messages to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::ReplaceToolArgs"
@@ -18378,7 +18378,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::tool_catalog::PluginDirective::ShortCircuitTool"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::ShortCircuitTool` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: first-party plugin crates and core runtime internals -- this variant is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:1120, crates/lash-core/src/plugin/session_obj/directives.rs:101, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::ShortCircuitTool` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer evidence: this variant is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs:101, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::ShortCircuitTool::output"
@@ -18386,8 +18386,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::tool_catalog::PluginDirective::ShortCircuitTool::output"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::ShortCircuitTool::output` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:295, crates/lash-plugin-plan-mode/tests/integration.rs:1120, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginDirective::ShortCircuitTool::output to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::emit_runtime_events"
@@ -18395,8 +18395,8 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::tool_catalog::PluginDirective::emit_runtime_events"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::emit_runtime_events` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: first-party plugin crates and the RLM protocol crate -- this function is exercised in-repo at crates/lash-plugin-plan-mode/src/update_plan.rs:299, crates/lash-plugin-plan-mode/src/plan_mode.rs:506, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginDirective::emit_runtime_events to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::emit_trace"
@@ -18414,7 +18414,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::tool_catalog::PluginDirective::short_circuit"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::short_circuit` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: in-repo workspace code and first-party plugin crates -- this function is exercised in-repo at crates/lash/tests/ui/facade_boundary_types_are_public.rs:359, crates/lash-plugin-plan-mode/src/plan_mode.rs:634, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::short_circuit` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer evidence: this function is exercised in-repo at crates/lash/tests/ui/facade_boundary_types_are_public.rs:359, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::PluginError"
@@ -18924,7 +18924,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::runtime_impl::PluginHost::build_session_with_parent"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginHost::build_session_with_parent` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineValidationContext::plugin_host`. Consumer class: the RLM protocol crate and first-party plugin crates -- this function is exercised in-repo at crates/lash-protocol-rlm/src/plugin/factory.rs:207, crates/lash-plugin-plan-mode/src/update_plan.rs:449, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginHost::build_session_with_parent` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineValidationContext::plugin_host`. Consumer evidence: this function is exercised in-repo at crates/lash-protocol-rlm/src/plugin/factory.rs:207, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::PluginHost::build_session_with_parent_and_overlay"
@@ -19459,8 +19459,8 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::session_obj::PluginSession::after_tool_call"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::after_tool_call` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer class: first-party plugin crates -- this function is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:1100, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginSession::after_tool_call to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginSession::after_turn"
@@ -19468,8 +19468,8 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::session_obj::PluginSession::after_turn"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::after_turn` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer class: first-party plugin crates -- this function is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:604, crates/lash-plugin-plan-mode/tests/integration.rs:642, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginSession::after_turn to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginSession::apply_checkpoint"
@@ -19487,7 +19487,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::session_obj::PluginSession::at_checkpoint"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::at_checkpoint` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer class: core runtime internals and first-party plugin crates -- this function is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs:183, crates/lash-plugin-plan-mode/tests/integration.rs:583, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::at_checkpoint` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer evidence: this function is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs:183, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::PluginSession::before_tool_call"
@@ -19495,8 +19495,8 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::session_obj::PluginSession::before_tool_call"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::before_tool_call` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer class: first-party plugin crates -- this function is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:420, crates/lash-plugin-plan-mode/tests/integration.rs:433, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginSession::before_tool_call to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginSession::before_turn"
@@ -19504,8 +19504,8 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::session_obj::PluginSession::before_turn"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::before_turn` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer class: first-party plugin crates -- this function is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:384, crates/lash-plugin-plan-mode/tests/integration.rs:627, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginSession::before_turn to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginSession::collect_prompt_contributions"
@@ -19514,7 +19514,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::session_obj::PluginSession::collect_prompt_contributions"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::collect_prompt_contributions` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer class: core runtime internals and first-party plugin crates -- this function is exercised in-repo at crates/lash-core/src/plugin/mod.rs:387, crates/lash-plugin-plan-mode/tests/integration.rs:481, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::collect_prompt_contributions` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer evidence: this function is exercised in-repo at crates/lash-core/src/plugin/mod.rs:387, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::PluginSession::compact_context"
@@ -19694,7 +19694,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::session_obj::PluginSession::resolve_tool_catalog"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::resolve_tool_catalog` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer class: first-party plugin crates and core runtime internals -- this function is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:461, crates/lash-core/src/session.rs:248, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::resolve_tool_catalog` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer evidence: this function is exercised in-repo at crates/lash-core/src/session.rs:248, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::PluginSession::resolved_tool_catalog"
@@ -19703,7 +19703,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::session_obj::PluginSession::resolved_tool_catalog"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::resolved_tool_catalog` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer class: the Standard protocol crate and first-party plugin crates -- this function is exercised in-repo at crates/lash-protocol-standard/tests/native_tools.rs:7, crates/lash-plugin-plan-mode/tests/integration.rs:357, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::resolved_tool_catalog` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer evidence: this function is exercised in-repo at crates/lash-protocol-standard/tests/native_tools.rs:7, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::PluginSession::restore"
@@ -19712,7 +19712,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::session_obj::PluginSession::restore"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::restore` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer class: first-party plugin crates and core runtime internals -- this function is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:334, crates/lash-core/src/plugin/runtime_impl.rs:234, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::restore` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer evidence: this function is exercised in-repo at crates/lash-core/src/plugin/runtime_impl.rs:234, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::PluginSession::run_plugin_command_value"
@@ -19720,8 +19720,8 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::session_obj::PluginSession::run_plugin_command_value"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::run_plugin_command_value` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer class: first-party plugin crates -- this function is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:283, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginSession::run_plugin_command_value to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginSession::run_plugin_task_value"
@@ -19729,8 +19729,8 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::session_obj::PluginSession::run_plugin_task_value"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::run_plugin_task_value` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer evidence: no in-repo caller runs a plugin task through the value-typed entry. Kept, not removed: it is the task half of the command/task pair whose command half `run_plugin_command_value` is exercised at crates/lash-plugin-plan-mode/tests/integration.rs:283. The doubt is explicit."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginSession::run_plugin_task_value to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginSession::session_id"
@@ -19783,8 +19783,8 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::session_obj::PluginSession::tool_catalog"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::tool_catalog` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer class: first-party plugin crates and core runtime internals -- this function is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:58, crates/lash-plugin-plan-mode/tests/integration.rs:99, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginSession::tool_catalog to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginSession::tool_registry"
@@ -19801,8 +19801,8 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::session_obj::PluginSession::tools"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::tools` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer class: first-party plugin crates and core runtime internals -- this function is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:809, crates/lash-plugin-plan-mode/tests/integration.rs:925, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginSession::tools to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginSession::transform_assistant_response"
@@ -19810,8 +19810,8 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::session_obj::PluginSession::transform_assistant_response"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::transform_assistant_response` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer class: first-party plugin crates -- this function is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:1161, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginSession::transform_assistant_response to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginSession::transform_assistant_stream"
@@ -19819,8 +19819,8 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::session_obj::PluginSession::transform_assistant_stream"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::transform_assistant_stream` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer class: first-party plugin crates -- this function is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:1155, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginSession::transform_assistant_stream to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginSession::triggers"
@@ -20302,8 +20302,8 @@ kind = "struct"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::PromptHookContext"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: `lash::plugins::PromptHookContext` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::collect_prompt_contributions` because its canonical identity is the lash-core one. Consumer class: first-party plugin crates and core runtime internals -- this type is exercised in-repo at crates/lash-plugin-plan-mode/src/update_plan.rs:314, crates/lash-plugin-plan-mode/src/update_plan.rs:425, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PromptHookContext to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PromptHookContext::protocol_turn_options"
@@ -20311,8 +20311,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::PromptHookContext::protocol_turn_options"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PromptHookContext::protocol_turn_options` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::collect_prompt_contributions`. Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/src/update_plan.rs:429, crates/lash-plugin-plan-mode/src/update_plan.rs:462, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PromptHookContext::protocol_turn_options to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PromptHookContext::session_id"
@@ -20329,8 +20329,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::PromptHookContext::sessions"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PromptHookContext::sessions` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::collect_prompt_contributions`. Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/src/update_plan.rs:427, crates/lash-plugin-plan-mode/src/update_plan.rs:460, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PromptHookContext::sessions to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PromptHookContext::state"
@@ -20338,8 +20338,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::PromptHookContext::state"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PromptHookContext::state` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::collect_prompt_contributions`. Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/src/update_plan.rs:90, crates/lash-plugin-plan-mode/src/update_plan.rs:93, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PromptHookContext::state to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PromptHookContext::turn_context"
@@ -20347,8 +20347,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::PromptHookContext::turn_context"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PromptHookContext::turn_context` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::collect_prompt_contributions`. Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/src/update_plan.rs:430, crates/lash-plugin-plan-mode/src/update_plan.rs:463, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PromptHookContext::turn_context to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::SessionAppendNode"
@@ -20795,7 +20795,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolCallHookContext::args"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::ToolCallHookContext::args` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_tool_call`. Consumer class: in-repo workspace code and first-party plugin crates -- this field is exercised in-repo at crates/lash/tests/ui/facade_boundary_types_are_public.rs:356, crates/lash-plugin-plan-mode/tests/integration.rs:276, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::ToolCallHookContext::args` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_tool_call`. Consumer evidence: this field is exercised in-repo at crates/lash/tests/ui/facade_boundary_types_are_public.rs:356, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::ToolCallHookContext::argument_projection"
@@ -20813,7 +20813,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolCallHookContext::new"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::ToolCallHookContext::new` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_tool_call`. Consumer class: core tool dispatch and the plan-mode plugin's hook tests -- this function is exercised at crates/lash-core/src/tool_dispatch/preparation.rs:144 and crates/lash-plugin-plan-mode/tests/integration.rs:420, not by any example, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::ToolCallHookContext::new` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_tool_call`. Consumer evidence: this function is exercised in-repo at crates/lash-core/src/tool_dispatch/preparation.rs:144, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::ToolCallHookContext::session_id"
@@ -20857,8 +20857,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolCallHookContext::turn_context"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::ToolCallHookContext::turn_context` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_tool_call`. Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:388, crates/lash-plugin-plan-mode/tests/integration.rs:486, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::ToolCallHookContext::turn_context to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::ToolCatalog"
@@ -21072,7 +21072,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolResultHookContext::args"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::ToolResultHookContext::args` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::after_tool_call`. Consumer class: in-repo workspace code and first-party plugin crates -- this field is exercised in-repo at crates/lash/tests/ui/facade_boundary_types_are_public.rs:356, crates/lash-plugin-plan-mode/tests/integration.rs:276, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::ToolResultHookContext::args` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::after_tool_call`. Consumer evidence: this field is exercised in-repo at crates/lash/tests/ui/facade_boundary_types_are_public.rs:356, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::ToolResultHookContext::duration_ms"
@@ -21090,7 +21090,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolResultHookContext::new"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::ToolResultHookContext::new` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::after_tool_call`. Consumer class: core tool dispatch and the plan-mode plugin's hook tests -- this function is exercised at crates/lash-core/src/tool_dispatch/execution.rs:313 and crates/lash-plugin-plan-mode/tests/integration.rs:1100, not by any example, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::ToolResultHookContext::new` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::after_tool_call`. Consumer evidence: this function is exercised in-repo at crates/lash-core/src/tool_dispatch/execution.rs:313, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::ToolResultHookContext::result"
@@ -21098,8 +21098,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolResultHookContext::result"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::ToolResultHookContext::result` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::after_tool_call`. Consumer class: first-party plugin crates and in-repo workspace code -- this field is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:808, crates/lash-plugin-plan-mode/tests/integration.rs:924, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::ToolResultHookContext::result to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::ToolResultHookContext::session_id"
@@ -21143,8 +21143,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolResultHookContext::turn_context"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::ToolResultHookContext::turn_context` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::after_tool_call`. Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:388, crates/lash-plugin-plan-mode/tests/integration.rs:486, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::ToolResultHookContext::turn_context to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::TurnContextTransform"
@@ -21177,8 +21177,8 @@ kind = "struct"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::TurnHookContext"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: `lash::plugins::TurnHookContext` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn` because its canonical identity is the lash-core one. Consumer class: first-party plugin crates and core runtime internals -- this type is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:20, crates/lash-plugin-plan-mode/tests/integration.rs:384, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::TurnHookContext to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::TurnHookContext::session_id"
@@ -21187,7 +21187,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::TurnHookContext::session_id"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::TurnHookContext::session_id` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: core runtime internals and the plan-mode plugin's hook tests -- this field is exercised at crates/lash-core/src/plugin/session_obj/directives.rs:153 and crates/lash-plugin-plan-mode/tests/integration.rs:385, not by any example, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::TurnHookContext::session_id` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer evidence: this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs:153, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::TurnHookContext::sessions"
@@ -21195,8 +21195,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::TurnHookContext::sessions"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::TurnHookContext::sessions` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:387, crates/lash-plugin-plan-mode/tests/integration.rs:483, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::TurnHookContext::sessions to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::TurnHookContext::state"
@@ -21204,8 +21204,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::TurnHookContext::state"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::TurnHookContext::state` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:161, crates/lash-plugin-plan-mode/tests/integration.rs:162, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::TurnHookContext::state to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::TurnHookContext::turn_context"
@@ -21213,8 +21213,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::TurnHookContext::turn_context"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::TurnHookContext::turn_context` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:388, crates/lash-plugin-plan-mode/tests/integration.rs:486, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::TurnHookContext::turn_context to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::TurnResultHookContext"
@@ -21232,7 +21232,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::TurnResultHookContext::session_id"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::TurnResultHookContext::session_id` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::after_turn`. Consumer class: core runtime internals and the plan-mode plugin's hook tests -- this field is exercised at crates/lash-core/src/plugin/session_obj/directives.rs:217 and crates/lash-plugin-plan-mode/tests/integration.rs:605, not by any example, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::TurnResultHookContext::session_id` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::after_turn`. Consumer evidence: this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs:217, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::TurnResultHookContext::sessions"
@@ -21240,8 +21240,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::TurnResultHookContext::sessions"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::TurnResultHookContext::sessions` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::after_turn`. Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:387, crates/lash-plugin-plan-mode/tests/integration.rs:483, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::TurnResultHookContext::sessions to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::TurnResultHookContext::turn"
@@ -21250,7 +21250,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::TurnResultHookContext::turn"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::TurnResultHookContext::turn` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::after_turn`. Consumer class: core runtime internals and the plan-mode plugin's hook tests -- this field is exercised at crates/lash-core/src/plugin/session_obj/directives.rs:217 and crates/lash-plugin-plan-mode/tests/integration.rs:606, not by any example, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::TurnResultHookContext::turn` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::after_turn`. Consumer evidence: this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs:217, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::TurnTransformContext"
@@ -41766,7 +41766,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::AssembledTurn::outcome"]
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::AssembledTurn::outcome` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::finalize_turn_with_phase_probe`. Consumer class: the subagent plugin crate and first-party plugin crates -- this field is exercised in-repo at crates/lash-subagents/src/rlm_support.rs:267, crates/lash-plugin-plan-mode/tests/integration.rs:282, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::AssembledTurn::outcome` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::finalize_turn_with_phase_probe`. Consumer evidence: this field is exercised in-repo at crates/lash-subagents/src/rlm_support.rs:267, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::runtime::AssembledTurn::state"
@@ -64647,8 +64647,8 @@ symbol = "lash_core::plugin::actions::PluginCommandOutcome::directives"
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginCommandOutcome` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/src/plan_mode.rs:612, crates/lash-plugin-plan-mode/src/plan_mode.rs:650, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash_core::plugin::actions::PluginCommandOutcome::directives to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginCommandOutcome::events"
@@ -64679,16 +64679,16 @@ symbol = "lash_core::plugin::actions::PluginCommandOutcome::with_directives"
 kind = "function"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginCommandOutcome` to hosts (plugin and tool implementers). Consumer evidence: no in-repo caller attaches directives through the builder. Kept, not removed: it is one of this type's two builders and the sibling `with_events` is exercised at crates/lash-plugin-plan-mode/src/plan_mode.rs:805. The doubt is explicit."
+disposition = "unused-add"
+reason = "Add lash_core::plugin::actions::PluginCommandOutcome::with_directives to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginCommandOutcome::with_events"
 kind = "function"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginCommandOutcome` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates -- this function is exercised in-repo at crates/lash-plugin-plan-mode/src/plan_mode.rs:805, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash_core::plugin::actions::PluginCommandOutcome::with_events to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginOperationDef"
@@ -64855,16 +64855,16 @@ symbol = "lash_core::plugin::actions::PluginTaskOutcome::with_directives"
 kind = "function"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_task_value` hands `PluginTaskOutcome` to hosts (plugin and tool implementers). Consumer evidence: no in-repo caller attaches directives to a task outcome. Kept, not removed: `PluginTaskOutcome` mirrors `PluginCommandOutcome` member for member and that type's `with_events` builder is exercised at crates/lash-plugin-plan-mode/src/plan_mode.rs:805, so deleting only the task-side builders would break the symmetry a plugin author relies on. The doubt is explicit."
+disposition = "unused-add"
+reason = "Add lash_core::plugin::actions::PluginTaskOutcome::with_directives to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginTaskOutcome::with_events"
 kind = "function"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_task_value` hands `PluginTaskOutcome` to hosts (plugin and tool implementers). Consumer evidence: no in-repo caller attaches events to a task outcome. Kept, not removed: `PluginTaskOutcome` mirrors `PluginCommandOutcome` member for member and that type's `with_events` builder is exercised at crates/lash-plugin-plan-mode/src/plan_mode.rs:805. The doubt is explicit."
+disposition = "unused-add"
+reason = "Add lash_core::plugin::actions::PluginTaskOutcome::with_events to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash_core::plugin::actions::SessionParam"
@@ -64895,8 +64895,8 @@ symbol = "lash_core::plugin::actions::SessionParam::Required"
 kind = "variant"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationDef::session_param` hands `SessionParam` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and core runtime internals -- this variant is exercised in-repo at crates/lash-plugin-plan-mode/src/plan_mode.rs:119, crates/lash-plugin-plan-mode/src/plan_mode.rs:129, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash_core::plugin::actions::SessionParam::Required to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash_core::plugin::hooks::AssistantStreamFinishReason"
@@ -65007,8 +65007,8 @@ symbol = "lash_core::plugin::hooks::TurnResultSummary"
 kind = "struct"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::hooks::TurnResultHookContext::turn` hands `TurnResultSummary` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and core runtime internals -- this type is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:607, crates/lash-plugin-plan-mode/tests/integration.rs:645, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash_core::plugin::hooks::TurnResultSummary to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash_core::plugin::hooks::TurnResultSummary::assistant_output"
@@ -65039,16 +65039,16 @@ symbol = "lash_core::plugin::hooks::TurnResultSummary::from_assembled"
 kind = "function"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::hooks::TurnResultHookContext::turn` hands `TurnResultSummary` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and core runtime internals -- this function is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:607, crates/lash-plugin-plan-mode/tests/integration.rs:645, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash_core::plugin::hooks::TurnResultSummary::from_assembled to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash_core::plugin::hooks::TurnResultSummary::outcome"
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::hooks::TurnResultHookContext::turn` hands `TurnResultSummary` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates -- this field is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:282, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash_core::plugin::hooks::TurnResultSummary::outcome to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash_core::plugin::hooks::TurnResultSummary::token_usage"
@@ -65079,24 +65079,24 @@ symbol = "lash_core::plugin::runtime_impl::SessionAuthorityContext::plugin_optio
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::fork_for_child_session` hands `SessionAuthorityContext` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and the RLM protocol crate -- this field is exercised in-repo at crates/lash-plugin-plan-mode/src/update_plan.rs:400, crates/lash-plugin-plan-mode/src/update_plan.rs:408, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash_core::plugin::runtime_impl::SessionAuthorityContext::plugin_options to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash_core::plugin::runtime_impl::SessionAuthorityContext::subagent"
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::fork_for_child_session` hands `SessionAuthorityContext` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/src/update_plan.rs:398, crates/lash-plugin-plan-mode/src/update_plan.rs:406, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash_core::plugin::runtime_impl::SessionAuthorityContext::subagent to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash_core::plugin::runtime_impl::SessionAuthorityContext::tool_access"
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::fork_for_child_session` hands `SessionAuthorityContext` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/src/update_plan.rs:397, crates/lash-plugin-plan-mode/src/update_plan.rs:405, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash_core::plugin::runtime_impl::SessionAuthorityContext::tool_access to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash_core::plugin::services::PluginOperationInvokeError"
@@ -65343,8 +65343,8 @@ symbol = "lash_core::plugin::tool_catalog::ToolCatalogContext"
 kind = "struct"
 availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::resolve_tool_catalog` hands `ToolCatalogContext` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and the RLM protocol crate -- this type is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:13, crates/lash-plugin-plan-mode/tests/integration.rs:461, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash_core::plugin::tool_catalog::ToolCatalogContext to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash_core::plugin::tool_catalog::ToolCatalogContext::extensions"
@@ -65360,7 +65360,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::resolve_tool_catalog` hands `ToolCatalogContext` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-plan-mode/tests/integration.rs:464, crates/lash-core/src/plugin/session_obj/tools.rs:13, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::resolve_tool_catalog` hands `ToolCatalogContext` to hosts (plugin and tool implementers). Consumer evidence: this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/tools.rs:13, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::plugin::tool_catalog::ToolCatalogContext::session_id"
