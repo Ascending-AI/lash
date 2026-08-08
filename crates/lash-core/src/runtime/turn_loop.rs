@@ -65,12 +65,6 @@ pub(super) fn post_commit_delivery_issue(
     }
 }
 
-fn post_commit_plugin_lifecycle_hook_issue(error: crate::PluginError) -> TurnIssue {
-    let mut issue = crate::plugin::plugin_lifecycle_hook_issue(error);
-    issue.retryable = Some(false);
-    issue
-}
-
 fn session_head_refresh_error(err: SessionError) -> RuntimeError {
     RuntimeError::new(RuntimeErrorCode::SessionHeadRefresh, err.to_string())
 }
@@ -707,10 +701,6 @@ impl LashRuntime {
         else {
             return Ok(None);
         };
-        // The signal means "the lane this turn holds was released underneath us". Any
-        // release predating this claim cannot invalidate the guard it returns.
-        self.fresh_session_execution_lease_released
-            .clear_before_claim();
         match SessionExecutionLeaseGuard::try_acquire(
             store,
             &self.state.session_id,
@@ -737,92 +727,6 @@ impl LashRuntime {
                 Ok(None)
             }
         }
-    }
-
-    /// Repair handoff authority after a nested fresh-lease commit.
-    ///
-    /// The shared trigger is set only when nested runtime-state persistence rotates and releases
-    /// the same owner's lease. At the physical-frame boundary, both in-process and durable
-    /// handoffs consume it before selecting their continuation path. A still-live retained guard
-    /// is transferred; a guard whose continuity is already lost or locally expired is deliberately
-    /// not reacquired, preserving the loud fenced failure, and a lane-less turn remains legal.
-    ///
-    /// The transfer cannot make the later claim atomic with asynchronous hooks. A hook that
-    /// invalidates the transferred token between this call and the durable claim still produces a
-    /// loud claim failure while leaving the committed handoff batch claimable. The resident graph
-    /// is invalidated whenever the trigger is consumed because same-owner guard rotation proves
-    /// nothing about whether the nested commit advanced the durable session head; explicit reload,
-    /// rather than guard-identity churn, is the graph-freshness authority (ADRs 0029 and 0045).
-    pub(super) async fn transfer_session_execution_lease_for_agent_frame_handoff(
-        &mut self,
-        guard: &mut Option<SessionExecutionLeaseGuard>,
-    ) -> Result<(), RuntimeError> {
-        if !self.fresh_session_execution_lease_released.consume() {
-            return Ok(());
-        }
-        self.graph_loaded_from_store = false;
-        self.last_committed_lease_continuity = None;
-        let Some(previous) = guard.as_ref() else {
-            return Ok(());
-        };
-        if previous.continuity().is_none() {
-            return Ok(());
-        }
-        let Some(store) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-        else {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::StoreCommitFailed,
-                "agent-frame handoff authority transfer requires a runtime persistence store",
-            ));
-        };
-        let previous_fencing_token = previous.fence().fencing_token;
-        let Some(transferred) = SessionExecutionLeaseGuard::try_acquire(
-            store,
-            &self.state.session_id,
-            &self.runtime_lease_owner,
-            self.host.core.control.lease_timings,
-            Arc::clone(&self.host.core.clock),
-        )
-        .await
-        .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?
-        else {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::SessionExecutionLeaseLost,
-                format!(
-                    "session execution authority for agent-frame handoff in session `{}` is held by another executor",
-                    self.state.session_id
-                ),
-            ));
-        };
-        let transferred_fencing_token = transferred.fence().fencing_token;
-        *guard = Some(transferred);
-        crate::trace::emit_trace(
-            &self.host.core.tracing.trace_sink,
-            &self.host.core.tracing.trace_context,
-            lash_trace::TraceContext::default().for_session(self.state.session_id.clone()),
-            lash_trace::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred {
-                owner_id: self.runtime_lease_owner.owner_id.clone(),
-                incarnation_id: self.runtime_lease_owner.incarnation_id.clone(),
-                previous_fencing_token,
-                transferred_fencing_token,
-                trigger: lash_trace::TraceSessionExecutionLeaseTransferTrigger::NestedCommit,
-            },
-            self.host.core.clock.as_ref(),
-        );
-        tracing::info!(
-            session_id = %self.state.session_id,
-            owner_id = %self.runtime_lease_owner.owner_id,
-            incarnation_id = %self.runtime_lease_owner.incarnation_id,
-            previous_fencing_token,
-            transferred_fencing_token,
-            trigger = "nested_commit",
-            event = "session_execution_lease.frame_handoff_transferred",
-            "transferred session execution authority at the agent-frame handoff"
-        );
-        Ok(())
     }
 
     async fn settle_session_execution_lease<T>(
@@ -1056,7 +960,7 @@ impl LashRuntime {
         };
 
         let plugins = Arc::clone(session.plugins());
-        let manager = match self.runtime_session_services_for_turn(None) {
+        let manager = match self.runtime_session_services_for_turn(None, session_execution_lease) {
             Ok(manager) => manager,
             Err(err) => {
                 return Err(RuntimeError::new(
@@ -1230,15 +1134,27 @@ impl LashRuntime {
                 self.host.core.clock.as_ref(),
             );
         }
+        // A final physical turn has already atomically released its lane, so
+        // TurnPersisted observers are genuinely lane-less. Agent-frame
+        // switches retain the guard and their observers must borrow it.
+        let post_commit_session_execution_lease = if release_session_execution_lease {
+            None
+        } else {
+            session_execution_lease
+        };
         match self
-            .emit_turn_persisted_event(&delivery.turn, scoped_effect_controller, &trace_turn_id)
+            .emit_turn_persisted_event(
+                &delivery.turn,
+                scoped_effect_controller,
+                &trace_turn_id,
+                post_commit_session_execution_lease,
+            )
             .await
         {
             Ok(Some(error)) => {
-                delivery
-                    .turn
-                    .errors
-                    .push(post_commit_plugin_lifecycle_hook_issue(error));
+                let mut issue = crate::plugin::plugin_lifecycle_hook_issue(error);
+                issue.retryable = Some(false);
+                delivery.turn.errors.push(issue);
                 delivery.post_commit_delivery_failed = true;
                 self.invalidate_resident_session_state();
             }
@@ -1422,13 +1338,16 @@ impl LashRuntime {
         returned_turn: &AssembledTurn,
         scoped_effect_controller: &ScopedEffectController<'_>,
         trace_turn_id: &str,
+        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
     ) -> Result<Option<crate::PluginError>, RuntimeError> {
         let Some(session) = self.session.as_ref() else {
             return Ok(None);
         };
-        let manager = self.runtime_session_services().map_err(|err| {
-            RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
-        })?;
+        let manager = self
+            .runtime_session_services_after_commit(session_execution_lease)
+            .map_err(|err| {
+                RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
+            })?;
         let phase_turn_id = turn_phase_id(trace_turn_id, "turn-persisted");
         let phase_controller = scoped_child_turn_controller(
             scoped_effect_controller,
@@ -1864,11 +1783,11 @@ impl LashRuntime {
         self.reload_invalidated_resident_session_state().await?;
         let lease_continuity =
             session_execution_lease.and_then(SessionExecutionLeaseGuard::continuity);
-        let may_reuse_resident_graph = self.graph_loaded_from_store
-            && !self.fresh_session_execution_lease_released.is_set()
+        let resident_graph_is_current = self.graph_loaded_from_store
+            && !self.resident_graph_head_stale.load(Ordering::Acquire)
             && lease_continuity.is_some()
             && lease_continuity == self.last_committed_lease_continuity;
-        if !may_reuse_resident_graph {
+        if !resident_graph_is_current {
             self.refresh_session_graph_from_store()
                 .await
                 .map_err(session_head_refresh_error)?;
@@ -2125,7 +2044,7 @@ impl LashRuntime {
         }
 
         let manager = self
-            .runtime_session_services_for_turn(None)
+            .runtime_session_services_for_turn(None, session_execution_lease)
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
@@ -2462,7 +2381,10 @@ impl LashRuntime {
             .map(|options| session_protocol_turn_options.merged_with_override(&options))
             .unwrap_or(session_protocol_turn_options);
         let manager = self
-            .runtime_session_services_for_turn(Some(child_usage_event_relay.clone()))
+            .runtime_session_services_for_turn(
+                Some(child_usage_event_relay.clone()),
+                session_execution_lease,
+            )
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
@@ -2549,7 +2471,10 @@ impl LashRuntime {
                 })?
         };
         let manager = self
-            .runtime_session_services_for_turn(Some(child_usage_event_relay.clone()))
+            .runtime_session_services_for_turn(
+                Some(child_usage_event_relay.clone()),
+                session_execution_lease,
+            )
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;

@@ -292,11 +292,6 @@ where
             TraceEvent::LashlangExecution { .. } => {
                 self.emit_instant(record, "lash.lashlang_execution", None)
             }
-            TraceEvent::SessionExecutionLeaseFrameHandoffTransferred { .. } => self.emit_instant(
-                record,
-                "lash.session_execution_lease.frame_handoff_transferred",
-                None,
-            ),
             TraceEvent::Custom { .. } => self.emit_instant(record, "lash.custom", None),
         }
         Ok(())
@@ -731,34 +726,6 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 ));
             }
         }
-        TraceEvent::SessionExecutionLeaseFrameHandoffTransferred {
-            owner_id,
-            incarnation_id,
-            previous_fencing_token,
-            transferred_fencing_token,
-            trigger,
-        } => {
-            attrs.push(KeyValue::new(
-                "lash.session_execution_lease.owner_id",
-                owner_id.clone(),
-            ));
-            attrs.push(KeyValue::new(
-                "lash.session_execution_lease.incarnation_id",
-                incarnation_id.clone(),
-            ));
-            attrs.push(KeyValue::new(
-                "lash.session_execution_lease.previous_fencing_token",
-                *previous_fencing_token as i64,
-            ));
-            attrs.push(KeyValue::new(
-                "lash.session_execution_lease.transferred_fencing_token",
-                *transferred_fencing_token as i64,
-            ));
-            attrs.push(KeyValue::new(
-                "lash.session_execution_lease.transfer_trigger",
-                trigger.to_string(),
-            ));
-        }
         TraceEvent::Custom { name, payload } => {
             attrs.push(KeyValue::new("lash.custom.name", name.clone()));
             push_payload_json(&mut attrs, options, "lash.custom.payload_json", payload);
@@ -1159,9 +1126,6 @@ fn event_type(event: &TraceEvent) -> &'static str {
         TraceEvent::ProtocolStep { .. } => "protocol_step",
         TraceEvent::TokenUsage { .. } => "token_usage",
         TraceEvent::TurnCompleted { .. } => "turn_completed",
-        TraceEvent::SessionExecutionLeaseFrameHandoffTransferred { .. } => {
-            "session_execution_lease.frame_handoff_transferred"
-        }
         TraceEvent::Custom { .. } => "custom",
     }
 }

@@ -48,6 +48,10 @@ pub enum StoreError {
         "runtime operation `{turn_id}` for session `{session_id}` was retried with different commit content; reuse an operation identity only for the same logical operation"
     )]
     RuntimeTurnCommitConflict { session_id: String, turn_id: String },
+    #[error(
+        "runtime commit for session `{session_id}` cannot both borrow and release the session execution lease"
+    )]
+    RuntimeCommitLeaseAuthorityConflict { session_id: String },
     /// One append operation id was reused for different semantic request content.
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**
@@ -291,6 +295,9 @@ impl StoreError {
             Self::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation",
             Self::HeadRevisionConflict { .. } => "HeadRevisionConflict",
             Self::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict",
+            Self::RuntimeCommitLeaseAuthorityConflict { .. } => {
+                "RuntimeCommitLeaseAuthorityConflict"
+            }
             Self::AppendOperationIdentityConflict { .. } => "AppendOperationIdentityConflict",
             Self::AppendReceiptRequestedNodeCountCorrupt { .. } => {
                 "AppendReceiptRequestedNodeCountCorrupt"

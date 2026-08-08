@@ -55,6 +55,7 @@ impl LashRuntime {
         Ok(())
     }
 
+    /// Runs a lane-less host append between turn drivers, never concurrently with a running turn.
     pub async fn append_session_nodes(
         &mut self,
         request: crate::AppendSessionNodesRequest,
@@ -152,13 +153,14 @@ impl LashRuntime {
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
             commit.turn_commit = append_stamp;
             commit.debug_assert_append_envelope_scope();
+            // Lane-less public runtime operation: callers append between turn
+            // drivers, so this handle owns no retained execution guard.
             let result = match super::commit_runtime_state_with_fresh_session_execution_lease(
                 Arc::clone(&store),
                 commit,
                 &self.runtime_lease_owner,
                 self.host.core.control.lease_timings,
                 Arc::clone(&self.host.core.clock),
-                self.fresh_session_execution_lease_released.clone(),
             )
             .await
             {
@@ -495,6 +497,7 @@ impl LashRuntime {
             .await
     }
 
+    /// Runs a lane-less plugin command between turn drivers, never concurrently with a running turn.
     pub async fn run_plugin_command(
         &mut self,
         name: &str,
@@ -539,6 +542,7 @@ impl LashRuntime {
         })
     }
 
+    /// Runs a lane-less plugin task between turn drivers, never concurrently with a running turn.
     pub async fn run_plugin_task(
         &mut self,
         name: &str,
@@ -700,13 +704,15 @@ impl LashRuntime {
                         "failed to hash plugin runtime events: {err}"
                     ))
                 })?;
+            // Lane-less host plugin-operation boundary. In-turn lifecycle
+            // graph appends use `session_manager::graph` and carry an explicit
+            // borrowed guard instead of reaching this runtime-owned path.
             let result = match super::commit_runtime_state_with_fresh_session_execution_lease(
                 store,
                 commit,
                 &self.runtime_lease_owner,
                 self.host.core.control.lease_timings,
                 Arc::clone(&self.host.core.clock),
-                self.fresh_session_execution_lease_released.clone(),
             )
             .await
             {
@@ -755,13 +761,14 @@ impl LashRuntime {
                     "failed to identify plugin operation state: {err}"
                 ))
             })?;
+        // Lane-less host plugin-operation snapshot. Turn-scoped service calls
+        // are classified at the session-manager call sites instead.
         let result = super::commit_runtime_state_with_fresh_session_execution_lease(
             store,
             commit,
             &self.runtime_lease_owner,
             self.host.core.control.lease_timings,
             Arc::clone(&self.host.core.clock),
-            self.fresh_session_execution_lease_released.clone(),
         )
         .await
         .map_err(|err| {

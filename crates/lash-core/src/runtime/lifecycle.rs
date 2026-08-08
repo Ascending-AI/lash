@@ -246,7 +246,7 @@ impl LashRuntime {
             protocol_turn_options,
             shared_token_ledger: Arc::new(std::sync::Mutex::new(Vec::new())),
             process_sync_needed: Arc::new(AtomicBool::new(false)),
-            fresh_session_execution_lease_released: NestedLeaseReleaseSignal::default(),
+            resident_graph_head_stale: Arc::new(AtomicBool::new(false)),
             turn_phase_probe: None,
             last_committed_lease_continuity: None,
             last_committed_observation_turn: None,
@@ -457,13 +457,14 @@ impl LashRuntime {
                     operation,
                 )
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
+            // Lane-less host lifecycle boundary: `park` runs between turns and
+            // owns no retained session-execution guard.
             let result = commit_runtime_state_with_fresh_session_execution_lease(
                 Arc::clone(&store),
                 commit,
                 &self.runtime_lease_owner,
                 self.host.core.control.lease_timings,
                 Arc::clone(&self.host.core.clock),
-                self.fresh_session_execution_lease_released.clone(),
             )
             .await
             .map_err(|source| session_commit_error("failed to persist runtime state", source))?;

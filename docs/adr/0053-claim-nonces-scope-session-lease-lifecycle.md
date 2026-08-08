@@ -43,11 +43,12 @@ become session-head commit authority.
   implementation; hosts can clone a minted value for retry but cannot derive one
   from stable owner data.
 - Same-owner reentry therefore rotates the lock-lifecycle token, and releasing
-  that reentered claim clears the durable lane row. A logical Agent Frame chain
-  that retained the earlier guard uses the frame-handoff transfer boundary to
-  reacquire only when a nested commit proves that rotation occurred. A locally
-  expired or lost guard is never silently reacquired there. FIG-1063 owns the
-  complete nesting contract beyond this boundary mechanism.
+  that reentered claim clears the durable lane row. Reentry is only for a
+  genuinely lane-less context. A nested runtime commit whose caller already
+  holds the session-execution lane borrows the outer guard's current authority:
+  it makes no fresh claim, performs no rotation, and performs no release on
+  success or failure. The outer guard remains the owner of renewal and release.
+  The former nested-release signal and Agent Frame handoff transfer are removed.
 - Renewal never rotates the nonce. Renewal and standalone release require exact
   `(owner, lease token)` equality and return named refusals when the claim is no
   longer current. Backend implementations must serialize renewal against claim
@@ -61,6 +62,10 @@ become session-head commit authority.
   the current lease token matches. A retained guard from before same-owner token
   rotation is rejected at its next fenced claim. Session-head commit authority
   remains the independent head CAS.
+- Borrowed commits use that exact execution predicate inside the store's commit
+  transaction before receipt replay or mutation. There is no commit-specific
+  exemption for stale or lapsed guards. The fresh-lease commit path retains
+  rotation and atomic release for lane-less callers.
 - A stale ancillary release carried by a valid commit never vetoes that commit
   and never clears the successor. A named in-band release refusal after commit
   is terminal and benign rather than `StoreCommitFailed`.
@@ -75,11 +80,12 @@ owner-and-token-predicated write. FIG-1064's SQLite/PostgreSQL predicate
 divergence is resolved by routing PostgreSQL, SQLite, in-memory, and perf-store
 execution checks through the core predicate.
 
-This predicate is the binding 2026-08-08 ruling. Any code that retains a guard
-across a same-owner nested fresh-lease commit now fails at its next fenced
-operation on every backend. The Agent Frame handoff transfer is the known
-legitimate boundary that establishes a current token; FIG-1063 owns any broader
-sanctioned nesting contract.
+This predicate and nesting contract are the binding 2026-08-08 FIG-1063 ruling:
+borrow when the caller holds the lane; acquire fresh and rotate only when it
+does not. A borrowed nested write that advances the durable head explicitly
+marks the runtime's resident graph stale so the next physical turn reloads
+before planning; guard continuity alone cannot prove graph freshness. FIG-1072
+owns the renewal-predicate follow-up.
 
 A rolling deployment on any backend must not let two binaries with different
 token-rotation semantics share one incarnation identity. Incarnation identifies
@@ -105,3 +111,7 @@ replacing such an authority across a protocol change.
   generation, expiry, and current-token equality. Commit authority remains the
   ADR 0029 head CAS. No durable schema, existing ID, or serialized authority
   shape changes.
+- Nested commits no longer invalidate the retained guard or emit a handoff
+  transfer record. Their authority is observable through the borrowed commit
+  fence, while durable-head freshness is handled independently by an explicit
+  reload marker.

@@ -4,6 +4,139 @@ use crate::facade_support::{RuntimeSessionStateFacadeOps, ToolStateFacadeOps};
 use lash_sansio::core_support::*;
 use std::sync::atomic::AtomicUsize;
 
+type PluginErrorDiscriminant = std::mem::Discriminant<crate::PluginError>;
+
+fn turn_persisted_borrowed_append_plugin(
+    attempted: Arc<AtomicBool>,
+    received_error: Arc<std::sync::Mutex<Option<PluginErrorDiscriminant>>>,
+) -> Arc<dyn crate::PluginFactory> {
+    Arc::new(RuntimeTestPluginFactory {
+        build: Arc::new(move |_| {
+            let attempted = Arc::clone(&attempted);
+            let received_error = Arc::clone(&received_error);
+            Ok(Arc::new(RuntimeTestPlugin {
+                before_turn: None,
+                checkpoint: None,
+                tool_result_projector: None,
+                runtime_event: Some(Arc::new(move |event| {
+                    let attempted = Arc::clone(&attempted);
+                    let received_error = Arc::clone(&received_error);
+                    Box::pin(async move {
+                        let crate::PluginLifecycleEvent::TurnPersisted(ctx) = event else {
+                            return Ok(());
+                        };
+                        if attempted.swap(true, Ordering::SeqCst) {
+                            return Ok(());
+                        }
+                        if let Err(error) = ctx
+                            .session_graph
+                            .append_session_nodes(
+                                &ctx.session_id,
+                                crate::AppendSessionNodesRequest {
+                                    operation_id: "lapsed-borrow-probe".to_string(),
+                                    nodes: vec![crate::SessionAppendNode::plugin(
+                                        "test.lapsed-borrow",
+                                        serde_json::json!({"attempted": true}),
+                                    )],
+                                    requires_ancestor_node_id: None,
+                                },
+                            )
+                            .await
+                        {
+                            *received_error.lock().expect("record borrowed append error") =
+                                Some(std::mem::discriminant(&error));
+                            return Err(error);
+                        }
+                        Ok(())
+                    })
+                })),
+                external_registrar: None,
+            }))
+        }),
+    })
+}
+
+fn turn_finalized_borrowed_append_plugin() -> Arc<dyn crate::PluginFactory> {
+    Arc::new(RuntimeTestPluginFactory {
+        build: Arc::new(move |_| {
+            let retained = Arc::new(std::sync::Mutex::new(None));
+            Ok(Arc::new(RuntimeTestPlugin {
+                before_turn: None,
+                checkpoint: None,
+                tool_result_projector: None,
+                runtime_event: Some(Arc::new(move |event| {
+                    let retained = Arc::clone(&retained);
+                    Box::pin(async move {
+                        match event {
+                            crate::PluginLifecycleEvent::TurnPersisted(ctx) => {
+                                *retained.lock().expect("retain borrowed graph service") =
+                                    Some(Arc::clone(&ctx.session_graph));
+                                Ok(())
+                            }
+                            crate::PluginLifecycleEvent::TurnFinalized(turn) => {
+                                let graph: Option<Arc<dyn crate::plugin::SessionGraphService>> =
+                                    retained
+                                        .lock()
+                                        .expect("read borrowed graph service")
+                                        .clone();
+                                let Some(graph) = graph else {
+                                    return Ok(());
+                                };
+                                graph
+                                    .append_session_nodes(
+                                        &turn.state.session_id,
+                                        crate::AppendSessionNodesRequest {
+                                            operation_id: "finalized-lapsed-borrow-probe"
+                                                .to_string(),
+                                            nodes: vec![crate::SessionAppendNode::plugin(
+                                                "test.finalized-lapsed-borrow",
+                                                serde_json::json!({"attempted": true}),
+                                            )],
+                                            requires_ancestor_node_id: None,
+                                        },
+                                    )
+                                    .await?;
+                                Ok(())
+                            }
+                            _ => Ok(()),
+                        }
+                    })
+                })),
+                external_registrar: None,
+            }))
+        }),
+    })
+}
+
+fn retain_turn_persisted_graph_service_plugin(
+    retained: Arc<std::sync::Mutex<Option<Arc<dyn crate::plugin::SessionGraphService>>>>,
+) -> Arc<dyn crate::PluginFactory> {
+    Arc::new(RuntimeTestPluginFactory {
+        build: Arc::new(move |_| {
+            let retained = Arc::clone(&retained);
+            Ok(Arc::new(RuntimeTestPlugin {
+                before_turn: None,
+                checkpoint: None,
+                tool_result_projector: None,
+                runtime_event: Some(Arc::new(move |event| {
+                    let retained = Arc::clone(&retained);
+                    Box::pin(async move {
+                        if let crate::PluginLifecycleEvent::TurnPersisted(ctx) = event {
+                            *retained.lock().expect("retain turn graph service") =
+                                Some(Arc::clone(&ctx.session_graph));
+                            return Err(crate::PluginError::Session(
+                                "stop after retaining the turn-scoped graph service".to_string(),
+                            ));
+                        }
+                        Ok(())
+                    })
+                })),
+                external_registrar: None,
+            }))
+        }),
+    })
+}
+
 struct FailNextProtocolRestore {
     fail_next: AtomicBool,
     restore_count: AtomicUsize,
@@ -1253,9 +1386,33 @@ struct ExpireLeaseAfterRetainedCommit {
     expired: AtomicBool,
 }
 
-struct ExpireLeaseAfterRetainedCommitAndSignalNestedRelease {
-    expiry: ExpireLeaseAfterRetainedCommit,
-    nested_release: NestedLeaseReleaseSignal,
+struct ExpireLeaseAtSecondTurnFinalizedHook {
+    clock: Arc<ManualClock>,
+    finalized_hooks: AtomicUsize,
+}
+
+impl ExpireLeaseAtSecondTurnFinalizedHook {
+    fn new(clock: Arc<ManualClock>) -> Self {
+        Self {
+            clock,
+            finalized_hooks: AtomicUsize::new(0),
+        }
+    }
+}
+
+impl crate::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAtSecondTurnFinalizedHook {
+    fn begin(&self, _phase: crate::runtime::RuntimeTurnPhase) {}
+
+    fn end(&self, _phase: crate::runtime::RuntimeTurnPhase) {}
+
+    fn begin_named(&self, phase: &str) {
+        if phase.starts_with("plugin_hook.turn_finalized.")
+            && self.finalized_hooks.fetch_add(1, Ordering::SeqCst) == 1
+        {
+            self.clock
+                .advance_ms(crate::LeaseTimings::default().ttl_ms() + 1);
+        }
+    }
 }
 
 struct PauseAtPreparedTurn {
@@ -1316,21 +1473,6 @@ impl crate::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAfterRetainedCommit {
     }
 
     fn end(&self, _phase: crate::runtime::RuntimeTurnPhase) {}
-}
-
-impl crate::runtime::RuntimeTurnPhaseProbe
-    for ExpireLeaseAfterRetainedCommitAndSignalNestedRelease
-{
-    fn begin(&self, phase: crate::runtime::RuntimeTurnPhase) {
-        self.expiry.begin(phase);
-        if phase == crate::runtime::RuntimeTurnPhase::PostCommitDelivery {
-            self.nested_release.mark_released();
-        }
-    }
-
-    fn end(&self, phase: crate::runtime::RuntimeTurnPhase) {
-        self.expiry.end(phase);
-    }
 }
 
 async fn standard_runtime_with_transport_and_queue_store(
@@ -3716,6 +3858,196 @@ async fn stream_prepared_turn_follows_agent_frame_switch() {
 }
 
 #[tokio::test]
+async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue() {
+    let call_index = Arc::new(AtomicUsize::new(0));
+    let captured_call_index = Arc::clone(&call_index);
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |_| {
+            let call_index = Arc::clone(&captured_call_index);
+            async move {
+                match call_index.fetch_add(1, Ordering::SeqCst) {
+                    0 => Ok(LlmResponse {
+                        parts: vec![LlmOutputPart::ToolCall {
+                            call_id: "finalized-lapsed-switch".to_string(),
+                            tool_name: "terminal_tool_0".to_string(),
+                            input_json: "{}".to_string(),
+                            replay: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    }),
+                    1 => Ok(LlmResponse {
+                        full_text: "final turn still commits".to_string(),
+                        parts: vec![LlmOutputPart::Text {
+                            text: "final turn still commits".to_string(),
+                            response_meta: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    }),
+                    index => panic!("unexpected provider call {index}"),
+                }
+            }
+        })
+        .build();
+    let clock = Arc::new(ManualClock::new(1_000));
+    let store_clock: Arc<dyn crate::Clock> = clock.clone();
+    let store = Arc::new(RecordingStore::with_clock(store_clock));
+    let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store;
+    let host_clock: Arc<dyn crate::Clock> = clock.clone();
+    let mut config = crate::RuntimeHostConfig::in_memory().with_clock(host_clock);
+    config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
+        transport.clone().into_handle(),
+    ));
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![turn_finalized_borrowed_append_plugin()],
+        Arc::new(TerminalControlTool {
+            controls: vec![crate::ToolControl::SwitchAgentFrame {
+                frame_id: "finalized-lapsed-follow-frame".to_string(),
+                initial_nodes: Vec::new(),
+                task: Some("exercise the retained finalize observer".to_string()),
+            }],
+        }),
+        transport,
+        crate::EmbeddedRuntimeHost::new(config),
+        runtime_store,
+    )
+    .await;
+    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
+    runtime.set_turn_phase_probe(Arc::new(ExpireLeaseAtSecondTurnFinalizedHook::new(
+        Arc::clone(&clock),
+    )));
+
+    let run = runtime
+        .stream_turn_with_agent_frames(
+            TurnInput::text("start finalized borrowed append probe"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", "finalized-lapsed-borrow"),
+            ),
+        )
+        .await
+        .expect("the final current-head commit survives the observer's borrowed-lane failure");
+
+    assert_eq!(run.turns.len(), 2);
+    let issue = run.turns[1]
+        .errors
+        .iter()
+        .find(|issue| {
+            issue.code.as_deref()
+                == Some(crate::RuntimeErrorCode::SessionExecutionLeaseLost.as_str())
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "TurnFinalized must preserve typed lane loss: {:?}",
+                run.turns[1].errors
+            )
+        });
+    assert_eq!(issue.kind, "runtime");
+    assert_eq!(issue.retryable, Some(false));
+    assert_eq!(call_index.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn retained_turn_graph_service_does_not_extend_the_execution_lane() {
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(|_| async {
+            Ok(LlmResponse {
+                parts: vec![LlmOutputPart::ToolCall {
+                    call_id: "retained-service-switch".to_string(),
+                    tool_name: "terminal_tool_0".to_string(),
+                    input_json: "{}".to_string(),
+                    replay: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            })
+        })
+        .build();
+    let store = Arc::new(RecordingStore::default());
+    let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
+    let retained = Arc::new(std::sync::Mutex::new(None));
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![retain_turn_persisted_graph_service_plugin(Arc::clone(
+            &retained,
+        ))],
+        Arc::new(TerminalControlTool {
+            controls: vec![crate::ToolControl::SwitchAgentFrame {
+                frame_id: "retained-service-follow-frame".to_string(),
+                initial_nodes: Vec::new(),
+                task: Some("leave this follow-on queued".to_string()),
+            }],
+        }),
+        transport,
+        test_host_config(),
+        runtime_store,
+    )
+    .await;
+    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
+    enqueue_idle_turn_input(store.as_ref(), "root", "stash the graph service").await;
+
+    let output = runtime
+        .stream_next_queued_work(TurnOptions::new(
+            CancellationToken::new(),
+            named_turn_scope("root", "retained-service"),
+        ))
+        .await
+        .expect("queued switch succeeds")
+        .expect("queued switch returns a turn");
+    assert!(matches!(
+        output.outcome,
+        TurnOutcome::AgentFrameSwitch { .. }
+    ));
+
+    let graph = retained
+        .lock()
+        .expect("read retained graph service")
+        .clone()
+        .expect("TurnPersisted retained its graph service");
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if crate::store::SessionExecutionLeaseStore::get_session_execution_lease(
+                store.as_ref(),
+                "root",
+            )
+            .await
+            .expect("read released lane")
+            .is_none()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the unique turn-driver guard releases while the service is retained");
+
+    let error = graph
+        .append_session_nodes(
+            "root",
+            crate::AppendSessionNodesRequest {
+                operation_id: "stale-retained-service".to_string(),
+                nodes: vec![crate::SessionAppendNode::plugin(
+                    "test.stale-retained-service",
+                    serde_json::json!({"attempted": true}),
+                )],
+                requires_ancestor_node_id: None,
+            },
+        )
+        .await
+        .expect_err("a retained service can only present its stale borrowed fence");
+    assert!(matches!(
+        error,
+        crate::PluginError::SessionExecutionLeaseLost { ref session_id }
+            if session_id == "root"
+    ));
+}
+
+#[tokio::test]
 async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff() {
     let call_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let captured_call_index = Arc::clone(&call_index);
@@ -3755,12 +4087,17 @@ async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff() {
     let store = Arc::new(RecordingStore::with_clock(store_clock));
     let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
+    let borrowed_append_attempted = Arc::new(AtomicBool::new(false));
+    let borrowed_append_error = Arc::new(std::sync::Mutex::new(None));
     let mut config = crate::RuntimeHostConfig::in_memory().with_clock(host_clock);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
-        Vec::new(),
+        vec![turn_persisted_borrowed_append_plugin(
+            Arc::clone(&borrowed_append_attempted),
+            Arc::clone(&borrowed_append_error),
+        )],
         Arc::new(TerminalControlTool {
             controls: vec![crate::ToolControl::SwitchAgentFrame {
                 frame_id: "queued-lapsed-follow-frame".to_string(),
@@ -3774,12 +4111,9 @@ async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff() {
     )
     .await;
     runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
-    runtime.set_turn_phase_probe(Arc::new(
-        ExpireLeaseAfterRetainedCommitAndSignalNestedRelease {
-            expiry: ExpireLeaseAfterRetainedCommit::new(Arc::clone(&clock)),
-            nested_release: runtime.fresh_session_execution_lease_released.clone(),
-        },
-    ));
+    runtime.set_turn_phase_probe(Arc::new(ExpireLeaseAfterRetainedCommit::new(Arc::clone(
+        &clock,
+    ))));
     enqueue_idle_turn_input(store.as_ref(), "root", "start lapsed queued handoff").await;
 
     let output = runtime
@@ -3802,8 +4136,28 @@ async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff() {
             issue.code.as_deref()
                 == Some(crate::RuntimeErrorCode::SessionExecutionLeaseLost.as_str())
         })
-        .expect("the durable handoff reports the lapsed session lane");
+        .unwrap_or_else(|| {
+            panic!(
+                "the durable handoff reports the lapsed session lane: {:?}",
+                output.errors
+            )
+        });
     assert_eq!(issue.retryable, Some(false));
+    assert_eq!(
+        *borrowed_append_error
+            .lock()
+            .expect("read borrowed append error"),
+        Some(std::mem::discriminant(
+            &crate::PluginError::SessionExecutionLeaseLost {
+                session_id: "root".to_string(),
+            }
+        )),
+        "the plugin must receive the typed borrowed-lane failure"
+    );
+    assert!(
+        borrowed_append_attempted.load(Ordering::SeqCst),
+        "the lapsed retained lane must be presented by the borrowed nested commit"
+    );
     assert_eq!(
         call_index.load(Ordering::SeqCst),
         1,
@@ -3873,12 +4227,17 @@ async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff() {
     let store = Arc::new(RecordingStore::with_clock(store_clock));
     let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
+    let borrowed_append_attempted = Arc::new(AtomicBool::new(false));
+    let borrowed_append_error = Arc::new(std::sync::Mutex::new(None));
     let mut config = crate::RuntimeHostConfig::in_memory().with_clock(host_clock);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
-        Vec::new(),
+        vec![turn_persisted_borrowed_append_plugin(
+            Arc::clone(&borrowed_append_attempted),
+            Arc::clone(&borrowed_append_error),
+        )],
         Arc::new(TerminalControlTool {
             controls: vec![crate::ToolControl::SwitchAgentFrame {
                 frame_id: "inprocess-lapsed-follow-frame".to_string(),
@@ -3892,12 +4251,9 @@ async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff() {
     )
     .await;
     runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
-    runtime.set_turn_phase_probe(Arc::new(
-        ExpireLeaseAfterRetainedCommitAndSignalNestedRelease {
-            expiry: ExpireLeaseAfterRetainedCommit::new(Arc::clone(&clock)),
-            nested_release: runtime.fresh_session_execution_lease_released.clone(),
-        },
-    ));
+    runtime.set_turn_phase_probe(Arc::new(ExpireLeaseAfterRetainedCommit::new(Arc::clone(
+        &clock,
+    ))));
 
     let run = runtime
         .stream_turn_with_agent_frames(
@@ -3922,8 +4278,28 @@ async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff() {
             issue.code.as_deref()
                 == Some(crate::RuntimeErrorCode::SessionExecutionLeaseLost.as_str())
         })
-        .expect("the in-process follow-on reports the lapsed session lane");
+        .unwrap_or_else(|| {
+            panic!(
+                "the in-process follow-on reports the lapsed session lane: {:?}",
+                run.turns[0].errors
+            )
+        });
     assert_eq!(issue.retryable, Some(false));
+    assert_eq!(
+        *borrowed_append_error
+            .lock()
+            .expect("read borrowed append error"),
+        Some(std::mem::discriminant(
+            &crate::PluginError::SessionExecutionLeaseLost {
+                session_id: "root".to_string(),
+            }
+        )),
+        "the plugin must receive the typed borrowed-lane failure"
+    );
+    assert!(
+        borrowed_append_attempted.load(Ordering::SeqCst),
+        "the lapsed retained lane must be presented by the borrowed nested commit"
+    );
     assert_eq!(
         call_index.load(Ordering::SeqCst),
         1,

@@ -282,6 +282,9 @@ impl SessionCommitStore for Store {
                 let outcome: Result<RuntimeCommitResult, StoreError> = (|| {
                     let commit = planner.commit();
                     ensure_session_not_deleted_conn(tx, &commit.session_id)?;
+                    if let Some(fence) = commit.session_execution_lease_fence.as_ref() {
+                        ensure_session_execution_lease_conn(tx, &commit.session_id, fence, now)?;
+                    }
                     let existing =
                         try_load_session_head_meta_from_conn(tx, &commit.session_id)?;
                     planner.validate_session_binding(

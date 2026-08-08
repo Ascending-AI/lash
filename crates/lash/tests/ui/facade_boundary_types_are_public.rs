@@ -325,6 +325,7 @@ fn persistence_types_are_nameable(
     RuntimeCommit {
         session_id: "facade".to_string(),
         expected_head_revision: 0,
+        session_execution_lease_fence: None,
         release_session_execution_lease: None,
         config: Default::default(),
         current_frame_node_id: None,

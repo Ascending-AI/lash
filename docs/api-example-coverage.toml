@@ -13177,6 +13177,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
+symbol = "lash::persistence::RuntimeCommit::borrowing_session_execution_lease"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeCommit::borrowing_session_execution_lease"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers and runtime persistence adapters; bundled examples use repository backends and do not construct borrowed-lane commits directly."
+
+[[api]]
 symbol = "lash::persistence::RuntimeCommit::release_session_execution_lease"
 kind = "field"
 availability = "default+all-features"
@@ -13193,6 +13202,15 @@ aliases = ["lash_core::RuntimeCommit::releasing_session_execution_lease"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash::persistence::RuntimeCommit::session_execution_lease_fence"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeCommit::session_execution_lease_fence"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers validate this transient current-token fence inside a borrowed commit transaction; application examples do not inspect backend authority envelopes."
 
 [[api]]
 symbol = "lash::persistence::RuntimeCommit::session_id"
@@ -16431,6 +16449,24 @@ disposition = "unused-justify"
 reason = "Concrete integrator class under ADR 0051: structured supersession diagnostics are consumed by recovery settlement and pinned by the runtime-persistence conformance law; custom durable substrates populate them."
 
 [[api]]
+symbol = "lash::persistence::StoreError::RuntimeCommitLeaseAuthorityConflict"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::RuntimeCommitLeaseAuthorityConflict"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable stores and substrate adapters consume this typed planner rejection when validating a runtime commit envelope; bundled examples use repository backends and do not construct invalid borrow-plus-release plans."
+
+[[api]]
+symbol = "lash::persistence::StoreError::RuntimeCommitLeaseAuthorityConflict::session_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::RuntimeCommitLeaseAuthorityConflict::session_id"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable stores and substrate adapters use the session identity to diagnose an invalid borrow-plus-release commit plan; bundled examples use repository backends and do not construct invalid plans."
+
+[[api]]
 symbol = "lash::persistence::StoreError::RuntimeTurnCommitConflict"
 kind = "variant"
 availability = "default+all-features"
@@ -18423,6 +18459,24 @@ aliases = ["lash_core::PluginError"]
 area = "plugins"
 disposition = "used-unasserted"
 usage = "examples/agent-service/src/demo_plugin.rs:6#plugins::{PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin},"
+
+[[api]]
+symbol = "lash::plugins::PluginError::SessionExecutionLeaseLost"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::SessionExecutionLeaseLost"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class: runtime lifecycle dispatch preserves a typed lapsed borrowed-lane failure across plugin hook fan-out; application plugins do not construct it."
+
+[[api]]
+symbol = "lash::plugins::PluginError::SessionExecutionLeaseLost::session_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::SessionExecutionLeaseLost::session_id"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class: runtime lifecycle dispatch reports the session whose borrowed execution authority lapsed."
 
 [[api]]
 symbol = "lash::plugins::PluginError::AppendOperationIdentityConflict"
@@ -49491,6 +49545,14 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::attachment_store_reopenable to the agent-workbench attachment upload example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::borrowed_session_execution_lease_commit_contract"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: conformance-suite embedders (ADR 0051). This executable contract proves borrowed runtime commits validate current lane authority before receipt replay, do not rotate or release the lane, and reject expired or stale fences. Durable backend suites plus the lash-perf store test are its integrator-class home rather than a host example."
+
+[[api]]
 symbol = "lash::testing::conformance::checkpoint_claim_probe_transaction_counts"
 kind = "function"
 availability = "all-features"
@@ -54830,78 +54892,6 @@ aliases = ["lash_core::TraceEvent::RuntimeStreamEvent::event"]
 area = "observation-admin"
 disposition = "unused-justify"
 reason = "Concrete host class: custom observability sink implementers consuming structured trace events rather than bundled sinks."
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred"
-kind = "variant"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred"]
-area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: operators and custom observability sinks reconstructing same-owner Agent Frame handoff authority changes from structured lease trace records."
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::owner_id"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::owner_id"]
-area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: operators and custom observability sinks attributing an Agent Frame handoff transfer to the stable worker owner."
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::incarnation_id"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::incarnation_id"]
-area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: operators and custom observability sinks attributing an Agent Frame handoff transfer to a specific worker incarnation."
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::previous_fencing_token"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::previous_fencing_token"]
-area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: operators and custom observability sinks reconstructing the pre-transfer session lane generation."
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::transferred_fencing_token"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::transferred_fencing_token"]
-area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: operators and custom observability sinks reconstructing the post-transfer session lane generation."
-
-[[api]]
-symbol = "lash::tracing::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::trigger"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::trigger"]
-area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: operators and custom observability sinks distinguishing nested-commit handoff repair from other lease transitions."
-
-[[api]]
-symbol = "lash::tracing::TraceSessionExecutionLeaseTransferTrigger"
-kind = "enum"
-availability = "default+all-features"
-aliases = ["lash_core::TraceSessionExecutionLeaseTransferTrigger"]
-area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: custom observability sinks interpreting the typed cause of a session execution lease handoff transfer."
-
-[[api]]
-symbol = "lash::tracing::TraceSessionExecutionLeaseTransferTrigger::NestedCommit"
-kind = "variant"
-availability = "default+all-features"
-aliases = ["lash_core::TraceSessionExecutionLeaseTransferTrigger::NestedCommit"]
-area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: custom observability sinks recognizing the nested runtime-state commit transfer cause."
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::SessionStarted"

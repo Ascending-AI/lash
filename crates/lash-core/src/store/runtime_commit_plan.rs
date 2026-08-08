@@ -127,6 +127,7 @@ impl RuntimeCommitPlanner {
     /// Validate request-only invariants and compute stable commit projections.
     pub fn prepare(commit: RuntimeCommit) -> Result<Self, StoreError> {
         commit.validate_budget()?;
+        validate_session_execution_lease_plan(&commit)?;
         commit.validate_operation_session()?;
 
         let turn_commit_hash = commit.turn_commit_hash()?;
@@ -511,9 +512,52 @@ impl<'a> RuntimeCommitPlan<'a> {
     }
 }
 
+fn validate_session_execution_lease_plan(commit: &RuntimeCommit) -> Result<(), StoreError> {
+    if commit.session_execution_lease_fence.is_some()
+        && commit.release_session_execution_lease.is_some()
+    {
+        return Err(StoreError::RuntimeCommitLeaseAuthorityConflict {
+            session_id: commit.session_id.clone(),
+        });
+    }
+    Ok(())
+}
+
 fn validate_head_revision(expected: u64, actual: u64) -> Result<(), StoreError> {
     if expected != actual {
         return Err(StoreError::HeadRevisionConflict { expected, actual });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lease_plan_rejects_borrow_xor_release_violation_with_typed_error() {
+        let state = crate::RuntimeSessionState {
+            session_id: "lease-plan-conflict".to_string(),
+            ..crate::RuntimeSessionState::default()
+        };
+        let authority = crate::SessionExecutionLeaseAuthority {
+            session_id: state.session_id.clone(),
+            owner: crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+            lease_token: "token".to_string(),
+            fencing_token: 1,
+        };
+        let commit = RuntimeCommit::persisted_state_for_test(&state, &[])
+            .borrowing_session_execution_lease(authority.clone())
+            .releasing_session_execution_lease(authority);
+
+        let error = match RuntimeCommitPlanner::prepare(commit) {
+            Ok(_) => panic!("one commit must not borrow and release the lane"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            StoreError::RuntimeCommitLeaseAuthorityConflict { session_id }
+                if session_id == "lease-plan-conflict"
+        ));
+    }
 }

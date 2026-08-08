@@ -673,7 +673,7 @@ impl DurableProcessWorker {
         {
             runtime.set_turn_phase_probe(probe);
         }
-        let manager = RuntimeSessionServices::new(&runtime, true, None).map_err(|err| {
+        let manager = RuntimeSessionServices::new(&runtime, true, None, None).map_err(|err| {
             PluginError::Session(format!(
                 "failed to build runtime env for process `{}`: {err}",
                 registration.id

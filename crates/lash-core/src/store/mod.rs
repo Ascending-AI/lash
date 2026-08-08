@@ -625,6 +625,7 @@ impl RuntimeCommit {
         let RuntimeCommit {
             session_id: _,
             expected_head_revision: _,
+            session_execution_lease_fence: _,
             release_session_execution_lease: _,
             config: _,
             current_frame_node_id: _,
@@ -858,6 +859,7 @@ impl RuntimeCommit {
         Ok(Self {
             session_id: state.session_id.clone(),
             expected_head_revision: state.head_revision,
+            session_execution_lease_fence: None,
             release_session_execution_lease: None,
             config: persisted_session_config_from_state(state),
             current_frame_node_id,
@@ -894,6 +896,15 @@ impl RuntimeCommit {
         completion: SessionExecutionLeaseAuthority,
     ) -> Self {
         self.release_session_execution_lease = Some(completion);
+        self
+    }
+
+    /// Requires the caller's current authority without changing lane ownership.
+    pub fn borrowing_session_execution_lease(
+        mut self,
+        fence: SessionExecutionLeaseAuthority,
+    ) -> Self {
+        self.session_execution_lease_fence = Some(fence);
         self
     }
 
@@ -1093,6 +1104,12 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     ) -> Result<Option<crate::SessionNodeRecord>, StoreError>;
 
     /// Atomically persist one settled runtime commit and its durable receipt.
+    ///
+    /// A commit carrying [`RuntimeCommit::session_execution_lease_fence`]
+    /// borrows a turn driver's held lane without claiming, rotating, renewing,
+    /// or releasing it. Implementors must validate that fence inside the write
+    /// transaction and before receipt lookup, so stale or expired authority
+    /// vetoes even an otherwise replayable operation identity.
     ///
     /// Implementors must look up the `(session_id, operation storage key)`
     /// receipt inside the write transaction before the fresh append ancestor

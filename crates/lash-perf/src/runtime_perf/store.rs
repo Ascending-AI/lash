@@ -600,6 +600,11 @@ impl SessionCommitStore for RuntimePerfStore {
         let planner = store::RuntimeCommitPlanner::prepare(commit)?;
         let commit = planner.commit();
         let session_id = &commit.session_id;
+        if let Some(fence) = commit.session_execution_lease_fence.as_ref() {
+            // The measurement backend intentionally uses a coarse in-memory
+            // check-then-act fence rather than modeling a production database.
+            self.verify_session_execution_lease(session_id, fence)?;
+        }
         let mut meta_guard = self
             .session_head_meta
             .lock()

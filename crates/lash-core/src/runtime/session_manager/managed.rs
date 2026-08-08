@@ -28,16 +28,15 @@ impl ManagedSessionCapability {
                     operation,
                 )
                 .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+            // Lane-less by construction: the child is being created before it
+            // owns an execution lane. A parent guard, if present, names a
+            // different session and cannot authorize this child commit.
             let result = commit_runtime_state_with_fresh_session_execution_lease(
                 Arc::clone(store),
                 commit,
                 &materialized.runtime.runtime_lease_owner,
                 materialized.runtime.host.core.control.lease_timings,
                 Arc::clone(&materialized.runtime.host.core.clock),
-                materialized
-                    .runtime
-                    .fresh_session_execution_lease_released
-                    .clone(),
             )
             .await
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
@@ -87,8 +86,7 @@ impl ManagedSessionCapability {
     ) -> Result<SessionHandle, crate::PluginError> {
         let plan = resolve_session_create_plan(self, current, request).await?;
         let materialized = materialize_session_create_plan(current, &plan).await?;
-        self.register_materialized_session(current, usage, plan, materialized)
-            .await
+        Box::pin(self.register_materialized_session(current, usage, plan, materialized)).await
     }
 
     pub(in crate::runtime::session_manager) async fn close_session(

@@ -814,6 +814,11 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         self.commit_write_transaction_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.ensure_session_not_deleted(&session_id)?;
+        if let Some(fence) = commit.session_execution_lease_fence.as_ref() {
+            // This check-then-act read is atomic under the coarse write lock;
+            // that serialization is intentional for the development backend.
+            self.verify_session_execution_lease(&session_id, fence)?;
+        }
         #[cfg(test)]
         if let Some(error) = self
             .fail_next_runtime_commit

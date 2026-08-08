@@ -57,6 +57,17 @@ fn usage_payload_identity_hash(entry: &crate::TokenLedgerEntry) -> String {
 pub struct RuntimeCommit {
     pub session_id: String,
     pub expected_head_revision: u64,
+    /// Current execution-lane authority required by a borrowed-lane commit.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**
+    /// enforce this transaction predicate before consulting a durable receipt.
+    ///
+    /// This is a transaction predicate, not semantic commit content: backends
+    /// validate it with the ordinary owner/generation/current-token/expiry
+    /// fence before receipt replay or mutation, and never rotate or release the
+    /// matching lease row.
+    #[serde(skip)]
+    pub session_execution_lease_fence: Option<SessionExecutionLeaseAuthority>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_session_execution_lease: Option<SessionExecutionLeaseAuthority>,
     pub config: crate::PersistedSessionConfig,
