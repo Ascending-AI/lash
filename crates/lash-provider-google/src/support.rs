@@ -13,8 +13,9 @@ pub(crate) use lash_core::llm::transport::{
 };
 pub(crate) use lash_core::llm::types::{
     AttachmentSource, GenerationDisposition, GenerationOptionDisposition, LlmContentBlock,
-    LlmOutputPart, LlmOutputSpec, LlmRequest, LlmResponse, LlmRole, LlmTerminalReason,
-    LlmToolChoice, LlmUsage, ProviderReasoningReplay, ProviderReplayMeta, ResponseTextMeta,
+    LlmOutputPart, LlmOutputSpec, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent,
+    LlmTerminalReason, LlmToolChoice, LlmUsage, ProviderReasoningReplay, ProviderReplayMeta,
+    ResponseTextMeta,
 };
 pub(crate) use lash_core::provider::{
     Provider, ProviderComponents, ProviderFactory, ProviderOptions, ReasoningDisableEncoding,
@@ -39,15 +40,16 @@ pub(crate) use lash_provider_auth::{
 pub(crate) use crate::config::*;
 
 /// Mutable accumulators a single Cloud Code SSE event folds into: the running
-/// full text, the per-event text deltas, the usage snapshot (normalized plus
-/// the raw `usageMetadata` sidecar), optional tool-call and text output-part
-/// sinks, and the last finish-bearing event.
+/// full text, the per-event visible/reasoning deltas, the usage snapshot
+/// (normalized plus the raw `usageMetadata` sidecar), optional tool-call and
+/// structured output-part sinks, and the last finish-bearing event.
 pub(crate) struct SseTextPartSink<'a> {
     pub full: &'a mut String,
     pub text_deltas: &'a mut Vec<String>,
+    pub reasoning_deltas: &'a mut Vec<String>,
     pub usage: &'a mut LlmUsage,
     pub provider_usage: &'a mut Option<Value>,
     pub tool_call_parts: Option<&'a mut Vec<LlmOutputPart>>,
-    pub text_parts: Option<&'a mut Vec<LlmOutputPart>>,
+    pub output_parts: Option<&'a mut Vec<LlmOutputPart>>,
     pub finish_event: &'a mut Option<Value>,
 }

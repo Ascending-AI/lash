@@ -39,7 +39,7 @@ impl GoogleOAuthProvider {
         }
     }
 
-    fn text_parts_from_event(event: &Value) -> Vec<(String, Option<String>)> {
+    fn text_parts_from_event(event: &Value) -> Vec<(String, Option<String>, bool)> {
         let mut out = Vec::new();
         let Some(candidates) = event
             .get("response")
@@ -58,22 +58,14 @@ impl GoogleOAuthProvider {
                 continue;
             };
             for part in parts {
-                // Skip reasoning text (Gemini marks it with `thought:true`);
-                // it isn't assistant-visible output and shouldn't accumulate
-                // into `full`. The signature ride-along is captured when
-                // we finalize the response.
-                if part.get("thought").and_then(|v| v.as_bool()) == Some(true) {
-                    continue;
-                }
                 if let Some(text) = part.get("text").and_then(|t| t.as_str())
                     && !text.is_empty()
                 {
-                    let signature = part
-                        .get("thoughtSignature")
-                        .and_then(|v| v.as_str())
-                        .filter(|s| !s.is_empty())
-                        .map(str::to_string);
-                    out.push((text.to_string(), signature));
+                    out.push((
+                        text.to_string(),
+                        Self::thought_signature(part),
+                        part.get("thought").and_then(Value::as_bool) == Some(true),
+                    ));
                 }
             }
         }
@@ -99,39 +91,112 @@ impl GoogleOAuthProvider {
                 continue;
             };
             for part in parts {
-                if let Some(function_call) = part.get("functionCall") {
-                    let Some(name) = function_call.get("name").and_then(|v| v.as_str()) else {
-                        continue;
-                    };
-                    let input_json = function_call
-                        .get("args")
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| "{}".to_string());
-                    // Capture `thoughtSignature` (if present) alongside
-                    // the functionCall. Gemini 3 will reject the next
-                    // turn if we don't echo it back.
-                    let signature = part
-                        .get("thoughtSignature")
-                        .and_then(|v| v.as_str())
-                        .filter(|s| !s.is_empty())
-                        .map(str::to_string);
-                    out.push(LlmOutputPart::ToolCall {
-                        call_id: function_call
-                            .get("id")
-                            .and_then(|v| v.as_str())
-                            .map(str::to_string)
-                            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
-                        tool_name: name.to_string(),
-                        input_json,
-                        replay: signature.map(|opaque| ProviderReplayMeta {
-                            item_id: None,
-                            opaque: Some(opaque),
-                        }),
-                    });
+                if let Some(tool_call) = Self::tool_call_part(part) {
+                    out.push(tool_call);
                 }
             }
         }
         out
+    }
+
+    fn thought_signature(part: &Value) -> Option<String> {
+        part.get("thoughtSignature")
+            .and_then(Value::as_str)
+            .filter(|signature| !signature.is_empty())
+            .map(str::to_string)
+    }
+
+    fn tool_call_part(part: &Value) -> Option<LlmOutputPart> {
+        let function_call = part.get("functionCall")?;
+        let name = function_call.get("name").and_then(Value::as_str)?;
+        let input_json = function_call
+            .get("args")
+            .map(Value::to_string)
+            .unwrap_or_else(|| "{}".to_string());
+        Some(LlmOutputPart::ToolCall {
+            call_id: function_call
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            tool_name: name.to_string(),
+            input_json,
+            replay: Self::thought_signature(part).map(|opaque| ProviderReplayMeta {
+                item_id: None,
+                opaque: Some(opaque),
+            }),
+        })
+    }
+
+    fn reasoning_replay(signature: Option<String>) -> Option<ProviderReasoningReplay> {
+        signature.map(|signature| ProviderReasoningReplay {
+            item_id: None,
+            encrypted_content: None,
+            signature: Some(signature),
+            redacted: false,
+            summary: Vec::new(),
+        })
+    }
+
+    fn push_reasoning_piece(
+        parts: &mut Vec<LlmOutputPart>,
+        reasoning_deltas: &mut Vec<String>,
+        piece: String,
+        signature: Option<String>,
+        reconcile_with_previous_event: bool,
+    ) {
+        let replay = Self::reasoning_replay(signature);
+        if reconcile_with_previous_event
+            && let Some(LlmOutputPart::Reasoning {
+                text,
+                replay: existing_replay,
+            }) = parts.last_mut()
+        {
+            let existing_signature = existing_replay
+                .as_ref()
+                .and_then(|replay| replay.signature.as_deref());
+            let incoming_signature = replay
+                .as_ref()
+                .and_then(|replay| replay.signature.as_deref());
+            let signatures_conflict = matches!(
+                (existing_signature, incoming_signature),
+                (Some(existing), Some(incoming)) if existing != incoming
+            );
+            if signatures_conflict {
+                Self::push_reasoning_piece(
+                    parts,
+                    reasoning_deltas,
+                    piece,
+                    replay.and_then(|replay| replay.signature),
+                    false,
+                );
+                return;
+            }
+
+            let delta = if piece.starts_with(text.as_str()) {
+                piece[text.len()..].to_string()
+            } else if text.starts_with(&piece) {
+                String::new()
+            } else {
+                piece
+            };
+            if !delta.is_empty() {
+                text.push_str(&delta);
+                reasoning_deltas.push(delta);
+            }
+            if existing_replay.is_none() && replay.is_some() {
+                *existing_replay = replay;
+            }
+            return;
+        }
+
+        if !piece.is_empty() {
+            reasoning_deltas.push(piece.clone());
+        }
+        parts.push(LlmOutputPart::Reasoning {
+            text: piece,
+            replay,
+        });
     }
 
     fn apply_stream_piece(
@@ -166,15 +231,17 @@ impl GoogleOAuthProvider {
         finish_event: &mut Option<Value>,
     ) -> Result<(), LlmTransportError> {
         let mut provider_usage = None;
+        let mut reasoning_deltas = Vec::new();
         Self::process_sse_event_with_text_parts(
             raw,
             SseTextPartSink {
                 full,
                 text_deltas,
+                reasoning_deltas: &mut reasoning_deltas,
                 usage,
                 provider_usage: &mut provider_usage,
                 tool_call_parts,
-                text_parts: None,
+                output_parts: None,
                 finish_event,
             },
             None,
@@ -189,10 +256,11 @@ impl GoogleOAuthProvider {
         let SseTextPartSink {
             full,
             text_deltas,
+            reasoning_deltas,
             usage,
             provider_usage,
             tool_call_parts,
-            text_parts,
+            output_parts,
             finish_event,
         } = sink;
         if raw.trim().is_empty() || raw.trim() == "[DONE]" {
@@ -216,12 +284,28 @@ impl GoogleOAuthProvider {
                 .and_then(|response| response.get("usageMetadata"))
                 .cloned();
         }
-        let mut text_parts = text_parts;
-        for (piece, signature) in Self::text_parts_from_event(&event) {
+        let mut output_parts = output_parts;
+        let mut discarded_output_parts = Vec::new();
+        let mut saw_thought_in_event = false;
+        for (piece, signature, is_thought) in Self::text_parts_from_event(&event) {
+            if is_thought {
+                let parts = output_parts
+                    .as_deref_mut()
+                    .unwrap_or(&mut discarded_output_parts);
+                Self::push_reasoning_piece(
+                    parts,
+                    reasoning_deltas,
+                    piece,
+                    signature,
+                    !saw_thought_in_event,
+                );
+                saw_thought_in_event = true;
+                continue;
+            }
             let Some(delta) = Self::apply_stream_piece(full, text_deltas, &piece) else {
                 continue;
             };
-            if let Some(parts) = text_parts.as_deref_mut() {
+            if let Some(parts) = output_parts.as_deref_mut() {
                 parts.push(LlmOutputPart::Text {
                     text: delta,
                     response_meta: signature.map(|signature| ResponseTextMeta {
@@ -283,11 +367,7 @@ impl GoogleOAuthProvider {
                 continue;
             };
             for item in items {
-                let signature = item
-                    .get("thoughtSignature")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string);
+                let signature = Self::thought_signature(item);
                 let is_thought = item
                     .get("thought")
                     .and_then(|v| v.as_bool())
@@ -303,13 +383,7 @@ impl GoogleOAuthProvider {
                         // lives on the same part.
                         parts.push(LlmOutputPart::Reasoning {
                             text: text.to_string(),
-                            replay: signature.clone().map(|signature| ProviderReasoningReplay {
-                                item_id: None,
-                                encrypted_content: None,
-                                signature: Some(signature),
-                                redacted: false,
-                                summary: Vec::new(),
-                            }),
+                            replay: Self::reasoning_replay(signature.clone()),
                         });
                     } else {
                         parts.push(LlmOutputPart::Text {
@@ -323,27 +397,8 @@ impl GoogleOAuthProvider {
                         });
                     }
                 }
-                if let Some(function_call) = item.get("functionCall") {
-                    let Some(name) = function_call.get("name").and_then(|v| v.as_str()) else {
-                        continue;
-                    };
-                    let input_json = function_call
-                        .get("args")
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| "{}".to_string());
-                    parts.push(LlmOutputPart::ToolCall {
-                        call_id: function_call
-                            .get("id")
-                            .and_then(|v| v.as_str())
-                            .map(str::to_string)
-                            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
-                        tool_name: name.to_string(),
-                        input_json,
-                        replay: signature.clone().map(|opaque| ProviderReplayMeta {
-                            item_id: None,
-                            opaque: Some(opaque),
-                        }),
-                    });
+                if let Some(tool_call) = Self::tool_call_part(item) {
+                    parts.push(tool_call);
                 }
             }
         }

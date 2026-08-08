@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use lash_core::llm::types::{
-    LlmEventSender, LlmMessage, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, LlmToolChoice,
-    LlmToolSpec,
+    LlmEventSender, LlmMessage, LlmOutputPart, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent,
+    LlmToolChoice, LlmToolSpec,
 };
 use lash_core::provider::Provider;
 use lash_llm_transport::proptest_support::{ScriptedSseTransport, chunk_partitions};
@@ -66,6 +66,32 @@ fn function_call_stream_bytes() -> Vec<u8> {
     .into_bytes()
 }
 
+fn reasoning_stream_bytes() -> Vec<u8> {
+    [
+        sse_frame(&json!({ "response": {
+            "candidates": [{ "content": { "parts": [{
+                "text": "réason ",
+                "thought": true
+            }] } }]
+        } })),
+        sse_frame(&json!({ "response": {
+            "candidates": [{ "content": { "parts": [{
+                "text": "carefully 😀",
+                "thought": true,
+                "thoughtSignature": "c3BsaXQtaW52YXJpYW50LXNpZw=="
+            }] } }]
+        } })),
+        sse_frame(&json!({ "response": {
+            "candidates": [{
+                "content": { "parts": [{ "text": "answer" }] },
+                "finishReason": "STOP"
+            }]
+        } })),
+    ]
+    .concat()
+    .into_bytes()
+}
+
 fn request(deltas: Arc<Mutex<Vec<String>>>) -> LlmRequest {
     LlmRequest {
         model: "gemini-3.1-pro-preview".to_string(),
@@ -121,6 +147,29 @@ fn assert_invariant_under_split(
     Ok(())
 }
 
+fn assert_reasoning_invariant_under_split(
+    canonical: Vec<u8>,
+    chunks: Vec<Vec<u8>>,
+) -> Result<(), TestCaseError> {
+    let (unsplit, unsplit_deltas) = complete_with_chunks(vec![canonical]);
+    let (split, split_deltas) = complete_with_chunks(chunks);
+    prop_assert_eq!(&split.parts, &unsplit.parts);
+    prop_assert_eq!(&split.full_text, &unsplit.full_text);
+    prop_assert_eq!(&split.terminal_reason, &unsplit.terminal_reason);
+    prop_assert_eq!(&split_deltas, &unsplit_deltas);
+    let reasoning = split.parts.iter().find_map(|part| match part {
+        LlmOutputPart::Reasoning { text, replay } => Some((text, replay)),
+        _ => None,
+    });
+    prop_assert!(matches!(
+        reasoning,
+        Some((text, Some(replay)))
+            if text == "réason carefully 😀"
+                && replay.signature.as_deref() == Some("c3BsaXQtaW52YXJpYW50LXNpZw==")
+    ));
+    Ok(())
+}
+
 proptest! {
     #![proptest_config(ProptestConfig {
         cases: 256,
@@ -139,5 +188,12 @@ proptest! {
         chunks in chunk_partitions(function_call_stream_bytes())
     ) {
         assert_invariant_under_split(function_call_stream_bytes(), chunks)?;
+    }
+
+    #[test]
+    fn reasoning_stream_parsing_is_invariant_under_arbitrary_chunk_splits(
+        chunks in chunk_partitions(reasoning_stream_bytes())
+    ) {
+        assert_reasoning_invariant_under_split(reasoning_stream_bytes(), chunks)?;
     }
 }
