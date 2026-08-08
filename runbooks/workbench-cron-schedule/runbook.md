@@ -202,6 +202,20 @@ Require no new cron run, occurrence, delivery/process, wake, queued batch/turn,
 `08-deleted-silence-{samples,state,cron,trigger,process,queue,store,trace}.json` and
 screenshot `08-deleted-silent.png`.
 
+## Phase: non-current remains live; retirement cancels
+
+This phase distinguishes a valid non-current schedule from a retired-session orphan. Do not use reset for the pointer rotation because reset also deletes the old session.
+
+1. On current session `S0`, register one `cron.Schedule` with a two-second expression. From the `agent_workbench.cron.restate.sync_upserted` record whose trace context is scoped to `S0`, capture its exact `payload.job_key` as `J` and require that `J` has the `{S0}:` prefix.
+2. Record the current count of `agent_workbench.cron.restate.run` records whose payload has both `job_session_id == S0` and `job_key == J`.
+3. Open a second scoped tab bound to a fresh session `S1` and make `S1` the active/current workbench session through the supported UI affordance; leave `S0` alive and undeleted, and do not cancel `J`.
+4. Wait for two schedule intervals. PASS only if the scoped run-record count for `(S0, J)` increases by at least two, both new records say `decision_basis == "session_store_meta_present"` and `session_state == "live"`, and there is no scoped `agent_workbench.cron.restate.zombie_cancelled` record. This is the non-current-live gate.
+5. Delete `S0` through the supported session-delete path.
+6. Wait for the next scheduled fire. PASS only if exactly one scoped `agent_workbench.cron.restate.zombie_cancelled` record for `(S0, J)` appears with `decision_basis == "deleted_session_tombstone"`, `session_state == "retired"`, and `reason == "session_retired"`; `WorkbenchCronJob/J/info` must return `null` after that record. This is the retired-cancel gate.
+7. Record the scoped run and occurrence counts, then wait two more schedule intervals. PASS only if neither count changes and no delivery, queued wake, or assistant tick output attributable to `(S0, J)` appears. This is the post-retirement-silence gate.
+
+Overall PASS requires ticks to continue after pointer rotation and stop only after deletion. A cancellation before deletion is "cancelled because non-current" and fails the phase; absence of the typed retired cancellation or any tick after it also fails the phase.
+
 ## Phase 6 — Reload identity, teardown, and score
 
 Record the pre-reload transcript multiset (role class + body text + rendered identity),
