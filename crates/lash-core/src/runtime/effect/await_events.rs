@@ -146,7 +146,7 @@ impl AwaitEventRegistry {
 
     fn poisoned() -> RuntimeError {
         RuntimeError::new(
-            "await_event_registry_poisoned",
+            crate::RuntimeErrorCode::AwaitEventRegistryPoisoned,
             "await-event registry lock poisoned",
         )
     }
@@ -200,7 +200,7 @@ impl AwaitEventRegistry {
     ) -> Result<String, RuntimeError> {
         let mut mac = HmacSha256::new_from_slice(&self.secret).map_err(|err| {
             RuntimeError::new(
-                "await_event_key_sign",
+                crate::RuntimeErrorCode::AwaitEventKeySign,
                 format!("failed to initialize await-event key signer: {err}"),
             )
         })?;
@@ -228,7 +228,7 @@ impl AwaitEventRegistry {
 
     fn unknown_or_revoked() -> RuntimeError {
         RuntimeError::new(
-            "await_event_unknown_or_revoked",
+            crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked,
             "await-event key is invalid or revoked",
         )
     }
@@ -421,8 +421,7 @@ impl AwaitEventRegistry {
                 tokio::select! {
                     _ = cancel.cancelled() => {
                         if key.wait.is_turn_control() {
-                            return Err(RuntimeError::new(
-                                "turn_control_wait_cancelled",
+                            return Err(RuntimeError::new(crate::RuntimeErrorCode::TurnControlWaitCancelled,
                                 "turn-control waiter stopped without resolving its keyed promise",
                             ));
                         }
@@ -430,8 +429,7 @@ impl AwaitEventRegistry {
                     }
                     _ = clock.sleep_until(deadline) => {
                         if key.wait.is_turn_control() {
-                            return Err(RuntimeError::new(
-                                "turn_control_wait_timeout",
+                            return Err(RuntimeError::new(crate::RuntimeErrorCode::TurnControlWaitTimeout,
                                 "turn-control waiter timed out without resolving its keyed promise",
                             ));
                         }
@@ -443,8 +441,7 @@ impl AwaitEventRegistry {
                 tokio::select! {
                     _ = cancel.cancelled() => {
                         if key.wait.is_turn_control() {
-                            return Err(RuntimeError::new(
-                                "turn_control_wait_cancelled",
+                            return Err(RuntimeError::new(crate::RuntimeErrorCode::TurnControlWaitCancelled,
                                 "turn-control waiter stopped without resolving its keyed promise",
                             ));
                         }

@@ -191,10 +191,13 @@ fn cron_sync_classifies_permanent_errors_terminal_and_unknown_errors_retryable()
 #[test]
 fn runtime_shape_uses_the_shared_terminal_classifier() {
     let error = AppError::runtime(lash::EmbedError::Runtime(
-        lash::runtime::RuntimeError::new("runtime_store", "retired controller-owned session")
-            .with_cause(lash::runtime::RuntimeErrorCause::SessionDeleted {
-                session_id: "retired-session".to_string(),
-            }),
+        lash::runtime::RuntimeError::new(
+            lash::runtime::RuntimeErrorCode::RuntimeStore,
+            "retired controller-owned session",
+        )
+        .with_cause(lash::runtime::RuntimeErrorCause::SessionDeleted {
+            session_id: "retired-session".to_string(),
+        }),
     ));
 
     assert!(error.terminal);
@@ -553,6 +556,37 @@ async fn effect_replay_ownership_decides_who_may_drive_a_foreground_turn() {
         "runtime-owned replay runs the turn the controller-owned host refused"
     );
     session.close().await.expect("close the executed session");
+}
+
+#[test]
+fn restate_runtime_codes_strengthen_handler_settlement() {
+    let retryable = classified_embed_handler_error(lash::EmbedError::Runtime(
+        lash::runtime::RuntimeError::new(
+            lash::runtime::RuntimeErrorCode::RestateAwaitEventResolve,
+            "temporary Restate ingress failure",
+        ),
+    ));
+    let retryable_rendered =
+        <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&retryable)
+            .to_string();
+    assert!(
+        !retryable_rendered.starts_with("Terminal error"),
+        "retryable Restate effects must remain retryable, got {retryable_rendered}"
+    );
+
+    let terminal = classified_embed_handler_error(lash::EmbedError::Runtime(
+        lash::runtime::RuntimeError::new(
+            lash::runtime::RuntimeErrorCode::RestateTurnTerminalDecode,
+            "persisted terminal shape is invalid",
+        ),
+    ));
+    let terminal_rendered =
+        <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&terminal)
+            .to_string();
+    assert!(
+        terminal_rendered.starts_with("Terminal error"),
+        "deterministic Restate decode failures must settle terminally, got {terminal_rendered}"
+    );
 }
 
 include!("restate_cron_tests.rs");

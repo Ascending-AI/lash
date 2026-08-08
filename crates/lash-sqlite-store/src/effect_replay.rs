@@ -576,7 +576,10 @@ impl EffectReplayPersistence for SqliteEffectReplayPersistence {
             })
             .await
             .map_err(|error| {
-                RuntimeError::new("sqlite_effect_journal_retirement", error.to_string())
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                    error.to_string(),
+                )
             })?;
         Ok(deleted)
     }

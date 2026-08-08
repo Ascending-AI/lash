@@ -8,18 +8,21 @@
 
 use std::sync::Arc;
 
-use lash_core::RuntimeError;
 use lash_core::facade_support::await_event_coordinator::{
     AwaitEventBackend, AwaitEventCoordinator, AwaitEventRowIdentity, AwaitEventVocabulary,
     PersistedPromise, TerminalCas,
 };
+use lash_core::{RuntimeError, RuntimeErrorCode};
 use sqlx::postgres::{PgPool, PgRow};
 use sqlx::{Executor, Row as _};
 
 const SESSION_LOCK_NAMESPACE: i64 = 562;
 
 const VOCABULARY: AwaitEventVocabulary = AwaitEventVocabulary {
-    code_prefix: "postgres",
+    sign: RuntimeErrorCode::PostgresAwaitEventSign,
+    encode: RuntimeErrorCode::PostgresAwaitEventEncode,
+    decode: RuntimeErrorCode::PostgresAwaitEventDecode,
+    notify: RuntimeErrorCode::PostgresAwaitEventNotify,
     display_name: "PostgreSQL",
 };
 
@@ -51,7 +54,7 @@ pub(crate) struct PostgresAwaitEventBackend {
 #[async_trait::async_trait]
 impl AwaitEventBackend for PostgresAwaitEventBackend {
     fn vocabulary(&self) -> AwaitEventVocabulary {
-        VOCABULARY
+        VOCABULARY.clone()
     }
 
     async fn session_is_revoked(&self, session_id: &str) -> Result<bool, RuntimeError> {
@@ -163,7 +166,7 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
                         Some(terminal_json) => TerminalCas::AlreadyResolved { terminal_json },
                         None => {
                             return Err(RuntimeError::new(
-                                "postgres_await_event_store",
+                                lash_core::RuntimeErrorCode::PostgresAwaitEventStore,
                                 "await-event CAS lost without a winning terminal",
                             ));
                         }
@@ -334,5 +337,8 @@ async fn lock_session(
 }
 
 fn store_error(err: sqlx::Error) -> RuntimeError {
-    RuntimeError::new("postgres_await_event_store", err.to_string())
+    RuntimeError::new(
+        lash_core::RuntimeErrorCode::PostgresAwaitEventStore,
+        err.to_string(),
+    )
 }

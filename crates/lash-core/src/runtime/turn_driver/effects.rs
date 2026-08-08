@@ -292,12 +292,10 @@ impl RuntimeTurnDriver<'_> {
         checkpoint: CheckpointKind,
         event_tx: &mpsc::Sender<RuntimeStreamEvent>,
     ) -> Result<crate::CheckpointDelivery, RuntimeError> {
-        let mut committed = self.checkpoint_messages.drain().map_err(|err| {
-            RuntimeError::new(
-                RuntimeErrorCode::Other("checkpoint_messages".to_string()),
-                err,
-            )
-        })?;
+        let mut committed = self
+            .checkpoint_messages
+            .drain()
+            .map_err(|err| RuntimeError::new(RuntimeErrorCode::CheckpointMessages, err))?;
         let mut transient_messages = Vec::new();
         let mut committed_user_messages = Vec::new();
         let mut turn_causes = Vec::new();
@@ -406,7 +404,10 @@ impl RuntimeTurnDriver<'_> {
         committed.extend(applied.messages);
         emit_session_events(event_tx, applied.events).await;
         if let Some(abort) = applied.abort {
-            return Err(RuntimeError::new(abort.code, abort.message));
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::from_wire_code(&abort.code),
+                abort.message,
+            ));
         }
 
         normalize_plugin_message_attachments(

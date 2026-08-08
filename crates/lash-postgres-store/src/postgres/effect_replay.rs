@@ -401,7 +401,10 @@ impl EffectReplayPersistence for PostgresEffectReplayPersistence {
             }
         }
         .map_err(|error| {
-            RuntimeError::new("postgres_effect_journal_retirement", error.to_string())
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                error.to_string(),
+            )
         })?;
         Ok(result.rows_affected() as usize)
     }

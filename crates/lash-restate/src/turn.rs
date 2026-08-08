@@ -54,19 +54,28 @@ impl TurnAttach for RestateTurnAttach {
                 },
             )
             .await
-            .map_err(|err| RuntimeError::new("restate_turn_terminal_attach", err.to_string()))?;
+            .map_err(|err| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::RestateTurnTerminalAttach,
+                    err.to_string(),
+                )
+            })?;
         match resolution {
-            Resolution::Ok(value) => serde_json::from_value(value)
-                .map_err(|err| RuntimeError::new("restate_turn_terminal_decode", err.to_string())),
+            Resolution::Ok(value) => serde_json::from_value(value).map_err(|err| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::RestateTurnTerminalDecode,
+                    err.to_string(),
+                )
+            }),
             Resolution::Cancelled => Err(RuntimeError::new(
-                "turn_control_unknown_or_revoked",
+                lash_core::RuntimeErrorCode::TurnControlUnknownOrRevoked,
                 format!(
                     "terminal promise for turn `{}` in session `{}` was revoked",
                     address.turn_id, address.session_id
                 ),
             )),
             other => Err(RuntimeError::new(
-                "restate_turn_terminal_invalid_resolution",
+                lash_core::RuntimeErrorCode::RestateTurnTerminalInvalidResolution,
                 format!(
                     "terminal promise for turn `{}` in session `{}` resolved with {other:?}",
                     address.turn_id, address.session_id

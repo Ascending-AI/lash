@@ -298,7 +298,7 @@ impl AwaitEventWaitIdentity {
         };
         if invalid {
             return Err(RuntimeError::new(
-                "invalid_await_event_wait_identity",
+                crate::RuntimeErrorCode::InvalidAwaitEventWaitIdentity,
                 "await-event wait identity requires non-empty stable ids",
             ));
         }
@@ -574,13 +574,13 @@ impl AwaitEventResolver for EffectTaskController {
             })
             .map_err(|_| {
                 RuntimeError::new(
-                    "runtime_effect_controller_task_closed",
+                    crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
                     "await-event key controller task is no longer running",
                 )
             })?;
         response_rx.await.map_err(|_| {
             RuntimeError::new(
-                "runtime_effect_controller_task_closed",
+                crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
                 "await-event key controller response was dropped",
             )
         })?
@@ -600,13 +600,13 @@ impl AwaitEventResolver for EffectTaskController {
             })
             .map_err(|_| {
                 RuntimeError::new(
-                    "runtime_effect_controller_task_closed",
+                    crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
                     "await-event resolution controller task is no longer running",
                 )
             })?;
         response_rx.await.map_err(|_| {
             RuntimeError::new(
-                "runtime_effect_controller_task_closed",
+                crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
                 "await-event resolution controller response was dropped",
             )
         })?
@@ -758,7 +758,7 @@ pub trait AwaitEventResolver: Send + Sync {
         _wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
         Err(RuntimeError::new(
-            "await_event_unsupported",
+            crate::RuntimeErrorCode::AwaitEventUnsupported,
             "this effect boundary does not support await-event keys",
         ))
     }
@@ -783,7 +783,7 @@ pub trait AwaitEventResolver: Send + Sync {
         _key: &AwaitEventKey,
     ) -> Result<Option<Resolution>, RuntimeError> {
         Err(RuntimeError::new(
-            "await_event_unsupported",
+            crate::RuntimeErrorCode::AwaitEventUnsupported,
             "this effect boundary does not support await-event reads",
         ))
     }
@@ -795,14 +795,14 @@ pub trait AwaitEventResolver: Send + Sync {
         _deadline: Option<Instant>,
     ) -> Result<Resolution, RuntimeError> {
         Err(RuntimeError::new(
-            "await_event_unsupported",
+            crate::RuntimeErrorCode::AwaitEventUnsupported,
             "this effect boundary does not support await-event waits",
         ))
     }
 
     async fn revoke_await_events_for_session(&self, _session_id: &str) -> Result<(), RuntimeError> {
         Err(RuntimeError::new(
-            "await_event_unsupported",
+            crate::RuntimeErrorCode::AwaitEventUnsupported,
             "this effect boundary does not support revoking await-event waits",
         ))
     }
@@ -819,7 +819,7 @@ pub trait AwaitEventResolver: Send + Sync {
     /// not silently claim success.
     async fn cancel_await_events_for_session(&self, _session_id: &str) -> Result<(), RuntimeError> {
         Err(RuntimeError::new(
-            "await_event_cancel_unsupported",
+            crate::RuntimeErrorCode::AwaitEventCancelUnsupported,
             "this effect boundary does not support cancelling durable waits",
         ))
     }
@@ -847,7 +847,7 @@ pub trait EffectHost: AwaitEventResolver {
         _retirement: EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
         Err(RuntimeError::new(
-            "effect_journal_retirement_unsupported",
+            crate::RuntimeErrorCode::EffectJournalRetirementUnsupported,
             "this effect host does not implement effect-journal retirement",
         ))
     }

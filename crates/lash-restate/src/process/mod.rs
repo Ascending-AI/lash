@@ -93,7 +93,7 @@ pub(crate) fn validate_segment_program_hash(
 ) -> Result<lash_core::SegmentHandover, RuntimeError> {
     if persisted.handover.program_hash.as_deref() != Some(persisted.program_hash.as_str()) {
         return Err(RuntimeError::new(
-            "restate_segment_program_hash_mismatch",
+            lash_core::RuntimeErrorCode::RestateSegmentProgramHashMismatch,
             format!(
                 "process `{process_id}` segment {} handover program identity is inconsistent",
                 persisted.segment_ordinal
@@ -118,7 +118,12 @@ pub(crate) fn restate_process_terminal_resolution(
 ) -> Result<Resolution, RuntimeError> {
     serde_json::to_value(output)
         .map(Resolution::Ok)
-        .map_err(|err| RuntimeError::new("restate_process_terminal_encode", err.to_string()))
+        .map_err(|err| {
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::RestateProcessTerminalEncode,
+                err.to_string(),
+            )
+        })
 }
 
 pub(crate) fn restate_process_terminal_output(
