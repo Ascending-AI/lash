@@ -31,7 +31,7 @@ use lash_provider_auth::{CredentialCallError, CredentialExecuteError};
 
 use crate::responses_shared as shared;
 
-use super::continuation::CodexWebsocketRequestPlan;
+use super::continuation::{CodexContinuation, CodexWebsocketRequestPlan};
 use super::credential::{CodexCredential, credential_transport_error};
 use super::session::{CodexWebSocketAttemptError, CodexWebsocketLease};
 use super::{CodexProvider, CodexTransport, PROVIDER};
@@ -49,6 +49,47 @@ struct CodexWebsocketAttemptDiagnostics {
     request_bytes: usize,
     retry_after_stale_previous_response: bool,
     retry_after_dead_reused_connection: bool,
+}
+
+struct CodexWebsocketAttemptGuard<'a> {
+    provider: &'a CodexProvider,
+    lease: Option<CodexWebsocketLease>,
+}
+
+impl<'a> CodexWebsocketAttemptGuard<'a> {
+    fn new(provider: &'a CodexProvider, lease: CodexWebsocketLease) -> Self {
+        Self {
+            provider,
+            lease: Some(lease),
+        }
+    }
+
+    fn lease(&self) -> &CodexWebsocketLease {
+        self.lease
+            .as_ref()
+            .expect("WebSocket attempt guard owns its lease")
+    }
+
+    fn lease_mut(&mut self) -> &mut CodexWebsocketLease {
+        self.lease
+            .as_mut()
+            .expect("WebSocket attempt guard owns its lease")
+    }
+
+    fn finish(mut self, continuation: Option<CodexContinuation>) {
+        if let Some(lease) = self.lease.take() {
+            self.provider
+                .release_websocket_lease(lease, true, continuation);
+        }
+    }
+}
+
+impl Drop for CodexWebsocketAttemptGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(lease) = self.lease.take() {
+            self.provider.release_websocket_lease(lease, false, None);
+        }
+    }
 }
 
 /// One-shot WebSocket retries already consumed by the current send loop.
@@ -191,6 +232,7 @@ impl CodexProvider {
         retry_state: CodexWebsocketRetryState,
         read_timeout: Duration,
     ) -> Result<LlmResponse, CodexWebSocketAttemptError> {
+        let mut attempt = CodexWebsocketAttemptGuard::new(self, lease);
         let stream_events = req.stream_events.clone();
         let provider_trace = req.provider_trace.clone();
         let stream_termination = req
@@ -201,7 +243,6 @@ impl CodexProvider {
         let request_body = match serde_json::to_string(&websocket_body) {
             Ok(request_body) => request_body,
             Err(error) => {
-                self.release_websocket_lease(lease, false, None);
                 return Err(CodexWebSocketAttemptError {
                     error: LlmTransportError::new(format!(
                         "Failed to serialize Codex WebSocket body: {error}"
@@ -220,7 +261,7 @@ impl CodexProvider {
         );
         let diagnostics = CodexWebsocketAttemptDiagnostics {
             configured_transport: self.transport,
-            reused_connection: lease.reused,
+            reused_connection: attempt.lease().reused,
             cached_request: plan.cached,
             continuation_available: plan.continuation_available,
             cache_miss_reason: plan.cache_miss_reason,
@@ -232,20 +273,13 @@ impl CodexProvider {
             retry_after_dead_reused_connection: retry_state.after_dead_reused_connection,
         };
         self.emit_websocket_attempt_trace(provider_trace.as_ref(), &diagnostics);
-        let mut lease = Some(lease);
         let mut events_seen = false;
-        if let Err(error) = lease
-            .as_mut()
-            .expect("websocket lease is present")
+        if let Err(error) = attempt
+            .lease_mut()
             .websocket
             .send(WsMessage::Text(request_body.clone().into()))
             .await
         {
-            self.release_websocket_lease(
-                lease.take().expect("websocket lease is present"),
-                false,
-                None,
-            );
             return Err(CodexWebSocketAttemptError {
                 error: LlmTransportError::new(format!("Codex WebSocket send failed: {error}"))
                     .with_request_body(request_body.clone())
@@ -260,24 +294,12 @@ impl CodexProvider {
         let mut state = shared::ResponsesStreamState::default();
         let expose_thinking = self.options.expose_thinking;
         loop {
-            let next_message = tokio::time::timeout(
-                read_timeout,
-                lease
-                    .as_mut()
-                    .expect("websocket lease is present")
-                    .websocket
-                    .next(),
-            )
-            .await;
+            let next_message =
+                tokio::time::timeout(read_timeout, attempt.lease_mut().websocket.next()).await;
             let Some(message) = (match next_message {
                 Ok(message) => message,
                 Err(_) => {
                     let output_started = Self::response_state_started_output(&state);
-                    self.release_websocket_lease(
-                        lease.take().expect("websocket lease is present"),
-                        false,
-                        None,
-                    );
                     return Err(CodexWebSocketAttemptError {
                         error: LlmTransportError::new("Codex WebSocket stream chunk timed out")
                             .with_kind(ProviderFailureKind::Timeout)
@@ -296,11 +318,6 @@ impl CodexProvider {
                 Ok(message) => message,
                 Err(error) => {
                     let output_started = Self::response_state_started_output(&state);
-                    self.release_websocket_lease(
-                        lease.take().expect("websocket lease is present"),
-                        false,
-                        None,
-                    );
                     return Err(CodexWebSocketAttemptError {
                         error: LlmTransportError::new(format!(
                             "Codex WebSocket receive failed: {error}"
@@ -320,11 +337,6 @@ impl CodexProvider {
                     Ok(text) => text,
                     Err(error) => {
                         let output_started = Self::response_state_started_output(&state);
-                        self.release_websocket_lease(
-                            lease.take().expect("websocket lease is present"),
-                            false,
-                            None,
-                        );
                         return Err(CodexWebSocketAttemptError {
                             error: LlmTransportError::new(format!(
                                 "Codex WebSocket binary frame was not UTF-8: {error}"
@@ -352,11 +364,6 @@ impl CodexProvider {
             if let Err(error) = process_result {
                 let output_started = Self::response_state_started_output(&state);
                 let stale_previous_response = Self::is_stale_previous_response_error(&error);
-                self.release_websocket_lease(
-                    lease.take().expect("websocket lease is present"),
-                    false,
-                    None,
-                );
                 return Err(CodexWebSocketAttemptError {
                     error: error.with_request_body(request_body.clone()),
                     events_seen,
@@ -404,11 +411,6 @@ impl CodexProvider {
             );
             partial.terminal_reason = LlmTerminalReason::Unknown;
             partial.generation_disposition = Some(Self::generation_disposition(&req.generation));
-            self.release_websocket_lease(
-                lease.take().expect("websocket lease is present"),
-                false,
-                None,
-            );
             return Err(CodexWebSocketAttemptError {
                 error: LlmTransportError::new("Codex WebSocket ended before response.completed")
                     .with_request_body(request_body)
@@ -435,11 +437,7 @@ impl CodexProvider {
         );
         response.http_summary = Some(self.websocket_http_summary(&diagnostics));
         response.generation_disposition = Some(Self::generation_disposition(&req.generation));
-        self.release_websocket_lease(
-            lease.take().expect("websocket lease is present"),
-            true,
-            continuation,
-        );
+        attempt.finish(continuation);
         Ok(response)
     }
 
