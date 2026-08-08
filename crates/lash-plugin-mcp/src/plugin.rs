@@ -72,9 +72,15 @@ impl McpPluginFactory {
     }
 }
 
+#[async_trait]
 impl PluginFactory for McpPluginFactory {
     fn id(&self) -> &'static str {
         "mcp"
+    }
+
+    async fn shutdown(&self) -> Result<(), PluginError> {
+        self.pool.shutdown_all().await;
+        Ok(())
     }
 
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
@@ -442,6 +448,88 @@ mod tests {
             json!({ "matches": ["matched"] })
         );
 
-        factory.pool().shutdown_all().await;
+        factory.shutdown().await.expect("shut down MCP factory");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn plugin_shutdown_kills_stdio_child_without_drop_and_is_idempotent() {
+        let scratch = tempfile::tempdir().expect("tempdir");
+        let pid_file = scratch.path().join("mcp.pid");
+        let initialize = json!({
+            "jsonrpc": "2.0",
+            "id": 0,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": { "tools": {} },
+                "serverInfo": { "name": "lifecycle", "version": "1.0.0" }
+            }
+        });
+        let list = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": { "tools": [] }
+        });
+        let script = "\
+            printf '%s\\n' \"$$\" > \"$PID_FILE\"; \
+            read -r _; printf '%s\\n' \"$RESP1\"; \
+            read -r _; \
+            read -r _; printf '%s\\n' \"$RESP2\"; \
+            cat >/dev/null"
+            .to_string();
+        let servers = BTreeMap::from([(
+            "lifecycle".to_string(),
+            McpServerConfig::Stdio {
+                command: "sh".to_string(),
+                args: vec!["-c".to_string(), script],
+                env: BTreeMap::from([
+                    ("PID_FILE".to_string(), pid_file.display().to_string()),
+                    ("RESP1".to_string(), initialize.to_string()),
+                    ("RESP2".to_string(), list.to_string()),
+                ]),
+                cwd: None,
+                startup_timeout_ms: 5_000,
+                call_policy: crate::McpCallPolicy {
+                    call_timeout_ms: 5_000,
+                    ..Default::default()
+                },
+                binary_content_attachments: false,
+            },
+        )]);
+        let factory = McpPluginFactory::new(servers)
+            .await
+            .expect("connect lifecycle server");
+        let pid: u32 = std::fs::read_to_string(&pid_file)
+            .expect("read child pid")
+            .trim()
+            .parse()
+            .expect("parse child pid");
+        assert!(
+            std::process::Command::new("kill")
+                .args(["-0", &pid.to_string()])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .expect("probe live child")
+                .success(),
+            "MCP child must be live before explicit shutdown"
+        );
+
+        factory.shutdown().await.expect("shut down MCP factory");
+
+        assert!(factory.server_statuses().is_empty());
+        assert!(
+            !std::process::Command::new("kill")
+                .args(["-0", &pid.to_string()])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .expect("probe stopped child")
+                .success(),
+            "explicit plugin shutdown must reap the MCP child before factory drop"
+        );
+        factory.shutdown().await.expect("repeat MCP shutdown");
+        assert!(
+            factory.server_statuses().is_empty(),
+            "a second plugin shutdown is a no-op"
+        );
     }
 }

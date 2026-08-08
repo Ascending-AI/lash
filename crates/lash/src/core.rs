@@ -313,6 +313,60 @@ impl LashCore {
         }
     }
 
+    /// Shut down registered plugin factories after the host has stopped intake.
+    ///
+    /// This method releases plugin-factory resources; it does not stop intake,
+    /// drain active turns, abort work, or orchestrate host shutdown. The host
+    /// owns those steps and must call `shutdown` only after no new work can enter.
+    /// The protocol factory is visited first, followed by common factories in
+    /// configured order. These factories own disjoint resources, so the order
+    /// carries no dependency semantics; it is fixed only for determinism and log
+    /// auditability. A host that shares a resource across factories must not rely
+    /// on this order.
+    ///
+    /// Every factory is visited even after failures. Each failure is warned and
+    /// the first is returned after the walk. Implementations own their timeout
+    /// policy and must make repeated shutdown calls idempotent. Factories added
+    /// through [`AdvancedLashCoreBuilder::plugin_host`] are included. Extra
+    /// factories supplied only to durable-process-worker configuration or to an
+    /// individual session are host-owned and are not walked by this method.
+    pub async fn shutdown(&self) -> Result<()> {
+        let factories = self
+            .protocol_factory
+            .iter()
+            .chain(self.plugin_factories.iter());
+        let mut first_error = None;
+        for factory in factories {
+            let started = std::time::Instant::now();
+            tracing::debug!(
+                plugin_factory = factory.id(),
+                "plugin factory shutdown started"
+            );
+            match factory.shutdown().await {
+                Ok(()) => tracing::debug!(
+                    plugin_factory = factory.id(),
+                    elapsed_ms = started.elapsed().as_millis(),
+                    "plugin factory shutdown completed"
+                ),
+                Err(error) => {
+                    tracing::warn!(
+                        plugin_factory = factory.id(),
+                        elapsed_ms = started.elapsed().as_millis(),
+                        error = %error,
+                        "plugin factory shutdown failed"
+                    );
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+        match first_error {
+            Some(error) => Err(EmbedError::Plugin(error)),
+            None => Ok(()),
+        }
+    }
+
     /// Report whether `session_id` has durable live session metadata.
     ///
     /// This is a cheap existence read: it does not create, hydrate, or open the

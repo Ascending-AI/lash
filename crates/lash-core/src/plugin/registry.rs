@@ -468,10 +468,12 @@ pub trait SessionPlugin: Send + Sync {
 /// wrapped in `Arc` so it can be cheaply cloned into per-session
 /// closures. The `PluginFactory` is constructed once by the embedder
 /// and held in the `RuntimeEnvironment`; its fields outlive every
-/// session. Hooks captured into a `PluginSpec` are closures that
-/// clone the `Arc`s off `self` and reference the shared state
-/// directly, so every session sees the same pool / cache / compiled
-/// artifact without rebuilding it.
+/// session. Hooks captured into a `PluginSpec` are closures that clone
+/// the `Arc`s off `self` and reference the shared state directly, so
+/// every session sees the same pool / cache / compiled artifact without
+/// rebuilding it. Factories that own host-visible resources also
+/// participate in the explicit post-intake lifecycle through
+/// [`shutdown`](Self::shutdown).
 ///
 /// The typical shape is:
 /// ```ignore
@@ -496,8 +498,24 @@ pub trait SessionPlugin: Send + Sync {
 ///     }
 /// }
 /// ```
+#[async_trait::async_trait]
 pub trait PluginFactory: Send + Sync {
     fn id(&self) -> &'static str;
+
+    /// Release host-visible resources owned by this factory after intake stops.
+    ///
+    /// Hosts call this before process exit so resources such as child processes,
+    /// connections, and background tasks are explicitly released. It takes
+    /// `&self` because reusable factory state lives behind its own
+    /// synchronization and is commonly shared with every session plugin. Lash
+    /// does not stop intake, drain, or abort turns as part of plugin shutdown.
+    /// Implementations must be idempotent and bound their cleanup; the first-party
+    /// MCP implementation's per-entry bound is rmcp's three-second cancellation
+    /// grace plus transport-task drain. The default is a no-op for factories
+    /// without host-visible resources.
+    async fn shutdown(&self) -> Result<(), PluginError> {
+        Ok(())
+    }
 
     fn extension_contributions(&self) -> Vec<PluginExtensionContribution> {
         Vec::new()

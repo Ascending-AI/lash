@@ -2094,6 +2094,7 @@ dependencies = [
  "async-trait",
  "base64",
  "fastrand",
+ "futures-util",
  "http",
  "lash-core",
  "lash-lashlang-runtime",
