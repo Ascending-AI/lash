@@ -145,101 +145,111 @@ pub fn now_secs() -> u64 {
 
 /// Form-urlencoded body encoder for OAuth token endpoints.
 pub fn url_form_encode(pairs: &[(&str, &str)]) -> String {
-    pairs
-        .iter()
-        .map(|(k, v)| format!("{}={}", form_escape(k), form_escape(v)))
-        .collect::<Vec<_>>()
-        .join("&")
-}
-
-/// Percent-encode a value for `application/x-www-form-urlencoded`.
-fn form_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char);
-            }
-            _ => {
-                out.push_str(&format!("%{:02X}", b));
-            }
-        }
-    }
-    out
-}
-
-/// Minimal percent-encoding for URL query parameters.
-pub fn urlencoded(s: &str) -> String {
-    s.replace('%', "%25")
-        .replace(' ', "%20")
-        .replace(':', "%3A")
-        .replace('/', "%2F")
-}
-
-/// Percent-decode a query-string value (handles `+` → space).
-pub fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0usize;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'+' => {
-                out.push(b' ');
-                i += 1;
-            }
-            b'%' if i + 2 < bytes.len() => {
-                if let (Some(hi), Some(lo)) = (hex_nibble(bytes[i + 1]), hex_nibble(bytes[i + 2])) {
-                    out.push((hi << 4) | lo);
-                    i += 3;
-                } else {
-                    out.push(bytes[i]);
-                    i += 1;
-                }
-            }
-            b => {
-                out.push(b);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).to_string()
-}
-
-fn hex_nibble(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(10 + (b - b'a')),
-        b'A'..=b'F' => Some(10 + (b - b'A')),
-        _ => None,
-    }
+    let mut serializer = form_urlencoded::Serializer::new(String::new());
+    serializer.extend_pairs(pairs);
+    serializer.finish()
 }
 
 /// Extract the value of a given query parameter from a URL or raw
 /// query-string. Returns `None` if the key is absent.
 pub fn extract_query_param(url_or_query: &str, key: &str) -> Option<String> {
-    let query = if let Some(idx) = url_or_query.find('?') {
-        &url_or_query[idx + 1..]
+    let input = url_or_query
+        .split_once('#')
+        .map_or(url_or_query, |(input, _)| input);
+    let query = if let Some(idx) = input.find('?') {
+        &input[idx + 1..]
     } else {
-        url_or_query
+        input
     };
-    for pair in query.split('&') {
-        if pair.is_empty() {
-            continue;
-        }
-        let mut parts = pair.splitn(2, '=');
-        let k = parts.next().unwrap_or("");
-        let v = parts.next().unwrap_or("");
-        if k == key {
-            return Some(percent_decode(v));
-        }
-    }
-    None
+
+    form_urlencoded::parse(query.as_bytes())
+        .find_map(|(name, value)| (name == key).then(|| value.into_owned()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn form_encoding_round_trips_reserved_empty_and_unicode_values() {
+        let pairs = [
+            ("reserved&key", "&=?+% /"),
+            ("unicode", "Grüße 雪"),
+            ("empty", ""),
+        ];
+
+        let encoded = url_form_encode(&pairs);
+
+        assert_eq!(
+            encoded,
+            "reserved%26key=%26%3D%3F%2B%25+%2F&unicode=Gr%C3%BC%C3%9Fe+%E9%9B%AA&empty="
+        );
+        assert_eq!(
+            form_urlencoded::parse(encoded.as_bytes())
+                .into_owned()
+                .collect::<Vec<_>>(),
+            pairs
+                .into_iter()
+                .map(|(key, value)| (key.to_owned(), value.to_owned()))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn malformed_percent_sequences_remain_literal_in_query_extraction() {
+        // Lenient-literal decoding is deliberate for user-pasted input: the
+        // authoritative validation is the remote token endpoint, and a local
+        // hard failure could wrongly reject a valid value containing `%`.
+        let cases = [
+            ("code=%", "%"),
+            ("code=%2", "%2"),
+            ("code=%GG", "%GG"),
+            ("code=ok%20bad%2Gtail", "ok bad%2Gtail"),
+            ("code=literal%25%", "literal%%"),
+        ];
+
+        for (query, expected) in cases {
+            assert_eq!(
+                extract_query_param(query, "code").as_deref(),
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn query_extraction_handles_adversarial_redirect_urls() {
+        let cases = [
+            (
+                "https://localhost/callback?state=x&code=a%26b%3Dc%3Fd%2Be%25f%E9%9B%AA#code=wrong",
+                "code",
+                Some("a&b=c?d+e%f雪"),
+            ),
+            ("?code=", "code", Some("")),
+            ("code=first&code=second", "code", Some("first")),
+            ("c%6Fde=encoded+key", "code", Some("encoded key")),
+            (
+                "code=good%ZZ%26still-value&admin=true",
+                "code",
+                Some("good%ZZ&still-value"),
+            ),
+            (
+                "https://localhost/callback?state=x#code=fragment",
+                "code",
+                None,
+            ),
+            (
+                "https://localhost/callback#fragment?code=fragment",
+                "code",
+                None,
+            ),
+            ("https://localhost/callback?other=value", "code", None),
+        ];
+
+        for (input, key, expected) in cases {
+            assert_eq!(extract_query_param(input, key).as_deref(), expected);
+        }
+    }
 
     #[test]
     fn token_endpoint_parses_all_rfc_6749_error_codes() {

@@ -39,7 +39,7 @@ lash-sqlite-store = { workspace = true }
 lash-standard-plugins = { workspace = true }
 lash-subagents = { workspace = true }
 lash-tools = { path = "../../crates/lash-tools", default-features = false, features = ["lashlang"] }
-percent-encoding = "2.3"
+percent-encoding = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 restate-sdk = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
