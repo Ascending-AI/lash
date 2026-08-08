@@ -100,6 +100,7 @@ impl SnapshotStore {
         let config = lash_core::PersistedSessionConfig {
             provider_id: state.policy.recorded_provider_id().to_string(),
             model: state.policy.model.clone(),
+            turn_budget: state.policy.turn_budget,
         };
         Self {
             read: std::sync::Mutex::new(Some(lash_core::store::PersistedSessionRead {
@@ -1949,7 +1950,7 @@ fn checkpoint_gated_provider(
 }
 
 fn standard_core() -> LashCore {
-    explicit_ephemeral_facets(LashCore::standard_builder())
+    explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .build()
@@ -1977,7 +1978,7 @@ fn rlm_factory() -> lash_protocol_rlm::RlmProtocolPluginFactory {
 /// A [`LashCoreBuilder`] pre-seeded with the default RLM factory.
 #[cfg(feature = "rlm")]
 fn rlm_core_builder() -> crate::core::LashCoreBuilder {
-    LashCore::rlm_builder(rlm_factory())
+    LashCore::rlm_builder(crate::TurnBudget::Unbounded, rlm_factory())
 }
 
 fn inline_scope(scope: lash_core::ExecutionScope) -> lash_core::ScopedEffectController<'static> {

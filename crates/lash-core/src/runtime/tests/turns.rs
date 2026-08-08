@@ -1235,7 +1235,7 @@ async fn continue_as_frame_rotation_reconciles_newly_advertised_tool() {
         standard_test_policy(),
         test_host_config(),
         crate::RuntimeServices::new(plugins),
-        RuntimeSessionState::default(),
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
     )
     .await
     .expect("frame child runtime");

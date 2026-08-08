@@ -9,6 +9,7 @@ impl ManagedSessionCapability {
         usage: &UsageCapability,
         request: crate::SessionTurnRequest<'_>,
     ) -> Result<AssembledTurn, crate::PluginError> {
+        let admission_class = request.admission_class();
         let (
             crate::SessionTurnInput {
                 session_id,
@@ -32,11 +33,13 @@ impl ManagedSessionCapability {
         // process is cancelled — releases it, because release happens in `Drop`
         // rather than at a statement after the child await. It is claimed before
         // the event plumbing so a denied turn allocates nothing.
-        let lease = ManagedTurnLease::register(
+        let lease = ManagedTurnLease::register_with_admission_class(
             &self.turns,
             &usage.child_turn_live_usage,
             &session_id,
             &turn_id,
+            self.turn_concurrency_limit,
+            admission_class,
         )?;
         let (event_tx, mut event_rx) = mpsc::channel::<SessionStreamEvent>(100);
         let usage_source = self.child_usage_source(usage, &session_id);
@@ -58,9 +61,11 @@ impl ManagedSessionCapability {
         let turn = match scoped_effect_controller.into_static() {
             Ok(scoped_effect_controller) => {
                 // Canonical recursion-growth seam: every shareable child turn
-                // gets a fresh Tokio task stack here. Future turn-path growth
-                // belongs behind this boundary, rather than in new boxes at
-                // whichever recursive poll site happens to overflow next.
+                // gets a fresh Tokio task stack here. The registry admission
+                // cap bounds how many of those independent stacks may be live
+                // in this registry; future turn-path growth belongs behind this
+                // boundary, rather than in new boxes at whichever recursive
+                // poll site happens to overflow next.
                 let task = crate::task::spawn(
                     crate::runtime::process_worker::inherit_process_execution_permit(
                         run_managed_session_turn(
@@ -203,14 +208,38 @@ enum ManagedTurnAdmission {
         holder_turn_id: String,
         holder_registration: u64,
     },
+    AtCapacity {
+        registered_turns: usize,
+        limit: usize,
+    },
 }
 
 impl ManagedTurnLease {
-    fn register(
+    #[cfg(test)]
+    fn register_with_limit(
         turns: &ManagedTurnRegistry,
         live_usage: &ChildTurnLiveUsage,
         session_id: &str,
         turn_id: &str,
+        concurrency_limit: std::num::NonZeroUsize,
+    ) -> Result<Self, crate::PluginError> {
+        Self::register_with_admission_class(
+            turns,
+            live_usage,
+            session_id,
+            turn_id,
+            concurrency_limit,
+            crate::plugin::runtime_host::ManagedTurnAdmissionClass::Normal,
+        )
+    }
+
+    fn register_with_admission_class(
+        turns: &ManagedTurnRegistry,
+        live_usage: &ChildTurnLiveUsage,
+        session_id: &str,
+        turn_id: &str,
+        concurrency_limit: std::num::NonZeroUsize,
+        admission_class: crate::plugin::runtime_host::ManagedTurnAdmissionClass,
     ) -> Result<Self, crate::PluginError> {
         let registration =
             NEXT_MANAGED_TURN_REGISTRATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -237,6 +266,14 @@ impl ManagedTurnLease {
                     registered_turns,
                     holder_turn_id: holder_turn_id.clone(),
                     holder_registration: holder.registration,
+                }
+            } else if admission_class
+                == crate::plugin::runtime_host::ManagedTurnAdmissionClass::Normal
+                && registered_turns >= concurrency_limit.get()
+            {
+                ManagedTurnAdmission::AtCapacity {
+                    registered_turns,
+                    limit: concurrency_limit.get(),
                 }
             } else {
                 registered.insert(
@@ -290,11 +327,34 @@ impl ManagedTurnLease {
                     "session `{session_id}` already has a running turn"
                 )));
             }
+            ManagedTurnAdmission::AtCapacity {
+                registered_turns,
+                limit,
+            } => {
+                tracing::debug!(
+                    session_id,
+                    turn_id = %turn_id,
+                    registered_turns,
+                    limit,
+                    outcome = "denied",
+                    event = "managed_turn.admission",
+                    "managed turn denied: concurrency limit reached"
+                );
+                return Err(crate::PluginError::Runtime(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded,
+                    format!(
+                        "managed-turn concurrency limit of {limit} is reached; retry after a running turn finishes"
+                    ),
+                )));
+            }
             ManagedTurnAdmission::Admitted { registered_turns } => tracing::debug!(
                 session_id,
                 turn_id = %turn_id,
                 registration,
                 registered_turns,
+                admission_class = ?admission_class,
+                cap_exempt = admission_class
+                    == crate::plugin::runtime_host::ManagedTurnAdmissionClass::RuntimeInternalCompaction,
                 outcome = "admitted",
                 event = "managed_turn.admission",
                 "managed turn admitted"
@@ -308,6 +368,23 @@ impl ManagedTurnLease {
             registration,
             released: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    #[cfg(test)]
+    fn register(
+        turns: &ManagedTurnRegistry,
+        live_usage: &ChildTurnLiveUsage,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<Self, crate::PluginError> {
+        Self::register_with_limit(
+            turns,
+            live_usage,
+            session_id,
+            turn_id,
+            std::num::NonZeroUsize::new(crate::runtime::DEFAULT_MANAGED_TURN_CONCURRENCY_LIMIT)
+                .expect("the managed-turn concurrency default is non-zero"),
+        )
     }
 
     /// Flag observed by this turn's live-usage forwarder. Set before the entries
@@ -610,6 +687,96 @@ mod tests {
             Some("session".to_string()),
             "a denied registration must not overwrite the live one"
         );
+    }
+
+    #[test]
+    fn managed_turn_admission_rejects_beyond_cap_with_typed_retryable_error() {
+        let (turns, live_usage) = shared_maps();
+        let limit = std::num::NonZeroUsize::new(1).expect("test limit is non-zero");
+        let lease = ManagedTurnLease::register_with_limit(
+            &turns,
+            &live_usage,
+            "first-session",
+            "first-turn",
+            limit,
+        )
+        .expect("first turn fits under cap");
+
+        let error = match ManagedTurnLease::register_with_limit(
+            &turns,
+            &live_usage,
+            "second-session",
+            "second-turn",
+            limit,
+        ) {
+            Ok(_) => panic!("second concurrent turn must be denied at capacity"),
+            Err(error) => error,
+        };
+        let crate::PluginError::Runtime(error) = error else {
+            panic!("capacity denial must use the typed runtime error family");
+        };
+        assert_eq!(
+            error.code,
+            crate::RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded
+        );
+        assert!(error.is_retryable());
+        assert_eq!(lock_turns(&turns).len(), 1);
+
+        drop(lease);
+        ManagedTurnLease::register_with_limit(
+            &turns,
+            &live_usage,
+            "second-session",
+            "second-turn",
+            limit,
+        )
+        .expect("released capacity is immediately reusable");
+    }
+
+    #[test]
+    fn runtime_internal_compaction_bypasses_cap_but_normal_child_remains_denied() {
+        let (turns, live_usage) = shared_maps();
+        let limit = std::num::NonZeroUsize::new(1).expect("test limit is non-zero");
+        let _at_cap = ManagedTurnLease::register_with_limit(
+            &turns,
+            &live_usage,
+            "normal-session",
+            "normal-turn",
+            limit,
+        )
+        .expect("normal turn fills the registry cap");
+
+        let _compaction = ManagedTurnLease::register_with_admission_class(
+            &turns,
+            &live_usage,
+            "compaction-session",
+            "compaction-turn",
+            limit,
+            crate::plugin::runtime_host::ManagedTurnAdmissionClass::RuntimeInternalCompaction,
+        )
+        .expect("runtime-internal compaction remains admissible at the cap");
+        assert_eq!(
+            lock_turns(&turns).len(),
+            2,
+            "cap-exempt compaction remains counted in registry observability"
+        );
+
+        let denied = match ManagedTurnLease::register_with_limit(
+            &turns,
+            &live_usage,
+            "second-normal-session",
+            "second-normal-turn",
+            limit,
+        ) {
+            Ok(_) => panic!("a normal child turn remains denied while the registry is at capacity"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            denied,
+            crate::PluginError::Runtime(ref error)
+                if error.code == crate::RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded
+                    && error.is_retryable()
+        ));
     }
 
     /// A child turn's usage forwarder can still be mid-emit when the lease

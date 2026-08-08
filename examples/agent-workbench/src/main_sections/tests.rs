@@ -57,7 +57,7 @@ mod tests {
                 .with_lashlang_abilities(workbench_lashlang_abilities()),
             artifact_store,
         );
-        lash::LashCore::rlm_builder(factory)
+        lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
             .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
                 data_dir.join("attachments"),
@@ -1219,7 +1219,7 @@ finish initial
                 .with_lashlang_abilities(workbench_lashlang_abilities()),
             artifact_store_for_core,
         );
-        let core = LashCore::rlm_builder(factory)
+        let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .provider(provider)
             .model(model)
             .store_factory(Arc::clone(&core_store_factory))
@@ -1853,7 +1853,7 @@ finish initial
             artifact_store,
         )
         .with_lashlang_execution_sink(lashlang_execution_sink);
-        let core = LashCore::rlm_builder(factory)
+        let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .provider(provider)
             .model(model)
             .store_factory(Arc::clone(&core_store_factory))
@@ -2180,7 +2180,7 @@ finish initial
                 .with_lashlang_abilities(workbench_lashlang_abilities()),
             artifact_store,
         );
-        LashCore::rlm_builder(factory)
+        LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .provider(provider)
             .model(model)
             .store_factory(session_store_factory)

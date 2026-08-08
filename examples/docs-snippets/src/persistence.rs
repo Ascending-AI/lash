@@ -25,7 +25,7 @@ async fn sqlite_core(provider: ProviderHandle, model: String) -> anyhow::Result<
         ),
         artifact_store,
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model.clone())
@@ -81,7 +81,7 @@ async fn postgres_core(database_url: String) -> anyhow::Result<()> {
         ),
         Arc::new(storage.lashlang_artifact_store()),
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .store_factory(Arc::new(storage.session_store_factory()))
         .process_registry(Arc::new(storage.process_registry()))
         .trigger_store(Arc::new(storage.trigger_store()))
@@ -183,7 +183,7 @@ async fn shared_factory(
         ),
         artifact_store,
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model.clone())

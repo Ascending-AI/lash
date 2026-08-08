@@ -141,6 +141,15 @@ pub struct Store {
     checkpoint_write_transaction_count: AtomicUsize,
 }
 
+impl Store {
+    /// Replace the process-local enqueue nonce seed for deterministic fixtures.
+    #[doc(hidden)]
+    pub fn with_commit_count_seed_for_testing(mut self, seed: u64) -> Self {
+        self.commit_count = AtomicU64::new(seed);
+        self
+    }
+}
+
 /// SQLite-backed process registry for one configured runtime deployment.
 ///
 /// It is intentionally separate from [`Store`]: the durable-core catalog
@@ -1208,7 +1217,9 @@ mod tests {
     async fn durable_state(store: &Store, session_id: &str) -> lash_core::RuntimeSessionState {
         let state = lash_core::RuntimeSessionState {
             session_id: session_id.to_string(),
-            ..Default::default()
+            ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+            ))
         };
         store
             .admit_and_bind_session(&lash_core::SessionBinding::root(session_id, &state.policy))
@@ -1349,7 +1360,7 @@ mod tests {
         let request = SessionStoreCreateRequest {
             session_id: "corrupt-session-meta".to_string(),
             relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         };
 
         let store = factory

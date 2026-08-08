@@ -43,7 +43,7 @@ impl RemoteSessionScope {
 pub struct RemoteProcessExecutionEnvRef(String);
 
 impl RemoteProcessExecutionEnvRef {
-    pub const PREFIX: &'static str = "process-env:v2:sha256:";
+    pub const PREFIX: &'static str = "process-env:v3:sha256:";
 
     pub fn parse(value: impl Into<String>) -> Result<Self, RemoteProtocolError> {
         let value = value.into();
@@ -52,7 +52,7 @@ impl RemoteProcessExecutionEnvRef {
         } else {
             Err(RemoteProtocolError::InvalidEnvelope {
                 type_name: "RemoteProcessExecutionEnvRef",
-                message: "env_ref must match `process-env:v2:sha256:<64 lowercase hex>`"
+                message: "env_ref must match `process-env:v3:sha256:<64 lowercase hex>`"
                     .to_string(),
             })
         }
@@ -68,7 +68,7 @@ impl RemoteProcessExecutionEnvRef {
         } else {
             Err(RemoteProtocolError::InvalidEnvelope {
                 type_name,
-                message: "env_ref must match `process-env:v2:sha256:<64 lowercase hex>`"
+                message: "env_ref must match `process-env:v3:sha256:<64 lowercase hex>`"
                     .to_string(),
             })
         }
@@ -1011,7 +1011,15 @@ pub struct RemoteProcessModelSpec {
     pub limits: RemoteProcessModelLimits,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+/// Required wire mirror of the session's turn budget.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteTurnBudget {
+    Bounded(std::num::NonZeroUsize),
+    Unbounded,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteProcessExecutionPolicy {
     #[serde(default)]
@@ -1022,8 +1030,7 @@ pub struct RemoteProcessExecutionPolicy {
     pub session_id: Option<String>,
     #[serde(default)]
     pub autonomous: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_turns: Option<usize>,
+    pub turn_budget: RemoteTurnBudget,
     #[serde(default, skip_serializing_if = "RemotePromptLayer::is_empty")]
     pub prompt: RemotePromptLayer,
     /// Session-wide generation intent, mirroring `SessionPolicy.generation`.
@@ -1036,15 +1043,11 @@ pub struct RemoteProcessExecutionPolicy {
     pub generation: crate::llm::RemoteGenerationOptions,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteProcessExecutionEnvSpec {
     #[serde(default, skip_serializing_if = "RemoteProcessPluginOptions::is_empty")]
     pub plugin_options: RemoteProcessPluginOptions,
-    #[serde(
-        default,
-        skip_serializing_if = "RemoteProcessExecutionPolicy::is_empty"
-    )]
     pub policy: RemoteProcessExecutionPolicy,
 }
 
@@ -1055,14 +1058,25 @@ impl RemoteProcessPluginOptions {
 }
 
 impl RemoteProcessExecutionPolicy {
-    pub fn is_empty(&self) -> bool {
-        self == &Self::default()
+    pub fn new(turn_budget: RemoteTurnBudget) -> Self {
+        Self {
+            model: RemoteProcessModelSpec::default(),
+            provider_id: String::new(),
+            session_id: None,
+            autonomous: false,
+            turn_budget,
+            prompt: RemotePromptLayer::default(),
+            generation: crate::llm::RemoteGenerationOptions::default(),
+        }
     }
 }
 
 impl RemoteProcessExecutionEnvSpec {
-    pub fn is_empty(&self) -> bool {
-        self.plugin_options.is_empty() && self.policy.is_empty()
+    pub fn new(turn_budget: RemoteTurnBudget) -> Self {
+        Self {
+            plugin_options: RemoteProcessPluginOptions::default(),
+            policy: RemoteProcessExecutionPolicy::new(turn_budget),
+        }
     }
 
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {

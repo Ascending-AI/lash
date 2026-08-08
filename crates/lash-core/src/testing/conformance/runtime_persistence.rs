@@ -224,7 +224,7 @@ pub async fn runtime_persistence_clock_expiry(
 
     let stale_state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let stale_commit = store
         .commit_runtime_state(
@@ -410,7 +410,7 @@ async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
 async fn load_retains_reasoning_only_usage(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let usage = TokenLedgerEntry {
         source: "reasoning-only".to_string(),
@@ -441,7 +441,7 @@ async fn load_retains_reasoning_only_usage(store: Arc<dyn RuntimePersistence>) {
 async fn load_rejects_token_usage_overflow(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let usage = [
         TokenLedgerEntry {
@@ -490,7 +490,7 @@ async fn checkpoint_restore_rejects_turn_index_without_increment_headroom(
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
         turn_index,
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     commit_runtime_state_for_test(
         &store,
@@ -534,7 +534,7 @@ async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows(
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
         token_usage,
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     commit_runtime_state_for_test(
         &store,
@@ -569,7 +569,7 @@ async fn usage_delta_identity_is_idempotent_across_commits(store: Arc<dyn Runtim
     };
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let first = RuntimeCommit::persisted_state_for_test(&state, std::slice::from_ref(&usage));
     let durable_identity = first.usage_deltas[0].identity.clone();
@@ -628,7 +628,7 @@ async fn usage_ordinal_reuse_with_different_payload_survives_receipt_replay(
     )];
     let mut initial_state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
 
     // U1 is confirmed under append operation A at ordinal zero.
@@ -768,7 +768,7 @@ async fn loaded_conformance_state(store: &Arc<dyn RuntimePersistence>) -> Runtim
 async fn seed_append_receipt_state(store: &Arc<dyn RuntimePersistence>) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let nodes = vec![crate::SessionAppendNode::plugin(
         "append-receipt-seed",
@@ -966,7 +966,7 @@ async fn append_request_receipt_rejects_corrupt_node_count(store: Arc<dyn Runtim
 async fn concurrent_same_append_operation_applies_exactly_once(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let nodes = vec![crate::SessionAppendNode::plugin(
         "append-receipt-race",
@@ -1211,7 +1211,7 @@ async fn append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics(
 async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let nodes = vec![crate::SessionAppendNode::plugin(
         "append-receipt",
@@ -1311,7 +1311,7 @@ where
         plugin_snapshot_revision: Some(37),
         plugin_snapshot: Some(PluginSessionSnapshot::default()),
         execution_state_snapshot: Some(b"opaque-execution-state-before-clean-commit".to_vec()),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
 
     let first = commit_runtime_state_for_test(
@@ -1395,7 +1395,7 @@ pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimePers
         execution_state_ref: Some(crate::BlobRef(
             "checkpoint-component-that-was-never-stored".to_string(),
         )),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
 
     let error = commit_runtime_state_for_test(
@@ -1416,7 +1416,7 @@ pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimePers
 async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: "missing-frame-root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let node = SessionNodeRecord {
         node_id: "unframed-root".to_string(),
@@ -1462,7 +1462,7 @@ async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
     let lease = claim_session_execution_lease_for_test(&store, session_id, owner_id).await;
     let mut state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let mut expected = Vec::new();
     let mut replay = None;
@@ -1898,9 +1898,9 @@ fn sample_session_node(session_id: &str, id: &str, parent: Option<&str>) -> Sess
             SessionNodePayload::FrameOpen {
                 frame_key: id.to_string(),
                 reason: AgentFrameReason::initial(),
-                assignment: crate::AgentFrameAssignment::from_policy(
-                    crate::SessionPolicy::default(),
-                ),
+                assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                )),
                 protocol_turn_options: ProtocolTurnOptions::default(),
             }
         } else {
@@ -1933,9 +1933,9 @@ async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn Runt
                 .context_window_tokens(200_000)
                 .build()
                 .expect("valid model spec"),
-            ..SessionPolicy::default()
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
         },
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
     let assignment = state
@@ -1995,7 +1995,7 @@ async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Runtim
     let make_commit = |node_id: &str| {
         let state = RuntimeSessionState {
             session_id: session_id.to_string(),
-            ..RuntimeSessionState::default()
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         let node = sample_session_node(session_id, node_id, None);
         let derived_node_id = node.node_id.clone();
@@ -2073,7 +2073,7 @@ async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Runtim
 async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimePersistence>) {
     let alpha = RuntimeSessionState {
         session_id: "alpha".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     commit_runtime_state_for_test(
         &store,
@@ -2084,7 +2084,7 @@ async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimePersistence
     .expect("first commit binds the session");
     let beta = RuntimeSessionState {
         session_id: "beta".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let result = commit_runtime_state_for_test(
         &store,
@@ -2106,7 +2106,7 @@ async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePersistence>) 
         plugin_snapshot: Some(PluginSessionSnapshot {
             plugins: Default::default(),
         }),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let usage = TokenLedgerEntry {
         source: "turn".to_string(),
@@ -2418,7 +2418,7 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
 
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let lease_free_commit = store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
@@ -2442,7 +2442,7 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         session_id: "root".to_string(),
         turn_index: 1,
         head_revision: state.head_revision,
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let turn_commit = RuntimeCommit::persisted_state_for_test(&turn_state, &[]);
     let mut turn_commit = turn_commit;
@@ -2519,7 +2519,7 @@ pub async fn borrowed_session_execution_lease_commit_contract(store: Arc<dyn Run
         .expect("borrowed-commit lane acquired");
     let mut state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let operation = crate::OperationId::new(
         crate::ExecutionScope::runtime_operation("borrowed-commit-replay"),
@@ -2607,7 +2607,7 @@ pub async fn borrowed_session_execution_lease_commit_contract(store: Arc<dyn Run
 async fn same_incarnation_rotation_gates_claims_not_commits(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let overlap_owner = lease_owner("same-incarnation-overlap");
     let overlap_predecessor_nonce = crate::LeaseClaimNonce::new();
@@ -2656,7 +2656,7 @@ async fn same_incarnation_rotation_gates_claims_not_commits(store: Arc<dyn Runti
 
     let stale_state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let err = store
         .commit_runtime_state(
@@ -3240,7 +3240,7 @@ async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>
         session_id: "branchy".to_string(),
         current_frame_node_id: Some(root_node_id.clone()),
         session_graph: graph,
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
     let expected_node_ids = commit
@@ -3295,7 +3295,7 @@ async fn attachment_manifest_records_intent_and_commit_stamps(store: Arc<dyn Run
         .expect("commit attachment ref out of band");
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     commit_runtime_state_for_test(
         &store,
@@ -3748,7 +3748,7 @@ async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn RuntimeP
     );
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     store
         .commit_runtime_state(
@@ -3846,7 +3846,7 @@ async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn Runtime
     );
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     store
         .commit_runtime_state(
@@ -4032,7 +4032,7 @@ async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
     // by claim id + lease token; the abandon+reclaim is what supersedes it).
     let stale_state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let stale_err = commit_runtime_state_for_test(
         &store,
@@ -4135,7 +4135,7 @@ async fn queued_work_claims_supersede_across_session_lease_generations_with_timi
 
     let stale_state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let head_before_stale = store
         .load_session()
@@ -4978,7 +4978,7 @@ async fn wake_turn_policy_controls_coalescing(store: Arc<dyn RuntimePersistence>
     );
     let state = RuntimeSessionState {
         session_id: "wake-policy-merge".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     store
         .commit_runtime_state(
@@ -5085,7 +5085,7 @@ async fn queued_work_completion_is_lease_guarded(store: Arc<dyn RuntimePersisten
     stale_completion.lease_token.push_str(":stale");
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let err = store
         .commit_runtime_state(
@@ -5165,7 +5165,7 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
         turn_index: 41,
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let mut base_commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
     base_commit.enqueued_queue_batches = vec![
@@ -5691,7 +5691,7 @@ async fn pending_turn_input_claims_reclaim_complete_and_fence(store: Arc<dyn Run
 
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let err = store
         .commit_runtime_state(
@@ -5820,7 +5820,7 @@ async fn turn_input_claims_supersede_across_session_lease_generations_with_timin
 
     let stale_state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let stale_err = store
         .commit_runtime_state(
@@ -5931,7 +5931,7 @@ pub async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint(
 
     let stale_state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let stale_error = store
         .commit_runtime_state(
@@ -6004,7 +6004,7 @@ async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     let lease = claim_session_execution_lease_for_test(&store, "root", "cancel-input-owner").await;
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     store
         .commit_runtime_state(
@@ -6134,7 +6134,7 @@ async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
 
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let interrupt_result = store
         .commit_runtime_state(
@@ -6265,7 +6265,7 @@ async fn gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(
     let v1 = RuntimeSessionState {
         session_id: "gc-blobs".to_string(),
         tool_state_snapshot: Some(ToolState::default().with_generation(1)),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let v1_result = commit_runtime_state_for_test(
         &store,
@@ -6280,7 +6280,7 @@ async fn gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(
         session_id: "gc-blobs".to_string(),
         tool_state_snapshot: Some(ToolState::default().with_generation(2)),
         head_revision: v1_result.head_revision,
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     commit_runtime_state_for_test(
         &store,
@@ -6424,7 +6424,7 @@ fn sha256_of(bytes: &[u8]) -> impl std::fmt::LowerHex {
 async fn append_receipt_survives_reopen(factory: ReopenableRuntimePersistence) {
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let nodes = vec![crate::SessionAppendNode::plugin(
         "append-receipt-reopen",
@@ -6474,7 +6474,7 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
         tool_state_snapshot: Some(ToolState::default().with_generation(77)),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let initial_commit = commit_runtime_state_for_test(
         &factory.open,
@@ -6739,7 +6739,7 @@ async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
     ));
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     store
         .commit_runtime_state(
@@ -6780,7 +6780,7 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
 ) {
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
     state.session_graph.data_mut().nodes[0].timestamp = "2026-07-26T10:00:00Z".to_string();
@@ -6841,7 +6841,7 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     let changed_state = RuntimeSessionState {
         session_id: "root".to_string(),
         turn_index: 1,
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let mut changed = RuntimeCommit::persisted_state_for_test(&changed_state, &[]);
     changed.turn_commit =
@@ -6859,7 +6859,7 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
 async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
     let operation = crate::OperationId::turn("root", "realization-guard", "final");
@@ -6873,9 +6873,9 @@ async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePersis
             payload: crate::SessionNodePayload::FrameOpen {
                 frame_key: frame_key.to_string(),
                 reason: AgentFrameReason::initial(),
-                assignment: crate::AgentFrameAssignment::from_policy(
-                    crate::SessionPolicy::default(),
-                ),
+                assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                )),
                 protocol_turn_options: ProtocolTurnOptions::default(),
             },
         }],
@@ -6926,7 +6926,7 @@ async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePersis
 async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
     let operation = crate::OperationId::turn("root", "guard-turn", "final");
@@ -6964,7 +6964,7 @@ async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePersis
 async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
     let frame_key = "collision-frame";
@@ -6976,7 +6976,9 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
         payload: crate::SessionNodePayload::FrameOpen {
             frame_key: frame_key.to_string(),
             reason: AgentFrameReason::new("original"),
-            assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::default()),
+            assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            )),
             protocol_turn_options: ProtocolTurnOptions::default(),
         },
     };
@@ -6991,7 +6993,9 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
         payload: crate::SessionNodePayload::FrameOpen {
             frame_key: frame_key.to_string(),
             reason: AgentFrameReason::new("replacement"),
-            assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::default()),
+            assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            )),
             protocol_turn_options: ProtocolTurnOptions::default(),
         },
         ..original
@@ -7027,7 +7031,7 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
 async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let duplicate_node_id = crate::frame_node_id("root", "duplicate");
     let commit = RuntimeCommit::persisted_state_with_graph_commit(
@@ -7064,7 +7068,7 @@ async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersisten
 async fn commit_rejects_unresolvable_leaf(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let commit = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
@@ -7100,7 +7104,7 @@ async fn commit_rejects_unresolvable_leaf(store: Arc<dyn RuntimePersistence>) {
 async fn commit_rejects_missing_leaf(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let missing = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
@@ -7131,7 +7135,7 @@ async fn commit_rejects_missing_leaf(store: Arc<dyn RuntimePersistence>) {
 async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: "empty-append-head-move".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
     let first = store

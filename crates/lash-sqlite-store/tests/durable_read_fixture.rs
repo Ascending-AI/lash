@@ -91,7 +91,8 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
             Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
         )
         .await
-        .expect("open SQLite durable-core fixture"),
+        .expect("open SQLite durable-core fixture")
+        .with_commit_count_seed_for_testing(0),
     );
     let processes = Arc::new(
         SqliteProcessRegistry::open_with_clock(

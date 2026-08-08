@@ -640,7 +640,7 @@ async fn facade_final_value_execution_inner(
         ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    let mut builder = lash::LashCore::rlm_builder(factory)
+    let mut builder = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .effect_host(Arc::new(
             lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
@@ -966,7 +966,7 @@ fn agent_process_contract_core_with_options_and_effect_host(
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     )
     .with_lashlang_execution_sink(Arc::clone(&graph_store) as Arc<dyn lash::tracing::TraceSink>);
-    let mut builder = lash::LashCore::rlm_builder(factory)
+    let mut builder = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .effect_host(effect_host)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
@@ -993,7 +993,7 @@ fn agent_process_contract_core_with_options_and_effect_host(
         builder = builder.plugin(agent_contract_subagents_plugin());
     }
     if let Some(max_turns) = max_turns {
-        builder = builder.max_turns(max_turns);
+        builder = builder.turn_budget(lash::TurnBudget::bounded(max_turns));
     }
     let core = builder
         .build()

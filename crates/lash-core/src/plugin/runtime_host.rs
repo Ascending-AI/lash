@@ -165,6 +165,13 @@ pub struct SessionTurnInput {
 pub struct SessionTurnRequest<'run> {
     turn: SessionTurnInput,
     scoped_effect_controller: crate::ScopedEffectController<'run>,
+    admission_class: ManagedTurnAdmissionClass,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ManagedTurnAdmissionClass {
+    Normal,
+    RuntimeInternalCompaction,
 }
 
 impl<'run> SessionTurnRequest<'run> {
@@ -217,7 +224,22 @@ impl<'run> SessionTurnRequest<'run> {
                 input,
             },
             scoped_effect_controller,
+            admission_class: ManagedTurnAdmissionClass::Normal,
         })
+    }
+
+    /// Mark correctness-critical rolling-history compaction as runtime-internal.
+    ///
+    /// The turn remains registered for collision checks and observability, but
+    /// it does not consume or compete for the host's managed-turn admission cap.
+    #[doc(hidden)]
+    pub fn with_runtime_internal_compaction_admission(mut self) -> Self {
+        self.admission_class = ManagedTurnAdmissionClass::RuntimeInternalCompaction;
+        self
+    }
+
+    pub(crate) fn admission_class(&self) -> ManagedTurnAdmissionClass {
+        self.admission_class
     }
 
     pub fn session_id(&self) -> &str {

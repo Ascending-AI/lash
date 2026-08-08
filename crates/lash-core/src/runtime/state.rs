@@ -19,7 +19,6 @@ use super::usage::TokenLedgerEntry;
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeSessionState {
     pub session_id: String,
-    #[serde(default)]
     pub policy: SessionPolicy,
     /// Derived cache of FrameOpen nodes; never serialized or persisted.
     #[serde(skip)]
@@ -74,6 +73,33 @@ pub struct RuntimeSessionState {
 }
 
 impl RuntimeSessionState {
+    /// Construct empty runtime state with an explicitly chosen session policy.
+    pub fn new(policy: SessionPolicy) -> Self {
+        Self {
+            session_id: "root".to_string(),
+            policy,
+            agent_frames: Vec::new(),
+            current_frame_node_id: None,
+            session_graph: crate::SessionGraph::default(),
+            turn_index: 0,
+            token_usage: TokenUsage::default(),
+            last_prompt_usage: None,
+            protocol_turn_options: crate::ProtocolTurnOptions::default(),
+            tool_state_ref: None,
+            tool_state_generation: None,
+            tool_state_snapshot: None,
+            plugin_snapshot_ref: None,
+            plugin_snapshot_revision: None,
+            plugin_snapshot: None,
+            execution_state_ref: None,
+            execution_state_snapshot: None,
+            token_ledger: Vec::new(),
+            checkpoint_ref: None,
+            head_revision: 0,
+            persisted_node_ids: std::collections::HashSet::new(),
+        }
+    }
+
     /// Builds a `RuntimeSessionState` from snapshot data for protocol and process-engine
     /// implementors while materializing or restoring protocol session state.
     pub fn from_snapshot(snapshot: SessionSnapshot) -> Self {
@@ -436,6 +462,9 @@ pub(crate) mod facade_ops {
     /// This is not integrator surface, carries no stability promise, and exists
     /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
     pub trait RuntimeSessionStateFacadeOps {
+        // APIT is intentionally non-dyn-compatible; this trait has one static-dispatch impl.
+        fn empty_for(session_id: impl Into<String>, policy: SessionPolicy) -> RuntimeSessionState;
+
         fn turn_state(&self) -> PersistedTurnState;
 
         // APIT is intentionally non-dyn-compatible; this trait has one static-dispatch impl.
@@ -451,6 +480,13 @@ pub(crate) mod facade_ops {
     }
 
     impl RuntimeSessionStateFacadeOps for RuntimeSessionState {
+        fn empty_for(session_id: impl Into<String>, policy: SessionPolicy) -> RuntimeSessionState {
+            RuntimeSessionState {
+                session_id: session_id.into(),
+                ..RuntimeSessionState::new(policy)
+            }
+        }
+
         fn turn_state(&self) -> PersistedTurnState {
             PersistedTurnState {
                 turn_index: self.turn_index,
@@ -485,34 +521,6 @@ pub(crate) mod facade_ops {
                         fallback_policy.clone(),
                     )
                 })
-        }
-    }
-}
-
-impl Default for RuntimeSessionState {
-    fn default() -> Self {
-        Self {
-            session_id: "root".to_string(),
-            policy: SessionPolicy::default(),
-            agent_frames: Vec::new(),
-            current_frame_node_id: None,
-            session_graph: crate::SessionGraph::default(),
-            turn_index: 0,
-            token_usage: TokenUsage::default(),
-            last_prompt_usage: None,
-            protocol_turn_options: crate::ProtocolTurnOptions::default(),
-            tool_state_ref: None,
-            tool_state_generation: None,
-            tool_state_snapshot: None,
-            plugin_snapshot_ref: None,
-            plugin_snapshot_revision: None,
-            plugin_snapshot: None,
-            execution_state_ref: None,
-            execution_state_snapshot: None,
-            token_ledger: Vec::new(),
-            checkpoint_ref: None,
-            head_revision: 0,
-            persisted_node_ids: std::collections::HashSet::new(),
         }
     }
 }
@@ -586,13 +594,13 @@ mod tests {
             session_id: "snapshot-test".to_string(),
             policy: SessionPolicy {
                 provider_id: "mock".to_string(),
-                ..SessionPolicy::default()
+                ..SessionPolicy::new(crate::TurnBudget::Unbounded)
             },
             tool_state_snapshot: Some(crate::ToolState::default()),
             plugin_snapshot: Some(crate::PluginSessionSnapshot::default()),
             execution_state_snapshot: Some(vec![1, 2, 3]),
             head_revision: 42,
-            ..RuntimeSessionState::default()
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         state.ensure_agent_frame_initialized();
 
@@ -636,7 +644,7 @@ mod tests {
         let mut state = RuntimeSessionState {
             tool_state_ref: Some("persisted-tool-state".to_string().into()),
             tool_state_generation: Some(persisted_generation),
-            ..RuntimeSessionState::default()
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
 
         names.lock_recover().push("dynamic_two".to_string());

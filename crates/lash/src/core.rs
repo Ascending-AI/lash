@@ -270,14 +270,14 @@ pub struct SessionDeleteReport {
 }
 
 impl LashCore {
-    pub fn builder() -> LashCoreBuilder {
-        LashCoreBuilder::default()
+    pub fn builder(turn_budget: lash_core::TurnBudget) -> LashCoreBuilder {
+        LashCoreBuilder::new(turn_budget)
     }
 
     /// Sugar entry point: a [`LashCoreBuilder`] pre-seeded with the standard
     /// protocol plugin and the default runtime plugin stack.
-    pub fn standard_builder() -> LashCoreBuilder {
-        LashCore::builder()
+    pub fn standard_builder(turn_budget: lash_core::TurnBudget) -> LashCoreBuilder {
+        LashCore::builder(turn_budget)
             .protocol_plugin(Arc::new(
                 lash_protocol_standard::StandardProtocolPluginFactory::new(),
             ))
@@ -292,8 +292,11 @@ impl LashCore {
     /// resolver, execution sink/jsonl path, and — required at construction — the
     /// Lashlang artifact store) before passing it in.
     #[cfg(feature = "rlm")]
-    pub fn rlm_builder(factory: crate::rlm::RlmProtocolPluginFactory) -> LashCoreBuilder {
-        LashCore::builder()
+    pub fn rlm_builder(
+        turn_budget: lash_core::TurnBudget,
+        factory: crate::rlm::RlmProtocolPluginFactory,
+    ) -> LashCoreBuilder {
+        LashCore::builder(turn_budget)
             .protocol_plugin(Arc::new(factory))
             .plugins(default_runtime_stack())
     }
@@ -870,7 +873,6 @@ fn default_runtime_stack() -> PluginStack {
     lash_plugin_tool_output_budget::tool_output_budget_stack()
 }
 
-#[derive(Default)]
 pub struct LashCoreBuilder {
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
     session_spec: SessionSpec,
@@ -914,6 +916,39 @@ pub struct LashCoreBuilder {
 }
 
 impl LashCoreBuilder {
+    fn new(turn_budget: lash_core::TurnBudget) -> Self {
+        Self {
+            protocol_factory: None,
+            session_spec: SessionSpec::new().turn_budget(turn_budget),
+            provider: None,
+            store_factory: None,
+            child_store_factory: None,
+            effect_host: None,
+            attachment_store: None,
+            process_env_store: None,
+            trigger_store: None,
+            prompt: None,
+            trace_sink: None,
+            trace_level: None,
+            trace_context: None,
+            termination: None,
+            runtime_host_config: None,
+            tool_providers: Vec::new(),
+            plugin_stack: PluginStack::default(),
+            plugin_host: None,
+            lease_timings: None,
+            clock: None,
+            process_work_source: ProcessWorkSource::default(),
+            process_execution_concurrency: None,
+            queued_work_execution_concurrency: None,
+            process_event_sink: None,
+            wake_turn_policy: None,
+            process_tool_visibility_filter: None,
+            queued_work_source: QueuedWorkSource::default(),
+            live_replay_store: None,
+        }
+    }
+
     pub fn protocol_plugin(mut self, plugin: Arc<dyn PluginFactory>) -> Self {
         self.protocol_factory = Some(plugin);
         self
@@ -930,8 +965,8 @@ impl LashCoreBuilder {
         self
     }
 
-    pub fn max_turns(mut self, max_turns: usize) -> Self {
-        self.session_spec = self.session_spec.max_turns(max_turns);
+    pub fn turn_budget(mut self, turn_budget: lash_core::TurnBudget) -> Self {
+        self.session_spec = self.session_spec.turn_budget(turn_budget);
         self
     }
 
@@ -1219,12 +1254,15 @@ impl LashCoreBuilder {
             .model
             .clone()
             .ok_or(EmbedError::MissingModelSpec)?;
+        let turn_budget = self
+            .session_spec
+            .turn_budget
+            .ok_or(EmbedError::MissingTurnBudget)?;
 
         let base_policy = SessionPolicy {
             provider_id,
             model,
-            max_turns: self.session_spec.max_turns.flatten(),
-            ..SessionPolicy::default()
+            ..SessionPolicy::new(turn_budget)
         };
         let policy = self.session_spec.resolve_against(&base_policy);
 

@@ -545,7 +545,7 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 30, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 31, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         id: "process:1".to_string(),
@@ -571,7 +571,7 @@ fn remote_process_dtos_json_round_trip() {
                     },
                     ..Default::default()
                 },
-                ..Default::default()
+                ..RemoteProcessExecutionPolicy::new(RemoteTurnBudget::Unbounded)
             },
         }),
         originator: RemoteProcessOriginator::Session {
@@ -775,7 +775,7 @@ fn remote_trigger_subscription_dtos_json_round_trip() {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         subscription_key: "button-watcher".to_string(),
         env_ref:
-            "process-env:v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "process-env:v3:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .parse()
                 .expect("canonical env ref"),
         wake_target: Some(RemoteSessionScope::new("session")),
@@ -981,8 +981,8 @@ fn remote_process_env_ref_is_validated_but_serializes_as_string() {
     for invalid in [
         "",
         "process-env:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "process-env:v2:sha256:abc",
-        "process-env:v2:sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "process-env:v3:sha256:abc",
+        "process-env:v3:sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "tool-authority:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     ] {
         assert!(
@@ -997,7 +997,7 @@ fn remote_process_env_ref_is_validated_but_serializes_as_string() {
 fn remote_process_env_persistence_dtos_validate() {
     let request = RemotePersistProcessEnvRequest {
         protocol_version: REMOTE_PROTOCOL_VERSION,
-        env_spec: RemoteProcessExecutionEnvSpec::default(),
+        env_spec: RemoteProcessExecutionEnvSpec::new(RemoteTurnBudget::Unbounded),
     };
     request.validate().expect("valid persist env request");
 
@@ -1031,7 +1031,7 @@ fn process_execution_policy_carries_session_generation_options() {
             },
             ..Default::default()
         },
-        ..Default::default()
+        ..RemoteProcessExecutionPolicy::new(RemoteTurnBudget::Unbounded)
     };
     assert!(
         serde_json::to_value(&policy)
@@ -1195,7 +1195,7 @@ fn remote_turn_request_schema_has_no_model_intent() {
 }
 
 fn canonical_env_ref() -> &'static str {
-    "process-env:v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    "process-env:v3:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 }
 
 fn remote_trigger_input_template() -> RemoteTriggerInputTemplate {
@@ -1262,7 +1262,7 @@ fn remote_process_record() -> RemoteProcessRecord {
             caused_by: None,
         },
         env_ref: Some(
-            "process-env:v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "process-env:v3:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .parse()
                 .expect("canonical env ref"),
         ),

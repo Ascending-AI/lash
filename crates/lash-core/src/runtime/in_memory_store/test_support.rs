@@ -318,7 +318,7 @@ mod tests {
         let request = |session_id: &str| SessionStoreCreateRequest {
             session_id: session_id.to_string(),
             relation: crate::SessionRelation::Root,
-            policy: crate::SessionPolicy::default(),
+            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         };
         factory
             .create_store(&request("first"))
@@ -336,7 +336,7 @@ mod tests {
             .expect("second concrete store");
         let mut second_state = RuntimeSessionState {
             session_id: "second".to_string(),
-            ..Default::default()
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         second_state.ensure_agent_frame_initialized();
         let usage = TokenLedgerEntry {
@@ -381,7 +381,7 @@ mod tests {
         let store = super::InMemorySessionStore::new();
         let state = RuntimeSessionState {
             session_id: "budget-before-backend".to_string(),
-            ..Default::default()
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         let node = crate::SessionNodeRecord {
             node_id: "node".to_string(),
@@ -504,7 +504,7 @@ mod tests {
             });
         let state = RuntimeSessionState {
             session_id: "session".to_string(),
-            ..Default::default()
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         store
             .admit_and_bind_session(&crate::SessionBinding::root(
@@ -580,7 +580,7 @@ mod tests {
         };
         let state = RuntimeSessionState {
             session_id: session_id.to_string(),
-            ..RuntimeSessionState::default()
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
         commit.enqueued_queue_batches = vec![crate::process_wake_batch_draft(wake)];
@@ -622,7 +622,7 @@ mod tests {
             let request = SessionStoreCreateRequest {
                 session_id: format!("delete-create-race-{round}"),
                 relation: crate::SessionRelation::Root,
-                policy: crate::SessionPolicy::default(),
+                policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             };
             factory
                 .create_store(&request)

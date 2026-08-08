@@ -483,7 +483,7 @@ mod tests {
     fn test_process_observer(
         registry: Arc<dyn lash::process::ProcessRegistry>,
     ) -> lash::process::ProcessWorkObserver {
-        let core = lash::LashCore::standard_builder()
+        let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
             .model(
                 lash::ModelSpec::builder("test-model")
                     .context_window_tokens(4096)

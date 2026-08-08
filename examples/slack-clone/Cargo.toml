@@ -30,7 +30,7 @@ name = "slack-clone-mcp-server"
 path = "src/bin/mcp_server.rs"
 
 # Standard-mode host: no `rlm` feature, no `lash-protocol-rlm`, no Lashlang
-# artifact store. `LashCore::standard_builder()` pre-seeds the standard protocol
+# artifact store. `LashCore::standard_builder(TurnBudget::Unbounded)` pre-seeds the standard protocol
 # plugin, and the bot's turns are native tool-loop turns.
 [dependencies]
 anyhow = { workspace = true }

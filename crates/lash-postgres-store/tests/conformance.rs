@@ -874,7 +874,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .create_store(&lash_core::SessionStoreCreateRequest {
             session_id: session_id.to_string(),
             relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await
         .expect("create source-lock target");
@@ -977,7 +977,9 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     let completion = tokio::spawn(async move {
         let state = lash_core::RuntimeSessionState {
             session_id: session_id.to_string(),
-            ..lash_core::RuntimeSessionState::default()
+            ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+            ))
         };
         completion_store
             .commit_runtime_state(
@@ -1270,7 +1272,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .create_store(&lash_core::SessionStoreCreateRequest {
             session_id: SESSION_ID.to_string(),
             relation: lash_core::SessionRelation::default(),
-            policy: lash_core::SessionPolicy::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await
         .expect("create clocked Postgres session store");
@@ -1293,7 +1295,9 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .expect("clock test lease acquired");
     let state = lash_core::RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
-        ..Default::default()
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     let operation = lash_core::OperationId::turn(SESSION_ID, TURN_ID, "final");
     let operation_key = operation.storage_key().expect("canonical operation key");
@@ -1345,7 +1349,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 38, "Postgres component schema pin");
+    assert_eq!(current_version, 39, "Postgres component schema pin");
     let payload_hash_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
          WHERE table_schema = 'public'

@@ -5,7 +5,7 @@
 /// A standard-mode builder with a model + provider already named, ready for the
 /// explicit dependency wiring under test.
 fn peer_coherence_builder() -> crate::core::LashCoreBuilder {
-    LashCore::standard_builder()
+    LashCore::standard_builder(crate::TurnBudget::Unbounded)
         .provider(mock_provider())
         .model(mock_model_spec())
 }
@@ -59,7 +59,7 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
     let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::with_clock(
         clock.clone(),
     )) as Arc<dyn lash_core::SessionStoreFactory>;
-    let core = LashCore::standard_builder()
+    let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
         .model(
             lash_core::ModelSpec::builder("clock-wiring-model")
                 .context_window_tokens(4_096)
@@ -238,9 +238,9 @@ async fn default_process_work_driver_resolves_when_registry_and_store_factory_pr
         policy: lash_core::SessionPolicy {
             provider_id: mock_provider().kind().to_string(),
             model: mock_model_spec(),
-            ..Default::default()
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
-        ..Default::default()
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
     let core = explicit_ephemeral_facets(peer_coherence_builder())
@@ -286,7 +286,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
     use lash_core::SessionStoreFactory as _;
 
     let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>)
@@ -308,7 +308,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
         provider_id: "orphaned-source-provider".to_string(),
         model: source_model,
         session_id: Some("orphaned-fork-source".to_string()),
-        ..Default::default()
+        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let source_request = lash_core::SessionStoreCreateRequest {
         session_id: "orphaned-fork-source".to_string(),
@@ -322,7 +322,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: source_request.session_id.clone(),
         policy: source_policy,
-        ..Default::default()
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     source_state.ensure_agent_frame_initialized();
     source
@@ -356,7 +356,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
         .open_existing_store(&lash_core::SessionStoreCreateRequest {
             session_id: "orphaned-fork-branch".to_string(),
             relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await
         .expect("open orphaned-source fork")
@@ -383,7 +383,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
 
     let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let registry = Arc::new(TestLocalProcessRegistry::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>)
@@ -395,7 +395,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         provider_id: "fork-source-provider".to_string(),
         model: source_model,
         session_id: Some("fork-observer-source".to_string()),
-        ..Default::default()
+        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let source_store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
@@ -408,7 +408,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: "fork-observer-source".to_string(),
         policy,
-        ..Default::default()
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     source_state.ensure_agent_frame_initialized();
     source_store
@@ -468,7 +468,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .open_existing_store(&lash_core::SessionStoreCreateRequest {
             session_id: "fork-observer-branch".to_string(),
             relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await
         .expect("open branch store")
@@ -509,7 +509,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .open_existing_store(&lash_core::SessionStoreCreateRequest {
             session_id: "fork-transient-branch".to_string(),
             relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await
         .expect("open transient-failure branch store")
@@ -602,7 +602,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     core.session("fork-observer-branch")
         .open_with_state(lash_core::RuntimeSessionState {
             session_id: "fork-observer-branch".to_string(),
-            ..Default::default()
+            ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
         })
         .await?;
     assert_eq!(
@@ -765,10 +765,10 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
                 relation: Box::new(lash_core::SessionRelation::Root),
                 pending_observer_process_ids: vec![process_id.to_string()],
             },
-            policy: lash_core::SessionPolicy::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await?;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>)
@@ -835,7 +835,7 @@ async fn nested_session_observer_intents_settle_every_layer_before_open_returns(
 
     let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let registry = Arc::new(TestLocalProcessRegistry::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>)
@@ -870,7 +870,7 @@ async fn nested_session_observer_intents_settle_every_layer_before_open_returns(
                     }),
                     pending_observer_process_ids: vec![create_process_id.clone()],
                 },
-                policy: lash_core::SessionPolicy::default(),
+                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             })
             .await?;
 
@@ -1025,7 +1025,7 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
         projection_provenance: Default::default(),
     };
     let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .generation(host_generation.clone())
@@ -1044,7 +1044,7 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
             seed: Some(9),
             ..Default::default()
         },
-        ..Default::default()
+        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let source_store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
@@ -1057,7 +1057,7 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: "generation-fork-source".to_string(),
         policy: source_policy,
-        ..Default::default()
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     source_state.ensure_agent_frame_initialized();
     source_store

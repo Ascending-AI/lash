@@ -235,7 +235,7 @@ async fn queued_work_wake_preserves_a_retired_session_terminal() {
             .create_store(&lash::persistence::SessionStoreCreateRequest {
                 session_id: session_id.to_string(),
                 relation: lash::persistence::SessionRelation::default(),
-                policy: lash::runtime::SessionPolicy::default(),
+                policy: lash::runtime::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             })
             .await
             .expect("create session before retirement"),

@@ -25,7 +25,7 @@ fn configure_lease_timings(
     )
     .expect("ttl >= 3 * renew_interval");
 
-    let core = LashCore::rlm_builder(factory)
+    let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(
             lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")

@@ -34,7 +34,7 @@ pub(super) fn runtime_core_for_scripts(
     let (provider_handle, model, provider_kind) =
         runtime_provider_components(&provider_kind, &transport)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let mut builder = lash::LashCore::standard_builder()
+    let mut builder = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .effect_host(Arc::new(
             lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
         ))

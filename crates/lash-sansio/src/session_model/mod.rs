@@ -14,6 +14,45 @@ pub use prompt::{
 
 use std::sync::Arc;
 
+/// Per-turn budget: the maximum number of protocol iterations (model calls) a
+/// single turn may run before a clean MaxTurns stop is scheduled.
+///
+/// Hosts must choose a finite limit or opt into unlimited execution explicitly.
+/// `Bounded` uses a non-zero value so a turn always has an opportunity to run
+/// at least one iteration.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnBudget {
+    Bounded(std::num::NonZeroUsize),
+    Unbounded,
+}
+
+impl TurnBudget {
+    /// Construct a finite per-turn iteration budget.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `max_turns` is zero. In a const context, a literal zero is
+    /// rejected during compilation.
+    pub const fn bounded(max_turns: usize) -> Self {
+        match std::num::NonZeroUsize::new(max_turns) {
+            Some(max_turns) => Self::Bounded(max_turns),
+            None => {
+                panic!("turn budget must be non-zero; use TurnBudget::Unbounded to opt out")
+            }
+        }
+    }
+
+    pub fn max_turns(self) -> Option<usize> {
+        match self {
+            Self::Bounded(max_turns) => Some(max_turns.get()),
+            Self::Unbounded => None,
+        }
+    }
+}
+
 use crate::MessageOrigin;
 use crate::ToolDefinition;
 use crate::llm::types::LlmToolSpec;
@@ -451,12 +490,12 @@ impl TurnTerminationPolicyState {
         &self,
         protocol_iteration: usize,
         protocol_run_offset: usize,
-        max_turns: Option<usize>,
+        turn_budget: TurnBudget,
     ) -> Option<usize> {
         if self.turn_limit_final_scheduled {
             return None;
         }
-        let max = max_turns?;
+        let max = turn_budget.max_turns()?;
         if protocol_iteration < protocol_run_offset + max {
             return None;
         }
@@ -549,8 +588,38 @@ pub fn model_tool_specs(tools: &[ToolDefinition]) -> Vec<LlmToolSpec> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ErrorEnvelope, SessionStreamEvent, TokenUsage, TurnOutcome};
+    use super::{
+        ErrorEnvelope, SessionStreamEvent, TokenUsage, TurnBudget, TurnOutcome,
+        TurnTerminationPolicyState,
+    };
     use crate::llm::types::{LlmTerminalReason, ProviderFailureKind};
+
+    #[test]
+    fn bounded_turn_budget_exhausts_exactly_at_n_iterations() {
+        let state = TurnTerminationPolicyState::new();
+        let budget = TurnBudget::bounded(3);
+
+        assert_eq!(state.turn_limit_final_to_schedule(6, 4, budget), None);
+        assert_eq!(state.turn_limit_final_to_schedule(7, 4, budget), Some(3));
+    }
+
+    #[test]
+    #[should_panic(expected = "turn budget must be non-zero; use TurnBudget::Unbounded to opt out")]
+    fn bounded_turn_budget_rejects_zero() {
+        let _ = TurnBudget::bounded(0);
+    }
+
+    #[test]
+    fn unbounded_turn_budget_never_schedules_a_limit_stop() {
+        let state = TurnTerminationPolicyState::new();
+
+        for iteration in [0, 1, 10_000, usize::MAX] {
+            assert_eq!(
+                state.turn_limit_final_to_schedule(iteration, 0, TurnBudget::Unbounded),
+                None
+            );
+        }
+    }
 
     #[test]
     fn checked_token_usage_add_is_atomic_and_reasoning_is_not_additive_total() {

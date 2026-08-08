@@ -33,7 +33,7 @@ fn intent_fixture() -> RuntimeCommit {
     let mut state = crate::RuntimeSessionState {
         session_id: "golden-session".to_string(),
         turn_index: 7,
-        ..crate::RuntimeSessionState::default()
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
     state.session_graph.data_mut().nodes[0].timestamp = "2026-07-26T10:00:00Z".to_string();
@@ -157,7 +157,7 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
             }],
             Some(placeholder),
         ),
-        ..crate::RuntimeSessionState::default()
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let operation = OperationId::new(
         crate::ExecutionScope::runtime_operation("first-commit"),
@@ -247,7 +247,7 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
 fn intent_hash_golden_vector() {
     assert_eq!(
         intent_fixture().turn_commit_hash().expect("golden intent"),
-        "2c20265fafb2dac582ccba071cf210647dfd4fc15a90f679067fed8ca77d5030"
+        "725513f61895c55b878cd9212b021d7a656d7c3d104917ad2dcf327f3470d2bf"
     );
 }
 
@@ -274,7 +274,7 @@ fn session_head_payload_bytes_match_the_legacy_meta_format() {
         schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
         session_id: "column-owned-head".to_string(),
         head_revision: 41,
-        config: crate::PersistedSessionConfig::default(),
+        config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
         current_frame_node_id: None,
         checkpoint_ref: Some(BlobRef("checkpoint".to_string())),
         leaf_node_id: Some("leaf".to_string()),
@@ -283,7 +283,7 @@ fn session_head_payload_bytes_match_the_legacy_meta_format() {
         SessionHeadPayload {
             schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
             session_id: "column-owned-head".to_string(),
-            config: crate::PersistedSessionConfig::default(),
+            config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
             current_frame_node_id: None,
         },
         41,
@@ -502,9 +502,9 @@ fn frame_node_identity_is_stable_across_operation_realization() {
             payload: crate::SessionNodePayload::FrameOpen {
                 frame_key: "initial-frame".to_string(),
                 reason: crate::AgentFrameReason::initial(),
-                assignment: crate::AgentFrameAssignment::from_policy(
-                    crate::SessionPolicy::default(),
-                ),
+                assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                )),
                 protocol_turn_options: crate::ProtocolTurnOptions::default(),
             },
         }],

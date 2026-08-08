@@ -580,7 +580,9 @@ pub(super) fn run_rlm_protocol_contract(
         Some(options) => rlm_contract_config_with_turn_options(options),
         None => rlm_contract_config(termination),
     }?;
-    config.max_turns = max_turns;
+    config.turn_budget = max_turns
+        .map(lash_core::TurnBudget::bounded)
+        .unwrap_or(lash_core::TurnBudget::Unbounded);
     let mut machine = lash_core::TurnMachine::new(
         config,
         vec![contract_user_message(user_message)],
@@ -729,7 +731,7 @@ fn rlm_contract_config_with_turn_options(
         sync_execution_environment: true,
         model: "rlm-contract".to_string(),
         max_context_tokens: None,
-        max_turns: None,
+        turn_budget: lash_core::TurnBudget::Unbounded,
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
         generation: lash_core::GenerationOptions::default(),

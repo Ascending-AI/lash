@@ -1779,7 +1779,7 @@ async fn assert_enqueued_wake_high_water_safety(
         })?;
     let mut state = RuntimeSessionState {
         session_id: session.to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let commit = runtime
         .commit_runtime_state(
@@ -1996,7 +1996,9 @@ async fn assert_prune_reregister_wake_fence(
             RuntimeCommit::persisted_state_for_test(
                 &RuntimeSessionState {
                     session_id: session.to_string(),
-                    ..RuntimeSessionState::default()
+                    ..RuntimeSessionState::new(crate::SessionPolicy::new(
+                        crate::TurnBudget::Unbounded,
+                    ))
                 },
                 &[],
             )
@@ -2388,7 +2390,7 @@ async fn consume_wake(
         .map_err(|error| error.to_string())?
         .unwrap_or_else(|| RuntimeSessionState {
             session_id: session.to_string(),
-            ..RuntimeSessionState::default()
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         });
     let completion = if stale {
         let mut completion = claim.completion();

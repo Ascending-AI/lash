@@ -109,7 +109,10 @@ fn main() {
                     seed: Some(7),
                     stop_sequences: Vec::new(),
                 },
-                ..Default::default()
+                session_id: None,
+                autonomous: false,
+                turn_budget: lash::remote::processes::RemoteTurnBudget::Unbounded,
+                prompt: lash::remote::prompt::RemotePromptLayer::default(),
             },
         }),
         originator: lash::remote::processes::RemoteProcessOriginator::Host { scope: None },

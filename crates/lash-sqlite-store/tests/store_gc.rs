@@ -63,7 +63,7 @@ async fn factory_state(
     RuntimeSessionState {
         session_id: session_id.to_string(),
         head_revision,
-        ..Default::default()
+        ..RuntimeSessionState::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     }
 }
 
@@ -97,7 +97,9 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
         plugin_snapshot_revision: checkpoint.plugin_snapshot_revision,
         plugin_snapshot: checkpoint.plugin_snapshot.clone(),
         checkpoint_ref: Some(stored.checkpoint_ref.clone()),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     store
         .admit_and_bind_session(&lash_core::SessionBinding::root(
@@ -170,7 +172,9 @@ async fn auto_gc_runs_after_commit_without_reentrant_locking() {
         .await;
     let state = RuntimeSessionState {
         session_id: "auto-gc".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     store
         .admit_and_bind_session(&lash_core::SessionBinding::root(
@@ -232,7 +236,7 @@ async fn sqlite_catalog_indexes_usage_by_session() {
         .create_store(&SessionStoreCreateRequest {
             session_id: "usage-index".to_string(),
             relation: lash_core::SessionRelation::Root,
-            policy: SessionPolicy::default(),
+            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await
         .expect("create store");
@@ -265,7 +269,7 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
         },
         policy: SessionPolicy {
             model: model_spec("first-model"),
-            ..SessionPolicy::default()
+            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
     };
 
@@ -297,7 +301,7 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
         .create_store(&SessionStoreCreateRequest {
             policy: SessionPolicy {
                 model: model_spec("second-model"),
-                ..SessionPolicy::default()
+                ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
             },
             ..request
         })
@@ -323,7 +327,7 @@ async fn sqlite_factory_is_explicitly_usable_as_session_store_factory() {
         relation: lash_core::SessionRelation::Root,
         policy: SessionPolicy {
             model: model_spec("model"),
-            ..SessionPolicy::default()
+            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
     };
 
@@ -347,7 +351,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         relation: lash_core::SessionRelation::Root,
         policy: SessionPolicy {
             model: model_spec("model"),
-            ..SessionPolicy::default()
+            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
     };
     let deleted_store = factory
@@ -467,7 +471,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
     let store_for = |session_id: &str| SessionStoreCreateRequest {
         session_id: session_id.to_string(),
         relation: lash_core::SessionRelation::Root,
-        policy: SessionPolicy::default(),
+        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
     let first = factory
         .create_store(&store_for("first"))
@@ -490,7 +494,9 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
             payload: lash_core::SessionNodePayload::FrameOpen {
                 frame_key: "shared-frame-key".to_string(),
                 reason: lash_core::AgentFrameReason::initial(),
-                assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::default()),
+                assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                )),
                 protocol_turn_options: Default::default(),
             },
         };
@@ -536,7 +542,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
     let request = |session_id: &str| SessionStoreCreateRequest {
         session_id: session_id.to_string(),
         relation: lash_core::SessionRelation::Root,
-        policy: SessionPolicy::default(),
+        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
     let first = factory
         .create_store(&request("leaf-a"))
@@ -556,7 +562,9 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         payload: lash_core::SessionNodePayload::FrameOpen {
             frame_key: frame_key.to_string(),
             reason: lash_core::AgentFrameReason::initial(),
-            assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::default()),
+            assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+            )),
             protocol_turn_options: Default::default(),
         },
     };
@@ -596,7 +604,7 @@ async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
     let request = |session_id: &str| SessionStoreCreateRequest {
         session_id: session_id.to_string(),
         relation: lash_core::SessionRelation::Root,
-        policy: SessionPolicy::default(),
+        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
     let first = factory
         .create_store(&request("maintenance-a"))
@@ -653,7 +661,7 @@ async fn sqlite_snapshot_read_propagates_graph_statement_errors() {
         .create_store(&SessionStoreCreateRequest {
             session_id: "graph-read-error".to_string(),
             relation: lash_core::SessionRelation::Root,
-            policy: SessionPolicy::default(),
+            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await
         .expect("create store");
@@ -685,7 +693,7 @@ async fn sqlite_snapshot_read_rejects_undecodable_graph_nodes() {
         .create_store(&SessionStoreCreateRequest {
             session_id: "graph-node-decode-error".to_string(),
             relation: lash_core::SessionRelation::Root,
-            policy: SessionPolicy::default(),
+            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await
         .expect("create store");
@@ -731,7 +739,7 @@ async fn sqlite_snapshot_read_rejects_undecodable_graph_nodes() {
 async fn sqlite_picker_reads_inherited_history_from_fork_head_columns() {
     let root = unique_temp_dir("fork-picker");
     let factory = SqliteSessionStoreFactory::new(&root);
-    let policy = SessionPolicy::default();
+    let policy = SessionPolicy::new(lash_core::TurnBudget::Unbounded);
     let source = factory
         .create_store(&SessionStoreCreateRequest {
             session_id: "picker-source".to_string(),
@@ -769,7 +777,7 @@ async fn sqlite_picker_reads_inherited_history_from_fork_head_columns() {
         .open_existing_store(&SessionStoreCreateRequest {
             session_id: "picker-fork".to_string(),
             relation: lash_core::SessionRelation::Root,
-            policy: SessionPolicy::default(),
+            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await
         .expect("open fork")
@@ -805,7 +813,7 @@ async fn sqlite_snapshot_read_propagates_usage_statement_errors() {
         .create_store(&SessionStoreCreateRequest {
             session_id: "usage-read-error".to_string(),
             relation: lash_core::SessionRelation::Root,
-            policy: SessionPolicy::default(),
+            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await
         .expect("create store");

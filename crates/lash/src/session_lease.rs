@@ -149,7 +149,7 @@ impl LashCore {
         let request = lash_core::SessionStoreCreateRequest {
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::default(),
-            policy: lash_core::SessionPolicy::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         };
         let Some(store) = store_factory
             .open_existing_store(&request)

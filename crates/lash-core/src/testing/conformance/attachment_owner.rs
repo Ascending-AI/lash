@@ -459,7 +459,7 @@ async fn final_turn_commit(
         .expect("commit session metadata exists");
     let state = crate::RuntimeSessionState {
         session_id: session_id.to_string(),
-        ..crate::RuntimeSessionState::default()
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[])
         .with_committed_attachments(adopted_attachment_ids);
@@ -497,7 +497,7 @@ fn session_request(session_id: &str) -> crate::SessionStoreCreateRequest {
                 .expect("valid model"),
             provider_id: "attachment-owner-conformance".to_string(),
             session_id: Some(session_id.to_string()),
-            ..crate::SessionPolicy::default()
+            ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
         },
     }
 }

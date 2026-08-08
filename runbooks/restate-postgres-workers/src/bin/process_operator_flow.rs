@@ -323,7 +323,7 @@ fn core(
         ),
         Arc::new(storage.lashlang_artifact_store()),
     );
-    lash::LashCore::rlm_builder(protocol)
+    lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, protocol)
         .provider(provider)
         .model(
             lash::ModelSpec::builder("process-operator-flow-mock")

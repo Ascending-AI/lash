@@ -266,7 +266,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
         .create_store(&SessionStoreCreateRequest {
             session_id: session_id.clone(),
             relation: SessionRelation::Root,
-            policy: lash_core::SessionPolicy::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await
         .expect("create skewed-clock session store");
@@ -543,13 +543,15 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
         .create_store(&SessionStoreCreateRequest {
             session_id: session_id.clone(),
             relation: SessionRelation::Root,
-            policy: lash_core::SessionPolicy::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await
         .expect("create final-commit session store");
     let state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
@@ -591,7 +593,7 @@ async fn diagnostic_lease_read_neither_locks_the_row_nor_waits_for_a_holder() {
         .create_store(&SessionStoreCreateRequest {
             session_id: session_id.clone(),
             relation: SessionRelation::Root,
-            policy: Default::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await
         .expect("create the session store");

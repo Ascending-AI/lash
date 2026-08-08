@@ -171,7 +171,10 @@ impl StandardProtocolScenario {
 
     fn run(self) -> StandardProtocolRun {
         let mut config = standard_config();
-        config.max_turns = self.max_turns;
+        config.turn_budget = self
+            .max_turns
+            .map(lash_core::TurnBudget::bounded)
+            .unwrap_or(lash_core::TurnBudget::Unbounded);
         let mut machine = TurnMachine::new(
             config,
             vec![user_message(self.user_message)],
@@ -474,7 +477,7 @@ fn standard_config() -> TurnMachineConfig {
         sync_execution_environment: false,
         model: "test-model".to_string(),
         max_context_tokens: None,
-        max_turns: None,
+        turn_budget: lash_core::TurnBudget::Unbounded,
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
         generation: lash_core::GenerationOptions::default(),

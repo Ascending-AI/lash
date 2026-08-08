@@ -387,7 +387,9 @@ mod tests {
             .collect_prompt_contributions(PromptHookContext {
                 session_id: "root".to_string(),
                 sessions: Arc::new(MockSessionManager::default()),
-                state: SessionReadView::from_snapshot(&SessionSnapshot::default()),
+                state: SessionReadView::from_snapshot(&SessionSnapshot::new(
+                    crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+                )),
                 protocol_turn_options: ProtocolTurnOptions::default(),
                 turn_context: crate::TurnContext::default(),
             })

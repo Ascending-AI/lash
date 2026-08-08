@@ -27,7 +27,7 @@ fn test_config(protocol_driver: Arc<dyn ProtocolDriverHandle>) -> TurnMachineCon
         sync_execution_environment: false,
         model: "test-model".to_string(),
         max_context_tokens: None,
-        max_turns: None,
+        turn_budget: crate::TurnBudget::Unbounded,
         model_variant: crate::ReasoningSelection::ProviderDefault,
         model_capability: crate::llm::capability::ModelCapability::default(),
         generation: crate::llm::types::GenerationOptions::default(),

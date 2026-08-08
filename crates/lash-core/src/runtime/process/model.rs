@@ -229,7 +229,6 @@ impl fmt::Display for ProcessExecutionEnvRef {
 pub struct ProcessExecutionEnvSpec {
     #[serde(default)]
     pub plugin_options: crate::PluginOptions,
-    #[serde(default)]
     pub policy: crate::SessionPolicy,
 }
 
@@ -244,7 +243,7 @@ impl ProcessExecutionEnvSpec {
 
     /// Content-addresses the exact bytes persisted by [`Self::to_store_bytes`].
     ///
-    /// Version 2 is a clean cutover from the former live-model serde hash.
+    /// Version 3 adds the required turn-budget policy field.
     /// Store backends reject older schema versions and must be recreated; a
     /// future byte-format change requires a new textual family version and the
     /// same explicit old-row policy. These bytes follow the final binary's
@@ -268,7 +267,7 @@ impl ProcessExecutionEnvSpec {
 
 fn process_execution_env_ref_for_bytes(bytes: &[u8]) -> ProcessExecutionEnvRef {
     ProcessExecutionEnvRef::new(format!(
-        "process-env:v2:sha256:{}",
+        "process-env:v3:sha256:{}",
         crate::stable_hash::sha256_hex(bytes)
     ))
 }

@@ -242,7 +242,7 @@ async fn run_once_process_list_stress(chat_turns: usize) -> anyhow::Result<Runti
             );
             let spec = lash_core::ProcessExecutionEnvSpec::new(
                 options,
-                lash_core::SessionPolicy::default(),
+                lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             );
             let env_ref = spec
                 .stable_ref()

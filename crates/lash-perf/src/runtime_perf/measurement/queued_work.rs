@@ -889,7 +889,7 @@ async fn runtime_perf_commit_state(
 ) -> anyhow::Result<RuntimeSessionState> {
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     let policy = state.policy.clone();
     store

@@ -188,7 +188,7 @@ mod tests {
         SessionStoreCreateRequest {
             session_id: session_id.to_string(),
             relation: lash::persistence::SessionRelation::default(),
-            policy: lash::runtime::SessionPolicy::default(),
+            policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
         }
     }
 
@@ -197,7 +197,7 @@ mod tests {
     async fn durable_core(dir: &std::path::Path) -> (LashCore, Arc<dyn SessionStoreFactory>) {
         let factory: Arc<dyn SessionStoreFactory> =
             Arc::new(SqliteSessionStoreFactory::new(dir.join("sessions")));
-        let core = LashCore::standard_builder()
+        let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
             .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
             .attachment_store(Arc::new(
                 lash::persistence::InMemoryAttachmentStore::default(),

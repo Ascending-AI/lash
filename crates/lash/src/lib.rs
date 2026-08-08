@@ -55,9 +55,10 @@ pub use lash_core::{
     ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder, PendingTurnInput,
     PendingTurnInputCancelOutcome, PendingTurnInputCancelResult, PendingTurnInputCancelTarget,
     PendingTurnInputSuffixCancelOutcome, Resolution, ResolveOutcome, SessionCreateRequest,
-    SessionError, SessionStartPoint, TurnActivity, TurnActivityId, TurnCancelOriginHint, TurnCause,
-    TurnEvent, TurnInput, TurnInputApplication, facade_support::ExecutionSummary,
-    facade_support::GenerationOverlay, facade_support::PluginStack, facade_support::SessionCommand,
+    SessionError, SessionStartPoint, TurnActivity, TurnActivityId, TurnBudget,
+    TurnCancelOriginHint, TurnCause, TurnEvent, TurnInput, TurnInputApplication,
+    facade_support::ExecutionSummary, facade_support::GenerationOverlay,
+    facade_support::PluginStack, facade_support::SessionCommand,
     facade_support::SessionCommandReceipt, facade_support::SessionConfigPatch,
     facade_support::SessionSpec, facade_support::TurnActivitySink, facade_support::TurnAddress,
     facade_support::TurnAttach, facade_support::TurnCancelOutcome,
@@ -83,9 +84,9 @@ pub mod prelude {
         PromptLayerSink, QueuedTurnBuilder, Result, SessionBuilder, SessionCommand,
         SessionCommandAdmin, SessionCommandReceipt, SessionConfigPatch, SessionCreateRequest,
         SessionDeleteReport, SessionSpec, SessionStartPoint, SessionTriggerAdmin, ToolAdmin,
-        TurnActivity, TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBuilder, TurnCause,
-        TurnEvent, TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput,
-        TurnResult, TurnStop, TurnStream, message_role, message_text,
+        TurnActivity, TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget,
+        TurnBuilder, TurnCause, TurnEvent, TurnFinish, TurnInput, TurnInputAcceptanceReceipt,
+        TurnOutcome, TurnOutput, TurnResult, TurnStop, TurnStream, message_role, message_text,
     };
 }
 
@@ -398,7 +399,7 @@ pub mod remote {
             RemoteProcessWake, RemoteProcessWakeSpec, RemoteProcessWorkItem,
             RemoteProcessWorkSnapshot, RemoteRecoveryDisposition, RemoteRuntimeEffectKind,
             RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeScope, RemoteRuntimeSubject,
-            RemoteSessionScope, RemoteToolFailureClass,
+            RemoteSessionScope, RemoteToolFailureClass, RemoteTurnBudget,
         };
     }
 

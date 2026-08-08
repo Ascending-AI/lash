@@ -208,7 +208,7 @@ async fn inherited_child_session_carries_parent_tool_state() {
         standard_test_policy(),
         test_host_config(),
         crate::RuntimeServices::new(plugin_session),
-        RuntimeSessionState::default(),
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
     )
     .await
     .expect("runtime");
@@ -296,7 +296,7 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
         .with_session_store_factory(Arc::new(child_factory.clone()));
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
@@ -413,7 +413,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         ),
         RuntimeSessionState {
             session_id: "root".to_string(),
-            ..RuntimeSessionState::default()
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         },
     )
     .await
@@ -514,7 +514,7 @@ async fn forked_child_session_keeps_hidden_live_tool_non_executable_across_rebui
         standard_test_policy(),
         test_host_config(),
         crate::RuntimeServices::new(plugin_session),
-        RuntimeSessionState::default(),
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
     )
     .await
     .expect("runtime");

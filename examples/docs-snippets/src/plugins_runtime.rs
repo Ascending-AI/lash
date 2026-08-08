@@ -34,7 +34,7 @@ async fn plugin_install(provider: ProviderHandle) -> anyhow::Result<()> {
     // docs:start:plugin-install
     use std::sync::Arc;
 
-    let core = lash::LashCore::standard_builder()
+    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .provider(provider)
         .model(
             lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")

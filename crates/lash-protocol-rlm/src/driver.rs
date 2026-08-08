@@ -690,7 +690,7 @@ mod tests {
             sync_execution_environment: true,
             model: model.to_string(),
             max_context_tokens: None,
-            max_turns: None,
+            turn_budget: lash_core::TurnBudget::Unbounded,
             model_variant: Default::default(),
             model_capability: Default::default(),
             generation,

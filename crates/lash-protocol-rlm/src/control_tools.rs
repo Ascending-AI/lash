@@ -180,11 +180,22 @@ mod tests {
         assert!(!rendered.contains("global_count"), "{rendered}");
     }
 
-    #[derive(Default)]
     struct BatonManager {
         snapshot: RuntimeSessionState,
         created: Mutex<Vec<SessionCreateRequest>>,
         closed: Mutex<Vec<String>>,
+    }
+
+    impl Default for BatonManager {
+        fn default() -> Self {
+            Self {
+                snapshot: RuntimeSessionState::new(SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                )),
+                created: Mutex::new(Vec::new()),
+                closed: Mutex::new(Vec::new()),
+            }
+        }
     }
 
     #[test]
@@ -225,7 +236,9 @@ mod tests {
             Ok(SessionHandle {
                 session_id: request.session_id.unwrap_or_else(|| "child".to_string()),
                 parent_session_id: request.relation.parent_session_id().map(ToOwned::to_owned),
-                policy: request.policy.unwrap_or_default(),
+                policy: request
+                    .policy
+                    .expect("test session creation requires an explicit policy"),
                 observed_processes: Vec::new(),
             })
         }
@@ -376,7 +389,7 @@ mod tests {
             snapshot: RuntimeSessionState {
                 policy: SessionPolicy {
                     model: model_spec("model"),
-                    ..SessionPolicy::default()
+                    ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
                 },
                 protocol_turn_options: lash_core::ProtocolTurnOptions::typed(
                     RlmTermination::FinishRequired {
@@ -389,7 +402,9 @@ mod tests {
                 )
                 .expect("valid rlm turn options"),
                 session_graph,
-                ..RuntimeSessionState::default()
+                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                ))
             },
             created: Mutex::new(Vec::new()),
             ..BatonManager::default()
@@ -449,9 +464,11 @@ mod tests {
             snapshot: RuntimeSessionState {
                 policy: SessionPolicy {
                     model: model_spec("model"),
-                    ..SessionPolicy::default()
+                    ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
                 },
-                ..RuntimeSessionState::default()
+                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                ))
             },
             created: Mutex::new(Vec::new()),
             ..BatonManager::default()
@@ -505,9 +522,11 @@ mod tests {
             snapshot: RuntimeSessionState {
                 policy: SessionPolicy {
                     model: model_spec("model"),
-                    ..SessionPolicy::default()
+                    ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
                 },
-                ..RuntimeSessionState::default()
+                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                ))
             },
             created: Mutex::new(Vec::new()),
             ..BatonManager::default()
@@ -556,9 +575,11 @@ mod tests {
             snapshot: RuntimeSessionState {
                 policy: SessionPolicy {
                     model: model_spec("model"),
-                    ..SessionPolicy::default()
+                    ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
                 },
-                ..RuntimeSessionState::default()
+                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                ))
             },
             created: Mutex::new(Vec::new()),
             ..BatonManager::default()

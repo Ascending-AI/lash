@@ -100,7 +100,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
             .create_store(&SessionStoreCreateRequest {
                 session_id: session_id.to_string(),
                 relation: SessionRelation::Root,
-                policy: lash_core::SessionPolicy::default(),
+                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             })
             .await
             .with_context(|| format!("create retarget session `{session_id}`"))?;
@@ -236,7 +236,7 @@ async fn prepare(storage: &PostgresStorage) -> Result<()> {
         .create_store(&SessionStoreCreateRequest {
             session_id: SESSION_ID.to_string(),
             relation: SessionRelation::Root,
-            policy: lash_core::SessionPolicy::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await
         .context("create crash-recovery wake target")?;

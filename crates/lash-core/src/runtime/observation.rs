@@ -753,7 +753,7 @@ mod tests {
                         .context_window_tokens(1024)
                         .build()
                         .expect("model"),
-                    ..Default::default()
+                    ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
                 })
                 .build(),
         )
@@ -799,7 +799,7 @@ mod tests {
                         .context_window_tokens(1024)
                         .build()
                         .expect("model"),
-                    ..Default::default()
+                    ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
                 })
                 .build(),
         )
@@ -830,7 +830,7 @@ mod tests {
                         .context_window_tokens(1024)
                         .build()
                         .expect("model"),
-                    ..Default::default()
+                    ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
                 })
                 .build(),
         )
@@ -874,7 +874,7 @@ mod tests {
                         .context_window_tokens(1024)
                         .build()
                         .expect("model"),
-                    ..Default::default()
+                    ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
                 })
                 .build(),
         )

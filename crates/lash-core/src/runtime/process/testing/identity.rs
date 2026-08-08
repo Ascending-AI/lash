@@ -41,7 +41,7 @@ fn process_execution_env_identity_golden_corpus() {
         provider_id: "provider".to_string(),
         session_id: Some("session".to_string()),
         autonomous: true,
-        max_turns: Some(0),
+        turn_budget: crate::TurnBudget::bounded(1),
         prompt: crate::PromptLayer::with_template(crate::PromptTemplate::new(vec![])),
         generation: crate::GenerationOptions {
             output_token_cap: std::num::NonZeroUsize::new(1024),
@@ -54,7 +54,7 @@ fn process_execution_env_identity_golden_corpus() {
     let specs = [
         ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
-            crate::SessionPolicy::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         ProcessExecutionEnvSpec::new(plugin_options, policy),
     ];
@@ -71,12 +71,12 @@ fn process_execution_env_identity_golden_corpus() {
         actual,
         [
             (
-                "{\"plugin_options\":{},\"policy\":{\"model\":{\"id\":\"\",\"variant\":\"provider_default\",\"limits\":{\"context_window_tokens\":1}},\"provider_id\":\"\",\"session_id\":null,\"autonomous\":false,\"max_turns\":null}}".to_string(),
-                "process-env:v2:sha256:02f6585f92aa774919cc2d3b51f1853eb4ff3d9b25d441936d7742ed58f8ba7e".to_string(),
+                "{\"plugin_options\":{},\"policy\":{\"model\":{\"id\":\"\",\"variant\":\"provider_default\",\"limits\":{\"context_window_tokens\":1}},\"provider_id\":\"\",\"session_id\":null,\"autonomous\":false,\"turn_budget\":\"unbounded\"}}".to_string(),
+                "process-env:v3:sha256:3889c03ef030a2c50f57de91cb03927423b8a83a5c9f29bbf8a5be3b9722b1b7".to_string(),
             ),
             (
-                "{\"plugin_options\":{\"plugins\":{\"a:b\":{\"enabled\":true}}},\"policy\":{\"model\":{\"id\":\"model:rich\",\"variant\":{\"effort\":\"high\"},\"limits\":{\"context_window_tokens\":8192,\"output_token_capacity\":2048},\"capability\":{\"reasoning\":{\"efforts\":[\"low\",\"high\"],\"default_effort\":\"low\",\"aliases\":{\"max\":\"high\"},\"encoding\":{\"budget\":{\"high\":1024,\"low\":256}},\"disable\":\"toggle_false\",\"mandatory\":true},\"cache_control\":\"anthropic\",\"stream_termination\":\"eof_tolerated\",\"sampling\":\"pinned\"}},\"provider_id\":\"provider\",\"session_id\":\"session\",\"autonomous\":true,\"max_turns\":0,\"prompt\":{\"template\":{\"sections\":[]}},\"generation\":{\"output_token_cap\":1024,\"temperature\":0.25,\"seed\":-7}}}".to_string(),
-                "process-env:v2:sha256:a1f7bed1cd486042c887b946c15a8bcec8bfcc21b88a14f18698c76c2098a5db".to_string(),
+                "{\"plugin_options\":{\"plugins\":{\"a:b\":{\"enabled\":true}}},\"policy\":{\"model\":{\"id\":\"model:rich\",\"variant\":{\"effort\":\"high\"},\"limits\":{\"context_window_tokens\":8192,\"output_token_capacity\":2048},\"capability\":{\"reasoning\":{\"efforts\":[\"low\",\"high\"],\"default_effort\":\"low\",\"aliases\":{\"max\":\"high\"},\"encoding\":{\"budget\":{\"high\":1024,\"low\":256}},\"disable\":\"toggle_false\",\"mandatory\":true},\"cache_control\":\"anthropic\",\"stream_termination\":\"eof_tolerated\",\"sampling\":\"pinned\"}},\"provider_id\":\"provider\",\"session_id\":\"session\",\"autonomous\":true,\"turn_budget\":{\"bounded\":1},\"prompt\":{\"template\":{\"sections\":[]}},\"generation\":{\"output_token_cap\":1024,\"temperature\":0.25,\"seed\":-7}}}".to_string(),
+                "process-env:v3:sha256:1ff5df8ecc6360d7069534b2c46e6f07ef963f4113a5a5aa187992e7252b10a4".to_string(),
             ),
         ]
     );

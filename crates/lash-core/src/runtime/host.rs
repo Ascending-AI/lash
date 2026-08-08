@@ -10,6 +10,15 @@ use super::{
     TerminationPolicy,
 };
 
+/// Default registry-wide admission cap for concurrently running managed child
+/// turns in each runtime's opened-session registry, not across the process. It
+/// matches the existing per-turn event channel bound so the registry cannot
+/// admit more independently buffered turn streams than that established
+/// resource envelope without an explicit host override. Runtime-internal
+/// rolling-history compaction remains observable in the registry but is exempt
+/// from this cap so correctness-critical context maintenance cannot be starved.
+pub const DEFAULT_MANAGED_TURN_CONCURRENCY_LIMIT: usize = 100;
+
 /// Required host configuration for all runtimes.
 #[derive(Clone)]
 pub struct RuntimeHostConfig {
@@ -56,6 +65,11 @@ pub struct RuntimeControlConfig {
     pub wake_turn_policy: crate::WakeTurnPolicy,
     /// Optional narrow-only policy for the model-facing session process tools.
     pub process_tool_visibility_filter: Option<Arc<dyn crate::ProcessToolVisibilityFilter>>,
+    /// Per-runtime registry cap on concurrently running managed child turns.
+    /// Runtime-internal rolling-history compaction bypasses the cap while still
+    /// being registered for observability and collision checks.
+    /// Defaults to [`DEFAULT_MANAGED_TURN_CONCURRENCY_LIMIT`].
+    pub managed_turn_concurrency_limit: std::num::NonZeroUsize,
     /// Lease timing capability for every durable single-writer *lease* lane this
     /// runtime renews on a cadence: session execution leases, process leases,
     /// and durable effect-replay leases. Queued-work and turn-input claims are
@@ -105,6 +119,10 @@ impl RuntimeHostConfig {
                 lease_timings: crate::LeaseTimings::default(),
                 wake_turn_policy: crate::WakeTurnPolicy::default(),
                 process_tool_visibility_filter: None,
+                managed_turn_concurrency_limit: std::num::NonZeroUsize::new(
+                    DEFAULT_MANAGED_TURN_CONCURRENCY_LIMIT,
+                )
+                .expect("the managed-turn concurrency default is non-zero"),
             },
             tracing: RuntimeTracingConfig {
                 trace_sink: None,
@@ -176,6 +194,12 @@ impl RuntimeHostConfig {
         filter: Arc<dyn crate::ProcessToolVisibilityFilter>,
     ) -> Self {
         self.control.process_tool_visibility_filter = Some(filter);
+        self
+    }
+
+    /// Set the per-runtime registry admission cap for managed child turns.
+    pub fn with_managed_turn_concurrency_limit(mut self, limit: std::num::NonZeroUsize) -> Self {
+        self.control.managed_turn_concurrency_limit = limit;
         self
     }
 }
@@ -315,5 +339,21 @@ impl From<ProcessRuntimeHost> for RuntimeHost {
             process_work_driver: value.process_work_driver,
             queued_work_driver: value.queued_work_driver,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn managed_turn_concurrency_limit_defaults_to_event_channel_bound() {
+        let config = RuntimeHostConfig::in_memory();
+
+        assert_eq!(
+            config.control.managed_turn_concurrency_limit.get(),
+            DEFAULT_MANAGED_TURN_CONCURRENCY_LIMIT
+        );
+        assert_eq!(DEFAULT_MANAGED_TURN_CONCURRENCY_LIMIT, 100);
     }
 }

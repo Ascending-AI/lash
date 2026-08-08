@@ -15,7 +15,7 @@ async fn rlm_core(provider: ProviderHandle, model_id: &str) -> anyhow::Result<()
         ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .plugins(lash::plugins::runtime_plugin_stack())
         .provider(provider)
         .model(

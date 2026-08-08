@@ -96,7 +96,11 @@ impl QueuedWorkRunError {
 
 impl From<PluginError> for QueuedWorkRunError {
     fn from(error: PluginError) -> Self {
-        Self::terminal(error)
+        if matches!(&error, PluginError::Runtime(error) if error.is_retryable()) {
+            Self::transient(error)
+        } else {
+            Self::terminal(error)
+        }
     }
 }
 
@@ -1232,7 +1236,7 @@ mod tests {
         let request = crate::SessionStoreCreateRequest {
             session_id: "create-only-factory".to_string(),
             relation: crate::SessionRelation::Root,
-            policy: crate::SessionPolicy::default(),
+            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         };
 
         assert_eq!(

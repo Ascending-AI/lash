@@ -1358,7 +1358,7 @@ fn modeled_state(model: &ReferenceModel) -> RuntimeSessionState {
         plugin_snapshot_ref: model.components.plugin_ref.clone(),
         plugin_snapshot_revision: model.components.plugin_value.map(u64::from),
         execution_state_ref: model.components.execution_ref.clone(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     }
 }
 
@@ -1824,7 +1824,7 @@ async fn law_claimed_work_settles_exactly_once(
         .ok_or_else(|| TestCaseError::fail("selected work absent"))?;
     let mut state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let commit = RuntimeCommit::persisted_state_for_test(&state, &[])
         .completing_queue_claim(claim.completion());
@@ -1934,7 +1934,7 @@ async fn law_reclaim_mediates_supersession(
     let state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
         tool_state_snapshot: Some(ToolState::default().with_generation(31)),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let before = session_snapshot(store.as_ref())
         .await
@@ -2055,7 +2055,7 @@ async fn law_head_cas_serializes_competing_commits(
     let loser_state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
         tool_state_snapshot: Some(ToolState::default().with_generation(41)),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let (loser, _) = RuntimeCommit::persisted_state_for_test(&loser_state, &[])
         .with_operation(crate::OperationId::new(
@@ -2070,7 +2070,7 @@ async fn law_head_cas_serializes_competing_commits(
     let winner_state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
         tool_state_snapshot: Some(ToolState::default().with_generation(42)),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let (winner, _) = RuntimeCommit::persisted_state_for_test(&winner_state, &[])
         .with_operation(crate::OperationId::new(
@@ -2163,7 +2163,7 @@ async fn law_stale_settlement_cannot_damage_successor(
     let mut state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
         tool_state_snapshot: Some(ToolState::default().with_generation(51)),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let stale_result = store
         .commit_runtime_state(
@@ -2249,7 +2249,7 @@ async fn law_selected_batch_out_of_order_never_loses_work(
         .ok_or_else(|| TestCaseError::fail("later batch absent"))?;
     let mut state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let result = store
         .commit_runtime_state(
@@ -2332,7 +2332,7 @@ async fn law_turn_inputs_apply_once_in_order(
     let expected = claim.applications.clone();
     let state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let commit = RuntimeCommit::persisted_state_for_test(&state, &[])
         .completing_turn_input_claim(claim.completion());

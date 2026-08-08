@@ -76,7 +76,7 @@ async fn resolve_start_state(
     match &request.start {
         SessionStartPoint::Empty => Ok(RuntimeSessionState {
             session_id: session_id.to_string(),
-            ..Default::default()
+            ..RuntimeSessionState::new(current.policy.clone())
         }),
         SessionStartPoint::CurrentSession => Ok(current.snapshot.to_runtime_state()),
         SessionStartPoint::ExistingSession { session_id } => current

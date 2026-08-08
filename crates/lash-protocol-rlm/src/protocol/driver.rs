@@ -640,6 +640,7 @@ fn continue_or_stop_after_nonterminal(
 
     let next_protocol_iteration = ctx.protocol_iteration() + 1;
     let reached_turn_limit = ctx
+        .turn_budget()
         .max_turns()
         .is_some_and(|max_turns| next_protocol_iteration >= ctx.protocol_run_offset() + max_turns);
     if reached_turn_limit {
@@ -653,7 +654,7 @@ fn continue_or_stop_after_nonterminal(
                 return Ok(());
             }
             RlmTermination::Natural => {
-                if let Some(max_turns) = ctx.max_turns() {
+                if let Some(max_turns) = ctx.turn_budget().max_turns() {
                     actions.push(DriverAction::ScheduleTurnLimitFinal {
                         message: turn_limit_final_message(
                             rlm_message_id(ctx.turn_id(), next_protocol_iteration, "turn_limit"),

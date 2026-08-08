@@ -176,7 +176,7 @@ async fn commit_with_attachment_refs(
     let mut state = RuntimeSessionState {
         session_id: session_id.clone(),
         head_revision,
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let operation = if turn_owned {
         crate::OperationId::turn(&session_id, turn_id, "commit-with-attachment-refs")

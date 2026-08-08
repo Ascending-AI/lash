@@ -210,7 +210,7 @@ fn store_request(session_id: &str) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
         session_id: session_id.to_string(),
         relation: SessionRelation::Root,
-        policy: SessionPolicy::default(),
+        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     }
 }
 
@@ -528,7 +528,9 @@ async fn stale_head_transaction_is_rejected(
     let current = RuntimeSessionState {
         session_id: session_id.to_string(),
         head_revision: expected_head_revision,
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&current, &[]))
@@ -537,7 +539,9 @@ async fn stale_head_transaction_is_rejected(
     let stale = RuntimeSessionState {
         session_id: session_id.to_string(),
         head_revision: expected_head_revision,
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     let err = store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&stale, &[]))
@@ -567,7 +571,9 @@ async fn final_commit_retry_and_conflict_are_fenced(
 ) -> Result<BackendContentionOperation, String> {
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     let operation =
         lash_core::OperationId::turn(session_id, "backend-contention-final-turn", "final");
@@ -601,7 +607,9 @@ async fn final_commit_retry_and_conflict_are_fenced(
     let changed_state = RuntimeSessionState {
         session_id: session_id.to_string(),
         turn_index: 1,
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     let (changed_commit, _) = RuntimeCommit::persisted_state_for_test(&changed_state, &[])
         .with_operation(operation)

@@ -23,7 +23,7 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
         runtime_provider_components(OPENAI_COMPATIBLE, &transport).expect("runtime provider");
     let trace_dir = tempfile::tempdir().expect("trace directory");
     let trace_path = trace_dir.path().join("provider-requests.jsonl");
-    let core = lash::LashCore::standard_builder()
+    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))

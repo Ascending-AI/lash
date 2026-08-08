@@ -284,7 +284,7 @@ impl Backend {
             ),
             artifacts,
         );
-        let core = lash::LashCore::rlm_builder(factory)
+        let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .provider(provider)
             .model(
                 lash::ModelSpec::builder("session-lease-triage-mock")
@@ -345,7 +345,7 @@ fn request(session_id: &str) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
         session_id: session_id.to_string(),
         relation: lash::persistence::SessionRelation::default(),
-        policy: lash::runtime::SessionPolicy::default(),
+        policy: lash::runtime::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     }
 }
 

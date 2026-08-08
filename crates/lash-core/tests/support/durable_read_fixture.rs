@@ -30,7 +30,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 1;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 2;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -1037,7 +1037,10 @@ fn assert_graph_payloads(nodes: &[lash_core::SessionNodeRecord]) {
             assert_eq!(assignment.policy.context_window_tokens(), 1);
             assert_eq!(assignment.policy.session_id, None);
             assert!(!assignment.policy.autonomous);
-            assert_eq!(assignment.policy.max_turns, None);
+            assert_eq!(
+                assignment.policy.turn_budget,
+                lash_core::TurnBudget::Unbounded
+            );
             assert_eq!(assignment.usage_source, None);
             assert_eq!(
                 serde_json::to_value(&assignment.plugin_options)
@@ -1136,7 +1139,7 @@ fn fixture_session_request(session_id: &str) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
         session_id: session_id.to_string(),
         relation: SessionRelation::Root,
-        policy: SessionPolicy::default(),
+        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     }
 }
 
@@ -1178,7 +1181,9 @@ fn fixture_effect_envelope() -> RuntimeEffectEnvelope {
 fn fixture_state() -> RuntimeSessionState {
     RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     }
 }
 
@@ -1196,7 +1201,10 @@ fn fixture_append_nodes() -> Vec<SessionAppendNode> {
 }
 
 fn fixture_process_env() -> ProcessExecutionEnvSpec {
-    ProcessExecutionEnvSpec::new(Default::default(), SessionPolicy::default())
+    ProcessExecutionEnvSpec::new(
+        Default::default(),
+        SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+    )
 }
 
 pub fn expected_process_lease() -> lash_core::ProcessLease {

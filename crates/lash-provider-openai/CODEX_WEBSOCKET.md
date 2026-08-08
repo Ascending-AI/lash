@@ -70,7 +70,7 @@ The scripted WebSocket server harness lives in `codex::ws_testing` (compiled
 for unit tests and behind the default-on `testing` feature). The provider-layer
 unit tests in `src/codex.rs` drive `CodexProvider` against it directly; the
 runtime-level tests in `tests/codex_websocket_runtime.rs` build a normal
-facade (`LashCore::standard_builder()` + `ProviderHandle`) around a provider
+facade (`LashCore::standard_builder(TurnBudget::Unbounded)` + `ProviderHandle`) around a provider
 configured through the seams above and prove full turns over the WebSocket
 transport: streamed assistant text end-to-end, and a tool-call turn whose
 `function_call_output` round-trips on the follow-up request.

@@ -441,7 +441,7 @@ mod tests {
             parent_invocation: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
-                crate::SessionPolicy::default(),
+                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             session_id: "session".to_string(),
             agent_frame_id: String::new(),
@@ -583,7 +583,7 @@ mod tests {
             parent_invocation: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
-                crate::SessionPolicy::default(),
+                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             session_id: "session".to_string(),
             agent_frame_id: String::new(),
@@ -678,7 +678,7 @@ mod tests {
             parent_invocation: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
-                crate::SessionPolicy::default(),
+                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             session_id: "session".to_string(),
             agent_frame_id: String::new(),

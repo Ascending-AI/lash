@@ -44,7 +44,7 @@ pub(crate) fn test_config_with_protocol_turn_options(
         sync_execution_environment: true,
         model: "test-model".to_string(),
         max_context_tokens: None,
-        max_turns: None,
+        turn_budget: lash_core::TurnBudget::Unbounded,
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
         generation: lash_core::GenerationOptions::default(),
@@ -481,7 +481,10 @@ impl RlmProtocolScenario {
             } else {
                 test_config_with_termination(self.termination.clone())
             };
-            config.max_turns = self.max_turns;
+            config.turn_budget = self
+                .max_turns
+                .map(lash_core::TurnBudget::bounded)
+                .unwrap_or(lash_core::TurnBudget::Unbounded);
             config
         };
         let config = build_config();

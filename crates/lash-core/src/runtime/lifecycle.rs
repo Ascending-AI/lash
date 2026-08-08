@@ -133,7 +133,7 @@ impl LashRuntime {
         services: RuntimeServices,
         mut state: RuntimeSessionState,
     ) -> Result<Self, SessionError> {
-        // Defaulted state (e.g. `RuntimeSessionState::default()` used
+        // Defaulted state (e.g. `RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))` used
         // by fresh-session constructors) carries an empty policy.
         // Fill it in from the caller's policy so tests and hosts that
         // pass a real policy alongside default state don't trip the explicit
@@ -495,7 +495,7 @@ impl LashRuntime {
         let state = loaded.unwrap_or_else(|| RuntimeSessionState {
             session_id: parked.session_id.clone(),
             policy: parked.policy.clone(),
-            ..RuntimeSessionState::default()
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         });
         Self::from_environment(env, parked.policy, state, Some(parked.store)).await
     }
@@ -530,7 +530,9 @@ mod tests {
     fn initial_park_identity_is_stable_for_replay_and_distinguishes_content() {
         let mut state = crate::RuntimeSessionState {
             session_id: "park-identity".to_string(),
-            ..crate::RuntimeSessionState::default()
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
         };
         state.ensure_agent_frame_initialized();
         state.append_active_conversation_messages(&[user_message(
@@ -566,7 +568,7 @@ mod tests {
         use crate::SessionStoreFactory;
 
         let session_id = "deleted-during-runtime-binding";
-        let policy = crate::SessionPolicy::default();
+        let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
         let request = crate::SessionStoreCreateRequest {
             session_id: session_id.to_string(),
             relation: crate::SessionRelation::Root,
@@ -583,7 +585,9 @@ mod tests {
             .expect("delete session before runtime binding");
         let mut state = crate::RuntimeSessionState {
             session_id: session_id.to_string(),
-            ..crate::RuntimeSessionState::default()
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
         };
 
         let error = bind_state_to_store(
@@ -636,7 +640,9 @@ mod tests {
             crate::RuntimeSessionState {
                 session_id: session_id.to_string(),
                 policy,
-                ..crate::RuntimeSessionState::default()
+                ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                ))
             },
         )
         .await
@@ -699,7 +705,9 @@ mod tests {
             crate::RuntimeSessionState {
                 session_id: session_id.to_string(),
                 policy,
-                ..crate::RuntimeSessionState::default()
+                ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                ))
             },
         )
         .await

@@ -191,7 +191,7 @@ async fn async_main() -> anyhow_like::Result<()> {
         ),
         artifact_store,
     );
-    let core_builder = lash::LashCore::rlm_builder(factory)
+    let core_builder = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(model_spec)
         .store_factory(store_factory)

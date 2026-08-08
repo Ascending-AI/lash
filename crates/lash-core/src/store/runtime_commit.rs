@@ -327,7 +327,9 @@ mod usage_payload_identity_tests {
         let entry = usage_payload_v2_corpus().pop().expect("usage fixture").1;
         let state = crate::RuntimeSessionState {
             session_id: "usage-payload-version".to_string(),
-            ..crate::RuntimeSessionState::default()
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
         };
         let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[entry]);
         commit.usage_deltas[0].identity.payload_encoding_version += 1;

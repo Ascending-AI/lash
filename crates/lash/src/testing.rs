@@ -325,7 +325,7 @@ finish "registered"
             .with_lashlang_abilities(rebuild_abilities()),
             artifact_store,
         );
-        LashCore::rlm_builder(factory)
+        LashCore::rlm_builder(crate::TurnBudget::Unbounded, factory)
             .provider(rebuild_provider())
             .model(rebuild_model())
             .plugin(Arc::new(TriggerResourcePluginFactory))
@@ -356,7 +356,7 @@ finish "registered"
                 lash_core::PluginOptions::default(),
                 lash_core::SessionPolicy {
                     model: rebuild_model(),
-                    ..lash_core::SessionPolicy::default()
+                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
                 },
             ),
         )
@@ -760,7 +760,7 @@ finish "registered"
         ));
         let child_policy = lash_core::SessionPolicy {
             model: rebuild_model(),
-            ..lash_core::SessionPolicy::default()
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
         let registration = worker_registration(
             lash_core::ProcessInput::SessionTurn {

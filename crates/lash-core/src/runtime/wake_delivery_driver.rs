@@ -215,7 +215,7 @@ impl WakeDeliveryDriver {
             let request = SessionStoreCreateRequest {
                 session_id: target_session_id.clone(),
                 relation: SessionRelation::default(),
-                policy: SessionPolicy::default(),
+                policy: SessionPolicy::new(crate::TurnBudget::Unbounded),
             };
             let store = match session_store_factory.open_existing_store(&request).await {
                 Ok(Some(store)) => store,

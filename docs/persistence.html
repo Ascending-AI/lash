@@ -60,7 +60,7 @@
       </div>
       <aside class="contract">
         <strong>Start fresh when the version moves</strong>
-        <p>This release uses SQLite durable-core version 26, process-registry version 21, effect version 8, and trigger version 4, plus Postgres component version 38. Each exact version is pinned in its store crate, and a refused open names the version found alongside the version expected. Each continuation anchor binds its node, checkpoint, and source session as one immutable snapshot. Persistent deployments must use fresh stores when any exact version changes; there is no migration chain by policy, and adopting a new version is forward-only (see <a href="./operations.html#version-bumps">bumping lash</a>).</p>
+        <p>This release uses SQLite durable-core version 27, process-registry version 22, effect version 8, and trigger version 5, plus Postgres component version 39. Each exact version is pinned in its store crate, and a refused open names the version found alongside the version expected. Each continuation anchor binds its node, checkpoint, and source session as one immutable snapshot. Persistent deployments must use fresh stores when any exact version changes; there is no migration chain by policy, and adopting a new version is forward-only (see <a href="./operations.html#version-bumps">bumping lash</a>).</p>
       </aside>
       <aside class="contract">
         <strong>Provisioning Postgres yourself</strong>
@@ -90,7 +90,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     ),
     artifact_store,
 );
-let core = lash::LashCore::rlm_builder(factory)
+let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .provider(provider)
     .model(
         lash::ModelSpec::builder(model.clone())
@@ -147,7 +147,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     ),
     Arc::new(storage.lashlang_artifact_store()),
 );
-let core = lash::LashCore::rlm_builder(factory)
+let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .store_factory(Arc::new(storage.session_store_factory()))
     .process_registry(Arc::new(storage.process_registry()))
     .trigger_store(Arc::new(storage.trigger_store()))
@@ -380,7 +380,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     ),
     artifact_store,
 );
-let core = lash::LashCore::rlm_builder(factory)
+let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .provider(provider)
     .model(
         lash::ModelSpec::builder(model.clone())

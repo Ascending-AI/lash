@@ -18,7 +18,7 @@ fn request(session_id: impl Into<String>) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
         session_id: session_id.into(),
         relation: SessionRelation::Root,
-        policy: Default::default(),
+        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     }
 }
 
@@ -36,7 +36,9 @@ async fn create_state(
         .expect("create benchmark store");
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        ..Default::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     (store, state)
 }
@@ -77,7 +79,7 @@ async fn fork_store(
         session_id: session_id.to_string(),
         node_id: node_id.to_string(),
         relation: SessionRelation::Root,
-        policy: Default::default(),
+        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
     factory
         .fork_at(&fork_request)

@@ -3,11 +3,15 @@ use crate::support::*;
 #[derive(Debug, thiserror::Error)]
 pub enum EmbedError {
     #[error(
-        "protocol plugin is required; call .protocol_plugin(...) or use LashCore::standard_builder()/LashCore::rlm_builder(...)"
+        "protocol plugin is required; call .protocol_plugin(...) or use LashCore::standard_builder(lash::TurnBudget::bounded(...))/LashCore::rlm_builder(lash::TurnBudget::bounded(...), ...)"
     )]
     MissingProtocolPlugin,
     #[error("model spec is required; hosts must supply explicit model metadata")]
     MissingModelSpec,
+    #[error(
+        "turn budget is required; SessionSpec must carry TurnBudget::Bounded(...) or TurnBudget::Unbounded"
+    )]
+    MissingTurnBudget,
     #[error("effect host is required; provide an explicit effect host with .effect_host(...)")]
     MissingEffectHost,
     #[error(
@@ -107,6 +111,7 @@ impl EmbedError {
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::Runtime(err) => err.is_retryable(),
+            Self::Plugin(lash_core::PluginError::Runtime(err)) => err.is_retryable(),
             _ => false,
         }
     }
@@ -149,6 +154,7 @@ impl EmbedError {
             | Self::StaticTurnStreamRequiresStaticEffectHost => true,
             Self::Store(lash_core::StoreError::SessionDeleted { .. }) => true,
             Self::Runtime(err) => err.is_terminal(),
+            Self::Plugin(lash_core::PluginError::Runtime(err)) => err.is_terminal(),
             Self::Plugin(lash_core::PluginError::RuntimeEffectController(err)) => matches!(
                 err.cause.as_ref(),
                 Some(lash_core::RuntimeErrorCause::SessionDeleted { .. })
@@ -174,6 +180,7 @@ pub type Result<T> = std::result::Result<T, EmbedError>;
 #[cfg(test)]
 mod tests {
     use super::EmbedError;
+    use crate::runtime::{QueuedWorkRunError, QueuedWorkRunErrorClass};
     use lash_core::{
         PluginError, RuntimeEffectControllerError, RuntimeError, RuntimeErrorCause,
         RuntimeErrorCode, SessionError, StoreError,
@@ -188,6 +195,20 @@ mod tests {
         let err = runtime_error(RuntimeErrorCode::SessionExecutionBusy);
         assert!(err.is_retryable(), "{err}");
         assert!(!err.is_terminal(), "{err}");
+    }
+
+    #[test]
+    fn managed_turn_cap_denial_stays_retryable_across_plugin_host_boundaries() {
+        let plugin_error = PluginError::Runtime(RuntimeError::new(
+            RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded,
+            "test cap reached",
+        ));
+        let embed_error = EmbedError::from(plugin_error.clone());
+        assert!(embed_error.is_retryable());
+        assert!(!embed_error.is_terminal());
+
+        let queued_error = QueuedWorkRunError::from(plugin_error);
+        assert_eq!(queued_error.class, QueuedWorkRunErrorClass::Transient);
     }
 
     #[test]

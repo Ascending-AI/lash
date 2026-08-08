@@ -151,7 +151,7 @@ mod tests {
             tool_call_id: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
-                crate::SessionPolicy::default(),
+                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
         }
     }

@@ -1721,7 +1721,7 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
             .context_window_tokens(200_000)
             .build()
             .expect("valid model spec"),
-        ..SessionPolicy::default()
+        ..SessionPolicy::new(crate::TurnBudget::Unbounded)
     };
     let plugin_session =
         crate::PluginHost::new(vec![Arc::new(EffectControllerTestProtocolFactory {
@@ -1733,7 +1733,7 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
         policy,
         host_with_effect_recorder(recorder.clone()),
         RuntimeServices::new(plugin_session),
-        RuntimeSessionState::default(),
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
     )
     .await
     .expect("runtime");
@@ -1771,7 +1771,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
             .context_window_tokens(200_000)
             .build()
             .expect("valid model spec"),
-        ..SessionPolicy::default()
+        ..SessionPolicy::new(crate::TurnBudget::Unbounded)
     };
     let plugin_session =
         crate::PluginHost::new(vec![Arc::new(EffectControllerTestProtocolFactory {
@@ -1785,7 +1785,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
             mock_provider(Vec::new()).into_handle(),
         )),
         RuntimeServices::new(plugin_session),
-        RuntimeSessionState::default(),
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
     )
     .await
     .expect("runtime");

@@ -863,7 +863,7 @@ impl RuntimeBoundaryHarness {
                 .context_window_tokens(16_384)
                 .build()
                 .map_err(|err| RuntimeBoundaryError::new(err.to_string()))?,
-            ..lash_core::SessionPolicy::default()
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
         let env_ref = lash_core::runtime::persist_process_execution_env(
             runtime_host.durability.process_env_store.as_ref(),
@@ -1078,7 +1078,9 @@ impl RuntimeBoundaryHarness {
             session_graph,
             persisted_node_ids,
             head_revision,
-            ..RuntimeSessionState::default()
+            ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+            ))
         };
         let stale_work_completion_rejected = matches!(
             store
@@ -1335,7 +1337,7 @@ impl RuntimeBoundaryHarness {
         let request = SessionStoreCreateRequest {
             session_id: session_id.to_string(),
             relation: SessionRelation::Root,
-            policy: lash_core::SessionPolicy::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         };
         if let Some(store) = self
             .store_factory

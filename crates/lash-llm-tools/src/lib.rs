@@ -344,11 +344,22 @@ mod tests {
             .expect("valid test model spec")
     }
 
-    #[derive(Default)]
     struct DirectCompletionManager {
         snapshot: RuntimeSessionState,
         requests: Mutex<Vec<(lash_core::facade_support::DirectRequest, String)>>,
         response_text: String,
+    }
+
+    impl Default for DirectCompletionManager {
+        fn default() -> Self {
+            Self {
+                snapshot: RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                )),
+                requests: Mutex::new(Vec::new()),
+                response_text: String::new(),
+            }
+        }
     }
 
     #[async_trait]
@@ -447,9 +458,9 @@ mod tests {
             snapshot: RuntimeSessionState {
                 policy: lash_core::SessionPolicy {
                     model: model_spec("root-model", Some("fast")),
-                    ..lash_core::SessionPolicy::default()
+                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
                 },
-                ..RuntimeSessionState::default()
+                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
             },
             requests: Mutex::new(Vec::new()),
             response_text:
@@ -509,9 +520,11 @@ mod tests {
             snapshot: RuntimeSessionState {
                 policy: lash_core::SessionPolicy {
                     model: model_spec("root-model", Some("medium")),
-                    ..lash_core::SessionPolicy::default()
+                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
                 },
-                ..RuntimeSessionState::default()
+                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                ))
             },
             requests: Mutex::new(Vec::new()),
             response_text: r#"{"kind":"value","value":"done","error":null}"#.to_string(),
@@ -545,8 +558,10 @@ mod tests {
     async fn llm_query_error_result_fails_tool_call() {
         let manager = Arc::new(DirectCompletionManager {
             snapshot: RuntimeSessionState {
-                policy: lash_core::SessionPolicy::default(),
-                ..RuntimeSessionState::default()
+                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                ))
             },
             requests: Mutex::new(Vec::new()),
             response_text: r#"{"kind":"error","value":null,"error":"missing required evidence"}"#

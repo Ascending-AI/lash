@@ -598,7 +598,7 @@ mod tests {
             .create_store(&SessionStoreCreateRequest {
                 session_id: "mutation-session".to_string(),
                 relation: SessionRelation::Root,
-                policy: Default::default(),
+                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             })
             .await
             .expect("create observed store");
@@ -609,7 +609,9 @@ mod tests {
             plugin_snapshot: Some(PluginSessionSnapshot::default()),
             plugin_snapshot_revision: Some(1),
             execution_state_snapshot: Some(b"first execution state".to_vec()),
-            ..RuntimeSessionState::default()
+            ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+            ))
         };
         let first = store
             .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))

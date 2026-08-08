@@ -587,7 +587,7 @@ async fn sqlite_process_registry_rejects_pre_unit_external_owner_schema_before_s
     };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash process registry schema"));
-    assert!(message.contains("supports schema version 21"));
+    assert!(message.contains("supports schema version 22"));
     assert!(message.contains("delete the process registry database and start fresh"));
 }
 
@@ -756,7 +756,7 @@ async fn sqlite_trigger_store_rejects_pre_keyed_schema_before_serving() {
     };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash trigger store schema"));
-    assert!(message.contains("supports schema version 4"));
+    assert!(message.contains("supports schema version 5"));
     assert!(message.contains("delete the trigger store database and start fresh"));
 }
 
@@ -995,7 +995,7 @@ async fn sqlite_cancelled_queued_append_publishes_usage_exactly_once() {
         .create_store(&lash_core::SessionStoreCreateRequest {
             session_id: "root".to_string(),
             relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await
         .expect("create cancellation store");

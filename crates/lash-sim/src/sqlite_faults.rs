@@ -216,7 +216,9 @@ async fn run_seed(
     let mut store = create_store(Arc::clone(&factory), &session_id).await?;
     let mut state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
 
     for index in 0..prefix_commits {
@@ -436,7 +438,7 @@ fn request(session_id: &str) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
         session_id: session_id.to_string(),
         relation: SessionRelation::Root,
-        policy: SessionPolicy::default(),
+        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     }
 }
 

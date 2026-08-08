@@ -1110,7 +1110,7 @@ mod tests {
         let draft = input
             .remote_trigger_subscription_draft(
                 "button-main",
-                "process-env:v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                "process-env:v3:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                     .parse()
                     .expect("canonical env ref"),
                 "ui.button.pressed",

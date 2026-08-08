@@ -178,7 +178,7 @@ fn standard_core_with_attachment_policy(
     trace: Arc<RecordingTraceSink>,
     attachment_source_policy: Arc<dyn lash_core::facade_support::AttachmentSourcePolicy>,
 ) -> lash::LashCore {
-    lash::LashCore::standard_builder()
+    lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
@@ -279,7 +279,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         })
         .build()
         .into_handle();
-    let core = lash::LashCore::standard_builder()
+    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
@@ -732,7 +732,7 @@ finish { baton: baton }
         ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(

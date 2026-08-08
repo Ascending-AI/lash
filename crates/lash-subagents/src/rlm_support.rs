@@ -19,7 +19,9 @@ pub(crate) fn build_session_policy(
 ) -> Result<lash_core::SessionPolicy, String> {
     let current_snapshot = SessionSnapshot {
         policy: current_policy.clone(),
-        ..Default::default()
+        ..SessionSnapshot::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     let session_spec = SessionSpec::inherit();
     let tool_access = SessionToolAccess::default();

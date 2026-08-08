@@ -102,7 +102,7 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
         response_with_usage("threshold response", 1),
         response_with_usage("durable summary", 1),
     ]);
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
         .model(model_spec("rolling-history-model", None, 40_000))
         .plugin(Arc::new(
@@ -222,17 +222,18 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
 
     drop(session);
     drop(core);
-    let reopened_core = explicit_ephemeral_facets(LashCore::standard_builder())
-        .provider(rolling_history_provider(vec![response_with_usage(
-            "response after reopen",
-            1,
-        )]))
-        .model(model_spec("rolling-history-model", None, 40_000))
-        .plugin(Arc::new(
-            lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
-        ))
-        .store_factory(store_factory.clone())
-        .build()?;
+    let reopened_core =
+        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+            .provider(rolling_history_provider(vec![response_with_usage(
+                "response after reopen",
+                1,
+            )]))
+            .model(model_spec("rolling-history-model", None, 40_000))
+            .plugin(Arc::new(
+                lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
+            ))
+            .store_factory(store_factory.clone())
+            .build()?;
     let reopened_session = reopened_core.session(session_id).open().await?;
     reopened_session
         .turn(TurnInput::text("continue after compaction"))
@@ -262,7 +263,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         dir.path().join("sessions"),
     ));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(rolling_history_provider(vec![
             response_with_usage("first response", 60_000),
             response_with_usage("second response", 1),
@@ -364,7 +365,7 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
     let responses = (0..=THRESHOLD_TURNS)
         .map(|ordinal| response_with_usage(&format!("response {ordinal}"), 20_000))
         .collect();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(rolling_history_provider(responses))
         .model(model_spec("plugin-message-id-model", None, 40_000))
         .plugin(Arc::new(
@@ -423,14 +424,17 @@ async fn rolling_history_threshold_continue_as_extends_the_pre_switch_durable_le
         ),
         response_with_usage(&lashlang_block(r#"finish "continued""#), 1),
     ]);
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-        .provider(provider)
-        .model(model_spec("rolling-history-rlm-model", None, 40_000))
-        .plugin(Arc::new(
-            lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
-        ))
-        .store_factory(store_factory.clone())
-        .build()?;
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(provider)
+    .model(model_spec("rolling-history-rlm-model", None, 40_000))
+    .plugin(Arc::new(
+        lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
+    ))
+    .store_factory(store_factory.clone())
+    .build()?;
     let session = core.session(session_id).open().await?;
 
     let primed = session

@@ -70,7 +70,7 @@ async fn lazy_projection() -> anyhow::Result<()> {
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     )
     .with_projection_resolver(registry.clone());
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .plugins(runtime_plugin_stack())
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
@@ -105,7 +105,7 @@ async fn prompt_template(provider: ProviderHandle) -> anyhow::Result<()> {
         ),
     ]);
 
-    let core = lash::LashCore::standard_builder()
+    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .provider(provider)
         .model(
             lash::ModelSpec::builder("gpt-5.4")
@@ -299,7 +299,7 @@ async fn tone_session(
         ),
         std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model.clone())

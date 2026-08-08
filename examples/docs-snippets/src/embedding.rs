@@ -83,7 +83,7 @@ async fn full_core(provider: ProviderHandle) -> anyhow::Result<()> {
         ),
         artifact_store,
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(
             lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")
@@ -124,12 +124,15 @@ async fn preset_core(provider: ProviderHandle) -> anyhow::Result<()> {
 
     use lash::{SessionSpec, plugins::PluginFactory};
 
-    let root_spec = SessionSpec::new().provider_id(provider.kind()).model(
-        lash::ModelSpec::builder("gpt-5.4")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("valid model metadata"),
-    );
+    let root_spec = SessionSpec::new()
+        .turn_budget(lash::TurnBudget::Unbounded)
+        .provider_id(provider.kind())
+        .model(
+            lash::ModelSpec::builder("gpt-5.4")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("valid model metadata"),
+        );
 
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::new(
@@ -138,7 +141,7 @@ async fn preset_core(provider: ProviderHandle) -> anyhow::Result<()> {
         ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .session_spec(root_spec)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
@@ -167,7 +170,7 @@ async fn custom_stack(root_spec: SessionSpec) -> anyhow::Result<()> {
         ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .session_spec(root_spec)
         .plugins(plugins)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))

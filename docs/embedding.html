@@ -139,7 +139,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     ),
     artifact_store,
 );
-let core = lash::LashCore::rlm_builder(factory)
+let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .provider(provider)
     .model(
         lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")
@@ -173,13 +173,13 @@ println!("{assistant_text}");</code></pre>
           </div>
           <dl class="def-list">
             <dt><code>LashCore</code></dt>
-            <dd>Cloneable shared config for advanced custom protocol hosts. App code normally starts with <code>LashCore::standard_builder()</code> or <code>LashCore::rlm_builder(factory)</code>.</dd>
-            <dt><code>LashCore::standard_builder()</code> / <code>LashCore::rlm_builder(factory)</code></dt>
-            <dd>Sugar entry points for the built-in protocols. <code>standard_builder()</code> opens native provider-tool sessions; <code>rlm_builder(factory)</code> opens Lashlang/RLM sessions from a host-configured RLM protocol factory.</dd>
+            <dd>Cloneable shared config for advanced custom protocol hosts. App code normally starts with <code>LashCore::standard_builder(turn_budget)</code> or <code>LashCore::rlm_builder(turn_budget, factory)</code>.</dd>
+            <dt><code>LashCore::standard_builder(turn_budget)</code> / <code>LashCore::rlm_builder(turn_budget, factory)</code></dt>
+            <dd>Sugar entry points for the built-in protocols. Every builder requires the host to choose <code>TurnBudget::Bounded(n)</code> or <code>TurnBudget::Unbounded</code>; there is no implicit session-semantic default. <code>standard_builder(...)</code> opens native provider-tool sessions; <code>rlm_builder(...)</code> opens Lashlang/RLM sessions from a host-configured RLM protocol factory.</dd>
             <dt><code>SessionSpec</code></dt>
-            <dd>Provider, model/variant, max context tokens, max turns, prompt layer, generation options. Root cores: <code>SessionSpec::new()</code>. Children and subagents: <code>SessionSpec::inherit()</code>. <code>.generation(...)</code> layers sampling intent — output token cap, temperature, seed — over what the session inherits, and every LLM call in the session carries the result, including subagent turns. The layering is per option: an option the spec leaves unset keeps its inherited value, so a subagent that only caps output tokens still runs at the temperature and seed its parent pinned. <code>.replace_generation(...)</code> uses exactly the options you pass and <code>.clear_generation()</code> expresses none, both discarding what would be inherited. Reopening a session resolves the spec again, so the options a reopen runs with are the ones the host supplies then, exactly as for the model and the prompt layer — including a session opened at a fork point, since branching history does not branch configuration. A store keeps only the provider id and model of a session's configuration; the policy's own copy of the generation options is what resumes a process/remote execution environment, where no live host is there to supply one.</dd>
+            <dd>Provider, model/variant, max context tokens, required turn budget, prompt layer, generation options. Root cores: <code>SessionSpec::new()</code>. Children and subagents: <code>SessionSpec::inherit()</code>. <code>.turn_budget(...)</code> overrides the budget inherited from the root or parent policy; a serialized <code>SessionPolicy</code> without <code>turn_budget</code> is rejected instead of becoming silently unbounded. <code>.generation(...)</code> layers sampling intent — output token cap, temperature, seed — over what the session inherits, and every LLM call in the session carries the result, including subagent turns. The layering is per option: an option the spec leaves unset keeps its inherited value, so a subagent that only caps output tokens still runs at the temperature and seed its parent pinned. <code>.replace_generation(...)</code> uses exactly the options you pass and <code>.clear_generation()</code> expresses none, both discarding what would be inherited. Reopening a session resolves the spec again, so the options a reopen runs with are the ones the host supplies then, exactly as for the model and the prompt layer — including a session opened at a fork point, since branching history does not branch configuration. A store keeps only the provider id and model of a session's configuration; the policy's own copy of the generation options is what resumes a process/remote execution environment, where no live host is there to supply one.</dd>
             <dt><code>PluginStack</code></dt>
-            <dd>Ordered plugin factory list. <code>LashCore::standard_builder()</code> and <code>LashCore::rlm_builder(factory)</code> pre-seed their protocol plugin and the default runtime stack; generic <code>LashCore::builder()</code> requires an explicit protocol plugin. All paths still require explicit effect and attachment facets before <code>build()</code>; RLM also requires a Lashlang artifact store.</dd>
+            <dd>Ordered plugin factory list. <code>LashCore::standard_builder(turn_budget)</code> and <code>LashCore::rlm_builder(turn_budget, factory)</code> pre-seed their protocol plugin and the default runtime stack; generic <code>LashCore::builder(turn_budget)</code> requires an explicit protocol plugin. All paths still require explicit effect and attachment facets before <code>build()</code>; RLM also requires a Lashlang artifact store.</dd>
             <dt><code>LashSession</code></dt>
             <dd>One conversation/task. Parked/resumable runtime, optional per-session store, exposes <code>turn(TurnInput)</code>, <code>enqueue(TurnInput)</code> (durable pending input for the next turn unless an active-turn ingress is specified), <code>pending_turn_inputs()</code> plus typed pending-input cancellation for user-input previews and edit reconciliation, <code>queued_work()</code> for admin inspection of non-user process wakes and session commands, <code>await_queued_work_batch(batch_id)</code> (resolve when a non-user queued-work batch you enqueued is drained or cancelled, by any handle or process, without claiming it yourself; bound it with <code>tokio::time::timeout</code>), <code>read_view()</code>, and <code>admin()</code>.</dd>
             <dt><code>TurnBuilder</code></dt>
@@ -199,12 +199,15 @@ println!("{assistant_text}");</code></pre>
 
 use lash::{SessionSpec, plugins::PluginFactory};
 
-let root_spec = SessionSpec::new().provider_id(provider.kind()).model(
-    lash::ModelSpec::builder("gpt-5.4")
-        .context_window_tokens(200_000)
-        .build()
-        .expect("valid model metadata"),
-);
+let root_spec = SessionSpec::new()
+    .turn_budget(lash::TurnBudget::Unbounded)
+    .provider_id(provider.kind())
+    .model(
+        lash::ModelSpec::builder("gpt-5.4")
+            .context_window_tokens(200_000)
+            .build()
+            .expect("valid model metadata"),
+    );
 
 let factory = lash::rlm::RlmProtocolPluginFactory::new(
     lash::rlm::RlmProtocolPluginConfig::new(
@@ -213,7 +216,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     ),
     Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 );
-let core = lash::LashCore::rlm_builder(factory)
+let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .session_spec(root_spec)
     .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
     .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
@@ -238,7 +241,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     ),
     Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 );
-let core = lash::LashCore::rlm_builder(factory)
+let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .session_spec(root_spec)
     .plugins(plugins)
     .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))

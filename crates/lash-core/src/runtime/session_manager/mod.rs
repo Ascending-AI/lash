@@ -80,6 +80,7 @@ pub(in crate::runtime) struct CurrentSessionCapability {
 struct ManagedSessionCapability {
     registry: Arc<Mutex<HashMap<String, RuntimeHandle>>>,
     turns: Arc<StdMutex<HashMap<String, ManagedSessionTurn>>>,
+    turn_concurrency_limit: std::num::NonZeroUsize,
 }
 
 #[derive(Clone)]
@@ -229,6 +230,7 @@ impl ManagedSessionCapability {
         Self {
             registry: Arc::clone(&runtime.managed_sessions),
             turns: Arc::clone(&runtime.managed_turns),
+            turn_concurrency_limit: runtime.host.core.control.managed_turn_concurrency_limit,
         }
     }
 }
@@ -372,7 +374,7 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
             .context_window_tokens(200_000)
             .build()
             .expect("mixed-envelope model spec"),
-        ..crate::SessionPolicy::default()
+        ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
     };
     let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
         .build_session("root", None)
@@ -383,7 +385,9 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
         crate::PersistentRuntimeServices::new(plugins, Arc::clone(&store)),
         crate::RuntimeSessionState {
             policy,
-            ..Default::default()
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
         },
     )
     .await
@@ -680,7 +684,7 @@ pub(crate) async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
             .context_window_tokens(200_000)
             .build()
             .expect("cancelled usage model spec"),
-        ..crate::SessionPolicy::default()
+        ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
     };
     let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
         .build_session("root", None)
@@ -691,7 +695,9 @@ pub(crate) async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
         crate::PersistentRuntimeServices::new(plugins, Arc::clone(&store)),
         crate::RuntimeSessionState {
             policy,
-            ..Default::default()
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
         },
     )
     .await

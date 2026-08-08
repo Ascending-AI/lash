@@ -38,7 +38,7 @@ fn websocket_provider(server: &ScriptedWsServer) -> ProviderHandle {
 }
 
 fn websocket_core(provider: ProviderHandle) -> LashCore {
-    LashCore::standard_builder()
+    LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .provider(provider)
         .model(
             lash::ModelSpec::builder("gpt-5.4")
@@ -154,7 +154,7 @@ async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
     ])
     .await;
     let seen = Arc::new(Mutex::new(Vec::new()));
-    let core = LashCore::standard_builder()
+    let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .provider(websocket_provider(&server))
         .model(
             lash::ModelSpec::builder("gpt-5.4")

@@ -112,7 +112,7 @@ impl RuntimeTurnDriver<'_> {
             protocol_run_offset: run_offset,
             turn_driver_preamble: execution_environment.turn_driver_preamble,
             prepared_prompt,
-            max_turns: session_policy.max_turns,
+            turn_budget: session_policy.turn_budget,
             model_variant: session_policy.model.variant.clone(),
             model_capability: session_policy.model.capability.clone(),
             generation: session_policy.generation.clone(),

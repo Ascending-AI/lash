@@ -151,7 +151,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Version 38 is the coordinated FIG-915 cutover: residual durable names and
 // usage payloads use shared framing, while redundant process/trigger hashes
 // are replaced by structural conflict checks.
-const SCHEMA_VERSION: i32 = 38;
+// Version 39 adds the required per-turn budget to every durable session policy
+// carrier. Older stores are rejected and recreated without a compatibility
+// read path.
+const SCHEMA_VERSION: i32 = 39;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -1039,7 +1042,7 @@ mod tests {
         let request = SessionStoreCreateRequest {
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,
-            policy: Default::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         };
         let stale_store = factory
             .create_store(&request)
@@ -1047,7 +1050,9 @@ mod tests {
             .expect("create stale store");
         let mut state = lash_core::RuntimeSessionState {
             session_id: session_id.clone(),
-            ..Default::default()
+            ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+            ))
         };
         state.ensure_agent_frame_initialized();
 

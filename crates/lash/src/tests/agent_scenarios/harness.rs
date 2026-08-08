@@ -217,16 +217,17 @@ impl AgentScenarioSetup {
         let factory = rlm_factory().with_lashlang_execution_sink(
             Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
         );
-        let mut builder = explicit_ephemeral_facets(LashCore::rlm_builder(factory))
-            .provider(provider)
-            .model(mock_model_spec())
-            .store_factory(Arc::new(
-                lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
-                    Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-                    checkpoint_writes.clone(),
-                ),
-            ))
-            .process_registry(Arc::clone(&process_registry) as Arc<dyn ProcessRegistry>);
+        let mut builder =
+            explicit_ephemeral_facets(LashCore::rlm_builder(crate::TurnBudget::Unbounded, factory))
+                .provider(provider)
+                .model(mock_model_spec())
+                .store_factory(Arc::new(
+                    lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
+                        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+                        checkpoint_writes.clone(),
+                    ),
+                ))
+                .process_registry(Arc::clone(&process_registry) as Arc<dyn ProcessRegistry>);
         if let Some(tools) = self.tool_provider {
             builder = builder.tools(tools);
         }
@@ -237,7 +238,7 @@ impl AgentScenarioSetup {
             builder = builder.plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()));
         }
         if let Some(max_turns) = self.max_turns {
-            builder = builder.max_turns(max_turns);
+            builder = builder.turn_budget(lash_core::TurnBudget::bounded(max_turns));
         }
         Ok(AgentScenarioRuntime {
             core: builder.build()?,
@@ -555,8 +556,8 @@ impl AgentSessionTurnProcessScenario {
     fn child_create_request(&self) -> lash_core::SessionCreateRequest {
         let child_policy = lash_core::SessionPolicy {
             model: mock_model_spec(),
-            max_turns: Some(2),
-            ..lash_core::SessionPolicy::default()
+            turn_budget: lash_core::TurnBudget::bounded(2),
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
         lash_core::SessionCreateRequest::child(
             self.session_id,

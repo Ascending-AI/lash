@@ -421,13 +421,15 @@
                     .context_window_tokens(41_000)
                     .build()
                     .expect("rolling history model"),
-                ..Default::default()
+                ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
             };
             let state = lash_core::SessionSnapshot {
                 session_id: "workbench-rolling-history-session".to_string(),
                 policy,
                 session_graph: lash_core::SessionGraph::from_active_read_state(&messages),
-                ..Default::default()
+                ..lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                ))
             };
             let manager = Arc::new(lash_core::testing::MockSessionManager::default());
             let context_window_tokens = state.policy.context_window_tokens();
@@ -476,6 +478,7 @@
                 .expect("serialize the projected prompt messages");
 
             assert_eq!(context_window_tokens, 41_000);
+            assert_eq!(state.policy.turn_budget, lash_core::TurnBudget::Unbounded);
             assert!(
                 second_prompt.contains(CURRENT_MARKER),
                 "rolling history must retain the current user turn"

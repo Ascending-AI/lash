@@ -582,7 +582,7 @@ fn process_start_requests_round_trip_core_values() {
                 stop_sequences: Vec::new(),
                 projection_provenance: Default::default(),
             },
-            ..Default::default()
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
     ))
     .with_event_types([process_event_type()]);
@@ -828,7 +828,9 @@ fn observer_audit_and_fork_selector_types_round_trip() {
 #[test]
 fn remote_turn_result_maps_core_semantics() {
     let turn = lash_core::facade_support::AssembledTurn {
-        state: Default::default(),
+        state: lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        )),
         outcome: lash_core::facade_support::TurnOutcome::Finished(
             lash_core::facade_support::TurnFinish::AssistantMessage {
                 text: "done".to_string(),
@@ -1160,7 +1162,9 @@ fn remote_session_observation_from_core_maps_snapshot_metadata() {
             cache_write_input_tokens: 0,
             reasoning_output_tokens: 1,
         },
-        ..lash_core::SessionSnapshot::default()
+        ..lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     let observation = lash_core::facade_support::SessionObservation {
         read_view: lash_core::SessionReadView::from_snapshot(&snapshot),
@@ -1221,8 +1225,9 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
         other => panic!("unexpected payload: {other:?}"),
     }
 
-    let read_view =
-        lash_core::SessionReadView::from_snapshot(&lash_core::SessionSnapshot::default());
+    let read_view = lash_core::SessionReadView::from_snapshot(&lash_core::SessionSnapshot::new(
+        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+    ));
     let remote = RemoteSessionObservationEvent::from_core(
         8,
         event(
@@ -1368,7 +1373,7 @@ fn trigger_subscription_draft() -> lash_core::TriggerSubscriptionDraft {
     lash_core::TriggerSubscriptionDraft {
         subscription_key: "button-watcher".to_string(),
         env_ref: lash_core::ProcessExecutionEnvRef::new(
-            "process-env:v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "process-env:v3:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         ),
         wake_target: Some(lash_core::SessionScope::new("session-a")),
         name: Some("button watcher".to_string()),

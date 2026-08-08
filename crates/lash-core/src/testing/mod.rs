@@ -268,7 +268,7 @@ pub fn mock_session_policy() -> SessionPolicy {
             .context_window_tokens(200_000)
             .build()
             .expect("valid mock model spec"),
-        ..Default::default()
+        ..SessionPolicy::new(crate::TurnBudget::Unbounded)
     }
 }
 
@@ -411,7 +411,7 @@ fn code_execution_context_with_tool_provider_catalog_trigger_router_and_effect_c
     let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
     let execution_env_spec = crate::ProcessExecutionEnvSpec::new(
         crate::PluginOptions::default(),
-        crate::SessionPolicy::default(),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     );
     let attachment_store: Arc<crate::SessionAttachmentStore> =
         Arc::new(crate::SessionAttachmentStore::in_memory());
@@ -527,8 +527,8 @@ pub fn mock_assembled_turn(session_id: &str, summary: &str) -> AssembledTurn {
     AssembledTurn {
         state: SessionSnapshot {
             session_id: session_id.to_string(),
-            policy: SessionPolicy::default(),
-            ..Default::default()
+            policy: SessionPolicy::new(crate::TurnBudget::Unbounded),
+            ..SessionSnapshot::new(SessionPolicy::new(crate::TurnBudget::Unbounded))
         },
         outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
             text: summary.to_string(),
@@ -568,7 +568,10 @@ pub struct MockSessionManager {
 impl Default for MockSessionManager {
     fn default() -> Self {
         Self {
-            snapshot: RuntimeSessionState::default().to_snapshot(),
+            snapshot: RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
+            .to_snapshot(),
             tool_catalog: Vec::new(),
             turn: mock_assembled_turn("root", ""),
             tool_registry: None,
@@ -1521,7 +1524,7 @@ mod test_protocol_fakes {
             }
             actions.push(DriverAction::AdvanceProtocolIteration);
             let next_protocol_iteration = ctx.protocol_iteration() + 1;
-            if let Some(max_turns) = ctx.max_turns()
+            if let Some(max_turns) = ctx.turn_budget().max_turns()
                 && next_protocol_iteration >= ctx.protocol_run_offset() + max_turns
             {
                 let message_id = format!(
