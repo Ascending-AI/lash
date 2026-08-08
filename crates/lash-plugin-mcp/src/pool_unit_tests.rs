@@ -108,6 +108,146 @@ async fn connect_tolerates_unreachable_server() {
     assert!(!result.is_success(), "calls fail loudly while disconnected");
 
     pool.shutdown_all().await;
+
+    let result = pool
+        .call_tool(
+            "mcp__down__anything",
+            &json!({}),
+            &lash_core::testing::mock_tool_context(),
+        )
+        .await;
+    let output = result
+        .as_done_output()
+        .expect("post-shutdown call must complete with a failure");
+    let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
+        panic!("post-shutdown call must be a structured failure: {output:?}");
+    };
+    assert_eq!(failure.class, ToolFailureClass::Unavailable);
+    assert_eq!(failure.code, "mcp_pool_shut_down");
+    assert_eq!(failure.retry, ToolRetryDisposition::Never);
+}
+
+/// The first eager attempt fails, then a background reconnect spawns a live
+/// child and blocks in discovery. Shutdown must cancel that in-progress
+/// service explicitly and wait for the reconnect loop before returning;
+/// keeping `pool` alive proves this does not rely on pool drop.
+#[cfg(unix)]
+#[tokio::test]
+async fn shutdown_all_reaps_child_from_in_progress_reconnect_before_return() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let attempt_file = scratch.path().join("attempted");
+    let pid_file = scratch.path().join("mcp.pid");
+    let discovery_file = scratch.path().join("discovering");
+    let initialize = json!({
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "reconnect-race", "version": "1.0.0" }
+        }
+    });
+    let script = "\
+            if [ ! -e \"$ATTEMPT_FILE\" ]; then : > \"$ATTEMPT_FILE\"; exit 1; fi; \
+            printf '%s\\n' \"$$\" > \"$PID_FILE\"; \
+            read -r _; printf '%s\\n' \"$RESP1\"; \
+            read -r _; \
+            read -r _; : > \"$DISCOVERY_FILE\"; \
+            cat >/dev/null"
+        .to_string();
+    let servers = BTreeMap::from([(
+        "race".to_string(),
+        McpServerConfig::Stdio {
+            command: "sh".to_string(),
+            args: vec!["-c".to_string(), script],
+            env: BTreeMap::from([
+                (
+                    "ATTEMPT_FILE".to_string(),
+                    attempt_file.display().to_string(),
+                ),
+                ("PID_FILE".to_string(), pid_file.display().to_string()),
+                (
+                    "DISCOVERY_FILE".to_string(),
+                    discovery_file.display().to_string(),
+                ),
+                ("RESP1".to_string(), initialize.to_string()),
+            ]),
+            cwd: None,
+            startup_timeout_ms: 10_000,
+            call_policy: McpCallPolicy {
+                call_timeout_ms: 10_000,
+                ..Default::default()
+            },
+            binary_content_attachments: false,
+        },
+    )]);
+    let pool = McpConnectionPool::connect(servers)
+        .await
+        .expect("startup outage keeps the pool alive");
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !discovery_file.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("background reconnect reaches discovery");
+    let pid = std::fs::read_to_string(&pid_file)
+        .expect("read reconnect child pid")
+        .trim()
+        .to_string();
+    assert!(
+        process_exists(&pid),
+        "reconnect child must be live before shutdown"
+    );
+
+    pool.shutdown_all().await;
+
+    assert!(
+        !process_exists(&pid),
+        "shutdown_all must reap the in-progress reconnect child before returning"
+    );
+    assert!(pool.shut_down.load(Ordering::SeqCst));
+}
+
+#[cfg(unix)]
+fn process_exists(pid: &str) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", pid])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("probe child process")
+        .success()
+}
+
+#[tokio::test]
+async fn shutdown_all_wakes_sleeping_keepalive_loop() {
+    let pool = Arc::new(McpConnectionPool::empty());
+    let entry = Arc::new(McpEntry::new(
+        "keepalive".to_string(),
+        McpServerConfig::Stdio {
+            command: "unused".to_string(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            cwd: None,
+            startup_timeout_ms: 1_000,
+            call_policy: McpCallPolicy {
+                liveness_probe_interval_ms: 60_000,
+                ..Default::default()
+            },
+            binary_content_attachments: false,
+        },
+    ));
+    assert!(
+        pool.install("keepalive".to_string(), Arc::clone(&entry))
+            .is_ok()
+    );
+    assert!(entry.spawn_keepalive_loop().is_some());
+
+    tokio::time::timeout(Duration::from_secs(1), pool.shutdown_all())
+        .await
+        .expect("shutdown must wake keepalive instead of waiting for its interval");
+    assert!(!entry.keepalive_started.load(Ordering::SeqCst));
 }
 
 /// A connection that dies mid-life is detected on the next call and

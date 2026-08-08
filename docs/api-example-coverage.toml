@@ -1178,7 +1178,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::flush_trace_sink"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:113#core.flush_trace_sink()?;"
+usage = "examples/docs-snippets/src/operations.rs:117#core.flush_trace_sink()?;"
 
 [[api]]
 symbol = "lash::LashCore::fork_at"
@@ -1262,6 +1262,16 @@ area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1086#.session(session_id.clone())"
 assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1129#.map(|message| (message.id.as_str(), message.text.as_str()))"
+
+[[api]]
+symbol = "lash::LashCore::shutdown"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::prelude::LashCore::shutdown"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/slack-clone/src/bot.rs:194#let shutdown_result = core.shutdown().await.context(\"shut down Lash plugins\");"
+assertion = "examples/slack-clone/tests/mcp.rs:355#!process_exists(pid),"
 
 [[api]]
 symbol = "lash::LashCore::session_exists"
@@ -2186,7 +2196,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::ModelSpec::with_capability", "lash_core::ModelSpec::with_capability"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/slack-clone/src/bot/runtime.rs:282#.with_capability(lash::provider::ModelCapability {"
+usage = "examples/slack-clone/src/bot/runtime.rs:292#.with_capability(lash::provider::ModelCapability {"
 
 [[api]]
 symbol = "lash::ModelSpec::with_limits"
@@ -6011,7 +6021,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnResult::duration", "lash::turn::TurnResult::duration"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:194#let elapsed = output.result.duration(); // claim -> Committed Turn + Post-Commit Delivery"
+usage = "examples/docs-snippets/src/operations.rs:198#let elapsed = output.result.duration(); // claim -> Committed Turn + Post-Commit Delivery"
 
 [[api]]
 symbol = "lash::TurnResult::errors"
@@ -6074,7 +6084,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnResult::started_at", "lash::turn::TurnResult::started_at"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:193#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
+usage = "examples/docs-snippets/src/operations.rs:197#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
 
 [[api]]
 symbol = "lash::TurnResult::state"
@@ -19044,6 +19054,14 @@ availability = "default+all-features"
 area = "processes"
 disposition = "unused-add"
 reason = "Add lash::plugins::PluginFactory::process_engine_contributions to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::PluginFactory::shutdown"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an example-owned PluginFactory that overrides shutdown and assert its externally observable resource release; the MCP implementation lives outside the lash facade inventory and is not an honest usage anchor."
 
 [[api]]
 symbol = "lash::plugins::PluginHost"

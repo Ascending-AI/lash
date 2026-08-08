@@ -108,11 +108,15 @@ async fn graceful_drain(
     //    Codex provider sends WebSocket Close frames on its cached sessions.
     let _ = provider.close().await;
 
-    // 6. Flush the trace sink (fsync for JSONL). OTel span-export durability is
+    // 6. Release resources owned by plugin factories. This is not a drain
+    //    orchestrator: intake, ordering, and deadlines remain host policy.
+    core.shutdown().await?;
+
+    // 7. Flush the trace sink (fsync for JSONL). OTel span-export durability is
     //    the host's duty: `force_flush()`/`shutdown()` your own TracerProvider.
     core.flush_trace_sink()?;
 
-    // 7. Exit. Any lease this process still holds now expires on its TTL.
+    // 8. Exit. Any lease this process still holds now expires on its TTL.
     Ok(())
     // docs:end:graceful-drain
 }

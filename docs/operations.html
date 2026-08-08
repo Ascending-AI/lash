@@ -32,7 +32,7 @@
       </div>
       <aside class="contract">
         <strong>Contract</strong>
-        <p>lash ships no shutdown, drain, health, or readiness orchestrator. Drain ordering and deadlines are policy, and the runtime absorbing them would start the framework slide without ever knowing the host's grace budget. The boundary is recorded in <code>docs/adr/0014-operational-policy-stays-with-the-host.md</code>: host owns policy, lash owns levers.</p>
+        <p>lash ships no drain, health, or readiness orchestrator. <code>LashCore::shutdown()</code> is the narrow plugin-factory release lever, not a drain orchestrator: drain ordering and deadlines remain host policy. The boundary is recorded in <code>docs/adr/0014-operational-policy-stays-with-the-host.md</code>: host owns policy, lash owns levers.</p>
       </aside>
     </div>
 
@@ -217,7 +217,7 @@ let core = LashCore::rlm_builder(factory)
     <div class="section" id="graceful-drain">
       <div class="section-header">
         <h2>Graceful Drain</h2>
-        <p>There is no <code>LashCore::shutdown()</code>. A host composes its own drain from explicit levers, in host-owned order, with host-owned deadlines. Each numbered step below is a policy decision the host makes; the calls are the levers lash provides to carry it out.</p>
+        <p><code>LashCore::shutdown()</code> releases plugin-factory resources only; it does not orchestrate a drain. A host composes its drain from explicit levers, in host-owned order, with host-owned deadlines. Each numbered step below is a policy decision the host makes; the calls are the levers lash provides to carry it out.</p>
       </div>
       <pre data-lang="rust" data-snippet="operations#graceful-drain"><code>// lash ships no drain orchestrator (ADR-0014): each step is an explicit,
 // host-owned lever. The order below and every deadline are host policy.
@@ -255,13 +255,17 @@ for session in idle_sessions {
 //    Codex provider sends WebSocket Close frames on its cached sessions.
 let _ = provider.close().await;
 
-// 6. Flush the trace sink (fsync for JSONL). OTel span-export durability is
+// 6. Release resources owned by plugin factories. This is not a drain
+//    orchestrator: intake, ordering, and deadlines remain host policy.
+core.shutdown().await?;
+
+// 7. Flush the trace sink (fsync for JSONL). OTel span-export durability is
 //    the host's duty: `force_flush()`/`shutdown()` your own TracerProvider.
 core.flush_trace_sink()?;
 
-// 7. Exit. Any lease this process still holds now expires on its TTL.
+// 8. Exit. Any lease this process still holds now expires on its TTL.
 Ok(())</code></pre>
-      <p>Steps 1 and 2 are pure policy: lash cannot see your ingress or your grace budget, so stopping admission and deciding whether to await or cancel in-flight turns stays with the host. Steps 3 through 6 are the levers: <code>park</code>/<code>close</code>, the claim and wait handbacks, provider <code>close</code>, and trace <code>flush</code>. Each is an explicit call with no hidden ordering. Anything lash cannot expose as a lever without becoming an orchestrator (signal handling, drain deadlines, readiness endpoints) is host territory by design.</p>
+      <p>Steps 1 and 2 are pure policy: lash cannot see your ingress or your grace budget, so stopping admission and deciding whether to await or cancel in-flight turns stays with the host. Steps 3 through 7 are the levers: <code>park</code>/<code>close</code>, the claim and wait handbacks, provider <code>close</code>, plugin-factory <code>shutdown</code>, and trace <code>flush</code>. Each is an explicit call with no hidden drain orchestration. Anything lash cannot expose as a lever without becoming an orchestrator (signal handling, drain deadlines, readiness endpoints) is host territory by design.</p>
       <p>The <a href="./example-agent-service.html">agent service</a> example wires the subset a stateless request/response host owns: an axum graceful-shutdown signal stops admission, then the process closes its retained provider handle and flushes its trace sink before exit.</p>
       <p>A host that runs its own durable process worker has one more terminal-writing step, orthogonal to the session drain above: <code>DurableProcessWorker::drain_owner_bound_work()</code>. lash does not fold it into a facade drain, because only a host that constructs the worker (directly through <code>lash::durability::DurableProcessWorker::new</code>, or reached through <code>RestateProcessDeployment::worker()</code>) owns its lifecycle. Run it inside the worker's own shutdown, after stopping admission and releasing in-flight run leases. It terminalizes every non-terminal <code>OwnerBound</code> row <em>this</em> worker started (the row's <code>first_started.owner</code> equals the worker's lease owner) as <code>Abandoned{OwnerDrain}</code> under a fresh drain lease. The owner completing its own work is the ordinary graceful path, and <code>shell.start</code> processes carry <code>OwnerBound</code>. <code>Rerunnable</code> in-flight work (lashlang engine and subagent turns) takes the opposite contract: the worker just stops the local run task and writes <em>no</em> terminal, leaving the row non-terminal so the next worker re-runs it. Rows another owner started, not-yet-started <code>OwnerBound</code> rows (still claimable by any peer), and <code>ExternallyOwned</code> rows are left untouched. What happens to a host's OwnerBound work when it <em>crashes</em> instead of draining is the subject of <a href="#process-recovery">background process recovery</a>.</p>
       <p><code>ProcessDrainReport.abandoned</code> is confirmation evidence, not an attempted-work list: a process id enters it only when this pass receives <code>Committed</code> for its fenced <code>Abandoned{OwnerDrain}</code> terminal write. Every other outcome stays in <code>deferred</code>: <code>Busy</code> and <code>Absent</code> name ordinary claim/read results; <code>SettledByPeer { terminal_status }</code> and <code>AlreadyApplied { terminal_status }</code> name retained terminal evidence; <code>LeaseLost { operation }</code> means a newer owner superseded this pass; and <code>BackendError { operation, error }</code> names a registry failure. Retry backend-error rows after the registry is healthy; allow lease-lost rows to settle under the newer owner; do not treat any deferred row as this pass's drain write.</p>

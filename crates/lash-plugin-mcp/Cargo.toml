@@ -27,6 +27,7 @@ lash-tool-support = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
 fastrand = { workspace = true }
+futures-util = { workspace = true }
 http = "1"
 rmcp = { workspace = true, features = [
     "client",

@@ -8,6 +8,11 @@ queued-work and turn-input claims are no longer TTL leases with a renewal API �
 they pin a session-execution-lease generation for claimability and handoff.
 `LeaseTimings` governs only the true lease lanes.
 
+The FIG-1056 plugin-lifecycle ruling also narrows this ADR's shutdown rejection:
+a defaulted, fallible per-factory release seam through `LashCore::shutdown()` is
+in. An orchestrating drain remains out; intake, ordering, deadlines, active-turn
+handling, and other host policy do not move into Lash.
+
 ## Decision
 
 Lash ships no shutdown or drain orchestrator. Operational policy — when to stop
@@ -32,8 +37,10 @@ trace buffers) lives inside lash. The capability set:
   a-handle (flush + discard). Both consume the session and fail with
   `SessionStillInUse` when other live handles exist, making mid-turn quiesce an
   explicit contract rather than a silent partial flush.
-- **Transport and sink release**: `Provider::close()` (default no-op; Codex
-  drains its websocket session cache with real close frames) and
+- **Transport, plugin, and sink release**: `Provider::close()` (default no-op;
+  Codex drains its websocket session cache with real close frames),
+  `LashCore::shutdown()` (walks protocol-factory then common-factory release
+  hooks without draining turns), and
   `TraceSink::flush()` (default no-op; the OTel sink documents that span-export
   durability is the host provider's duty).
 - **Claim and wait handback**: host-facing `abandon_queued_work_claim` /
@@ -62,8 +69,9 @@ same boundary discipline keeps drain policy inside the host.
 ## Consequences
 
 - Hosts compose their own drain: stop admitting turns, cancel or await actives,
-  `park()`/`close()` sessions, `close()` providers, `flush()` sinks, and exit —
-  each step an explicit call, no hidden ordering.
+  `park()`/`close()` sessions, `close()` providers, release plugin factories,
+  `flush()` sinks, and exit — each step an explicit call, no hidden drain
+  orchestration.
 - Failover latency is a host decision (`LeaseTimings`), traded explicitly
   against false-takeover risk, instead of a constant chosen by lash.
 - `AwaitEventResolver` gained `cancel_await_events_for_session` with a
@@ -84,9 +92,11 @@ same boundary discipline keeps drain policy inside the host.
 
 ## Considered Alternatives
 
-- **`LashCore::shutdown()` orchestrator.** Rejected: drain ordering and
-  deadlines are policy; the runtime absorbing them starts the framework slide
-  and still could not know the host's grace budget.
+- **`LashCore::shutdown()` orchestrator.** Rejected in its orchestrating form:
+  drain ordering and deadlines are policy; the runtime absorbing them starts
+  the framework slide and still could not know the host's grace budget. The
+  narrowed, defaulted per-factory resource-release seam is accepted because it
+  exposes a Lash-owned lever without choosing drain policy.
 - **`Provider::shutdown()` hook alone.** Rejected: without the rest of the
   lever set nothing in core would call it, making it a footgun-by-convention.
 - **Accept the status quo (drop everything, TTL recovers).** Rejected after the

@@ -524,7 +524,7 @@ async fn dropped_pool_releases_entry_and_keepalive_task() {
     let keepalive = entry
         .spawn_keepalive_loop()
         .expect("enabled keepalive task");
-    pool.install("mock".to_string(), Arc::clone(&entry));
+    assert!(pool.install("mock".to_string(), Arc::clone(&entry)).is_ok());
     drop(entry);
     drop(pool);
 

@@ -32,7 +32,7 @@
       </div>
       <dl class="def-list">
         <dt><code>PluginFactory</code></dt>
-        <dd>Per-core. Owns shared state and cheaply builds a fresh <code>SessionPlugin</code> whenever a session opens.</dd>
+        <dd>Per-core. Owns shared state, cheaply builds a fresh <code>SessionPlugin</code> whenever a session opens, and may override the default no-op <code>shutdown()</code> lifecycle hook to release host-visible resources after intake stops.</dd>
         <dt><code>SessionPlugin</code></dt>
         <dd>Per-session. Registers hooks through <code>PluginRegistrar</code> and optionally participates in snapshot/restore.</dd>
         <dt><code>ToolProvider</code></dt>
@@ -208,6 +208,10 @@ fn update_plan_definition() -&gt; ToolDefinition {
         <div class="listing__row">
           <div class="listing__label">surface drift</div>
           <div class="listing__body"><p>Tool manifests are prompt/search metadata; full contracts are resolved later. Keep both generated from the same source so the model does not see stale schemas.</p></div>
+        </div>
+        <div class="listing__row">
+          <div class="listing__label">leaked child processes</div>
+          <div class="listing__body"><p>After intake stops, call <code>LashCore::shutdown()</code> so plugin factories can release child processes, connections, and background tasks. This releases factory resources; it does not drain or abort turns.</p></div>
         </div>
       </div>
     </div>

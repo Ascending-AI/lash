@@ -326,6 +326,37 @@ async fn bundled_mcp_tools_join_the_catalog_and_feed_the_standard_tool_loop() {
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn bot_exit_path_explicitly_stops_the_mcp_child() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let state = FakeApiState::normal();
+    let (api_base_url, _server) = fake_api(state).await;
+    let pid_file = scratch.path().join("shutdown-mcp.pid");
+    let script = Script::new([Step::Text("unused")]);
+    let core = build_core(
+        &scratch.path().join("lash"),
+        &api_base_url,
+        &script,
+        wrapped_server_config(&api_base_url, &pid_file),
+    )
+    .await;
+    let pid = read_pid(&pid_file).await;
+    assert!(
+        process_exists(pid),
+        "MCP child must be live before bot exit"
+    );
+
+    slack_clone::bot::shutdown_core(&core)
+        .await
+        .expect("shut down bot core");
+
+    assert!(
+        !process_exists(pid),
+        "the bot exit path must reap the MCP child through LashCore::shutdown"
+    );
+}
+
 #[tokio::test]
 async fn server_death_is_a_typed_failure_and_the_next_turn_uses_a_respawned_server() {
     let scratch = tempfile::tempdir().expect("tempdir");
@@ -437,6 +468,16 @@ fn kill_process(pid: u32) {
         .status()
         .expect("invoke kill");
     assert!(status.success(), "kill MCP child");
+}
+
+#[cfg(unix)]
+fn process_exists(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("probe process")
+        .success()
 }
 
 #[cfg(not(unix))]

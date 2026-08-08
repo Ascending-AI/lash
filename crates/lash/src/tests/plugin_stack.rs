@@ -1,5 +1,104 @@
 use super::*;
 
+struct ShutdownRecordingPluginFactory {
+    id: &'static str,
+    calls: Arc<std::sync::Mutex<Vec<&'static str>>>,
+    failure: Option<&'static str>,
+    standard_protocol: bool,
+}
+
+struct EmptySessionPlugin {
+    id: &'static str,
+}
+
+impl lash_core::facade_support::SessionPlugin for EmptySessionPlugin {
+    fn id(&self) -> &'static str {
+        self.id
+    }
+
+    fn register(
+        &self,
+        _reg: &mut lash_core::facade_support::PluginRegistrar,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::facade_support::PluginFactory for ShutdownRecordingPluginFactory {
+    fn id(&self) -> &'static str {
+        self.id
+    }
+
+    async fn shutdown(&self) -> std::result::Result<(), lash_core::PluginError> {
+        self.calls
+            .lock()
+            .expect("shutdown calls lock")
+            .push(self.id);
+        match self.failure {
+            Some(message) => Err(lash_core::PluginError::Invoke(message.to_string())),
+            None => Ok(()),
+        }
+    }
+
+    fn build(
+        &self,
+        ctx: &lash_core::facade_support::PluginSessionContext,
+    ) -> std::result::Result<
+        Arc<dyn lash_core::facade_support::SessionPlugin>,
+        lash_core::PluginError,
+    > {
+        if self.standard_protocol {
+            return lash_core::facade_support::PluginFactory::build(
+                &lash_protocol_standard::StandardProtocolPluginFactory::new(),
+                ctx,
+            );
+        }
+        Ok(Arc::new(EmptySessionPlugin { id: self.id }))
+    }
+}
+
+#[tokio::test]
+async fn core_shutdown_visits_protocol_then_common_factories_and_continues_after_error()
+-> Result<()> {
+    let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .protocol_plugin(Arc::new(ShutdownRecordingPluginFactory {
+            id: "protocol",
+            calls: Arc::clone(&calls),
+            failure: None,
+            standard_protocol: true,
+        }))
+        .plugin(Arc::new(ShutdownRecordingPluginFactory {
+            id: "first",
+            calls: Arc::clone(&calls),
+            failure: Some("first failed"),
+            standard_protocol: false,
+        }))
+        .plugin(Arc::new(ShutdownRecordingPluginFactory {
+            id: "second",
+            calls: Arc::clone(&calls),
+            failure: None,
+            standard_protocol: false,
+        }))
+        .build()?;
+
+    let error = core
+        .shutdown()
+        .await
+        .expect_err("first factory failure surfaces");
+
+    assert_eq!(
+        *calls.lock().expect("shutdown calls lock"),
+        vec!["protocol", "first", "second"],
+        "protocol factory is first and a failure does not stop the common-factory walk"
+    );
+    assert!(error.to_string().contains("first failed"), "{error}");
+    Ok(())
+}
+
 fn persisted_tool_state_at_generation(
     state: lash_core::ToolState,
     generation: u64,

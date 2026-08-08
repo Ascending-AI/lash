@@ -139,6 +139,25 @@ bounded attempt set is exhausted (including a failed boot connection). With
 keepalive disabled, a server with bounded reconnect attempts stays down after
 exhaustion until it is attached again.
 
+### Plugin lifecycle
+
+A real host owns the plugin lifecycle as well as plugin registration. At boot,
+the bot reads `McpPluginFactory::server_statuses()` and logs every configured
+server's connection state and imported tool count. On exit, Axum first stops
+accepting webhook events; only then does the bot call `LashCore::shutdown()`.
+That method awaits the protocol factory first and then common factories in
+configured order; the MCP factory uses the opportunity to stop every connection
+and reap every stdio child. Factories own disjoint resources, so this fixed order
+exists only for deterministic, auditable logs and carries no dependency
+semantics. A host that shares resources across factories must not depend on it.
+
+The ordering is the contract: stop intake, then call `LashCore::shutdown()`.
+Plugin shutdown does not drain or abort active turns. Each plugin implementation
+must make shutdown idempotent and bound its own cleanup time. Shutdown continues
+past factory errors and returns the first error after the full walk. rmcp's kill-on-drop
+behavior remains a last-resort fallback for a host that exits without running
+the explicit lifecycle, not the normal shutdown path.
+
 ## Session mapping doctrine
 
 **One channel, one Lash session, forever.** The session id is

@@ -111,68 +111,91 @@ pub async fn run(config: BotConfig) -> Result<()> {
         config.verification_token.clone(),
         session_owner,
     ));
-    if let Err(error) = bot.refresh_directory().await {
-        eprintln!("slack-clone-bot could not preload the user directory: {error:#}");
-    }
-
-    let listener = tokio::net::TcpListener::bind(config.addr)
-        .await
-        .with_context(|| format!("bind {}", config.addr))?;
-    let request_url = config.request_url();
-    println!(
-        "slack-clone-bot listening on http://{} (events at {request_url})",
-        config.addr
-    );
-
-    let server = tokio::spawn({
-        let bot = Arc::clone(&bot);
-        async move {
-            axum::serve(listener, webhook::router(bot))
-                .with_graceful_shutdown(shutdown_signal())
-                .await
+    let host_result: Result<()> = async {
+        if let Err(error) = bot.refresh_directory().await {
+            eprintln!("slack-clone-bot could not preload the user directory: {error:#}");
         }
-    });
 
-    // Recover before registering, so a previous boot's unfinished work is settled
-    // before the platform is asked to send more. Registration is the last step of
-    // boot for exactly this reason.
-    //
-    // The pass cannot settle everything synchronously. A boot that restarts inside
-    // the previous boot's session-execution lease TTL cannot take that lease, so an
-    // interrupted turn's admission is still fenced and its event comes back
-    // deferred. Those are retried on a background task rather than blocking boot
-    // for the length of a lease TTL — the endpoint has live traffic to serve.
-    match bot.recover().await {
-        Ok(report) => {
-            if !report.settled.is_empty() {
-                println!(
-                    "slack-clone-bot recovery settled {} event(s), deferred {}",
-                    report.settled.len() - report.deferred.len(),
-                    report.deferred.len()
-                );
+        let listener = tokio::net::TcpListener::bind(config.addr)
+            .await
+            .with_context(|| format!("bind {}", config.addr))?;
+        let request_url = config.request_url();
+        println!(
+            "slack-clone-bot listening on http://{} (events at {request_url})",
+            config.addr
+        );
+
+        let server = tokio::spawn({
+            let bot = Arc::clone(&bot);
+            async move {
+                axum::serve(listener, webhook::router(bot))
+                    .with_graceful_shutdown(shutdown_signal())
+                    .await
             }
-            for event_id in report.deferred {
-                let bot = Arc::clone(&bot);
-                tokio::spawn(async move {
-                    if let Err(error) = bot
-                        .retry_deferred(event_id.clone(), channel::DEFERRED_RETRY_DEADLINE)
-                        .await
-                    {
-                        eprintln!("slack-clone-bot deferred retry of {event_id} failed: {error:#}");
-                    }
-                });
+        });
+
+        // Recover before registering, so a previous boot's unfinished work is settled
+        // before the platform is asked to send more. Registration is the last step of
+        // boot for exactly this reason.
+        //
+        // The pass cannot settle everything synchronously. A boot that restarts inside
+        // the previous boot's session-execution lease TTL cannot take that lease, so an
+        // interrupted turn's admission is still fenced and its event comes back
+        // deferred. Those are retried on a background task rather than blocking boot
+        // for the length of a lease TTL — the endpoint has live traffic to serve.
+        match bot.recover().await {
+            Ok(report) => {
+                if !report.settled.is_empty() {
+                    println!(
+                        "slack-clone-bot recovery settled {} event(s), deferred {}",
+                        report.settled.len() - report.deferred.len(),
+                        report.deferred.len()
+                    );
+                }
+                for event_id in report.deferred {
+                    let bot = Arc::clone(&bot);
+                    tokio::spawn(async move {
+                        if let Err(error) = bot
+                            .retry_deferred(event_id.clone(), channel::DEFERRED_RETRY_DEADLINE)
+                            .await
+                        {
+                            eprintln!(
+                                "slack-clone-bot deferred retry of {event_id} failed: {error:#}"
+                            );
+                        }
+                    });
+                }
             }
+            Err(error) => eprintln!("slack-clone-bot recovery pass failed: {error:#}"),
         }
-        Err(error) => eprintln!("slack-clone-bot recovery pass failed: {error:#}"),
-    }
 
-    register(&api, &config, &request_url).await?;
+        if let Err(error) = register(&api, &config, &request_url).await {
+            server.abort();
+            let _ = server.await;
+            return Err(error);
+        }
 
-    let served = server.await.context("bot server task failed")?;
-    served.context("serve bot")?;
-    if let Err(error) = bot.core().flush_trace_sink() {
-        eprintln!("slack-clone-bot: trace flush failed: {error}");
+        let served = server.await.context("bot server task failed")?;
+        served.context("serve bot")
     }
+    .await;
+
+    let shutdown_result = shutdown_core(bot.core()).await;
+    host_result?;
+    shutdown_result
+}
+
+/// Complete the bot host's post-intake Lash shutdown sequence.
+///
+/// The HTTP server has stopped accepting events before the production exit
+/// path calls this helper. Keeping the sequence public lets the integration
+/// suite call and verify the same lifecycle path directly.
+pub async fn shutdown_core(core: &lash::LashCore) -> Result<()> {
+    let shutdown_result = core.shutdown().await.context("shut down Lash plugins");
+    let flush_result = core.flush_trace_sink().context("flush Lash trace sink");
+    shutdown_result?;
+    flush_result?;
+    println!("slack-clone-bot plugin shutdown complete");
     Ok(())
 }
 

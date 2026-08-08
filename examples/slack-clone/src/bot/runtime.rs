@@ -128,11 +128,21 @@ pub async fn build_core(
     let mcp = if config.mcp_servers.is_empty() {
         None
     } else {
-        Some(Arc::new(
+        let mcp = Arc::new(
             McpPluginFactory::new(config.mcp_servers.clone())
                 .await
                 .context("connect slack-clone MCP servers")?,
-        ))
+        );
+        for status in mcp.server_statuses() {
+            println!(
+                "slack-clone-bot MCP server {}: connected={}, tools={}, last_error={}",
+                status.server_name,
+                status.connected,
+                status.tool_count,
+                status.last_error.as_deref().unwrap_or("none")
+            );
+        }
+        Some(mcp)
     };
     let mut builder = LashCore::standard_builder()
         .provider(provider)
