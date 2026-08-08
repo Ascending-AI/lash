@@ -244,9 +244,10 @@ pub mod persistence {
         SessionBinding, SessionCommitStore, SessionExecutionLease,
         SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
         SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
-        SessionExecutionLeaseStore, SessionGraph, SessionHistoryRecord, SessionMeta,
-        SessionNodeRecord, SessionReadView, SessionRelation, StoreError, StoreMaintenance, TurnId,
-        TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
+        SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionGraph,
+        SessionHistoryRecord, SessionMeta, SessionNodeRecord, SessionReadView, SessionRelation,
+        StoreError, StoreMaintenance, TurnId, TurnInputStore, VacuumReport, WorkClaim,
+        WorkCompletion,
     };
     /// Committed session history flattened into presentation order, as returned
     /// by [`SessionReadView::chronological_projection`].

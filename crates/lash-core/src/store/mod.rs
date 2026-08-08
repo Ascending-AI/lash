@@ -28,7 +28,7 @@ pub use commit_identity::{
     OperationId, RuntimeCommitReceiptDecision, decide_runtime_commit_receipt,
     derive_history_node_id,
 };
-pub use error::StoreError;
+pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use load::{load_persisted_session_state, refresh_persisted_session_state};
 pub use queued_work::QueuedWorkClass;
@@ -1342,6 +1342,8 @@ pub trait SessionExecutionLeaseStore: Send + Sync {
     /// Backends reject expired authority with [`StoreError::SessionExecutionLeaseExpired`];
     /// stale, released, or superseded owner/token authority uses
     /// [`StoreError::SessionExecutionLeaseRenewalRefused`] with structured decision evidence.
+    /// Granted renewals echo the presented session and owner, never rotate either
+    /// token, and return expiry at least as late; core refuses install otherwise.
     async fn renew_session_execution_lease(
         &self,
         fence: &SessionExecutionLeaseAuthority,

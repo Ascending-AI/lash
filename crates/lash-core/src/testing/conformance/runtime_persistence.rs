@@ -2274,6 +2274,8 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         .renew_session_execution_lease(&reentered.fence(), 120_000)
         .await
         .expect("renew live session lease");
+    assert_eq!(renewed.session_id, reentered.session_id);
+    assert_eq!(renewed.owner, reentered.owner);
     assert_eq!(renewed.lease_token, reentered.lease_token);
     assert_eq!(renewed.fencing_token, reentered.fencing_token);
     assert!(renewed.expires_at_epoch_ms >= reentered.expires_at_epoch_ms);

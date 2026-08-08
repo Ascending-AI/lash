@@ -39,7 +39,7 @@ pub(crate) enum LeaseTriage {
     /// a provider call with no timeout. Look at the provider, not the lease.
     ProviderHangShape,
     /// The holder's renewals stopped. A peer may take the lane over with a higher
-    /// generation, and `session_execution_lease.renew_failed` →
+    /// generation, and `session_execution_lease.renewal_failed` →
     /// `session_execution_lease.taken_over` orders the handoff in the log.
     ///
     /// **Do not kill the displaced runner on this reading.** It may still commit;
@@ -84,7 +84,7 @@ impl LeaseTriage {
                  call and cancel the exact turn if it must stop"
             }
             Self::LeaseLost => {
-                "renewals stopped; read session_execution_lease.renew_failed / .taken_over for the \
+                "renewals stopped; read session_execution_lease.renewal_failed / .taken_over for the \
                  handoff and do not kill the displaced runner, which may still commit"
             }
         }

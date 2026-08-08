@@ -53,6 +53,7 @@ impl std::fmt::Debug for LeaseClaimNonce {
 pub enum SessionExecutionLeaseRefusalOperation {
     ExecutionFence,
     Renewal,
+    RenewalInstall,
     Release,
 }
 
@@ -61,6 +62,7 @@ impl SessionExecutionLeaseRefusalOperation {
         match self {
             Self::ExecutionFence => "execution_fence",
             Self::Renewal => "renewal",
+            Self::RenewalInstall => "renewal_install",
             Self::Release => "release",
         }
     }
@@ -69,6 +71,7 @@ impl SessionExecutionLeaseRefusalOperation {
         match self {
             Self::ExecutionFence => "session_execution_lease.execution_fence_refused",
             Self::Renewal => "session_execution_lease.renewal_refused",
+            Self::RenewalInstall => "session_execution_lease.renewal_install_refused",
             Self::Release => "session_execution_lease.release_refused",
         }
     }
@@ -83,7 +86,9 @@ pub struct SessionExecutionLeaseRefusalFacts<'a> {
     pub current_fencing_token: Option<u64>,
     pub current_expires_at_epoch_ms: Option<u64>,
     pub observed_at_epoch_ms: Option<u64>,
+    pub minimum_expires_at_epoch_ms: Option<u64>,
     pub requested_session_id: Option<&'a str>,
+    pub refusal_cause: Option<&'static str>,
 }
 
 impl<'a> SessionExecutionLeaseRefusalFacts<'a> {
@@ -106,6 +111,8 @@ impl<'a> SessionExecutionLeaseRefusalFacts<'a> {
 /// Token values remain opaque: the event carries only SHA-256 identities so an
 /// operator can compare the presented and durable tokens without learning
 /// either nonce.
+/// For `renewal_install`, `current_*` describes the returned response rather
+/// than the durable row, and `expiry_matched` means that response did not regress.
 #[doc(hidden)]
 pub fn trace_session_execution_lease_refusal(
     operation: SessionExecutionLeaseRefusalOperation,
@@ -132,11 +139,21 @@ pub fn trace_session_execution_lease_refusal(
     let generation_matched = facts
         .current_fencing_token
         .map(|token| token == presented.fencing_token);
-    let expiry_matched = facts
-        .current_expires_at_epoch_ms
-        .zip(facts.observed_at_epoch_ms)
-        .map(|(expires_at, observed_at)| expires_at > observed_at);
-    let refusal_cause = if operation != SessionExecutionLeaseRefusalOperation::ExecutionFence {
+    let expiry_matched = facts.current_expires_at_epoch_ms.and_then(|expires_at| {
+        facts
+            .minimum_expires_at_epoch_ms
+            .map(|minimum| expires_at >= minimum)
+            .or_else(|| {
+                facts
+                    .observed_at_epoch_ms
+                    .map(|observed_at| expires_at > observed_at)
+            })
+    });
+    let refusal_cause = if operation == SessionExecutionLeaseRefusalOperation::RenewalInstall {
+        facts.refusal_cause.unwrap_or(decision_basis)
+    } else if operation == SessionExecutionLeaseRefusalOperation::Renewal
+        || operation == SessionExecutionLeaseRefusalOperation::Release
+    {
         decision_basis
     } else if session_matched == Some(false) {
         "session_binding_mismatch"
@@ -166,6 +183,11 @@ pub fn trace_session_execution_lease_refusal(
         "sha256:{}",
         crate::stable_hash::sha256_hex(presented.lease_token.as_bytes())
     );
+    let consulted_state = if operation == SessionExecutionLeaseRefusalOperation::RenewalInstall {
+        "backend_renewal_response"
+    } else {
+        "session_execution_lease_row"
+    };
 
     tracing::warn!(
         target: "lash_core::session_execution_lease",
@@ -185,11 +207,12 @@ pub fn trace_session_execution_lease_refusal(
         generation_matched = ?generation_matched,
         current_expires_at_epoch_ms = ?facts.current_expires_at_epoch_ms,
         observed_at_epoch_ms = ?facts.observed_at_epoch_ms,
+        minimum_expires_at_epoch_ms = ?facts.minimum_expires_at_epoch_ms,
         expiry_matched = ?expiry_matched,
         refusal_cause,
         current_token_identity = current_token_identity.as_str(),
         presented_token_identity = presented_token_identity.as_str(),
-        consulted_state = "session_execution_lease_row",
+        consulted_state,
         observation_freshness,
         outcome = "refused",
     );
@@ -319,6 +342,7 @@ pub fn require_current_session_execution_lease(
                 current_expires_at_epoch_ms: current.map(|current| current.expires_at_epoch_ms),
                 observed_at_epoch_ms: Some(now_epoch_ms),
                 requested_session_id: Some(session_id),
+                ..Default::default()
             },
         );
         Err(StoreError::SessionExecutionLeaseExpired {

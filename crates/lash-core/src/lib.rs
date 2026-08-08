@@ -864,8 +864,9 @@ pub use store::{
     LeaseClaimNonce, LeaseOwnerIdentity, QueuedWorkStore, RuntimePersistence, SessionAdmission,
     SessionBinding, SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
     SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
-    SessionExecutionLeaseDisplacement, SessionExecutionLeaseStore, SessionMeta, StoreError,
-    StoreMaintenance, TurnInputStore, VacuumReport,
+    SessionExecutionLeaseDisplacement, SessionExecutionLeaseRenewalInstallMismatch,
+    SessionExecutionLeaseStore, SessionMeta, StoreError, StoreMaintenance, TurnInputStore,
+    VacuumReport,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

@@ -138,14 +138,24 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
             });
         }
         current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
-        Ok(crate::SessionExecutionLease {
+        let renewed = crate::SessionExecutionLease {
             session_id: fence.session_id.clone(),
             owner: fence.owner.clone(),
             lease_token: fence.lease_token.clone(),
             fencing_token: current.fencing_token,
             claimed_at_epoch_ms: current.claimed_at_epoch_ms,
             expires_at_epoch_ms: current.expires_at_epoch_ms,
-        })
+        };
+        #[cfg(test)]
+        if let Some(injected) = self
+            .next_session_execution_lease_renewal_response
+            .lock()
+            .expect("lock injected renewal response")
+            .take()
+        {
+            return Ok(injected);
+        }
+        Ok(renewed)
     }
 
     async fn release_session_execution_lease(

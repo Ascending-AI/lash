@@ -26,7 +26,7 @@ use crate::{EmbedError, LashCore, Result};
 /// than the one you expected, is therefore never grounds to kill a turn, fail a
 /// request, or fabricate a terminal state. Pair it with the
 /// `session_execution_lease.*` trace timeline
-/// (`claimed` → `renew_failed` → `taken_over` → `commit_cas_rejected`) and with
+/// (`acquired` → `renewal_failed` → `taken_over` → `commit_cas_rejected`) and with
 /// the turn's own committed outcome before concluding anything.
 ///
 /// Obtained from

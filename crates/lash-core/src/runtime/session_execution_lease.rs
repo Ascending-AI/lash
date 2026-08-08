@@ -12,8 +12,9 @@
 //! |---|---|---|---|
 //! | `session_execution_lease.acquired` | INFO | the claimant | this runner acquired the lane |
 //! | `session_execution_lease.taken_over` | INFO | the *winner* | this claim displaced a named lapsed holder |
-//! | `session_execution_lease.lost` | WARN | the loser | a renewal was fence-rejected; this runner no longer holds the lane |
+//! | `session_execution_lease.lost` | WARN | the loser | a store verdict (`consulted = "renewal_fence_rejected"`) or refused response install (`consulted = "renewal_response_refused"`) ended continuity; this runner no longer holds the lane |
 //! | `session_execution_lease.renewal_refused` | WARN | the store | durable owner/token decision evidence for a refused renewal |
+//! | `session_execution_lease.renewal_install_refused` | WARN | the runner | a backend returned a renewal that did not preserve the presented lease |
 //! | `session_execution_lease.release_refused` | WARN | the store | durable owner/token decision evidence for a refused release |
 //! | `session_execution_lease.renewal_failed` | WARN | the holder | renewal stopped on a transient error; the lease is still ours to release |
 //! | `session_execution_lease.commit_cas_rejected` | WARN | the losing writer | the commit's head CAS lost to a concurrent writer |
@@ -46,7 +47,7 @@
 
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
 use super::Clock;
 use crate::LeaseTimings;
@@ -74,6 +75,18 @@ mod release_state {
     /// The backend acknowledged the release, or the commit that carried it
     /// succeeded. Terminal.
     pub(super) const RELEASED: u8 = 2;
+}
+
+/// Why this runner can no longer continue under its resident lease.
+mod loss_cause {
+    /// Renewal has not established any loss of continuity.
+    pub(super) const NONE: u8 = 0;
+    /// The store proved that the durable owner, lifecycle token, or lease had
+    /// stopped matching. No owner-side release remains to perform.
+    pub(super) const STORE_VERDICT: u8 = 1;
+    /// Core refused the returned renewal response. The durable row may still be
+    /// ours, so cleanup must attempt the normal token-fenced release.
+    pub(super) const RESPONSE_REFUSED: u8 = 2;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -108,7 +121,7 @@ pub(super) struct SessionExecutionLeaseGuard {
     store: Arc<dyn RuntimePersistence>,
     lease: Arc<StdMutex<SessionExecutionLease>>,
     release_state: Arc<AtomicU8>,
-    lost: Arc<AtomicBool>,
+    loss_cause: Arc<AtomicU8>,
     clock: Arc<dyn Clock>,
     guard_id: u64,
     renew_task: tokio::task::JoinHandle<()>,
@@ -122,7 +135,7 @@ pub(super) struct SessionExecutionLeaseGuard {
 #[derive(Clone)]
 pub(super) struct BorrowedLaneAuthority {
     lease: Arc<StdMutex<SessionExecutionLease>>,
-    lost: Arc<AtomicBool>,
+    loss_cause: Arc<AtomicU8>,
 }
 
 impl BorrowedLaneAuthority {
@@ -141,7 +154,7 @@ impl BorrowedLaneAuthority {
         Box::new(SessionExecutionLeaseCommitEvidence {
             owner: lease.owner.clone(),
             fencing_token: lease.fencing_token,
-            lease_lost: self.lost.load(Ordering::Acquire),
+            lease_lost: self.loss_cause.load(Ordering::Acquire) != loss_cause::NONE,
         })
     }
 }
@@ -204,12 +217,12 @@ impl SessionExecutionLeaseGuard {
         }
         let lease = Arc::new(StdMutex::new(lease));
         let release_state = Arc::new(AtomicU8::new(release_state::LIVE));
-        let lost = Arc::new(AtomicBool::new(false));
+        let loss_cause = Arc::new(AtomicU8::new(loss_cause::NONE));
         let renew_task = spawn_renewal_task(
             Arc::clone(&store),
             Arc::clone(&lease),
             Arc::clone(&release_state),
-            Arc::clone(&lost),
+            Arc::clone(&loss_cause),
             timings,
             Arc::clone(&clock),
         );
@@ -217,7 +230,7 @@ impl SessionExecutionLeaseGuard {
             store,
             lease,
             release_state,
-            lost,
+            loss_cause,
             clock,
             guard_id: NEXT_LEASE_GUARD_ID.fetch_add(1, Ordering::Relaxed),
             renew_task,
@@ -227,7 +240,7 @@ impl SessionExecutionLeaseGuard {
     pub(super) fn borrowed_authority(&self) -> BorrowedLaneAuthority {
         BorrowedLaneAuthority {
             lease: Arc::clone(&self.lease),
-            lost: Arc::clone(&self.lost),
+            loss_cause: Arc::clone(&self.loss_cause),
         }
     }
 
@@ -262,7 +275,7 @@ impl SessionExecutionLeaseGuard {
         Box::new(SessionExecutionLeaseCommitEvidence {
             owner: lease.owner.clone(),
             fencing_token: lease.fencing_token,
-            lease_lost: self.lost.load(Ordering::Acquire),
+            lease_lost: self.loss_cause.load(Ordering::Acquire) != loss_cause::NONE,
         })
     }
 
@@ -289,7 +302,7 @@ impl SessionExecutionLeaseGuard {
     }
 
     pub(super) fn is_lost(&self) -> bool {
-        self.lost.load(Ordering::Acquire)
+        self.loss_cause.load(Ordering::Acquire) != loss_cause::NONE
     }
 
     pub(super) fn continuity(&self) -> Option<SessionExecutionLeaseContinuity> {
@@ -324,7 +337,7 @@ impl SessionExecutionLeaseGuard {
             // before acknowledgement, so fall through and retry it.
             Err(_) => {}
         }
-        if self.is_lost() {
+        if self.loss_cause.load(Ordering::Acquire) == loss_cause::STORE_VERDICT {
             // Definitive fence loss only: renewal proved the durable owner,
             // token or fence stopped matching, so there is no owner-side
             // release left to perform. A transient renewal failure must never
@@ -448,7 +461,9 @@ impl Drop for SessionExecutionLeaseGuard {
     fn drop(&mut self) {
         self.renew_task.abort();
         let state = self.release_state.load(Ordering::Acquire);
-        if state == release_state::RELEASED || self.is_lost() {
+        if state == release_state::RELEASED
+            || self.loss_cause.load(Ordering::Acquire) == loss_cause::STORE_VERDICT
+        {
             return;
         }
         let lease = self
@@ -459,12 +474,13 @@ impl Drop for SessionExecutionLeaseGuard {
         let completion = lease.completion();
         let observed_at_epoch_ms = self.clock.timestamp_ms();
         let store = Arc::clone(&self.store);
+        let lease_lost = self.is_lost();
         tracing::debug!(
             session_id = %completion.session_id,
             owner_id = %completion.owner.owner_id,
             incarnation_id = %completion.owner.incarnation_id,
             fencing_token = completion.fencing_token,
-            lease_lost = false,
+            lease_lost,
             expires_at_epoch_ms = lease.expires_at_epoch_ms,
             observed_at_epoch_ms,
             remaining_ttl_ms = lease.expires_at_epoch_ms.saturating_sub(observed_at_epoch_ms),
@@ -516,7 +532,7 @@ fn spawn_renewal_task(
     store: Arc<dyn RuntimePersistence>,
     lease: Arc<StdMutex<SessionExecutionLease>>,
     release_state: Arc<AtomicU8>,
-    lost: Arc<AtomicBool>,
+    loss_cause: Arc<AtomicU8>,
     timings: LeaseTimings,
     clock: Arc<dyn Clock>,
 ) -> tokio::task::JoinHandle<()> {
@@ -527,72 +543,152 @@ fn spawn_renewal_task(
             if release_state.load(Ordering::Acquire) != release_state::LIVE {
                 break;
             }
-            let fence = lease
+            let presented = lease
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .fence();
-            match store
+                .clone();
+            let fence = presented.fence();
+            let renewal = match store
                 .renew_session_execution_lease(&fence, timings.ttl_ms())
                 .await
             {
                 Ok(renewed) => {
-                    tracing::debug!(
-                        session_id = %renewed.session_id,
-                        owner_id = %renewed.owner.owner_id,
-                        incarnation_id = %renewed.owner.incarnation_id,
-                        fencing_token = renewed.fencing_token,
-                        event = "session_execution_lease.renewed",
-                        "renewed session execution lease"
-                    );
-                    *lease
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner) = renewed;
-                }
-                Err(err) => {
-                    // Only a definitive fence result proves the lease stopped
-                    // being ours. A transient failure (contention, backend
-                    // unavailability) leaves the durable lease live, so it must
-                    // not mark the lease lost: `release_if_live` would then
-                    // record completion without ever asking the backend to
-                    // release, blocking a successor until TTL.
-                    let fence_lost = matches!(
-                        err,
-                        StoreError::SessionExecutionLeaseExpired { .. }
-                            | StoreError::SessionExecutionLeaseRenewalRefused { .. }
-                    );
-                    if fence_lost {
-                        lost.store(true, Ordering::Release);
-                        tracing::warn!(
-                            error = %err,
-                            session_id = %fence.session_id,
-                            owner_id = %fence.owner.owner_id,
-                            incarnation_id = %fence.owner.incarnation_id,
-                            fencing_token = fence.fencing_token,
-                            consulted = "renewal_fence_rejected",
-                            outcome = "lease_lost",
-                            event = "session_execution_lease.lost",
-                            "lost session execution lease"
-                        );
-                    } else {
-                        tracing::warn!(
-                            error = %err,
-                            session_id = %fence.session_id,
-                            owner_id = %fence.owner.owner_id,
-                            incarnation_id = %fence.owner.incarnation_id,
-                            fencing_token = fence.fencing_token,
-                            consulted = "renewal_error_transient",
-                            outcome = "renewal_stopped_release_still_required",
-                            event = "session_execution_lease.renewal_failed",
-                            "session execution lease renewal failed transiently; \
-                             the lease is still ours to release"
-                        );
+                    match validate_renewed_session_execution_lease(&presented, &renewed) {
+                        Ok(()) => {
+                            tracing::debug!(
+                                session_id = %renewed.session_id,
+                                owner_id = %renewed.owner.owner_id,
+                                incarnation_id = %renewed.owner.incarnation_id,
+                                fencing_token = renewed.fencing_token,
+                                event = "session_execution_lease.renewed",
+                                "renewed session execution lease"
+                            );
+                            *lease
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner) = renewed;
+                            Ok(())
+                        }
+                        Err(mismatch) => {
+                            trace_renewal_install_refused(
+                                &presented,
+                                &renewed,
+                                mismatch,
+                                clock.timestamp_ms(),
+                            );
+                            Err(StoreError::SessionExecutionLeaseRenewalInstallRefused {
+                                session_id: presented.session_id.clone(),
+                                mismatch,
+                            })
+                        }
                     }
-                    break;
                 }
+                Err(err) => Err(err),
+            };
+            if let Err(err) = renewal {
+                // A store verdict proves that owner-side release is obsolete.
+                // A refused response also ends local continuity, but may leave
+                // the durable lease ours and therefore still requires release.
+                // A transient failure proves neither kind of loss.
+                let established_loss_cause = match &err {
+                    StoreError::SessionExecutionLeaseExpired { .. }
+                    | StoreError::SessionExecutionLeaseRenewalRefused { .. } => {
+                        loss_cause::STORE_VERDICT
+                    }
+                    StoreError::SessionExecutionLeaseRenewalInstallRefused { .. } => {
+                        loss_cause::RESPONSE_REFUSED
+                    }
+                    _ => loss_cause::NONE,
+                };
+                if established_loss_cause != loss_cause::NONE {
+                    loss_cause.store(established_loss_cause, Ordering::Release);
+                    tracing::warn!(
+                        error = %err,
+                        session_id = %fence.session_id,
+                        owner_id = %fence.owner.owner_id,
+                        incarnation_id = %fence.owner.incarnation_id,
+                        fencing_token = fence.fencing_token,
+                        consulted = if established_loss_cause == loss_cause::STORE_VERDICT {
+                            "renewal_fence_rejected"
+                        } else {
+                            "renewal_response_refused"
+                        },
+                        outcome = "lease_lost",
+                        event = "session_execution_lease.lost",
+                        "lost session execution lease"
+                    );
+                } else {
+                    tracing::warn!(
+                        error = %err,
+                        session_id = %fence.session_id,
+                        owner_id = %fence.owner.owner_id,
+                        incarnation_id = %fence.owner.incarnation_id,
+                        fencing_token = fence.fencing_token,
+                        consulted = "renewal_error_transient",
+                        outcome = "renewal_stopped_release_still_required",
+                        event = "session_execution_lease.renewal_failed",
+                        "session execution lease renewal failed transiently; \
+                         the lease is still ours to release"
+                    );
+                }
+                break;
             }
         }
     })
 }
+
+/// Require a renewal response to preserve the resident lease's identity and
+/// monotonically extend (or retain) its expiry before replacing it.
+///
+/// This is the runner-side counterpart of the store-side renewal predicate;
+/// FIG-1072 tracks core-owning that predicate so both sides share one
+/// implementation.
+fn validate_renewed_session_execution_lease(
+    presented: &SessionExecutionLease,
+    renewed: &SessionExecutionLease,
+) -> Result<(), crate::SessionExecutionLeaseRenewalInstallMismatch> {
+    use crate::SessionExecutionLeaseRenewalInstallMismatch as Mismatch;
+
+    if renewed.session_id != presented.session_id {
+        Err(Mismatch::Session)
+    } else if !renewed.owner.same_incarnation(&presented.owner) {
+        Err(Mismatch::OwnerIncarnation)
+    } else if renewed.lease_token != presented.lease_token {
+        Err(Mismatch::LeaseToken)
+    } else if renewed.fencing_token != presented.fencing_token {
+        Err(Mismatch::FencingToken)
+    } else if renewed.expires_at_epoch_ms < presented.expires_at_epoch_ms {
+        Err(Mismatch::ExpiryRegressed)
+    } else {
+        Ok(())
+    }
+}
+
+fn trace_renewal_install_refused(
+    presented: &SessionExecutionLease,
+    renewed: &SessionExecutionLease,
+    mismatch: crate::SessionExecutionLeaseRenewalInstallMismatch,
+    observed_at_epoch_ms: u64,
+) {
+    crate::store_backend_support::trace_session_execution_lease_refusal(
+        crate::store_backend_support::SessionExecutionLeaseRefusalOperation::RenewalInstall,
+        "core_renewal_install_validation",
+        "backend_renewal_response",
+        &presented.fence(),
+        crate::store_backend_support::SessionExecutionLeaseRefusalFacts {
+            current_owner: Some(&renewed.owner),
+            current_token: Some(&renewed.lease_token),
+            current_fencing_token: Some(renewed.fencing_token),
+            current_expires_at_epoch_ms: Some(renewed.expires_at_epoch_ms),
+            observed_at_epoch_ms: Some(observed_at_epoch_ms),
+            minimum_expires_at_epoch_ms: Some(presented.expires_at_epoch_ms),
+            requested_session_id: Some(&renewed.session_id),
+            refusal_cause: Some(mismatch.label()),
+        },
+    );
+}
+
+#[cfg(test)]
+mod renewal_install_tests;
 
 /// Report a takeover from the winning claim, naming the holder it displaced.
 ///
@@ -1118,6 +1214,56 @@ mod tests {
         );
     }
 
+    /// Refusing a malformed renewal response also leaves the durable lease
+    /// potentially ours: every backend has already extended its row before
+    /// returning success, so cleanup must make one token-fenced release attempt.
+    #[tokio::test]
+    async fn renewal_install_refusal_still_requires_a_backend_release() {
+        let store = Arc::new(InMemorySessionStore::new());
+        let timings = LeaseTimings::new(
+            std::time::Duration::from_secs(30),
+            std::time::Duration::from_millis(10),
+        )
+        .expect("test lease timings");
+        let guard = SessionExecutionLeaseGuard::try_acquire(
+            Arc::clone(&store) as Arc<dyn RuntimePersistence>,
+            SESSION_ID,
+            &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+            timings,
+            Arc::new(crate::runtime::SystemClock),
+        )
+        .await
+        .expect("claim lease")
+        .expect("lease acquired");
+        let mut malformed = guard
+            .lease
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        malformed.lease_token.push_str("-malformed");
+        store.respond_to_next_session_execution_lease_renewal_with(malformed);
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !guard.is_lost() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the refused renewal response marks continuity lost");
+
+        guard.release_if_live().await.expect("release");
+
+        assert_eq!(
+            store.session_execution_lease_release_attempt_count(),
+            1,
+            "the owner must release after refusing the backend response"
+        );
+        assert!(
+            !lease_is_held(&store).await,
+            "a successor must not wait out the TTL after an install refusal"
+        );
+    }
+
     /// The other half of the same rule: a definitive fence rejection *is* loss,
     /// and then there is no owner-side release left to perform.
     #[tokio::test]
@@ -1174,7 +1320,7 @@ mod tests {
         ) {
             assert_eq!(event.target, "lash_core::session_execution_lease");
             assert_eq!(event.level, "WARN");
-            assert_eq!(event.field_count(), 23);
+            assert_eq!(event.field_count(), 24);
             for field in [
                 "event",
                 "operation",
@@ -1202,6 +1348,7 @@ mod tests {
                 "generation_matched",
                 "current_expires_at_epoch_ms",
                 "observed_at_epoch_ms",
+                "minimum_expires_at_epoch_ms",
                 "expiry_matched",
             ] {
                 assert_eq!(event.field_kind(field), CapturedFieldKind::Debug, "{field}");
@@ -1308,7 +1455,7 @@ mod tests {
         .await;
         let execution_event =
             execution_capture.exactly_one("session_execution_lease.execution_fence_refused");
-        assert_eq!(execution_event.field_count(), 23);
+        assert_eq!(execution_event.field_count(), 24);
         assert_eq!(execution_event.field("operation"), "execution_fence");
         assert_eq!(
             execution_event.field("decision_basis"),
