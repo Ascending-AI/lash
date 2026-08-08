@@ -143,7 +143,8 @@ fn conflicting_reopen_state(session_id: &str) -> RuntimeSessionState {
             protocol_turn_options: Default::default(),
         },
     });
-    state.session_graph = lash_core::SessionGraph::from_nodes(nodes, Some(frame_node_id.clone()));
+    state.session_graph = lash_core::SessionGraph::from_nodes(nodes, Some(frame_node_id.clone()))
+        .expect("session lifecycle fixture graph is valid");
     state.current_frame_node_id = Some(frame_node_id);
     state.agent_frames = state.session_graph.agent_frame_records(session_id);
     state.policy = lash_core::SessionPolicy {
@@ -1258,7 +1259,8 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
         panic!("current frame must be a FrameOpen node");
     };
     assignment.policy.provider_id = "other-provider".to_string();
-    state.session_graph = lash_core::SessionGraph::from_nodes(nodes, leaf_node_id);
+    state.session_graph = lash_core::SessionGraph::from_nodes(nodes, leaf_node_id)
+        .expect("session lifecycle fixture graph is valid");
     state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))

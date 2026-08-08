@@ -23,6 +23,68 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
 }
 
 #[test]
+fn construction_enforces_structural_graph_integrity() {
+    let node = |id: &str, parent: Option<&str>| SessionNodeRecord {
+        node_id: id.to_string(),
+        parent_node_id: parent.map(str::to_string),
+        timestamp: "2026-08-08T00:00:00Z".to_string(),
+        payload: SessionNodePayload::Plugin {
+            plugin_type: "construction-integrity-test".to_string(),
+            body: SharedJsonValue::new(serde_json::json!({"id": id})),
+        },
+    };
+
+    assert!(matches!(
+        SessionGraph::from_nodes(
+            vec![node("duplicate", None), node("duplicate", None)],
+            Some("duplicate".to_string()),
+        ),
+        Err(crate::StoreError::NodeIdCollision { node_id }) if node_id == "duplicate"
+    ));
+    assert!(matches!(
+        SessionGraph::from_nodes(
+            vec![node("orphan", Some("missing-parent"))],
+            Some("orphan".to_string()),
+        ),
+        Err(crate::StoreError::InvalidGraphParent {
+            node_id,
+            actual: Some(parent),
+            ..
+        }) if node_id == "orphan" && parent == "missing-parent"
+    ));
+    assert!(matches!(
+        SessionGraph::from_nodes(vec![node("present", None)], Some("missing-leaf".to_string())),
+        Err(crate::StoreError::InvalidGraphLeaf {
+            leaf_node_id: Some(leaf)
+        }) if leaf == "missing-leaf"
+    ));
+    assert!(matches!(
+        SessionGraph::from_nodes(
+            vec![
+                node("cycle-a", Some("cycle-b")),
+                node("cycle-b", Some("cycle-a")),
+            ],
+            None,
+        ),
+        Err(crate::StoreError::InvalidGraphParent { .. })
+    ));
+
+    let leafless = SessionGraph::from_nodes(
+        vec![
+            node("catalog-root", None),
+            node("catalog-child", Some("catalog-root")),
+        ],
+        None,
+    )
+    .expect("structurally valid leafless catalogs are constructible");
+    assert_eq!(leafless.nodes.len(), 2);
+    assert!(matches!(
+        leafless.validate_resident_integrity(),
+        Err(crate::StoreError::InvalidGraphLeaf { leaf_node_id: None })
+    ));
+}
+
+#[test]
 fn cache_build_rejects_parent_cycles() {
     const CHILD_ENV: &str = "LASH_FIG843_CYCLE_CACHE_CHILD";
     if std::env::var_os(CHILD_ENV).is_some() {
@@ -38,7 +100,7 @@ fn cache_build_rejects_parent_cycles() {
 }
 
 fn cache_build_rejects_parent_cycles_scenario() {
-    let graph = SessionGraph::from_nodes(
+    let graph = SessionGraph::from_unchecked_nodes_for_testing(
         vec![
             SessionNodeRecord {
                 node_id: "cycle-a".to_string(),
@@ -84,7 +146,10 @@ fn cache_build_rejects_duplicate_node_ids() {
             body: SharedJsonValue::new(serde_json::json!({"value": 1})),
         },
     };
-    let graph = SessionGraph::from_nodes(vec![node.clone(), node], Some("duplicate".to_string()));
+    let graph = SessionGraph::from_unchecked_nodes_for_testing(
+        vec![node.clone(), node],
+        Some("duplicate".to_string()),
+    );
 
     assert!(matches!(
         SessionGraphCache::build(&graph),
@@ -94,7 +159,7 @@ fn cache_build_rejects_duplicate_node_ids() {
 
 #[test]
 fn cache_build_rejects_dangling_parents() {
-    let graph = SessionGraph::from_nodes(
+    let graph = SessionGraph::from_unchecked_nodes_for_testing(
         vec![SessionNodeRecord {
             node_id: "dangling-child".to_string(),
             parent_node_id: Some("missing-parent".to_string()),
@@ -128,9 +193,11 @@ fn resident_integrity_rejects_missing_leaves() {
             body: SharedJsonValue::new(serde_json::json!({"value": 1})),
         },
     };
-    let unknown_leaf =
-        SessionGraph::from_nodes(vec![node.clone()], Some("missing-leaf".to_string()));
-    let absent_leaf = SessionGraph::from_nodes(vec![node], None);
+    let unknown_leaf = SessionGraph::from_unchecked_nodes_for_testing(
+        vec![node.clone()],
+        Some("missing-leaf".to_string()),
+    );
+    let absent_leaf = SessionGraph::from_unchecked_nodes_for_testing(vec![node], None);
 
     assert!(matches!(
         unknown_leaf.validate_resident_integrity(),
@@ -155,7 +222,7 @@ fn cache_build_rejects_cycles_in_inactive_components() {
             body: SharedJsonValue::new(serde_json::json!({"node": node_id})),
         },
     };
-    let graph = SessionGraph::from_nodes(
+    let graph = SessionGraph::from_unchecked_nodes_for_testing(
         vec![
             plugin_node("active-root", None),
             plugin_node("active-leaf", Some("active-root")),
@@ -191,7 +258,7 @@ fn nearest_ancestor_walk_is_bounded_on_a_parent_cycle() {
 }
 
 fn nearest_ancestor_walk_is_bounded_scenario() {
-    let graph = SessionGraph::from_nodes(
+    let graph = SessionGraph::from_unchecked_nodes_for_testing(
         vec![
             SessionNodeRecord {
                 node_id: "nearest-a".to_string(),

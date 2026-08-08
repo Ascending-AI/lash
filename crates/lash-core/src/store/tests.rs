@@ -156,7 +156,8 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
                 },
             }],
             Some(placeholder),
-        ),
+        )
+        .expect("first-commit fixture graph is valid"),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let operation = OperationId::new(

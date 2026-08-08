@@ -1468,19 +1468,19 @@ fn malformed_resident_graph(shape: u8) -> crate::SessionGraph {
         },
     };
     match shape {
-        0 => crate::SessionGraph::from_nodes(
+        0 => crate::SessionGraph::from_unchecked_nodes_for_testing(
             vec![node("duplicate", None), node("duplicate", None)],
             Some("duplicate".to_string()),
         ),
-        1 => crate::SessionGraph::from_nodes(
+        1 => crate::SessionGraph::from_unchecked_nodes_for_testing(
             vec![node("dangling", Some("missing"))],
             Some("dangling".to_string()),
         ),
-        2 => crate::SessionGraph::from_nodes(
+        2 => crate::SessionGraph::from_unchecked_nodes_for_testing(
             vec![node("present", None)],
             Some("missing-leaf".to_string()),
         ),
-        _ => crate::SessionGraph::from_nodes(
+        _ => crate::SessionGraph::from_unchecked_nodes_for_testing(
             vec![
                 node("cycle-a", Some("cycle-b")),
                 node("cycle-b", Some("cycle-a")),

@@ -24,6 +24,7 @@ pub mod provider;
 pub mod runtime;
 pub mod session;
 pub mod session_graph;
+pub(crate) mod session_graph_integrity;
 pub mod session_model;
 mod stable_hash;
 mod stable_identity;

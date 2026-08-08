@@ -1585,7 +1585,8 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
     state.session_graph = crate::SessionGraph::from_nodes(
         vec![frame, live_leaf.clone()],
         Some(live_leaf.node_id.clone()),
-    );
+    )
+    .expect("delete-session fixture graph is valid");
     created
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await

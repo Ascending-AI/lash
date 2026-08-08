@@ -139,7 +139,8 @@ impl SnapshotStore {
                 assignment.policy.provider_id = provider_id.clone();
             }
         }
-        read.graph = lash_core::SessionGraph::from_nodes(nodes, leaf_node_id);
+        read.graph = lash_core::SessionGraph::from_nodes(nodes, leaf_node_id)
+            .expect("snapshot fixture graph is valid");
         read.head_revision += 1;
     }
 }

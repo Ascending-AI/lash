@@ -160,7 +160,9 @@ impl CurrentSessionCapability {
                 node.parent_node_id = None;
                 node
             });
-        let session_graph = crate::SessionGraph::from_nodes(
+        // This is either empty or one detached frame root selected from an already-validated
+        // resident graph, so identity, parent, and leaf integrity hold by construction.
+        let session_graph = crate::SessionGraph::from_validated_nodes(
             frame_root.iter().cloned().collect(),
             frame_root.map(|node| node.node_id),
         );

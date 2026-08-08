@@ -2,6 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::sync::{Arc, OnceLock};
 
+use crate::session_graph_integrity::{
+    ancestry_indices, graph_node_indices, validate_graph_parent_topology,
+};
 use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
 use crate::{BaseRenderCache, Clock, Message, MessageRole, PromptUsage, TokenUsage};
 use facade_ops::{SessionGraphFacadeOps, SessionNodeRecordFacadeOps};
@@ -613,104 +616,6 @@ impl SessionGraphCache {
     }
 }
 
-fn graph_node_indices(graph: &SessionGraph) -> Result<HashMap<String, usize>, crate::StoreError> {
-    let mut by_id = HashMap::with_capacity(graph.nodes.len());
-    for (idx, node) in graph.nodes.iter().enumerate() {
-        if by_id.insert(node.node_id.clone(), idx).is_some() {
-            return Err(crate::StoreError::NodeIdCollision {
-                node_id: node.node_id.clone(),
-            });
-        }
-    }
-    Ok(by_id)
-}
-
-fn ancestry_indices(
-    graph: &SessionGraph,
-    by_id: &HashMap<String, usize>,
-    node_id: Option<&str>,
-) -> Result<Vec<usize>, crate::StoreError> {
-    let mut path = Vec::new();
-    let mut visited = HashSet::with_capacity(graph.nodes.len());
-    let mut current = match node_id {
-        Some(node_id) => Some(by_id.get(node_id).copied().ok_or_else(|| {
-            crate::StoreError::InvalidGraphLeaf {
-                leaf_node_id: Some(node_id.to_string()),
-            }
-        })?),
-        None => None,
-    };
-    while let Some(idx) = current {
-        let node = &graph.nodes[idx];
-        if !visited.insert(idx) {
-            return Err(crate::StoreError::InvalidGraphParent {
-                node_id: node.node_id.clone(),
-                expected: None,
-                actual: node.parent_node_id.clone(),
-            });
-        }
-        path.push(idx);
-        current = node
-            .parent_node_id
-            .as_ref()
-            .and_then(|parent| by_id.get(parent).copied());
-    }
-    Ok(path)
-}
-
-fn validate_graph_parent_topology(
-    graph: &SessionGraph,
-    by_id: &HashMap<String, usize>,
-) -> Result<(), crate::StoreError> {
-    for node in &graph.nodes {
-        if let Some(parent_node_id) = node.parent_node_id.as_deref()
-            && !by_id.contains_key(parent_node_id)
-        {
-            return Err(crate::StoreError::InvalidGraphParent {
-                node_id: node.node_id.clone(),
-                expected: None,
-                actual: node.parent_node_id.clone(),
-            });
-        }
-    }
-
-    const UNVISITED: u8 = 0;
-    const VISITING: u8 = 1;
-    const RESOLVED: u8 = 2;
-    let mut state = vec![UNVISITED; graph.nodes.len()];
-    for start in 0..graph.nodes.len() {
-        if state[start] != UNVISITED {
-            continue;
-        }
-        let mut path = Vec::new();
-        let mut current = Some(start);
-        while let Some(idx) = current {
-            if state[idx] == RESOLVED {
-                break;
-            }
-            state[idx] = VISITING;
-            path.push(idx);
-            let node = &graph.nodes[idx];
-            let parent = node
-                .parent_node_id
-                .as_ref()
-                .and_then(|parent_node_id| by_id.get(parent_node_id).copied());
-            if parent.is_some_and(|parent_idx| state[parent_idx] == VISITING) {
-                return Err(crate::StoreError::InvalidGraphParent {
-                    node_id: node.node_id.clone(),
-                    expected: None,
-                    actual: node.parent_node_id.clone(),
-                });
-            }
-            current = parent;
-        }
-        for idx in path {
-            state[idx] = RESOLVED;
-        }
-    }
-    Ok(())
-}
-
 impl SessionNodeRecord {
     /// Borrow the message identity carried by a conversation node.
     ///
@@ -822,9 +727,31 @@ impl SessionGraph {
         self.append_message_batch_at(appendable_messages, timestamp);
     }
 
-    /// Builds a `SessionGraph` from nodes data for store, effect-host, and protocol implementors
-    /// while materializing, executing, or persisting a session turn.
-    pub fn from_nodes(nodes: Vec<SessionNodeRecord>, leaf_node_id: Option<String>) -> Self {
+    /// Builds and structurally validates a graph from node data.
+    ///
+    /// Graph integrity follows the same pair-assertion rule as durable state: validate before
+    /// writing and validate again after reading. Store implementations must map an error returned
+    /// here while decoding durable rows to their typed stored-data-corruption variant. A supplied
+    /// leaf must resolve, but leaf presence is a resident-graph invariant enforced by
+    /// `validate_resident_integrity` at the resident seam.
+    pub fn from_nodes(
+        nodes: Vec<SessionNodeRecord>,
+        leaf_node_id: Option<String>,
+    ) -> Result<Self, crate::StoreError> {
+        let graph = Self::from_validated_nodes(nodes, leaf_node_id);
+        graph.validate_structural_integrity()?;
+        Ok(graph)
+    }
+
+    /// Builds a graph from nodes whose integrity is already guaranteed by the caller.
+    ///
+    /// This is deliberately crate-private and named for auditability. It is only appropriate when
+    /// the nodes are derived from an already-validated resident graph by an operation that
+    /// preserves identity, parent topology, and leaf membership.
+    pub(crate) fn from_validated_nodes(
+        nodes: Vec<SessionNodeRecord>,
+        leaf_node_id: Option<String>,
+    ) -> Self {
         Self {
             inner: Arc::new(SessionGraphData {
                 nodes,
@@ -834,12 +761,25 @@ impl SessionGraph {
         }
     }
 
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn from_unchecked_nodes_for_testing(
+        nodes: Vec<SessionNodeRecord>,
+        leaf_node_id: Option<String>,
+    ) -> Self {
+        Self::from_validated_nodes(nodes, leaf_node_id)
+    }
+
     pub(crate) fn validate_resident_integrity(&self) -> Result<(), crate::StoreError> {
         if !self.nodes.is_empty() && self.leaf_node_id.is_none() {
             return Err(crate::StoreError::InvalidGraphLeaf { leaf_node_id: None });
         }
-        let cache = self.try_cache()?;
-        validate_graph_parent_topology(self, &cache.by_id)
+        self.validate_structural_integrity()
+    }
+
+    fn validate_structural_integrity(&self) -> Result<(), crate::StoreError> {
+        let by_id = graph_node_indices(self)?;
+        ancestry_indices(self, &by_id, self.leaf_node_id.as_deref())?;
+        validate_graph_parent_topology(self, &by_id)
     }
 
     pub(crate) fn append_builder(&self) -> SessionGraphAppendBuilder {
@@ -949,6 +889,10 @@ impl SessionGraph {
             .expect("session graph cache was initialized"))
     }
 
+    /// Returns the cache for a graph that passed construction-time validation.
+    ///
+    /// The panic is a last-resort invariant for defects introduced by later in-memory mutation;
+    /// durable rows are rejected by [`Self::from_nodes`] before they can reach this reader.
     fn cache(&self) -> &SessionGraphCache {
         self.try_cache()
             .unwrap_or_else(|err| panic!("invalid resident session graph: {err}"))
@@ -1180,8 +1124,10 @@ impl SessionGraph {
         self.data_mut().nodes.push(node);
     }
 
-    /// Tests branch liveness for store and protocol implementors against the current leaf ancestry;
-    /// an invalid resident graph is a contract violation and panics.
+    /// Tests branch liveness for store and protocol implementors against the current leaf ancestry.
+    ///
+    /// The panic is a last-resort invariant for post-construction mutation defects. Durable data
+    /// is validated by [`Self::from_nodes`] before a resident graph is returned.
     pub fn active_path_contains(&self, node_id: &str) -> bool {
         self.try_active_path_contains(node_id)
             .unwrap_or_else(|err| panic!("invalid resident session graph: {err}"))
@@ -1201,11 +1147,26 @@ impl SessionGraph {
     /// Return a resident graph containing only the current ancestry path.
     ///
     /// This is a memory-residency trim. It does not create a durable fork or
-    /// move a persisted session head.
+    /// move a persisted session head. The caller must have validated the source graph.
     pub fn trim_to_active_path(&self) -> SessionGraph {
         let path = self.active_path_nodes();
-        SessionGraph::from_nodes(
+        // Selecting the ancestry of a validated graph preserves unique ids, complete parents, and
+        // the existing leaf, so repeating the full validation on this hot read projection is
+        // unnecessary.
+        SessionGraph::from_validated_nodes(
             path.into_iter().cloned().collect(),
+            self.leaf_node_id.clone(),
+        )
+    }
+
+    pub(crate) fn try_trim_to_active_path(&self) -> Result<SessionGraph, crate::StoreError> {
+        let by_id = graph_node_indices(self)?;
+        let mut path = ancestry_indices(self, &by_id, self.leaf_node_id.as_deref())?;
+        path.reverse();
+        SessionGraph::from_nodes(
+            path.into_iter()
+                .map(|index| self.nodes[index].clone())
+                .collect(),
             self.leaf_node_id.clone(),
         )
     }

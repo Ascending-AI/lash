@@ -26,6 +26,7 @@ mod attachment_store;
 mod await_event_cold;
 mod effect_host;
 mod fence_integrity;
+mod graph_integrity;
 mod helpers;
 mod live_replay;
 mod observer_intent;
@@ -53,6 +54,7 @@ pub use attachment_store::*;
 pub use await_event_cold::*;
 pub use effect_host::*;
 pub use fence_integrity::*;
+pub use graph_integrity::*;
 pub use helpers::*;
 pub use live_replay::*;
 pub use observer_intent::*;
@@ -103,11 +105,110 @@ use lash_sansio::{AttachmentCreateMeta, AttachmentTypeMetadata, MediaType};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SessionStoreFactory;
     use lash_sansio::sync::MutexExt;
 
     struct InMemoryFenceIntegrityInjector {
         runtime: Arc<crate::InMemorySessionStore>,
         triggers: Arc<crate::InMemoryTriggerStore>,
+    }
+
+    struct InMemoryGraphIntegrityInjector {
+        runtime: Arc<crate::InMemorySessionStore>,
+    }
+
+    #[async_trait::async_trait]
+    impl GraphIntegrityInjector for InMemoryGraphIntegrityInjector {
+        async fn inject(&self, target: &GraphIntegrityTarget) {
+            self.runtime.inject_graph_corruption_for_testing(target);
+        }
+
+        async fn load_whole_graph(
+            &self,
+            _session_id: &str,
+        ) -> Result<crate::SessionGraph, crate::StoreError> {
+            self.runtime.load_whole_graph_for_testing()
+        }
+    }
+
+    #[tokio::test]
+    async fn in_memory_graph_integrity_conformance() {
+        graph_integrity_conformance(|_| async {
+            let runtime = Arc::new(crate::InMemorySessionStore::new());
+            GraphIntegrityHandles {
+                runtime: Arc::clone(&runtime) as Arc<dyn crate::RuntimePersistence>,
+                injector: Arc::new(InMemoryGraphIntegrityInjector { runtime }),
+            }
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_leafless_session_ignores_populated_sibling_catalog() {
+        let factory = crate::InMemorySessionStoreFactory::new();
+        let leafless_request = session_store_request(
+            "leafless-sibling",
+            "graph-integrity-model",
+            crate::SessionRelation::Root,
+        );
+        let leafless = factory
+            .create_store(&leafless_request)
+            .await
+            .expect("create leafless sibling");
+        leafless
+            .admit_and_bind_session(&crate::SessionBinding::from_create_request(
+                &leafless_request,
+            ))
+            .await
+            .expect("bind leafless sibling");
+        let leafless_state = crate::RuntimeSessionState {
+            session_id: leafless_request.session_id.clone(),
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
+        };
+        leafless
+            .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
+                &leafless_state,
+                &[],
+            ))
+            .await
+            .expect("seed leafless sibling head");
+
+        let populated_request = session_store_request(
+            "populated-sibling",
+            "graph-integrity-model",
+            crate::SessionRelation::Root,
+        );
+        let populated = factory
+            .create_store(&populated_request)
+            .await
+            .expect("create populated sibling");
+        let mut state = crate::RuntimeSessionState {
+            session_id: populated_request.session_id.clone(),
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
+        };
+        state.ensure_agent_frame_initialized();
+        populated
+            .admit_and_bind_session(&crate::SessionBinding::from_create_request(
+                &populated_request,
+            ))
+            .await
+            .expect("bind populated sibling");
+        populated
+            .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+            .await
+            .expect("seed populated sibling");
+
+        let read = leafless
+            .load_session()
+            .await
+            .expect("leafless sibling load is isolated")
+            .expect("leafless sibling has a durable head");
+        assert!(read.graph.nodes.is_empty());
+        assert!(read.graph.leaf_node_id.is_none());
     }
 
     #[async_trait::async_trait]

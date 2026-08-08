@@ -124,7 +124,7 @@ impl InMemorySessionStore {
         tombstoned.clear();
 
         *self.global_session_heads.lock_recover() = heads;
-        *self.global_session_graph.lock_recover() = crate::SessionGraph::from_nodes(nodes, None);
+        *self.global_session_graph.lock_recover() = crate::SessionGraph::from_nodes(nodes, None)?;
         *self.global_node_owners.lock_recover() = owners;
         *self.tombstoned_node_ids.lock_recover() = tombstoned;
         *self.session_graph.lock_recover() = crate::SessionGraph::default();

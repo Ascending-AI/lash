@@ -37,10 +37,6 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
         } else {
             let mut graph = self.global_session_graph.lock_recover();
             let before = graph.nodes.len();
-            let leaf_node_id = graph
-                .leaf_node_id
-                .clone()
-                .filter(|leaf| !ids.contains(leaf));
             let nodes = graph
                 .nodes
                 .iter()
@@ -48,7 +44,7 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
                 .cloned()
                 .collect::<Vec<_>>();
             let removed_node_count = before.saturating_sub(nodes.len());
-            *graph = crate::SessionGraph::from_nodes(nodes, leaf_node_id);
+            *graph = crate::SessionGraph::from_nodes(nodes, None)?;
             self.global_node_owners
                 .lock_recover()
                 .retain(|node_id, _| !ids.contains(node_id));

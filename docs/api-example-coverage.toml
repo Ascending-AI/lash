@@ -68656,6 +68656,190 @@ usage = "examples/agent-workbench/src/mail.rs:146#.read_recover()"
 reason = "The workbench host reads its in-memory mail store through the public poison-recovering facade."
 
 [[api]]
+symbol = "lash::testing::conformance::GraphIntegrityCorruption"
+kind = "enum"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance seam enumerates the structural corruption classes injected by the shared matrix."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityCorruption::DanglingLeafId"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance case selects a durable head whose leaf id does not resolve."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityCorruption::DuplicateNodeId"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance case selects duplicate durable node identities."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityCorruption::OrphanLeaf"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance case selects a leaf whose parent does not resolve."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityCorruption::ParentCycle"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance case selects active and inactive parent cycles."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityHandles"
+kind = "struct"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance bundle supplies a runtime reader and raw corruption injector."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityHandles::injector"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance bundle exposes the backend-owned raw graph seam."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityHandles::runtime"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance bundle exposes the active-path runtime reader."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityInjector"
+kind = "trait"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance seam lets each store inject raw rows and drive its whole-graph reader."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityInjector::cleanup"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance hook restores schema constraints changed by a corruption case."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityInjector::inject"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance hook injects one raw structural graph defect."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityInjector::load_whole_graph"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance hook drives the store-specific whole-graph read path."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityRead"
+kind = "enum"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance seam names the two durable graph read shapes under test."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityRead::ActivePath"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance case drives RuntimePersistence active-path loading."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityRead::WholeGraph"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance case drives the backend whole-graph reader."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityTarget"
+kind = "struct"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance target identifies the rows and corruption shape to inject."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityTarget::corruption"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance target carries the structural corruption class."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityTarget::leaf_node_id"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance target identifies the healthy durable leaf row."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityTarget::missing_node_id"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance target supplies a deterministic nonexistent node identity."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityTarget::read"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance target identifies the active-path or whole-graph read shape."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityTarget::root_node_id"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance target identifies the healthy durable root row."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphIntegrityTarget::session_id"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance target identifies the selected durable session."
+
+[[api]]
+symbol = "lash::testing::conformance::graph_integrity_conformance"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Shared three-backend fixture verifies corrupt durable graphs are refused before resident readers run."
+
+[[api]]
 symbol = "lash::sync::RwLockExt::write_recover"
 kind = "function"
 availability = "default+all-features"

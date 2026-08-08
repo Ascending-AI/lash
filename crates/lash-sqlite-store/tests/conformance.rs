@@ -10,14 +10,16 @@ use std::sync::{Arc, Mutex};
 use lash_core::runtime::RuntimeScope;
 use lash_core::testing::conformance::{
     FenceIntegrityHandles, FenceIntegrityInjector, FenceIntegrityObservation, FenceIntegrityTarget,
-    ReopenableProcessRegistry, ReopenableRuntimePersistence, ReopenableTriggerStore,
+    GraphIntegrityCorruption, GraphIntegrityHandles, GraphIntegrityInjector, GraphIntegrityRead,
+    GraphIntegrityTarget, ReopenableProcessRegistry, ReopenableRuntimePersistence,
+    ReopenableTriggerStore,
 };
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
     ProcessExecutionEnvStore, ProcessRegistry, Resolution, ResolveOutcome, RuntimeEffectCommand,
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
-    RuntimePersistence, SessionStoreFactory, TriggerStore,
+    RuntimePersistence, SessionCommitStore, SessionStoreFactory, TriggerStore,
 };
 use lash_sqlite_store::{
     SqliteEffectHost, SqliteEffectReplayOptions, SqliteProcessRegistry,
@@ -275,6 +277,167 @@ async fn sqlite_fence_integrity_conformance() {
         }
     })
     .await;
+}
+
+struct SqliteGraphIntegrityInjector {
+    _dir: TempDir,
+    runtime_path: PathBuf,
+    runtime: Arc<Store>,
+}
+
+#[async_trait::async_trait]
+impl GraphIntegrityInjector for SqliteGraphIntegrityInjector {
+    async fn inject(&self, target: &GraphIntegrityTarget) {
+        let conn =
+            rusqlite::Connection::open(&self.runtime_path).expect("open raw SQLite graph fixture");
+        match target.corruption {
+            GraphIntegrityCorruption::OrphanLeaf => {
+                let changed = conn
+                    .execute(
+                        "UPDATE graph_nodes SET parent_node_id = ?1 WHERE node_id = ?2",
+                        rusqlite::params![target.missing_node_id, target.leaf_node_id],
+                    )
+                    .expect("inject orphaned SQLite graph leaf");
+                assert_eq!(changed, 1);
+            }
+            GraphIntegrityCorruption::DuplicateNodeId => {
+                conn.execute_batch(
+                    "ALTER TABLE graph_nodes RENAME TO graph_nodes_valid;
+                     CREATE TABLE graph_nodes (
+                         seq INTEGER PRIMARY KEY,
+                         session_id TEXT NOT NULL,
+                         node_id TEXT NOT NULL,
+                         parent_node_id TEXT,
+                         node_json TEXT NOT NULL,
+                         tombstoned INTEGER NOT NULL DEFAULT 0
+                     );
+                     INSERT INTO graph_nodes SELECT * FROM graph_nodes_valid;
+                     DROP TABLE graph_nodes_valid;
+                     CREATE INDEX idx_graph_nodes_session_seq ON graph_nodes(session_id, seq);
+                     CREATE INDEX idx_graph_nodes_parent ON graph_nodes(parent_node_id);",
+                )
+                .expect("remove SQLite graph-node uniqueness for corruption injection");
+                let changed = conn
+                    .execute(
+                        "INSERT INTO graph_nodes (
+                             session_id, node_id, parent_node_id, node_json, tombstoned
+                         )
+                         SELECT session_id, node_id, parent_node_id, node_json, tombstoned
+                         FROM graph_nodes WHERE node_id = ?1 LIMIT 1",
+                        rusqlite::params![target.leaf_node_id],
+                    )
+                    .expect("inject duplicate SQLite graph node id");
+                assert_eq!(changed, 1);
+            }
+            GraphIntegrityCorruption::DanglingLeafId => {
+                let changed = conn
+                    .execute(
+                        "UPDATE session_head SET leaf_node_id = ?1 WHERE session_id = ?2",
+                        rusqlite::params![target.missing_node_id, target.session_id],
+                    )
+                    .expect("inject dangling SQLite graph leaf id");
+                assert_eq!(changed, 1);
+            }
+            GraphIntegrityCorruption::ParentCycle => {
+                if target.read == GraphIntegrityRead::ActivePath {
+                    let changed = conn
+                        .execute(
+                            "UPDATE graph_nodes SET parent_node_id = ?1 WHERE node_id = ?2",
+                            rusqlite::params![target.leaf_node_id, target.root_node_id],
+                        )
+                        .expect("inject active SQLite graph parent cycle");
+                    assert_eq!(changed, 1);
+                } else {
+                    let node_a_id = format!("{}-a", target.missing_node_id);
+                    let node_b_id = format!("{}-b", target.missing_node_id);
+                    let insert = |node_id: &str, parent_node_id: &str| {
+                        conn.execute(
+                            "INSERT INTO graph_nodes (
+                                 session_id, node_id, parent_node_id, node_json, tombstoned
+                             )
+                             SELECT session_id, ?1, ?2, node_json, tombstoned
+                             FROM graph_nodes WHERE node_id = ?3 LIMIT 1",
+                            rusqlite::params![node_id, parent_node_id, target.leaf_node_id],
+                        )
+                        .expect("inject inactive SQLite graph cycle node")
+                    };
+                    assert_eq!(insert(&node_a_id, &node_b_id), 1);
+                    assert_eq!(insert(&node_b_id, &node_a_id), 1);
+                }
+            }
+        }
+    }
+
+    async fn load_whole_graph(
+        &self,
+        _session_id: &str,
+    ) -> Result<lash_core::SessionGraph, lash_core::StoreError> {
+        self.runtime.load_session_graph().await
+    }
+}
+
+#[tokio::test]
+async fn sqlite_graph_integrity_conformance() {
+    lash_core::testing::conformance::graph_integrity_conformance(|case| async move {
+        let dir = tempfile::tempdir().expect("SQLite graph fixture tempdir");
+        let runtime_path = dir.path().join(format!("{case}-runtime.db"));
+        let runtime = Arc::new(
+            Store::open(&runtime_path)
+                .await
+                .expect("open SQLite graph fixture"),
+        );
+        GraphIntegrityHandles {
+            runtime: Arc::clone(&runtime) as Arc<dyn RuntimePersistence>,
+            injector: Arc::new(SqliteGraphIntegrityInjector {
+                _dir: dir,
+                runtime_path,
+                runtime,
+            }),
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn sqlite_load_session_graph_accepts_healthy_non_empty_session() {
+    let store = Arc::new(
+        Store::memory()
+            .await
+            .expect("open healthy SQLite graph store"),
+    );
+    let session_id = "healthy-whole-session-graph";
+    let mut state = lash_core::RuntimeSessionState {
+        session_id: session_id.to_string(),
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    state.ensure_agent_frame_initialized();
+    state
+        .session_graph
+        .append_plugin("healthy-whole-graph", serde_json::json!({"second": true}));
+    store
+        .admit_and_bind_session(&lash_core::SessionBinding::root(session_id, &state.policy))
+        .await
+        .expect("bind healthy SQLite graph session");
+    store
+        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
+            &state,
+            &[],
+        ))
+        .await
+        .expect("seed healthy SQLite graph session");
+
+    let graph = store
+        .load_session_graph()
+        .await
+        .expect("healthy whole-session graph loads");
+    assert!(graph.nodes.len() >= 2);
+    let leaf_node_id = graph
+        .leaf_node_id
+        .as_deref()
+        .expect("loaded graph has a leaf");
+    assert!(graph.nodes.iter().any(|node| node.node_id == leaf_node_id));
 }
 
 #[tokio::test]

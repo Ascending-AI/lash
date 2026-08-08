@@ -3235,7 +3235,8 @@ async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>
             sample_session_node("branchy", "left-leaf", Some("left-node")),
         ],
         Some("left-leaf".to_string()),
-    );
+    )
+    .expect("branch fixture graph is valid");
     let state = RuntimeSessionState {
         session_id: "branchy".to_string(),
         current_frame_node_id: Some(root_node_id.clone()),
@@ -6983,7 +6984,8 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
         },
     };
     state.session_graph =
-        crate::SessionGraph::from_nodes(vec![original.clone()], Some(colliding_id.clone()));
+        crate::SessionGraph::from_nodes(vec![original.clone()], Some(colliding_id.clone()))
+            .expect("collision fixture seed graph is valid");
     let initial = RuntimeCommit::persisted_state_for_test(&state, &[]);
     let first = commit_runtime_state_for_test(&store, initial, "collision-seed")
         .await
