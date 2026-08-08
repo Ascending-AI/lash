@@ -2683,7 +2683,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelTarget::input_id"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:1122#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
+usage = "examples/agent-workbench/src/restate.rs:1118#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget::source_key"
@@ -18588,6 +18588,24 @@ aliases = ["lash_core::PluginError::Invoke::0"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+
+[[api]]
+symbol = "lash::plugins::PluginError::ProcessAttachCeilingElapsed"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::ProcessAttachCeilingElapsed"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete durable-host class: process attach callers match it to re-attach the same process id after a bounded transport connection ages out."
+
+[[api]]
+symbol = "lash::plugins::PluginError::ProcessAttachCeilingElapsed::process_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::ProcessAttachCeilingElapsed::process_id"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete durable-host class: process attach callers reuse the carried process id when establishing the next bounded attachment."
 
 [[api]]
 symbol = "lash::plugins::PluginError::ProcessAlreadyStarted"
@@ -67167,6 +67185,15 @@ aliases = ["lash_core::RuntimeErrorCode::RestateTurnTerminalAttach"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: runtime hosts match the typed diagnostic to choose retry, terminal settlement, or caller-bug handling."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RestateTurnTerminalAttachCeilingElapsed"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RestateTurnTerminalAttachCeilingElapsed"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete durable-host class: turn attach callers match this retryable code to re-attach the same turn address after one bounded connection ages out."
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::RestateTurnTerminalDecode"

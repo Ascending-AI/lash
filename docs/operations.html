@@ -52,7 +52,7 @@
         </div>
         <div class="listing__row">
           <div class="listing__label">Restate-backed durable tier</div>
-          <div class="listing__body"><p>Turns run under a workflow engine with <code>RestateRuntimeEffectController</code>, so a crash reruns the handler and replays effect outcomes before the Committed Turn. Long turns and background processes survive worker loss. See <a href="./architecture/durability.html">durability and replay</a>.</p></div>
+          <div class="listing__body"><p>Turns run under a workflow engine with <code>RestateRuntimeEffectController</code>, so a crash reruns the handler and replays effect outcomes before the Committed Turn. Long turns and background processes survive worker loss. <code>RestateConnection</code> defaults control requests to 30 seconds and each durable attach connection to a 6-hour ceiling. Override both explicitly with <code>RestateConnection::with_config(url, RestateConnectionConfig { control_timeout_ms: 30_000, attach_ceiling_ms: 21_600_000 })</code>; an attach ceiling bounds one connection, so the host re-attaches the same durable identity when it elapses. See <a href="./architecture/durability.html">durability and replay</a>.</p></div>
         </div>
       </div>
     </div>

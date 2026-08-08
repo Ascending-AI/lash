@@ -19,20 +19,18 @@ pub(crate) async fn submit_restate_workflow_json<T: Serialize>(
     .map_err(|err| AppError::internal(format!("Restate submit failed: {err}")))
 }
 
-pub(crate) async fn submit_restate_empty(state: &AppState, url: String) -> Result<(), AppError> {
-    let response = state
-        .restate_http
-        .post(&url)
-        .send()
-        .await
-        // Audited: reqwest transport errors have no Lash session identity or tombstone variant.
-        .map_err(|err| AppError::internal(format!("Restate submit failed: {err}")))?;
-    if !response.status().is_success() {
-        // Audited: this branch has only an HTTP status and URL; no typed response body is decoded here.
-        return Err(AppError::internal(format!(
-            "Restate submit failed with status {} for {url}",
-            response.status()
-        )));
-    }
-    Ok(())
+pub(crate) async fn submit_restate_empty(
+    state: &AppState,
+    object: &str,
+    object_key: &str,
+    handler: &str,
+) -> Result<(), AppError> {
+    lash_restate::RestateIngressClient::new(lash_restate::RestateConnection::with_client(
+        &state.restate_ingress_url,
+        state.restate_http.clone(),
+    ))
+    .call_object_empty(object, object_key, handler)
+    .await
+    // Audited: this boundary receives only Restate HTTP ingress/response errors, not Lash session errors.
+    .map_err(|err| AppError::internal(format!("Restate submit failed: {err}")))
 }

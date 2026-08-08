@@ -312,9 +312,17 @@ pub fn first_header_value<'a>(headers: &'a [(String, String)], name: &str) -> Op
 }
 
 pub fn build_http_client() -> reqwest::Client {
-    reqwest::Client::builder()
+    http_client_builder()
         .build()
         .expect("failed to build reqwest HTTP client")
+}
+
+/// Build a reqwest client with Lash's shared connection safeguards while
+/// leaving authentication and other host policy configurable.
+pub fn http_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .tcp_keepalive(Duration::from_secs(60))
 }
 
 pub fn header_pairs(headers: &reqwest::header::HeaderMap) -> Vec<(String, String)> {

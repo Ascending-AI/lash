@@ -35,8 +35,8 @@ pub use workflow::{
 };
 
 const PROCESS_CANCEL_PROMISE_KEY: &str = "process_cancel_requested";
-const PROCESS_CANCEL_CONFIRM_RETRIES: usize = 3;
-const PROCESS_CANCEL_CONFIRM_RETRY_DELAY: Duration = Duration::from_millis(5);
+const PROCESS_CANCEL_CONFIRM_RETRIES: usize = 5;
+const PROCESS_CANCEL_CONFIRM_RETRY_DELAY: Duration = Duration::from_millis(100);
 /// Wall-clock epoch milliseconds for terminal evidence written at the Restate
 /// tier (ADR 0019 recovery enforcement). The Restate boundary carries no
 /// injected Lash clock — its durability comes from the engine and workflow-key
@@ -460,10 +460,16 @@ impl ProcessAttach for RestateProcessIngressRunner {
             )
             .await
             .map_err(|err| {
-                RestateEffectError::BackgroundScheduler(format!(
-                    "ingress await for process `{process_id}` failed: {err}"
-                ))
-                .into_plugin_error()
+                if err.is_timeout() {
+                    PluginError::ProcessAttachCeilingElapsed {
+                        process_id: process_id.to_string(),
+                    }
+                } else {
+                    RestateEffectError::BackgroundScheduler(format!(
+                        "ingress await for process `{process_id}` failed: {err}"
+                    ))
+                    .into_plugin_error()
+                }
             })
     }
 }

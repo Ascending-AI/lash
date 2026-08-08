@@ -55,10 +55,12 @@ impl TurnAttach for RestateTurnAttach {
             )
             .await
             .map_err(|err| {
-                RuntimeError::new(
-                    lash_core::RuntimeErrorCode::RestateTurnTerminalAttach,
-                    err.to_string(),
-                )
+                let code = if err.is_timeout() {
+                    lash_core::RuntimeErrorCode::RestateTurnTerminalAttachCeilingElapsed
+                } else {
+                    lash_core::RuntimeErrorCode::RestateTurnTerminalAttach
+                };
+                RuntimeError::new(code, err.to_string())
             })?;
         match resolution {
             Resolution::Ok(value) => serde_json::from_value(value).map_err(|err| {

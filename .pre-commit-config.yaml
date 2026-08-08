@@ -42,6 +42,15 @@ repos:
         files: '\.rs$'
         pass_filenames: false
 
+      # Restate retries non-terminal handler failures indefinitely; production
+      # handler code must use typed errors rather than panic-capable operations.
+      - id: restate-handler-panic-boundary
+        name: Restate handler panic boundary
+        language: system
+        entry: python3 scripts/check-restate-handler-panics.py
+        files: '^crates/lash-restate/src/.*\.rs$'
+        pass_filenames: false
+
       # Mirrors CI Lint "Check durable-read fixture schema declaration".
       - id: durable-read-fixture-version
         name: durable-read fixture schema declaration

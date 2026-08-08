@@ -693,10 +693,6 @@ pub(crate) async fn cancel_cron_jobs_for_session(
         guard.remove(session_id).unwrap_or_default()
     });
     for job_key in job_keys {
-        let url = format!(
-            "{}/WorkbenchCronJob/{job_key}/cancel",
-            state.restate_ingress_url.trim_end_matches('/')
-        );
         state.trace_for_session(
             session_id,
             "cron.restate.cancel",
@@ -705,7 +701,7 @@ pub(crate) async fn cancel_cron_jobs_for_session(
                 "reason": reason,
             }),
         );
-        submit_restate_empty(state, url).await?;
+        submit_restate_empty(state, "WorkbenchCronJob", &job_key, "cancel").await?;
     }
     Ok(())
 }

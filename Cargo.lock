@@ -68,6 +68,7 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "lash-core",
+ "lash-http-transport",
  "lash-lashlang-runtime",
  "lash-llm-tools",
  "lash-plugin-process-controls",

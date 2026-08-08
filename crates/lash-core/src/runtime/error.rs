@@ -82,6 +82,9 @@ pub enum RuntimeErrorCode {
     RestateProcessTerminalEncode,
     RestateSegmentProgramHashMismatch,
     RestateTurnTerminalAttach,
+    /// A bounded Restate terminal attachment elapsed while the durable wait
+    /// remained live. Re-attaching the same address is explicitly safe.
+    RestateTurnTerminalAttachCeilingElapsed,
     RestateTurnTerminalDecode,
     RestateTurnTerminalInvalidResolution,
     /// Process-local; repaired by restart, not by same-process retry.
@@ -193,6 +196,9 @@ impl RuntimeErrorCode {
             Self::RestateProcessTerminalEncode => "restate_process_terminal_encode",
             Self::RestateSegmentProgramHashMismatch => "restate_segment_program_hash_mismatch",
             Self::RestateTurnTerminalAttach => "restate_turn_terminal_attach",
+            Self::RestateTurnTerminalAttachCeilingElapsed => {
+                "restate_turn_terminal_attach_ceiling_elapsed"
+            }
             Self::RestateTurnTerminalDecode => "restate_turn_terminal_decode",
             Self::RestateTurnTerminalInvalidResolution => {
                 "restate_turn_terminal_invalid_resolution"
@@ -253,6 +259,7 @@ impl RuntimeErrorCode {
                 | Self::RestateAwaitEventRevoke
                 | Self::RestateAwaitEventSessionUpdate
                 | Self::RestateTurnTerminalAttach
+                | Self::RestateTurnTerminalAttachCeilingElapsed
                 | Self::RuntimePerfStartGateRetry
                 | Self::RuntimeStore
                 | Self::SessionCommandPostDriveRefresh
@@ -380,6 +387,9 @@ impl RuntimeErrorCode {
             "restate_process_terminal_encode" => Self::RestateProcessTerminalEncode,
             "restate_segment_program_hash_mismatch" => Self::RestateSegmentProgramHashMismatch,
             "restate_turn_terminal_attach" => Self::RestateTurnTerminalAttach,
+            "restate_turn_terminal_attach_ceiling_elapsed" => {
+                Self::RestateTurnTerminalAttachCeilingElapsed
+            }
             "restate_turn_terminal_decode" => Self::RestateTurnTerminalDecode,
             "restate_turn_terminal_invalid_resolution" => {
                 Self::RestateTurnTerminalInvalidResolution
@@ -584,6 +594,7 @@ mod tests {
             | RuntimeErrorCode::RestateAwaitEventRevoke
             | RuntimeErrorCode::RestateAwaitEventSessionUpdate
             | RuntimeErrorCode::RestateTurnTerminalAttach
+            | RuntimeErrorCode::RestateTurnTerminalAttachCeilingElapsed
             | RuntimeErrorCode::RuntimePerfStartGateRetry
             | RuntimeErrorCode::RuntimeStore
             | RuntimeErrorCode::SessionCommandPostDriveRefresh
@@ -723,6 +734,7 @@ mod tests {
             RuntimeErrorCode::RestateProcessTerminalEncode,
             RuntimeErrorCode::RestateSegmentProgramHashMismatch,
             RuntimeErrorCode::RestateTurnTerminalAttach,
+            RuntimeErrorCode::RestateTurnTerminalAttachCeilingElapsed,
             RuntimeErrorCode::RestateTurnTerminalDecode,
             RuntimeErrorCode::RestateTurnTerminalInvalidResolution,
             RuntimeErrorCode::RuntimeEffectControllerTaskClosed,

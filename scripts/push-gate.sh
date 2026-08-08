@@ -219,6 +219,9 @@ step "Clippy"
 # shellcheck disable=SC2086
 cargo clippy --workspace --all-targets --locked ${ci_features} -- -D warnings
 
+step "Restate handler panic boundary"
+python3 scripts/check-restate-handler-panics.py
+
 step "Core/UI boundary guard"
 bash scripts/check-core-ui-boundary.sh
 
