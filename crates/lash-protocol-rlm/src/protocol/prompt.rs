@@ -326,7 +326,11 @@ fn render_builtins_section(images: bool) -> String {
         "- `range(end)` / `range(start, end)` / `range(start, end, step)` — integer list, end-exclusive; positive or negative `step`, never `0`".to_string(),
         "- `ceil_div(a, b)` / `floor_div(a, b)` — integer division helpers for chunk/count math; divisor must not be `0`".to_string(),
         "- `push(list, item)` — new list with one item appended".to_string(),
+        "- `sort(list)` — stable ascending sort; items must share one comparable type. `sort_by(list, \"field.path\")` stably sorts records by a required nested field".to_string(),
+        "- `sum(list)` / `min(list)` / `max(list)` — numeric total or comparable extrema; `sum([])` is `0`, while extrema of an empty list are `null`".to_string(),
+        "- `unique(list)` / `reverse(list)` — stable deduplication or reversal, returning a new list".to_string(),
         "- `split(s, sep)` / `join(list, sep)` — string split/join".to_string(),
+        "- `replace(s, from, to)` / `lower(s)` / `upper(s)` — literal text rewriting and Unicode case conversion".to_string(),
         "- `find(s, needle, start?)` — zero-based character index of the first literal match, or `null`; `start` defaults to `0` and is a non-negative character index; an empty `needle` returns `start` when it is in bounds".to_string(),
         "- `grep_text(s, needle)` — literal in-memory line search; `needle` must be non-empty; returns one record per matching line: `{ line: int, text: str, match: str, start: int, end: int }`, where `line` is 1-based, `text` is the line without its line ending, and `start`/`end` are zero-based character offsets within that line's `text` with `end` exclusive".to_string(),
         "- `trim(s)` — strip whitespace".to_string(),
@@ -336,6 +340,7 @@ fn render_builtins_section(images: bool) -> String {
         "- `json_parse(s)` — parse a JSON string into a value".to_string(),
         "- `format(template, arg0, arg1, ...)` — positional interpolation: `{}` auto-numbers, `{0}` / `{1}` pick a specific arg, `{{` / `}}` escape literal braces. Do not wrap args in a list: use `format(\"It is {}.\", trim(now.output))`, not `format(\"It is {}.\", [trim(now.output)])`.".to_string(),
         "- `validate(value, Type { ... })` — check an intermediate value against a Type literal and return it unchanged, or abort with a validation error".to_string(),
+        "- Regex and date/time operations are deliberately host tools, not builtins".to_string(),
     ];
 
     format!(

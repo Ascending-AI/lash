@@ -133,6 +133,46 @@ pub(crate) const BUILTINS: &[Builtin] = &[
         name: "range",
         arity: Arity::Range(1, 3),
     },
+    Builtin {
+        name: "sort",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
+        name: "sort_by",
+        arity: Arity::Exact(2),
+    },
+    Builtin {
+        name: "sum",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
+        name: "min",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
+        name: "max",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
+        name: "replace",
+        arity: Arity::Exact(3),
+    },
+    Builtin {
+        name: "lower",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
+        name: "upper",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
+        name: "unique",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
+        name: "reverse",
+        arity: Arity::Exact(1),
+    },
 ];
 
 /// Looks up a builtin by name.

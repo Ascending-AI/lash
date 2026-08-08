@@ -832,7 +832,14 @@ impl<'module> Linker<'module> {
                 let return_expected = scope.expected_return.clone();
                 self.infer_expr_type_expected(inner, scope, return_expected.as_ref())?
             }
-            Expr::BuiltinCall { name, .. } => builtin_return_type(name.as_str()),
+            Expr::BuiltinCall { name, args } => {
+                let arg_types = args
+                    .iter()
+                    .map(|arg| self.infer_expr_type(arg, scope))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.validate_shaping_builtin(name.as_str(), &arg_types, scope.span)?;
+                shaping_builtin_return_type(name.as_str(), &arg_types)
+            }
             Expr::Field { target, field } => {
                 self.field_type(&self.infer_expr_type(target, scope)?, field, scope.span)?
             }

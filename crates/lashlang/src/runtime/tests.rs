@@ -428,6 +428,59 @@ async fn golden_lashlang_diagnostic_corpus_is_exact() {
         link_diagnostic("finish 1 in { one: true }"),
     ));
     cases.push(diagnostic_case(
+        "runtime_sort_mixed_types",
+        runtime_diagnostic("finish sort([1, \"two\"])").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_sort_by_missing_path",
+        runtime_diagnostic("finish sort_by([{ profile: { score: 1 } }, {}], \"profile.score\")")
+            .await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_sort_by_not_a_record",
+        runtime_diagnostic("finish sort_by([{ score: 1 }, 2], \"score\")").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_sort_by_empty_path",
+        runtime_diagnostic("finish sort_by([{ score: 1 }], \"\")").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_sum_non_number",
+        runtime_diagnostic("finish sum([1, \"two\"])").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_min_incomparable",
+        runtime_diagnostic("finish min([[1], [2]])").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_min_empty_list",
+        runtime_diagnostic("finish min([])").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_max_requires_list",
+        runtime_diagnostic("finish max({ value: 1 })").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_replace_requires_text",
+        runtime_diagnostic("finish replace(1, \"1\", \"one\")").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_lower_requires_text",
+        runtime_diagnostic("finish lower(false)").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_upper_requires_text",
+        runtime_diagnostic("finish upper(1)").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_unique_requires_list",
+        runtime_diagnostic("finish unique(1)").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_reverse_requires_list",
+        runtime_diagnostic("finish reverse(1)").await,
+    ));
+    cases.push(diagnostic_case(
         "runtime_bad_wrapper_unwrap",
         runtime_diagnostic("finish ({ ok: false, error: \"boom\" })?").await,
     ));
@@ -889,6 +942,16 @@ fn intrinsic_snapshot(chunk: &Chunk, op: IntrinsicOp) -> String {
         IntrinsicOp::CeilDiv => format!("intrinsic ceil_div argc={argc}"),
         IntrinsicOp::FloorDiv => format!("intrinsic floor_div argc={argc}"),
         IntrinsicOp::Push => format!("intrinsic push argc={argc}"),
+        IntrinsicOp::Sort => format!("intrinsic sort argc={argc}"),
+        IntrinsicOp::SortBy => format!("intrinsic sort_by argc={argc}"),
+        IntrinsicOp::Sum => format!("intrinsic sum argc={argc}"),
+        IntrinsicOp::Min => format!("intrinsic min argc={argc}"),
+        IntrinsicOp::Max => format!("intrinsic max argc={argc}"),
+        IntrinsicOp::Replace => format!("intrinsic replace argc={argc}"),
+        IntrinsicOp::Lower => format!("intrinsic lower argc={argc}"),
+        IntrinsicOp::Upper => format!("intrinsic upper argc={argc}"),
+        IntrinsicOp::Unique => format!("intrinsic unique argc={argc}"),
+        IntrinsicOp::Reverse => format!("intrinsic reverse argc={argc}"),
         IntrinsicOp::InvalidArity { name, .. } => {
             format!(
                 "intrinsic invalid_arity({}) argc={argc}",

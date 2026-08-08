@@ -480,6 +480,85 @@ impl<'module> Linker<'module> {
         }
     }
 
+    fn validate_shaping_builtin(
+        &self,
+        name: &str,
+        args: &[TypeExpr],
+        span: Option<Span>,
+    ) -> Result<(), LinkError> {
+        let incompatible = |builtin: &str, expected: &'static str, actual: &TypeExpr| {
+            LinkError::IncompatibleBuiltinOperands {
+                builtin: builtin.to_string(),
+                expected,
+                actual: format_type_expr(&self.resolve_type_aliases(actual)),
+                span,
+            }
+        };
+        match (name, args) {
+            ("sort", [list]) | ("min", [list]) | ("max", [list]) => {
+                let item = shaping_list_item(&self.resolve_type_aliases(list))
+                    .ok_or_else(|| incompatible(name, "a list or tuple", list))?;
+                if shaping_comparable_type(&item) {
+                    Ok(())
+                } else {
+                    Err(incompatible(name, "a list of comparable values", list))
+                }
+            }
+            ("sum", [list]) => {
+                let item = shaping_list_item(&self.resolve_type_aliases(list))
+                    .ok_or_else(|| incompatible("sum", "a list of numbers", list))?;
+                if shaping_number_type(&item) {
+                    Ok(())
+                } else {
+                    Err(incompatible("sum", "a list of numbers", list))
+                }
+            }
+            ("sort_by", [list, path]) => {
+                let item = shaping_list_item(&self.resolve_type_aliases(list))
+                    .ok_or_else(|| incompatible("sort_by", "a list of records", list))?;
+                if !shaping_record_type(&item) {
+                    return Err(incompatible("sort_by", "a list of records", list));
+                }
+                if shaping_text_type(&self.resolve_type_aliases(path)) {
+                    Ok(())
+                } else {
+                    Err(incompatible("sort_by", "a text field path", path))
+                }
+            }
+            ("unique" | "reverse", [list]) => {
+                if shaping_list_item(&self.resolve_type_aliases(list)).is_some() {
+                    Ok(())
+                } else {
+                    Err(incompatible(
+                        if name == "unique" { "unique" } else { "reverse" },
+                        "a list or tuple",
+                        list,
+                    ))
+                }
+            }
+            ("lower" | "upper", [value]) => {
+                if shaping_text_type(&self.resolve_type_aliases(value)) {
+                    Ok(())
+                } else {
+                    Err(incompatible(
+                        if name == "lower" { "lower" } else { "upper" },
+                        "text",
+                        value,
+                    ))
+                }
+            }
+            ("replace", [text, needle, replacement]) => {
+                for value in [text, needle, replacement] {
+                    if !shaping_text_type(&self.resolve_type_aliases(value)) {
+                        return Err(incompatible("replace", "three text arguments", value));
+                    }
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
     fn process_output_type(&self, process: &str) -> TypeExpr {
         match self.process_types.get(process) {
             // Awaited process handles are runtime result envelopes. Preserve

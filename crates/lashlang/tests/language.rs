@@ -2296,6 +2296,91 @@ async fn membership_operator_supports_lists_record_keys_and_string_substrings() 
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn shaping_builtins_are_deterministic_and_preserve_stable_order() {
+    let host = TestHost::default();
+    let mut state = State::new();
+
+    let value = finished(
+        execute(
+            r#"
+        rows = [
+          { id: "first", profile: { score: 2 } },
+          { id: "second", profile: { score: 1 } },
+          { id: "third", profile: { score: 2 } }
+        ]
+        finish {
+          sorted: sort([3, 1, 2]),
+          sorted_by: sort_by(rows, "profile.score"),
+          sum: sum([1, 2, 3]),
+          min: min([3, 1, 2]),
+          max: max([3, 1, 2]),
+          replaced: replace("a-b-a", "a", "x"),
+          lower: lower("Straße"),
+          upper: upper("Straße"),
+          unique: unique([1, 2, 1, 3, 2]),
+          reversed: reverse([1, 2, 3])
+        }
+        "#,
+            &mut state,
+            &host,
+        )
+        .await
+        .expect("execution should succeed"),
+    );
+
+    let Value::Record(record) = value else {
+        panic!("expected record");
+    };
+    assert_eq!(
+        record["sorted"],
+        Value::List(vec![Value::Number(1.0), Value::Number(2.0), Value::Number(3.0)].into())
+    );
+    let Value::List(sorted_by) = &record["sorted_by"] else {
+        panic!("expected sorted rows");
+    };
+    let ids = sorted_by
+        .iter()
+        .map(|row| row.as_record().expect("row")["id"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ids,
+        vec![
+            Value::String("second".into()),
+            Value::String("first".into()),
+            Value::String("third".into()),
+        ]
+    );
+    assert_eq!(record["sum"], Value::Number(6.0));
+    assert_eq!(record["min"], Value::Number(1.0));
+    assert_eq!(record["max"], Value::Number(3.0));
+    assert_eq!(record["replaced"], Value::String("x-b-x".into()));
+    assert_eq!(record["lower"], Value::String("straße".into()));
+    assert_eq!(record["upper"], Value::String("STRASSE".into()));
+    assert_eq!(
+        record["unique"],
+        Value::List(vec![Value::Number(1.0), Value::Number(2.0), Value::Number(3.0)].into())
+    );
+    assert_eq!(
+        record["reversed"],
+        Value::List(vec![Value::Number(3.0), Value::Number(2.0), Value::Number(1.0)].into())
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn empty_extrema_are_typed_runtime_errors() {
+    let host = TestHost::default();
+    for builtin in ["min", "max"] {
+        let mut state = State::new();
+        let error = execute(&format!("finish {builtin}([])"), &mut state, &host)
+            .await
+            .expect_err("empty extrema must fail");
+        assert!(
+            matches!(error, ExecuteError::Runtime(RuntimeError::ShapingEmptyList { builtin: actual }) if actual == builtin)
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn dynamic_record_indexing_reads_fields() {
     let host = TestHost::default();
     let mut state = State::new();

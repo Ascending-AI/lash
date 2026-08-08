@@ -136,6 +136,46 @@ pub enum RuntimeError {
     /// `push` received a first argument that is not a list.
     #[error("`push` requires a list as the first argument")]
     PushUnsupported,
+    /// A shaping builtin received a value that is not a list or tuple.
+    #[error("`{builtin}` requires a list or tuple, got {actual}")]
+    ShapingListRequired {
+        builtin: &'static str,
+        actual: String,
+    },
+    /// A text-shaping builtin received a non-text argument.
+    #[error("`{builtin}` {argument} must be text, got {actual}")]
+    ShapingTextRequired {
+        builtin: &'static str,
+        argument: &'static str,
+        actual: String,
+    },
+    /// A numeric aggregation encountered a non-number list element.
+    #[error("`{builtin}` item {index} must be a number, got {actual}")]
+    ShapingNumberRequired {
+        builtin: &'static str,
+        index: usize,
+        actual: String,
+    },
+    /// An ordering builtin encountered a value that cannot share one ordering.
+    #[error("`{builtin}` item {index} ({actual}) is not comparable with item 0 ({reference})")]
+    ShapingComparableRequired {
+        builtin: &'static str,
+        index: usize,
+        reference: String,
+        actual: String,
+    },
+    /// An extrema builtin received an empty list.
+    #[error("`{builtin}` requires a non-empty list")]
+    ShapingEmptyList { builtin: &'static str },
+    /// `sort_by` received an item that was not a record.
+    #[error("`sort_by` item {index} must be a record, got {actual}")]
+    SortByRecordRequired { index: usize, actual: String },
+    /// `sort_by` received an empty field path.
+    #[error("`sort_by` field path must not be empty")]
+    SortByEmptyPath,
+    /// `sort_by` could not resolve its field path on a list item.
+    #[error("`sort_by` item {index} is missing field path `{path}`")]
+    SortByMissingPath { path: String, index: usize },
     /// `range` received a bound that is not a finite integer.
     #[error("`range` bounds must be finite integers")]
     InvalidRangeBound,
@@ -380,6 +420,36 @@ mod tests {
             RuntimeError::InUnsupported,
             RuntimeError::JoinUnsupported,
             RuntimeError::PushUnsupported,
+            RuntimeError::ShapingListRequired {
+                builtin: "sort",
+                actual: "text".into(),
+            },
+            RuntimeError::ShapingTextRequired {
+                builtin: "replace",
+                argument: "needle",
+                actual: "int".into(),
+            },
+            RuntimeError::ShapingNumberRequired {
+                builtin: "sum",
+                index: 1,
+                actual: "text".into(),
+            },
+            RuntimeError::ShapingComparableRequired {
+                builtin: "sort",
+                index: 1,
+                reference: "number".into(),
+                actual: "string".into(),
+            },
+            RuntimeError::ShapingEmptyList { builtin: "min" },
+            RuntimeError::SortByRecordRequired {
+                index: 2,
+                actual: "number".into(),
+            },
+            RuntimeError::SortByEmptyPath,
+            RuntimeError::SortByMissingPath {
+                path: "profile.score".into(),
+                index: 2,
+            },
             RuntimeError::InvalidRangeBound,
             RuntimeError::InvalidRangeBoundType {
                 actual: "text".into(),
@@ -582,6 +652,26 @@ mod tests {
                     "`join` requires a tuple or list as the first argument"
                 }
                 RuntimeError::PushUnsupported => "`push` requires a list as the first argument",
+                RuntimeError::ShapingListRequired { .. } => {
+                    "`sort` requires a list or tuple, got text"
+                }
+                RuntimeError::ShapingTextRequired { .. } => {
+                    "`replace` needle must be text, got int"
+                }
+                RuntimeError::ShapingNumberRequired { .. } => {
+                    "`sum` item 1 must be a number, got text"
+                }
+                RuntimeError::ShapingComparableRequired { .. } => {
+                    "`sort` item 1 (string) is not comparable with item 0 (number)"
+                }
+                RuntimeError::ShapingEmptyList { .. } => "`min` requires a non-empty list",
+                RuntimeError::SortByRecordRequired { .. } => {
+                    "`sort_by` item 2 must be a record, got number"
+                }
+                RuntimeError::SortByEmptyPath => "`sort_by` field path must not be empty",
+                RuntimeError::SortByMissingPath { .. } => {
+                    "`sort_by` item 2 is missing field path `profile.score`"
+                }
                 RuntimeError::InvalidRangeBound => "`range` bounds must be finite integers",
                 RuntimeError::InvalidRangeBoundType { .. } => {
                     "`range` bounds must be finite integers, got text"

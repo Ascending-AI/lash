@@ -37,6 +37,16 @@ fn intrinsic_for_builtin(name: &str, argc: usize) -> Option<IntrinsicOp> {
         "ceil_div" => IntrinsicOp::CeilDiv,
         "floor_div" => IntrinsicOp::FloorDiv,
         "push" => IntrinsicOp::Push,
+        "sort" => IntrinsicOp::Sort,
+        "sort_by" => IntrinsicOp::SortBy,
+        "sum" => IntrinsicOp::Sum,
+        "min" => IntrinsicOp::Min,
+        "max" => IntrinsicOp::Max,
+        "replace" => IntrinsicOp::Replace,
+        "lower" => IntrinsicOp::Lower,
+        "upper" => IntrinsicOp::Upper,
+        "unique" => IntrinsicOp::Unique,
+        "reverse" => IntrinsicOp::Reverse,
         _ => return None,
     })
 }

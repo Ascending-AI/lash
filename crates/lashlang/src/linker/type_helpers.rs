@@ -384,12 +384,93 @@ fn builtin_return_type(name: &str) -> TypeExpr {
         "len" | "find" | "to_int" | "ceil_div" | "floor_div" => TypeExpr::Int,
         "empty" | "contains" | "starts_with" | "ends_with" => TypeExpr::Bool,
         "to_float" => TypeExpr::Float,
-        "to_string" | "trim" | "join" => TypeExpr::Str,
-        "keys" | "values" | "split" | "grep_text" | "range" | "push" => {
+        "to_string" | "trim" | "join" | "replace" | "lower" | "upper" => TypeExpr::Str,
+        "sum" => TypeExpr::Float,
+        "keys" | "values" | "split" | "grep_text" | "range" | "push" | "sort"
+        | "sort_by" | "unique" | "reverse" => {
             TypeExpr::List(Box::new(TypeExpr::Any))
         }
         "json_parse" | "validate" | "format" => TypeExpr::Any,
         _ => TypeExpr::Any,
+    }
+}
+
+fn shaping_builtin_return_type(name: &str, args: &[TypeExpr]) -> TypeExpr {
+    match (name, args) {
+        ("sort" | "sort_by" | "unique" | "reverse", [list, ..]) => list.clone(),
+        ("min" | "max", [TypeExpr::List(item)]) => *item.clone(),
+        _ => builtin_return_type(name),
+    }
+}
+
+fn shaping_list_item(ty: &TypeExpr) -> Option<TypeExpr> {
+    match ty {
+        TypeExpr::List(item) => Some(*item.clone()),
+        TypeExpr::Any | TypeExpr::Ref(_) => Some(TypeExpr::Any),
+        TypeExpr::Union(items) => Some(union_type(
+            items
+                .iter()
+                .map(shaping_list_item)
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        _ => None,
+    }
+}
+
+fn shaping_number_type(ty: &TypeExpr) -> bool {
+    match ty {
+        TypeExpr::Any | TypeExpr::Ref(_) | TypeExpr::Int | TypeExpr::Float => true,
+        TypeExpr::Union(items) => items.iter().all(shaping_number_type),
+        _ => false,
+    }
+}
+
+fn shaping_text_type(ty: &TypeExpr) -> bool {
+    match ty {
+        TypeExpr::Any | TypeExpr::Ref(_) | TypeExpr::Str | TypeExpr::Enum(_) => true,
+        TypeExpr::Union(items) => items.iter().all(shaping_text_type),
+        _ => false,
+    }
+}
+
+fn shaping_record_type(ty: &TypeExpr) -> bool {
+    match ty {
+        TypeExpr::Any | TypeExpr::Ref(_) | TypeExpr::Object(_) => true,
+        TypeExpr::Union(items) => items.iter().all(shaping_record_type),
+        _ => false,
+    }
+}
+
+fn shaping_comparable_type(ty: &TypeExpr) -> bool {
+    match ty {
+        TypeExpr::Any
+        | TypeExpr::Ref(_)
+        | TypeExpr::Str
+        | TypeExpr::Int
+        | TypeExpr::Float
+        | TypeExpr::Bool
+        | TypeExpr::Null
+        | TypeExpr::Enum(_) => true,
+        TypeExpr::Union(items) => {
+            let categories = items.iter().map(shaping_comparable_category).collect::<Vec<_>>();
+            categories.iter().all(Option::is_some)
+                && categories.windows(2).all(|pair| pair[0] == pair[1])
+        }
+        _ => false,
+    }
+}
+
+fn shaping_comparable_category(ty: &TypeExpr) -> Option<u8> {
+    match ty {
+        TypeExpr::Any | TypeExpr::Dict | TypeExpr::Ref(_) => Some(0),
+        TypeExpr::Int | TypeExpr::Float => Some(1),
+        TypeExpr::Str | TypeExpr::Enum(_) => Some(2),
+        TypeExpr::Bool => Some(3),
+        TypeExpr::Null => Some(4),
+        TypeExpr::Union(items) if shaping_comparable_type(ty) => {
+            items.first().and_then(shaping_comparable_category)
+        }
+        _ => None,
     }
 }
 

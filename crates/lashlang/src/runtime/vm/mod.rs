@@ -1415,8 +1415,19 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             _ => {
                 let argc = op.argc();
-                let values = self.stack_tail(argc)?;
-                let value = execute_intrinsic(op, &self.chunk.names, values).await?;
+                let start = self
+                    .stack
+                    .len()
+                    .checked_sub(argc)
+                    .ok_or(RuntimeError::VmStackUnderflow)?;
+                let values = &self.stack[start..];
+                let value = execute_intrinsic(
+                    op,
+                    &self.chunk.names,
+                    values,
+                    &mut self.instructions_executed,
+                )
+                .await?;
                 self.stack.truncate(self.stack.len() - argc);
                 self.stack.push(value);
             }

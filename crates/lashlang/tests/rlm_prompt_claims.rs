@@ -1317,6 +1317,16 @@ async fn prompt_mentions_every_builtin_we_document() {
         "ceil_div",
         "floor_div",
         "push",
+        "sort",
+        "sort_by",
+        "sum",
+        "min",
+        "max",
+        "replace",
+        "lower",
+        "upper",
+        "unique",
+        "reverse",
     ];
     // Call each builtin with a shape guaranteed to succeed — we don't
     // check results here (covered by the per-builtin tests above), only
@@ -1349,6 +1359,16 @@ async fn prompt_mentions_every_builtin_we_document() {
         (r#"finish ceil_div(3, 2)"#, "ceil_div"),
         (r#"finish floor_div(3, 2)"#, "floor_div"),
         (r#"finish push([], "x")"#, "push"),
+        (r#"finish sort([2, 1])"#, "sort"),
+        (r#"finish sort_by([{a: 2}, {a: 1}], "a")"#, "sort_by"),
+        (r#"finish sum([1, 2])"#, "sum"),
+        (r#"finish min([1, 2])"#, "min"),
+        (r#"finish max([1, 2])"#, "max"),
+        (r#"finish replace("aba", "a", "x")"#, "replace"),
+        (r#"finish lower("ABC")"#, "lower"),
+        (r#"finish upper("abc")"#, "upper"),
+        (r#"finish unique([1, 1])"#, "unique"),
+        (r#"finish reverse([1, 2])"#, "reverse"),
     ];
     assert_eq!(smoke.len(), DOCUMENTED.len());
     for (code, name) in smoke {
