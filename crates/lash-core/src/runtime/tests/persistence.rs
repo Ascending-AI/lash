@@ -158,6 +158,12 @@ async fn recording_store_satisfies_runtime_persistence_conformance() {
 }
 
 #[tokio::test]
+async fn recording_store_enforces_core_lease_fence_authority() {
+    let store = RecordingStore::default();
+    crate::testing::conformance::session_execution_lease_fence_authority(&store).await;
+}
+
+#[tokio::test]
 async fn in_memory_append_receipt_replays_after_ancestor_superseded() {
     let store = Arc::new(RecordingStore::default());
     let mutation_store = Arc::clone(&store);

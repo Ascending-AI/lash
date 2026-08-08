@@ -1,6 +1,8 @@
 //! Session-execution-lease vocabulary: holder identity, the durable row, the
 //! fences derived from it, and what a claim reports about the holder it displaced.
 
+use super::StoreError;
+
 /// Unforgeable proposal that identifies one logical lease-claim attempt.
 ///
 /// Construct a fresh nonce for every distinct claim and borrow that same nonce
@@ -49,6 +51,7 @@ impl std::fmt::Debug for LeaseClaimNonce {
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionExecutionLeaseRefusalOperation {
+    ExecutionFence,
     Renewal,
     Release,
 }
@@ -56,6 +59,7 @@ pub enum SessionExecutionLeaseRefusalOperation {
 impl SessionExecutionLeaseRefusalOperation {
     fn label(self) -> &'static str {
         match self {
+            Self::ExecutionFence => "execution_fence",
             Self::Renewal => "renewal",
             Self::Release => "release",
         }
@@ -63,8 +67,35 @@ impl SessionExecutionLeaseRefusalOperation {
 
     fn event(self) -> &'static str {
         match self {
+            Self::ExecutionFence => "session_execution_lease.execution_fence_refused",
             Self::Renewal => "session_execution_lease.renewal_refused",
             Self::Release => "session_execution_lease.release_refused",
+        }
+    }
+}
+
+/// Durable facts consulted while diagnosing a lease refusal.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SessionExecutionLeaseRefusalFacts<'a> {
+    pub current_owner: Option<&'a LeaseOwnerIdentity>,
+    pub current_token: Option<&'a str>,
+    pub current_fencing_token: Option<u64>,
+    pub current_expires_at_epoch_ms: Option<u64>,
+    pub observed_at_epoch_ms: Option<u64>,
+    pub requested_session_id: Option<&'a str>,
+}
+
+impl<'a> SessionExecutionLeaseRefusalFacts<'a> {
+    /// Capture the owner-and-token subset consulted by renewal and release.
+    pub fn lifecycle(
+        current_owner: Option<&'a LeaseOwnerIdentity>,
+        current_token: Option<&'a str>,
+    ) -> Self {
+        Self {
+            current_owner,
+            current_token,
+            ..Self::default()
         }
     }
 }
@@ -81,18 +112,49 @@ pub fn trace_session_execution_lease_refusal(
     decision_basis: &'static str,
     observation_freshness: &'static str,
     presented: &SessionExecutionLeaseAuthority,
-    current_owner: Option<&LeaseOwnerIdentity>,
-    current_token: Option<&str>,
+    facts: SessionExecutionLeaseRefusalFacts<'_>,
 ) {
-    let current_owner_id = current_owner
+    let current_owner_id = facts
+        .current_owner
         .map(|owner| owner.owner_id.as_str())
         .unwrap_or("none");
-    let current_incarnation_id = current_owner
+    let current_incarnation_id = facts
+        .current_owner
         .map(|owner| owner.incarnation_id.as_str())
         .unwrap_or("none");
-    let owner_matched = current_owner.is_some_and(|owner| owner.same_incarnation(&presented.owner));
-    let token_matched = current_token == Some(presented.lease_token.as_str());
-    let current_token_identity = current_token
+    let owner_matched = facts
+        .current_owner
+        .is_some_and(|owner| owner.same_incarnation(&presented.owner));
+    let token_matched = facts.current_token == Some(presented.lease_token.as_str());
+    let session_matched = facts
+        .requested_session_id
+        .map(|session_id| presented.session_id == session_id);
+    let generation_matched = facts
+        .current_fencing_token
+        .map(|token| token == presented.fencing_token);
+    let expiry_matched = facts
+        .current_expires_at_epoch_ms
+        .zip(facts.observed_at_epoch_ms)
+        .map(|(expires_at, observed_at)| expires_at > observed_at);
+    let refusal_cause = if operation != SessionExecutionLeaseRefusalOperation::ExecutionFence {
+        decision_basis
+    } else if session_matched == Some(false) {
+        "session_binding_mismatch"
+    } else if facts.current_fencing_token.is_none() {
+        "missing_current_lease"
+    } else if !owner_matched {
+        "owner_mismatch"
+    } else if generation_matched == Some(false) {
+        "generation_mismatch"
+    } else if expiry_matched == Some(false) {
+        "expired"
+    } else if !token_matched {
+        "token_mismatch"
+    } else {
+        decision_basis
+    };
+    let current_token_identity = facts
+        .current_token
         .map(|token| {
             format!(
                 "sha256:{}",
@@ -115,8 +177,16 @@ pub fn trace_session_execution_lease_refusal(
         presented_incarnation_id = presented.owner.incarnation_id.as_str(),
         current_owner_id,
         current_incarnation_id,
+        session_matched = ?session_matched,
         owner_matched,
         token_matched,
+        presented_fencing_token = presented.fencing_token,
+        current_fencing_token = ?facts.current_fencing_token,
+        generation_matched = ?generation_matched,
+        current_expires_at_epoch_ms = ?facts.current_expires_at_epoch_ms,
+        observed_at_epoch_ms = ?facts.observed_at_epoch_ms,
+        expiry_matched = ?expiry_matched,
+        refusal_cause,
         current_token_identity = current_token_identity.as_str(),
         presented_token_identity = presented_token_identity.as_str(),
         consulted_state = "session_execution_lease_row",
@@ -186,15 +256,75 @@ pub struct SessionExecutionLease {
 /// Fence checks and release used to accept field-identical record types. That
 /// allowed one role to gain an authority field without making the other role a
 /// compile error. A single record keeps both paths structurally identical while
-/// each operation consults only its authority fields: execution claims validate
-/// owner plus fencing generation; renewal and release validate owner plus lease
-/// token. The lease token never becomes commit authority.
+/// each operation consults its authority fields: execution claims validate the
+/// owner, fencing generation, live expiry, and current lease token; renewal and
+/// release validate owner plus lease token. The lease token does not become
+/// session-head commit authority.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SessionExecutionLeaseAuthority {
     pub session_id: String,
     pub owner: LeaseOwnerIdentity,
     pub lease_token: String,
     pub fencing_token: u64,
+}
+
+/// The lease-row facts every backend loads before deciding whether a retained
+/// execution guard still has authority.
+///
+/// Storage implementations own how these facts are read and locked. Core owns
+/// their meaning so an execution fence cannot silently differ by backend.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub struct SessionExecutionLeaseFenceFacts<'a> {
+    pub owner: Option<&'a LeaseOwnerIdentity>,
+    pub lease_token: Option<&'a str>,
+    pub fencing_token: u64,
+    pub expires_at_epoch_ms: u64,
+}
+
+/// Require the one canonical session-execution-lease fence predicate.
+///
+/// A retained guard has authority only while it names the requested session,
+/// the current holder incarnation, the current fencing generation, the current
+/// lease token, and a lease whose expiry is strictly after `now_epoch_ms`.
+/// Every refusal uses the same typed error construction from this function.
+#[doc(hidden)]
+pub fn require_current_session_execution_lease(
+    session_id: &str,
+    current: Option<SessionExecutionLeaseFenceFacts<'_>>,
+    presented: &SessionExecutionLeaseAuthority,
+    now_epoch_ms: u64,
+) -> Result<(), StoreError> {
+    let authorized = presented.session_id == session_id
+        && current.is_some_and(|current| {
+            current
+                .owner
+                .is_some_and(|owner| owner.same_incarnation(&presented.owner))
+                && current.fencing_token == presented.fencing_token
+                && current.expires_at_epoch_ms > now_epoch_ms
+                && current.lease_token == Some(presented.lease_token.as_str())
+        });
+    if authorized {
+        Ok(())
+    } else {
+        trace_session_execution_lease_refusal(
+            SessionExecutionLeaseRefusalOperation::ExecutionFence,
+            "core_execution_fence_predicate",
+            "backend_execution_fence_snapshot",
+            presented,
+            SessionExecutionLeaseRefusalFacts {
+                current_owner: current.and_then(|current| current.owner),
+                current_token: current.and_then(|current| current.lease_token),
+                current_fencing_token: current.map(|current| current.fencing_token),
+                current_expires_at_epoch_ms: current.map(|current| current.expires_at_epoch_ms),
+                observed_at_epoch_ms: Some(now_epoch_ms),
+                requested_session_id: Some(session_id),
+            },
+        );
+        Err(StoreError::SessionExecutionLeaseExpired {
+            session_id: session_id.to_string(),
+        })
+    }
 }
 
 impl SessionExecutionLease {
@@ -324,5 +454,73 @@ mod tests {
             serde_json::to_string(&authority).expect("serialize lease authority"),
             r#"{"session_id":"session","owner":{"owner_id":"owner","incarnation_id":"incarnation"},"lease_token":"lease","fencing_token":7}"#
         );
+    }
+
+    #[test]
+    fn fence_predicate_requires_every_ruled_authority_fact() {
+        let owner = LeaseOwnerIdentity::opaque("owner", "incarnation");
+        let authority = SessionExecutionLeaseAuthority {
+            session_id: "session".to_string(),
+            owner: owner.clone(),
+            lease_token: "current-token".to_string(),
+            fencing_token: 7,
+        };
+        let current = SessionExecutionLeaseFenceFacts {
+            owner: Some(&owner),
+            lease_token: Some("current-token"),
+            fencing_token: 7,
+            expires_at_epoch_ms: 101,
+        };
+        require_current_session_execution_lease("session", Some(current), &authority, 100)
+            .expect("all current authority facts match");
+
+        for rejected in [
+            SessionExecutionLeaseFenceFacts {
+                lease_token: Some("rotated-token"),
+                ..current
+            },
+            SessionExecutionLeaseFenceFacts {
+                fencing_token: 8,
+                ..current
+            },
+            SessionExecutionLeaseFenceFacts {
+                expires_at_epoch_ms: 100,
+                ..current
+            },
+        ] {
+            assert!(matches!(
+                require_current_session_execution_lease(
+                    "session",
+                    Some(rejected),
+                    &authority,
+                    100
+                ),
+                Err(StoreError::SessionExecutionLeaseExpired { session_id })
+                    if session_id == "session"
+            ));
+        }
+        let stale_owner = LeaseOwnerIdentity::opaque("owner", "stale-incarnation");
+        assert!(matches!(
+            require_current_session_execution_lease(
+                "session",
+                Some(SessionExecutionLeaseFenceFacts {
+                    owner: Some(&stale_owner),
+                    ..current
+                }),
+                &authority,
+                100
+            ),
+            Err(StoreError::SessionExecutionLeaseExpired { .. })
+        ));
+        let mut wrong_session = authority.clone();
+        wrong_session.session_id = "other-session".to_string();
+        assert!(matches!(
+            require_current_session_execution_lease("session", Some(current), &wrong_session, 100),
+            Err(StoreError::SessionExecutionLeaseExpired { .. })
+        ));
+        assert!(matches!(
+            require_current_session_execution_lease("session", None, &authority, 100),
+            Err(StoreError::SessionExecutionLeaseExpired { .. })
+        ));
     }
 }

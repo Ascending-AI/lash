@@ -200,31 +200,24 @@ impl RuntimePerfStore {
         session_id: &str,
         fence: &SessionExecutionLeaseAuthority,
     ) -> Result<(), StoreError> {
-        if fence.session_id != session_id {
-            return Err(StoreError::SessionExecutionLeaseExpired {
-                session_id: session_id.to_string(),
-            });
-        }
         let now = current_epoch_ms();
         let leases = self
             .session_execution_leases
             .lock()
             .expect("lock perf session execution leases");
-        let Some(current) = leases.get(&fence.session_id) else {
-            return Err(StoreError::SessionExecutionLeaseExpired {
-                session_id: fence.session_id.clone(),
-            });
-        };
-        if current.owner.as_ref() == Some(&fence.owner)
-            && current.fencing_token == fence.fencing_token
-            && current.expires_at_epoch_ms > now
-        {
-            Ok(())
-        } else {
-            Err(StoreError::SessionExecutionLeaseExpired {
-                session_id: fence.session_id.clone(),
-            })
-        }
+        lash_core::store_backend_support::require_current_session_execution_lease(
+            session_id,
+            leases.get(session_id).map(|current| {
+                lash_core::store_backend_support::SessionExecutionLeaseFenceFacts {
+                    owner: current.owner.as_ref(),
+                    lease_token: current.lease_token.as_deref(),
+                    fencing_token: current.fencing_token,
+                    expires_at_epoch_ms: current.expires_at_epoch_ms,
+                }
+            }),
+            fence,
+            now,
+        )
     }
 
     /// The fencing token of the session's currently-live execution lease, or
@@ -267,8 +260,10 @@ impl RuntimePerfStore {
                     "token_scoped_release_did_not_match",
                     "perf_store_lock",
                     completion,
-                    current.and_then(|lease| lease.owner.as_ref()),
-                    current.and_then(|lease| lease.lease_token.as_deref()),
+                    lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
+                        current.and_then(|lease| lease.owner.as_ref()),
+                        current.and_then(|lease| lease.lease_token.as_deref()),
+                    ),
                 );
             }
             false
@@ -960,8 +955,10 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
                 "owner_or_token_mismatch",
                 "perf_store_lock",
                 fence,
-                current.owner.as_ref(),
-                current.lease_token.as_deref(),
+                lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
+                    current.owner.as_ref(),
+                    current.lease_token.as_deref(),
+                ),
             );
             return Err(StoreError::SessionExecutionLeaseRenewalRefused {
                 session_id: fence.session_id.clone(),

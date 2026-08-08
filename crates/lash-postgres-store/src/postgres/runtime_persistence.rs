@@ -1147,8 +1147,10 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
                 "owner_or_token_mismatch",
                 "postgres_locked_transaction",
                 fence,
-                current.owner.as_ref(),
-                current.lease_token.as_deref(),
+                lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
+                    current.owner.as_ref(),
+                    current.lease_token.as_deref(),
+                ),
             );
             return Err(StoreError::SessionExecutionLeaseRenewalRefused {
                 session_id: fence.session_id.clone(),
@@ -1182,8 +1184,10 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
                 "conditional_update_did_not_match",
                 "postgres_locked_transaction",
                 fence,
-                current.owner.as_ref(),
-                current.lease_token.as_deref(),
+                lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
+                    current.owner.as_ref(),
+                    current.lease_token.as_deref(),
+                ),
             );
             return Err(StoreError::SessionExecutionLeaseRenewalRefused {
                 session_id: fence.session_id.clone(),
@@ -1212,10 +1216,12 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
                 "token_scoped_release_did_not_match",
                 "postgres_locked_transaction",
                 completion,
-                current.as_ref().and_then(|lease| lease.owner.as_ref()),
-                current
-                    .as_ref()
-                    .and_then(|lease| lease.lease_token.as_deref()),
+                lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
+                    current.as_ref().and_then(|lease| lease.owner.as_ref()),
+                    current
+                        .as_ref()
+                        .and_then(|lease| lease.lease_token.as_deref()),
+                ),
             );
             return Err(StoreError::SessionExecutionLeaseReleaseRefused {
                 session_id: completion.session_id.clone(),
@@ -1839,8 +1845,22 @@ impl TurnInputStore for PostgresSessionStore {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, &draft.session_id).await?;
         let now = self.clock.timestamp_ms();
+        let enqueue_seq: i64 = sqlx::query_scalar(
+            "SELECT nextval(pg_get_serial_sequence(
+                'lash_pending_turn_inputs',
+                'enqueue_seq'
+             ))",
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         let input_id = draft.input_id.clone().unwrap_or_else(|| {
-            derive_pending_turn_input_id(&draft.session_id, draft.source_key.as_deref(), now)
+            lash_core::store_backend_support::derive_pending_turn_input_id(
+                &draft.session_id,
+                draft.source_key.as_deref(),
+                now,
+                enqueue_seq as u64,
+            )
         });
         let state = match draft.ingress {
             lash_core::TurnInputIngress::ActiveTurn { .. } => {
@@ -1853,9 +1873,10 @@ impl TurnInputStore for PostgresSessionStore {
         let input = if let Some(source_key) = draft.source_key.as_deref() {
             let row = sqlx::query(
                 "INSERT INTO lash_pending_turn_inputs (
-                    input_id, session_id, source_key, ingress_json, state, input_json, enqueued_at_ms
+                    enqueue_seq, input_id, session_id, source_key, ingress_json, state, input_json,
+                    enqueued_at_ms
                  )
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                  ON CONFLICT (session_id, source_key) DO UPDATE
                  SET source_key = lash_pending_turn_inputs.source_key
                  RETURNING enqueue_seq, input_id, session_id, source_key, ingress_json,
@@ -1863,6 +1884,7 @@ impl TurnInputStore for PostgresSessionStore {
                            claim_owner_id, claim_owner_incarnation_id,
                            claim_owner_liveness_json, claim_token, claim_session_lease_generation",
             )
+            .bind(enqueue_seq)
             .bind(&input_id)
             .bind(&draft.session_id)
             .bind(source_key)
@@ -1889,10 +1911,12 @@ impl TurnInputStore for PostgresSessionStore {
         } else {
             sqlx::query(
                 "INSERT INTO lash_pending_turn_inputs (
-                    input_id, session_id, source_key, ingress_json, state, input_json, enqueued_at_ms
+                    enqueue_seq, input_id, session_id, source_key, ingress_json, state, input_json,
+                    enqueued_at_ms
                  )
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
             )
+            .bind(enqueue_seq)
             .bind(&input_id)
             .bind(&draft.session_id)
             .bind(&draft.source_key)
@@ -2335,21 +2359,6 @@ impl StoreMaintenance for PostgresSessionStore {
             deleted_blob_count,
         })
     }
-}
-
-fn derive_pending_turn_input_id(
-    session_id: &str,
-    source_key: Option<&str>,
-    now_epoch_ms: u64,
-) -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
-    format!(
-        "ti:{:x}",
-        Sha256::digest(format!("{session_id}:{source_key:?}:{now_epoch_ms}:{nanos}").as_bytes())
-    )
 }
 
 enum ClaimTransactionOutcome<T> {
@@ -2975,31 +2984,21 @@ async fn ensure_session_execution_lease_tx(
     session_id: &str,
     fence: &SessionExecutionLeaseAuthority,
 ) -> Result<(), StoreError> {
-    if fence.session_id != session_id {
-        return Err(StoreError::SessionExecutionLeaseExpired {
-            session_id: session_id.to_string(),
-        });
-    }
     let now = postgres_transaction_epoch_ms(tx).await?;
     let current = load_session_execution_lease_tx(tx, session_id).await?;
-    let Some(current) = current else {
-        return Err(StoreError::SessionExecutionLeaseExpired {
-            session_id: session_id.to_string(),
-        });
-    };
-    if current
-        .owner
-        .as_ref()
-        .is_some_and(|owner| owner.same_incarnation(&fence.owner))
-        && current.fencing_token == fence.fencing_token
-        && current.expires_at_ms > now
-    {
-        Ok(())
-    } else {
-        Err(StoreError::SessionExecutionLeaseExpired {
-            session_id: session_id.to_string(),
-        })
-    }
+    lash_core::store_backend_support::require_current_session_execution_lease(
+        session_id,
+        current.as_ref().map(|current| {
+            lash_core::store_backend_support::SessionExecutionLeaseFenceFacts {
+                owner: current.owner.as_ref(),
+                lease_token: current.lease_token.as_deref(),
+                fencing_token: current.fencing_token,
+                expires_at_epoch_ms: current.expires_at_ms,
+            }
+        }),
+        fence,
+        now,
+    )
 }
 
 async fn release_session_execution_lease_tx(

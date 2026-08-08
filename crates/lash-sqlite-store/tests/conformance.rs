@@ -702,6 +702,12 @@ async fn sqlite_store_satisfies_runtime_persistence_conformance() {
     .await;
 }
 
+#[tokio::test]
+async fn sqlite_store_enforces_core_lease_fence_authority() {
+    let store = Store::memory().await.expect("in-memory SQLite store");
+    lash_core::testing::conformance::session_execution_lease_fence_authority(&store).await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_runtime_persistence_recovery_laws() {
     let dir = tempfile::tempdir().expect("store-recovery tempdir");

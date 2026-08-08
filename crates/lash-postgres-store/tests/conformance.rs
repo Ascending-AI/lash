@@ -132,10 +132,12 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
     };
     let storage = Arc::new(storage);
     let database_url = database_url().expect("configured Postgres database URL");
+    let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
     lash_core::testing::conformance::runtime_persistence_reopenable(
         || {
             let storage = Arc::clone(&storage);
             let database_url = database_url.clone();
+            let clock = Arc::clone(&clock);
             sync_await(async move {
                 reset(&storage).await;
                 let open_storage = PostgresStorage::connect(&database_url)
@@ -145,14 +147,33 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
                     .await
                     .expect("open independent Postgres conformance pool");
                 ReopenableRuntimePersistence {
-                    open: Arc::new(open_storage.unbound_session_store()),
-                    reopen: Arc::new(reopen_storage.unbound_session_store()),
+                    open: Arc::new(
+                        open_storage
+                            .unbound_session_store()
+                            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
+                    ),
+                    reopen: Arc::new(
+                        reopen_storage
+                            .unbound_session_store()
+                            .with_clock(clock as Arc<dyn lash_core::Clock>),
+                    ),
                 }
             })
         },
         lash_core::testing::conformance::RuntimePersistenceLeaseTiming::Realtime,
     )
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_store_enforces_core_lease_fence_authority_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres lease-fence conformance: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    let store = storage.unbound_session_store();
+    lash_core::testing::conformance::session_execution_lease_fence_authority(&store).await;
 }
 
 /// Pins the PostgreSQL-local hardening rule that claims and renewals join the

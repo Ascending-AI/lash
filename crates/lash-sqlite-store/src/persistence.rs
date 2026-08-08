@@ -991,8 +991,10 @@ impl SessionExecutionLeaseStore for Store {
                             "owner_or_token_mismatch",
                             "sqlite_write_transaction",
                             &fence,
-                            current.owner.as_ref(),
-                            current.lease_token.as_deref(),
+                            lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
+                                current.owner.as_ref(),
+                                current.lease_token.as_deref(),
+                            ),
                         );
                         return Err(StoreError::SessionExecutionLeaseRenewalRefused {
                             session_id: fence.session_id.clone(),
@@ -1054,10 +1056,12 @@ impl SessionExecutionLeaseStore for Store {
                             "token_scoped_release_did_not_match",
                             "sqlite_write_transaction",
                             &completion,
-                            current.as_ref().and_then(|lease| lease.owner.as_ref()),
-                            current
-                                .as_ref()
-                                .and_then(|lease| lease.lease_token.as_deref()),
+                            lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
+                                current.as_ref().and_then(|lease| lease.owner.as_ref()),
+                                current
+                                    .as_ref()
+                                    .and_then(|lease| lease.lease_token.as_deref()),
+                            ),
                         );
                         return Err(StoreError::SessionExecutionLeaseReleaseRefused {
                             session_id: completion.session_id.clone(),
@@ -1920,7 +1924,7 @@ impl TurnInputStore for Store {
                         }
                     }
                     let input_id = draft.input_id.clone().unwrap_or_else(|| {
-                        derive_pending_turn_input_id(
+                        lash_core::store_backend_support::derive_pending_turn_input_id(
                             &draft.session_id,
                             draft.source_key.as_deref(),
                             now,
@@ -2396,18 +2400,6 @@ impl StoreMaintenance for Store {
     async fn gc_unreachable(&self) -> Result<GcReport, StoreError> {
         Ok(Store::gc_unreachable(self).await)
     }
-}
-
-fn derive_pending_turn_input_id(
-    session_id: &str,
-    source_key: Option<&str>,
-    now_epoch_ms: u64,
-    nonce: u64,
-) -> String {
-    format!(
-        "ti:{:x}",
-        Sha256::digest(format!("{session_id}:{source_key:?}:{now_epoch_ms}:{nonce}").as_bytes())
-    )
 }
 
 fn cancel_pending_turn_input_row_conn(
@@ -3081,30 +3073,20 @@ fn ensure_session_execution_lease_conn(
     fence: &SessionExecutionLeaseAuthority,
     now: u64,
 ) -> Result<(), StoreError> {
-    if fence.session_id != session_id {
-        return Err(StoreError::SessionExecutionLeaseExpired {
-            session_id: session_id.to_string(),
-        });
-    }
     let current = load_session_execution_lease_row_conn(conn, session_id)?;
-    let Some(current) = current else {
-        return Err(StoreError::SessionExecutionLeaseExpired {
-            session_id: session_id.to_string(),
-        });
-    };
-    if current
-        .owner
-        .as_ref()
-        .is_some_and(|owner| owner.same_incarnation(&fence.owner))
-        && current.fencing_token == fence.fencing_token
-        && current.expires_at_ms > now
-    {
-        Ok(())
-    } else {
-        Err(StoreError::SessionExecutionLeaseExpired {
-            session_id: session_id.to_string(),
-        })
-    }
+    lash_core::store_backend_support::require_current_session_execution_lease(
+        session_id,
+        current.as_ref().map(|current| {
+            lash_core::store_backend_support::SessionExecutionLeaseFenceFacts {
+                owner: current.owner.as_ref(),
+                lease_token: current.lease_token.as_deref(),
+                fencing_token: current.fencing_token,
+                expires_at_epoch_ms: current.expires_at_ms,
+            }
+        }),
+        fence,
+        now,
+    )
 }
 
 fn release_session_execution_lease_conn(

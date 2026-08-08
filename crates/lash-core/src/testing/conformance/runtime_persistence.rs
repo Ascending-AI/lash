@@ -97,11 +97,47 @@ where
 {
     let probe = make();
     assert_fresh_instances(&probe.open, &probe.reopen, "runtime_persistence_reopenable");
+    pending_turn_input_mint_is_unique_across_store_instances(
+        probe.open.as_ref(),
+        probe.reopen.as_ref(),
+    )
+    .await;
     drop(probe);
     runtime_persistence_suite(|| make().open, &lease_timing).await;
     gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(make().open).await;
     append_receipt_survives_reopen(make()).await;
     runtime_persistence_survives_reopen(make()).await;
+}
+
+/// A newly minted turn-input identity is store-wide rather than handle-local.
+///
+/// Reopenable backends exercise this through two independently constructed
+/// handles over one durable store. Their conformance clocks deliberately keep
+/// both admissions in one millisecond so the nonce is the deciding fact.
+async fn pending_turn_input_mint_is_unique_across_store_instances(
+    first: &dyn RuntimePersistence,
+    second: &dyn RuntimePersistence,
+) {
+    let session_id = "pending-turn-input-multi-store-mint";
+    let first_input = first
+        .enqueue_pending_turn_input(pending_next_turn_input_draft(
+            session_id,
+            "first independent-store input",
+        ))
+        .await
+        .expect("first store instance mints a pending turn-input ID");
+    let second_input = second
+        .enqueue_pending_turn_input(pending_next_turn_input_draft(
+            session_id,
+            "second independent-store input",
+        ))
+        .await
+        .expect("second store instance mints a pending turn-input ID");
+
+    assert_ne!(
+        first_input.input_id, second_input.input_id,
+        "independent store instances must mint distinct pending turn-input IDs in one millisecond"
+    );
 }
 
 /// Prove lease and claim expiry using an injected embedded-backend clock.
@@ -258,6 +294,8 @@ where
     commit_rejects_leaf_without_frame_open_ancestor(make()).await;
     // [`SessionExecutionLeaseStore`]: single-writer lane fencing.
     session_execution_lease_contract(make()).await;
+    same_incarnation_rotation_gates_claims_not_commits(make()).await;
+    session_execution_lease_fence_authority(make().as_ref()).await;
     concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable(make()).await;
     session_execution_lease_expires_by_ttl_contract(&make, lease_timing).await;
     session_execution_lease_diagnostic_read_contract(make()).await;
@@ -2377,71 +2415,6 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         session_id: "root".to_string(),
         ..RuntimeSessionState::default()
     };
-    let overlap_owner = lease_owner("same-incarnation-overlap");
-    let overlap_predecessor_nonce = crate::LeaseClaimNonce::new();
-    let overlap_predecessor = store
-        .try_claim_session_execution_lease_with_token(
-            "root",
-            &overlap_owner,
-            &overlap_predecessor_nonce,
-            60_000,
-        )
-        .await
-        .expect("claim overlap predecessor")
-        .acquired()
-        .expect("overlap predecessor acquired");
-    let overlap_successor_nonce = crate::LeaseClaimNonce::new();
-    let overlap_successor = store
-        .try_claim_session_execution_lease_with_token(
-            "root",
-            &overlap_owner,
-            &overlap_successor_nonce,
-            60_000,
-        )
-        .await
-        .expect("claim overlap successor")
-        .acquired()
-        .expect("same incarnation overlap successor acquired");
-    assert_eq!(
-        overlap_successor.fencing_token, overlap_predecessor.fencing_token,
-        "same-incarnation overlap must preserve the claim generation"
-    );
-
-    let overlap_win = store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&state, &[])
-                .releasing_session_execution_lease(overlap_predecessor.completion()),
-        )
-        .await
-        .expect("predecessor may win purely by the current-head CAS");
-    state.head_revision = overlap_win.head_revision;
-    let live_after_win = store
-        .get_session_execution_lease("root")
-        .await
-        .expect("read overlap successor after predecessor win")
-        .expect("stale predecessor release must leave successor live");
-    assert_eq!(live_after_win.lease_token, overlap_successor.lease_token);
-
-    let stale_state = RuntimeSessionState {
-        session_id: "root".to_string(),
-        ..RuntimeSessionState::default()
-    };
-    let err = store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
-                .releasing_session_execution_lease(overlap_predecessor.completion()),
-        )
-        .await
-        .expect_err("predecessor may lose only because the head CAS is stale");
-    assert!(matches!(err, StoreError::HeadRevisionConflict { .. }));
-    let live_after_loss = store
-        .get_session_execution_lease("root")
-        .await
-        .expect("read overlap successor after predecessor loss")
-        .expect("CAS-losing predecessor must leave successor live");
-    assert_eq!(live_after_loss.lease_token, overlap_successor.lease_token);
-    release_session_execution_lease_for_test(&store, &overlap_successor).await;
-
     let lease_free_commit = store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
@@ -2525,6 +2498,77 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         .expect("queue work claim");
     assert_eq!(claim.batches[0].batch_id, batch.batch_id);
     release_session_execution_lease_for_test(&store, &queue_lease).await;
+}
+
+async fn same_incarnation_rotation_gates_claims_not_commits(store: Arc<dyn RuntimePersistence>) {
+    let mut state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        ..RuntimeSessionState::default()
+    };
+    let overlap_owner = lease_owner("same-incarnation-overlap");
+    let overlap_predecessor_nonce = crate::LeaseClaimNonce::new();
+    let overlap_predecessor = store
+        .try_claim_session_execution_lease_with_token(
+            "root",
+            &overlap_owner,
+            &overlap_predecessor_nonce,
+            60_000,
+        )
+        .await
+        .expect("claim overlap predecessor")
+        .acquired()
+        .expect("overlap predecessor acquired");
+    let overlap_successor_nonce = crate::LeaseClaimNonce::new();
+    let overlap_successor = store
+        .try_claim_session_execution_lease_with_token(
+            "root",
+            &overlap_owner,
+            &overlap_successor_nonce,
+            60_000,
+        )
+        .await
+        .expect("claim overlap successor")
+        .acquired()
+        .expect("same incarnation overlap successor acquired");
+    assert_eq!(
+        overlap_successor.fencing_token, overlap_predecessor.fencing_token,
+        "same-incarnation overlap must preserve the claim generation"
+    );
+
+    let overlap_win = store
+        .commit_runtime_state(
+            RuntimeCommit::persisted_state_for_test(&state, &[])
+                .releasing_session_execution_lease(overlap_predecessor.completion()),
+        )
+        .await
+        .expect("predecessor may win purely by the current-head CAS");
+    state.head_revision = overlap_win.head_revision;
+    let live_after_win = store
+        .get_session_execution_lease("root")
+        .await
+        .expect("read overlap successor after predecessor win")
+        .expect("stale predecessor release must leave successor live");
+    assert_eq!(live_after_win.lease_token, overlap_successor.lease_token);
+
+    let stale_state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        ..RuntimeSessionState::default()
+    };
+    let err = store
+        .commit_runtime_state(
+            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
+                .releasing_session_execution_lease(overlap_predecessor.completion()),
+        )
+        .await
+        .expect_err("predecessor may lose only because the head CAS is stale");
+    assert!(matches!(err, StoreError::HeadRevisionConflict { .. }));
+    let live_after_loss = store
+        .get_session_execution_lease("root")
+        .await
+        .expect("read overlap successor after predecessor loss")
+        .expect("CAS-losing predecessor must leave successor live");
+    assert_eq!(live_after_loss.lease_token, overlap_successor.lease_token);
+    release_session_execution_lease_for_test(&store, &overlap_successor).await;
 }
 
 /// Probe the claim/renew race through the public API on every backend. Embedded
@@ -2976,6 +3020,95 @@ pub async fn session_execution_lease_displacement(
         .release_session_execution_lease(&after_release.lease.completion())
         .await
         .expect("release the reclaimed lane");
+}
+
+/// Prove the core-owned execution-fence predicate through a backend's real
+/// load/lock/claim path.
+///
+/// The same vector runs against in-memory, SQLite, PostgreSQL, and the perf
+/// store so no implementation can weaken one term locally. Queued-work and
+/// leading-command paths receive this coverage transitively through their
+/// shared fence-ensure helper rather than duplicating the vector three times.
+pub async fn session_execution_lease_fence_authority(store: &dyn RuntimePersistence) {
+    let session_id = "lease-fence-authority";
+    let owner = lease_owner("lease-fence-owner");
+    store
+        .enqueue_pending_turn_input(pending_next_turn_input_draft(
+            session_id,
+            "lease fence input",
+        ))
+        .await
+        .expect("enqueue input behind the lease fence");
+    let predecessor = store
+        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .await
+        .expect("claim fence predecessor")
+        .acquired()
+        .expect("fence predecessor acquired");
+    let successor = store
+        .try_claim_session_execution_lease(session_id, &owner, 60_000)
+        .await
+        .expect("rotate fence token for the same owner")
+        .acquired()
+        .expect("same-owner successor acquired");
+    assert_eq!(predecessor.fencing_token, successor.fencing_token);
+    assert_ne!(predecessor.lease_token, successor.lease_token);
+
+    let stale_token = store
+        .claim_next_turn_inputs(session_id, &predecessor.fence(), &owner, 1)
+        .await
+        .expect_err("a retained guard must be rejected after same-owner token rotation");
+    assert!(matches!(
+        stale_token,
+        StoreError::SessionExecutionLeaseExpired { .. }
+    ));
+
+    let mut stale_incarnation = successor.fence();
+    stale_incarnation.owner.incarnation_id.push_str(":stale");
+    let stale_incarnation = store
+        .claim_next_turn_inputs(session_id, &stale_incarnation, &owner, 1)
+        .await
+        .expect_err("a stale holder incarnation must be rejected");
+    assert!(matches!(
+        stale_incarnation,
+        StoreError::SessionExecutionLeaseExpired { .. }
+    ));
+
+    store
+        .release_session_execution_lease(&successor.completion())
+        .await
+        .expect("release live successor before expiry case");
+    let expired = store
+        .try_claim_session_execution_lease(session_id, &lease_owner("lease-fence-expired"), 0)
+        .await
+        .expect("claim immediately expired fence")
+        .acquired()
+        .expect("immediately expired fence acquired");
+    let expired_error = store
+        .claim_next_turn_inputs(session_id, &expired.fence(), &expired.owner, 1)
+        .await
+        .expect_err("an expired lease must be rejected");
+    assert!(matches!(
+        expired_error,
+        StoreError::SessionExecutionLeaseExpired { .. }
+    ));
+
+    let current = store
+        .try_claim_session_execution_lease(session_id, &lease_owner("lease-fence-current"), 60_000)
+        .await
+        .expect("claim current fence")
+        .acquired()
+        .expect("current fence acquired");
+    let claim = store
+        .claim_next_turn_inputs(session_id, &current.fence(), &current.owner, 1)
+        .await
+        .expect("the current-token holder must be accepted")
+        .expect("the current-token holder claims the pending input");
+    assert_eq!(claim.inputs.len(), 1);
+    store
+        .release_session_execution_lease(&current.completion())
+        .await
+        .expect("release current fence after acceptance case");
 }
 
 /// The durable-backend entry point for the shared lease-acquisition contract.

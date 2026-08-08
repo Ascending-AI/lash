@@ -41,8 +41,11 @@ pub mod triggers;
 
 #[doc(hidden)]
 pub mod store_backend_support {
+    pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
     pub use crate::store::session_execution_lease::{
-        SessionExecutionLeaseRefusalOperation, trace_session_execution_lease_refusal,
+        SessionExecutionLeaseFenceFacts, SessionExecutionLeaseRefusalFacts,
+        SessionExecutionLeaseRefusalOperation, require_current_session_execution_lease,
+        trace_session_execution_lease_refusal,
     };
 }
 
