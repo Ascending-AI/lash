@@ -1,17 +1,15 @@
 #[derive(Clone)]
 struct Scope {
     bindings: BTreeMap<String, Binding>,
-    allow_unknown_globals: bool,
     process_body: bool,
     expected_return: Option<TypeExpr>,
     span: Option<Span>,
 }
 
 impl Scope {
-    fn new(allow_unknown_globals: bool, process_body: bool, span: Option<Span>) -> Self {
+    fn new(process_body: bool, span: Option<Span>) -> Self {
         Self {
             bindings: BTreeMap::new(),
-            allow_unknown_globals,
             process_body,
             expected_return: None,
             span,
@@ -71,9 +69,6 @@ impl Scope {
         value_ty: &TypeExpr,
     ) -> Result<(), LinkError> {
         let Some(binding) = self.get(&target.root) else {
-            if self.allow_unknown_globals {
-                return Ok(());
-            }
             return Err(LinkError::UnknownName {
                 name: target.root.to_string(),
                 span: self.span,

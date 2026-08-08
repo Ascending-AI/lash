@@ -118,6 +118,8 @@ impl std::fmt::Display for HostRequirementsRef {
 pub struct HostRequirements {
     #[serde(default)]
     pub resources: LashlangHostCatalog,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub globals: BTreeSet<String>,
     #[serde(default)]
     pub abilities: LashlangAbilities,
     #[serde(default)]
@@ -576,6 +578,13 @@ fn write_host_requirements(writer: &mut HashWriter, requirements: &HostRequireme
     if requirements.language_features.label_annotations {
         writer.atom("language-features");
         writer.atom("label-annotations");
+    }
+    if !requirements.globals.is_empty() {
+        writer.atom("globals");
+        writer.usize(requirements.globals.len());
+        for name in &requirements.globals {
+            writer.atom(name);
+        }
     }
     writer.atom("resources");
     writer.atom("modules");
@@ -1299,7 +1308,13 @@ impl<'program> RequirementsCollector<'program> {
                 self.requirements.language_features.label_annotations = true;
                 self.collect_expr(expr, scope)
             }
-            Expr::Variable(name) => scope.get(name.as_str()).cloned(),
+            Expr::Variable(name) => match scope.get(name.as_str()).cloned() {
+                Some(binding) => Some(binding),
+                None => {
+                    self.requirements.globals.insert(name.to_string());
+                    Some(RequirementBinding::Value)
+                }
+            },
             Expr::Tuple(items) => {
                 for item in items {
                     self.collect_expr(item, scope);
@@ -1355,6 +1370,8 @@ impl<'program> RequirementsCollector<'program> {
                     .unwrap_or(RequirementBinding::Value);
                 if target.steps.is_empty() {
                     scope.insert(target.root.to_string(), binding);
+                } else if !scope.contains_key(target.root.as_str()) {
+                    self.requirements.globals.insert(target.root.to_string());
                 }
                 Some(RequirementBinding::Value)
             }

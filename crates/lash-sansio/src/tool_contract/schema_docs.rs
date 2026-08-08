@@ -9,6 +9,8 @@ use std::borrow::Cow;
 
 use super::*;
 
+const COMPACT_SCHEMA_MAX_DEPTH: usize = 8;
+
 pub fn schema_for<T>() -> serde_json::Value
 where
     T: schemars::JsonSchema,
@@ -551,7 +553,8 @@ fn type_label_is_nullable(label: &str) -> bool {
 }
 
 fn parameter_doc(name: &str, schema: &serde_json::Value, required: bool) -> ParameterDoc {
-    let (type_label, nullable) = schema_type_label_and_nullability(schema);
+    let type_label = compact_schema_label(schema);
+    let nullable = type_label_is_nullable(&type_label);
     ParameterDoc {
         name: name.to_string(),
         type_label,
@@ -584,7 +587,7 @@ fn parameter_doc(name: &str, schema: &serde_json::Value, required: bool) -> Para
         max_items: schema.get("maxItems").and_then(serde_json::Value::as_u64),
         item_type: schema
             .get("items")
-            .map(schema_type_label)
+            .map(compact_schema_label)
             .filter(|value| value != "any"),
     }
 }
@@ -691,6 +694,10 @@ pub(crate) fn compact_schema_label(schema: &serde_json::Value) -> String {
 }
 
 fn compact_schema_label_resolved(schema: &serde_json::Value) -> String {
+    compact_schema_label_at_depth(schema, 0)
+}
+
+fn compact_schema_label_at_depth(schema: &serde_json::Value, depth: usize) -> String {
     if let Some(any_of) = schema
         .get("anyOf")
         .or_else(|| schema.get("oneOf"))
@@ -698,7 +705,7 @@ fn compact_schema_label_resolved(schema: &serde_json::Value) -> String {
     {
         let labels = any_of
             .iter()
-            .map(compact_schema_label_resolved)
+            .map(|schema| compact_schema_label_at_depth(schema, depth))
             .collect::<std::collections::BTreeSet<_>>();
         let joined = labels.into_iter().collect::<Vec<_>>().join(" | ");
         return if joined.is_empty() {
@@ -713,7 +720,7 @@ fn compact_schema_label_resolved(schema: &serde_json::Value) -> String {
             .iter()
             .filter_map(serde_json::Value::as_str)
             .filter(|ty| *ty != "null")
-            .map(|ty| compact_schema_label_resolved(&serde_json::json!({ "type": ty })))
+            .map(|ty| compact_schema_label_at_depth(&serde_json::json!({ "type": ty }), depth))
             .collect::<std::collections::BTreeSet<_>>();
         let mut out = if labels.is_empty() {
             "any".to_string()
@@ -729,16 +736,17 @@ fn compact_schema_label_resolved(schema: &serde_json::Value) -> String {
     match schema.get("type").and_then(serde_json::Value::as_str) {
         Some("array") => schema
             .get("items")
-            .map(compact_schema_label_resolved)
+            .map(|schema| compact_schema_label_at_depth(schema, depth.saturating_add(1)))
             .filter(|value| !value.is_empty())
             .map(|item| format!("list[{item}]"))
             .unwrap_or_else(|| "list[any]".to_string()),
-        Some("object") => compact_record_label(schema),
+        Some("object") if depth < COMPACT_SCHEMA_MAX_DEPTH => compact_record_label(schema, depth),
+        Some("object") => "record".to_string(),
         _ => schema_type_label(schema),
     }
 }
 
-fn compact_record_label(schema: &serde_json::Value) -> String {
+fn compact_record_label(schema: &serde_json::Value, depth: usize) -> String {
     let Some(properties) = schema
         .get("properties")
         .and_then(serde_json::Value::as_object)
@@ -749,14 +757,18 @@ fn compact_record_label(schema: &serde_json::Value) -> String {
         return "record".to_string();
     }
 
-    let required = schema
+    let required_order = schema
         .get("required")
         .and_then(serde_json::Value::as_array)
         .into_iter()
         .flatten()
         .filter_map(serde_json::Value::as_str)
+        .collect::<Vec<_>>();
+    let required = required_order
+        .iter()
+        .copied()
         .collect::<std::collections::BTreeSet<_>>();
-    let fields = properties
+    let mut fields = properties
         .iter()
         .map(|(name, field_schema)| {
             let suffix = if required.contains(name.as_str()) {
@@ -764,10 +776,34 @@ fn compact_record_label(schema: &serde_json::Value) -> String {
             } else {
                 "?"
             };
-            format!("{name}{suffix}: {}", compact_schema_label(field_schema))
+            (
+                name,
+                format!(
+                    "{name}{suffix}: {}",
+                    compact_schema_label_at_depth(field_schema, depth.saturating_add(1))
+                ),
+            )
         })
         .collect::<Vec<_>>();
-    format!("record{{{}}}", fields.join(", "))
+    fields.sort_by(|(left, _), (right, _)| {
+        match (
+            required_order.iter().position(|name| name == left),
+            required_order.iter().position(|name| name == right),
+        ) {
+            (Some(left), Some(right)) => left.cmp(&right),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => left.cmp(right),
+        }
+    });
+    format!(
+        "record{{{}}}",
+        fields
+            .into_iter()
+            .map(|(_, field)| field)
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 pub(crate) fn compact_examples(examples: &[String], limit: usize) -> Vec<String> {
@@ -931,5 +967,25 @@ mod schema_doc_tests {
                 .and_then(serde_json::Value::as_str),
             Some("string")
         );
+    }
+
+    #[test]
+    fn compact_schema_labels_cap_recursive_object_depth() {
+        let mut schema = serde_json::json!({ "type": "string" });
+        for _ in 0..(COMPACT_SCHEMA_MAX_DEPTH + 3) {
+            schema = serde_json::json!({
+                "type": "object",
+                "properties": { "child": schema },
+                "required": ["child"]
+            });
+        }
+
+        let label = compact_schema_label(&schema);
+        assert_eq!(
+            label.matches("record{").count(),
+            COMPACT_SCHEMA_MAX_DEPTH,
+            "{label}"
+        );
+        assert!(label.contains("child: record"), "{label}");
     }
 }

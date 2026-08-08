@@ -4823,6 +4823,137 @@ async fn durable_queued_continue_as_survives_post_commit_graph_append_inner() ->
 
 #[cfg(feature = "rlm")]
 #[test]
+fn durable_queued_continue_as_seed_is_visible_to_follow_turn_linker() -> Result<()> {
+    run_async_test_on_stack_budget("durable-queued-continue-as-seed-test", || {
+        durable_queued_continue_as_seed_is_visible_to_follow_turn_linker_inner()
+    })
+}
+
+#[cfg(feature = "rlm")]
+async fn durable_queued_continue_as_seed_is_visible_to_follow_turn_linker_inner() -> Result<()> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = "durable-queued-continue-as-seed";
+    let (first_provider_call_tx, first_provider_call_rx) = tokio::sync::oneshot::channel();
+    let first_provider_call_tx = Arc::new(std::sync::Mutex::new(Some(first_provider_call_tx)));
+    let release_first_provider_call = Arc::new(tokio::sync::Notify::new());
+    let provider_call_count = Arc::new(AtomicUsize::new(0));
+    let repair_request = Arc::new(std::sync::Mutex::new(None));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("embed-test")
+        .complete({
+            let first_provider_call_tx = Arc::clone(&first_provider_call_tx);
+            let release_first_provider_call = Arc::clone(&release_first_provider_call);
+            let provider_call_count = Arc::clone(&provider_call_count);
+            let repair_request = Arc::clone(&repair_request);
+            move |request| {
+                let first_provider_call_tx = Arc::clone(&first_provider_call_tx);
+                let release_first_provider_call = Arc::clone(&release_first_provider_call);
+                let provider_call_count = Arc::clone(&provider_call_count);
+                let repair_request = Arc::clone(&repair_request);
+                async move {
+                    let call = provider_call_count.fetch_add(1, Ordering::SeqCst);
+                    let text = match call {
+                        0 => {
+                            lashlang_block(
+                                r#"control = { total: 28 }
+finish { established: control.total }"#,
+                            )
+                        }
+                        1 => {
+                            if let Some(tx) = first_provider_call_tx
+                                .lock()
+                                .expect("first provider call sender")
+                                .take()
+                            {
+                                let _ = tx.send(());
+                            }
+                            release_first_provider_call.notified().await;
+                            lashlang_block(
+                                r#"await control.continue_as({ task: "finish from seeded durable handoff", seed: { baton: "seed:durable", session_chars: len(session_projection) } })?"#,
+                            )
+                        }
+                        2 => lashlang_block(
+                            r#"finish { seed_visible: baton, session_projection_chars: session_chars }"#,
+                        ),
+                        _ => {
+                            *repair_request.lock().expect("repair request") =
+                                Some(format!("{request:?}"));
+                            lashlang_block(r#"finish { unexpected_repair: true }"#)
+                        }
+                    };
+                    Ok(text_response(&text))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+        dir.path().join("sessions"),
+    ));
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory)
+        .disable_queued_work_driver()
+        .build()?;
+    let session = core.session(session_id).open().await?;
+    let established = session
+        .turn(TurnInput::text(
+            "establish a durable global that collides with a module root",
+        ))
+        .run()
+        .await?;
+    assert_eq!(
+        established.final_value(),
+        Some(&serde_json::json!({ "established": 28 }))
+    );
+    session
+        .admin()
+        .protocol()
+        .apply_session_extension(lash_protocol_rlm::rlm_session_projection_extension(
+            lash_protocol_rlm::RlmProjectedBindings::new()
+                .bind_json("session_projection", serde_json::json!("session:durable"))
+                .expect("valid session projection"),
+        ))
+        .await?;
+    session
+        .enqueue(TurnInput::text("switch frames with a durable seed"))
+        .id("queued-continue-as-seed")
+        .send()
+        .await?;
+
+    let turn_session = session.clone();
+    let turn = tokio::spawn(async move { turn_session.queued_turn().run().await });
+    tokio::time::timeout(std::time::Duration::from_secs(1), first_provider_call_rx)
+        .await
+        .expect("first provider call should start")
+        .expect("first provider call signal should arrive");
+    session
+        .enqueue(TurnInput::text("keep this pending across the frame switch"))
+        .id("queued-after-continue-as")
+        .send()
+        .await?;
+    release_first_provider_call.notify_one();
+    let output = turn
+        .await
+        .expect("queued turn task")?
+        .expect("queued turn should run");
+
+    assert_eq!(
+        output.final_value(),
+        Some(&serde_json::json!({
+            "seed_visible": "seed:durable",
+            "session_projection_chars": 15
+        })),
+        "the committed frame seed must be installed before the follow turn links: {output:?}; repair_request={:?}",
+        repair_request.lock().expect("repair request")
+    );
+    assert_eq!(provider_call_count.load(Ordering::SeqCst), 3);
+    Ok(())
+}
+
+#[cfg(feature = "rlm")]
+#[test]
 fn durable_queued_chained_continue_as_survives_nested_commit_handoff() -> Result<()> {
     run_async_test_on_stack_budget("durable-queued-chained-continue-as-test", || {
         durable_queued_chained_continue_as_survives_nested_commit_handoff_inner()

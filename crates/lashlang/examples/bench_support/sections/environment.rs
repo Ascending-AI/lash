@@ -102,7 +102,9 @@ fn build_benchmark_host_environment() -> LashlangHostEnvironment {
         TypeExpr::Any,
         TypeExpr::Any,
     );
-    LashlangHostEnvironment::new(resources, LashlangAbilities::all())
+    LashlangHostEnvironment::new(resources, LashlangAbilities::all()).with_globals([
+        "history", "ctx", "snap", "img", "docs", "proj",
+    ])
 }
 
 pub fn linked_benchmark_program(source: &str) -> LinkedModule {

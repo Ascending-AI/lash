@@ -128,18 +128,14 @@ pub fn format_runtime_diagnostic(source: &str, error: &RuntimeError, span: Optio
 }
 
 pub fn format_link_diagnostic(source: &str, error: &LinkError) -> String {
+    let hint = link_hint(error);
     match error.span() {
-        Some(span) => format_source_diagnostic(source, span, &error.to_string(), None),
-        None => error.to_string(),
+        Some(span) => format_source_diagnostic(source, span, &error.to_string(), hint.as_deref()),
+        None => format_message_with_hint(&error.to_string(), hint.as_deref()),
     }
 }
 
-fn format_source_diagnostic(
-    source: &str,
-    span: Span,
-    message: &str,
-    hint: Option<&'static str>,
-) -> String {
+fn format_source_diagnostic(source: &str, span: Span, message: &str, hint: Option<&str>) -> String {
     let start = span.start.min(source.len());
     let (line, column, _line_start, line_end, source_line) = line_column_snippet(source, start);
     let caret_pad = " ".repeat(column.saturating_sub(1));
@@ -160,13 +156,32 @@ fn format_source_diagnostic(
     diagnostic
 }
 
-fn format_message_with_hint(message: &str, hint: Option<&'static str>) -> String {
+fn format_message_with_hint(message: &str, hint: Option<&str>) -> String {
     let mut diagnostic = message.to_string();
     if let Some(hint) = hint {
         diagnostic.push_str("\nhint: ");
         diagnostic.push_str(hint);
     }
     diagnostic
+}
+
+fn link_hint(error: &LinkError) -> Option<String> {
+    let (prefix, suggestions) = match error {
+        LinkError::UnknownResourceOperation { suggestions, .. } => {
+            ("available operations: ", suggestions)
+        }
+        LinkError::UnresolvedReceiver { suggestions, .. } => {
+            ("use a module authority, e.g. ", suggestions)
+        }
+        _ => return None,
+    };
+    let message = error.to_string();
+    let suggestions = suggestions
+        .iter()
+        .filter(|suggestion| !message.contains(suggestion.as_str()))
+        .map(|suggestion| format!("`{suggestion}`"))
+        .collect::<Vec<_>>();
+    (!suggestions.is_empty()).then(|| format!("{prefix}{}", suggestions.join(", ")))
 }
 
 fn parse_hint(error: &ParseError) -> Option<&'static str> {
@@ -464,6 +479,32 @@ mod tests {
         assert_eq!(stats.misses, 4);
         assert_eq!(stats.evictions, 0);
         assert_eq!(stats.entries, 3);
+    }
+
+    #[test]
+    fn linked_program_cache_rechecks_required_live_globals() {
+        let source = "finish persisted";
+        let available = LashlangHostEnvironment::default().with_globals(["persisted"]);
+        let missing = LashlangHostEnvironment::default();
+        let mut cache = LinkedProgramCache::with_capacity(2);
+
+        let linked = cache
+            .get_or_compile(source, &available)
+            .expect("live global should link");
+        assert_eq!(
+            linked.linked_module().artifact.host_requirements.globals,
+            ["persisted".to_string()].into_iter().collect()
+        );
+        let error = cache
+            .get_or_compile(source, &missing)
+            .expect_err("cache hit must not bypass current globals");
+        assert!(matches!(
+            error,
+            LinkedProgramCacheError::Link(LinkError::UnknownName { name, .. })
+                if name == "persisted"
+        ));
+        assert_eq!(cache.stats().hits, 0);
+        assert_eq!(cache.stats().misses, 2);
     }
 
     #[tokio::test(flavor = "current_thread")]

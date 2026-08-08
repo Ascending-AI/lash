@@ -115,6 +115,74 @@ struct WorkRow {
     preview: Option<String>,
 }
 
+pub(crate) struct ReadOnlyVariableDoc {
+    pub(crate) name: String,
+    pub(crate) descriptor_type: String,
+    pub(crate) value: Option<serde_json::Value>,
+}
+
+impl ReadOnlyVariableDoc {
+    pub(crate) fn from_flow_value(name: String, value: &FlowValue) -> Self {
+        let (descriptor_type, value) = match value {
+            FlowValue::Projected(projected) => (
+                projected.type_name().to_string(),
+                serde_json::to_value(projected.materialize()).ok(),
+            ),
+            other => (
+                flow_value_descriptor_type(other).to_string(),
+                serde_json::to_value(other).ok(),
+            ),
+        };
+        Self {
+            name,
+            descriptor_type,
+            value,
+        }
+    }
+
+    pub(crate) fn descriptor_only(name: String, descriptor_type: String) -> Self {
+        Self {
+            name,
+            descriptor_type,
+            value: None,
+        }
+    }
+}
+
+pub(crate) fn render_read_only_variables(mut docs: Vec<ReadOnlyVariableDoc>) -> String {
+    docs.sort_by(|left, right| left.name.cmp(&right.name));
+    let shapes = docs
+        .iter()
+        .map(|doc| (doc.name.clone(), doc.value.as_ref().map(infer_json_shape)))
+        .collect::<BTreeMap<_, _>>();
+    let mut registry = SchemaRegistry::default();
+    for (name, shape) in &shapes {
+        if let Some(shape) = shape {
+            registry.register_root(name, shape);
+        }
+    }
+
+    let mut lines = vec![
+        "These read-only values are already in scope. Access them directly in `<lashlang>` blocks; do not recreate them manually.".to_string(),
+        String::new(),
+        "Read-only variables:".to_string(),
+    ];
+    for doc in &docs {
+        let type_text = shapes
+            .get(&doc.name)
+            .and_then(Option::as_ref)
+            .map(|shape| render_shape_inline(shape, &registry))
+            .unwrap_or_else(|| normalize_descriptor_type(&doc.descriptor_type));
+        lines.push(render_read_only_line(
+            &doc.name,
+            &type_text,
+            &doc.descriptor_type,
+        ));
+    }
+    append_schema_registry(&mut lines, &registry);
+    lines.join("\n")
+}
+
 pub(crate) fn render_bound_variables(
     cache: &mut BoundVariableRenderCache,
     globals: &[(String, FlowValue)],
@@ -172,7 +240,11 @@ pub(crate) fn render_bound_variables(
 
     lines.push(String::new());
     lines.push("Available variables:".to_string());
-    lines.push("- `history`: `list<HistoryItem>`, read-only".to_string());
+    lines.push(render_read_only_line(
+        "history",
+        "list[HistoryItem]",
+        "list",
+    ));
     for row in &rows {
         let line = render_row_line(row, &registry);
         cache.entries.insert(
@@ -188,6 +260,25 @@ pub(crate) fn render_bound_variables(
         lines.push(line);
     }
 
+    lines.push(String::new());
+    lines.push("Schema:".to_string());
+    lines.push("```text".to_string());
+    lines.extend(history_item_type_definition());
+    if !registry.definitions.is_empty() {
+        lines.push(String::new());
+    }
+    for (idx, (name, shape)) in registry.definitions.iter().enumerate() {
+        if idx > 0 {
+            lines.push(String::new());
+        }
+        lines.extend(render_type_definition(name, shape, &registry));
+    }
+    lines.push("```".to_string());
+
+    Arc::from(lines.join("\n"))
+}
+
+fn append_schema_registry(lines: &mut Vec<String>, registry: &SchemaRegistry) {
     if !registry.definitions.is_empty() {
         lines.push(String::new());
         lines.push("Schema:".to_string());
@@ -196,12 +287,55 @@ pub(crate) fn render_bound_variables(
             if idx > 0 {
                 lines.push(String::new());
             }
-            lines.extend(render_type_definition(name, shape, &registry));
+            lines.extend(render_type_definition(name, shape, registry));
         }
         lines.push("```".to_string());
     }
+}
 
-    Arc::from(lines.join("\n"))
+fn render_read_only_line(name: &str, type_text: &str, descriptor_type: &str) -> String {
+    format!(
+        "- `{name}`: `{type_text}`, read-only (descriptor: `{}`)",
+        normalize_descriptor_type(descriptor_type)
+    )
+}
+
+fn normalize_descriptor_type(type_name: &str) -> String {
+    match type_name {
+        "string" => "str".to_string(),
+        "number" => "float".to_string(),
+        "integer" => "int".to_string(),
+        "boolean" => "bool".to_string(),
+        "object" | "record" => "record".to_string(),
+        "array" | "list" => "list[any]".to_string(),
+        "null" => "null".to_string(),
+        other if !other.trim().is_empty() => other.to_string(),
+        _ => "any".to_string(),
+    }
+}
+
+fn flow_value_descriptor_type(value: &FlowValue) -> &'static str {
+    match value {
+        FlowValue::Null => "null",
+        FlowValue::Bool(_) => "boolean",
+        FlowValue::Number(_) => "number",
+        FlowValue::String(_) => "string",
+        FlowValue::Image(_) => "image",
+        FlowValue::Resource(_) => "resource",
+        FlowValue::Tuple(_) | FlowValue::List(_) => "list",
+        FlowValue::Record(_) => "record",
+        FlowValue::Projected(_) => "projected",
+    }
+}
+
+fn history_item_type_definition() -> Vec<String> {
+    vec![
+        "type HistoryItem =".to_string(),
+        "  | { kind: \"message\", id: str, role: enum[\"user\", \"system\", \"assistant\", \"event\"], content: str, attachments?: list[HistoryAttachment] }".to_string(),
+        "  | { kind: \"lashlang_step\", id: str, protocol_iteration: int, code: str, output: list[str], images?: list[HistoryImage], error?: str | null, final_output?: any | null }".to_string(),
+        "type HistoryAttachment = { id: str, media_type?: str | null, label?: str | null, source: str, reference: str }".to_string(),
+        "type HistoryImage = { id: str, media_type: str, width?: int | null, height?: int | null, bytes: int, label?: str | null }".to_string(),
+    ]
 }
 
 fn render_row_line(row: &WorkRow, registry: &SchemaRegistry) -> String {
@@ -700,11 +834,14 @@ mod bound_variable_tests {
         let s = render_with_cache(&mut cache, json!({ "task": "ship" }));
 
         assert!(
-            s.contains("- `history`: `list<HistoryItem>`, read-only"),
+            s.contains("- `history`: `list[HistoryItem]`, read-only"),
             "{s}"
         );
+        assert!(s.contains("type HistoryItem ="), "{s}");
+        assert!(s.contains("kind: \"message\""), "{s}");
+        assert!(s.contains("kind: \"lashlang_step\""), "{s}");
         assert!(
-            !s.contains("- `history`: `list<HistoryItem>`, read-only, 7 entries"),
+            !s.contains("- `history`: `list[HistoryItem]`, read-only, 7 entries"),
             "{s}"
         );
 

@@ -251,6 +251,7 @@ fn ambiguous_host_descriptor_constructor_is_rejected() {
     );
     let requirements = HostRequirements {
         resources: catalog,
+        globals: Default::default(),
         abilities: LashlangAbilities::default(),
         language_features: LashlangLanguageFeatures::default(),
     };
