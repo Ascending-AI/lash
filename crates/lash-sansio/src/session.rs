@@ -1,5 +1,33 @@
 use crate::{AttachmentRef, MediaType, ToolCallRecord};
 
+/// Compact source-level record of an effect the embedded executor actually ran.
+///
+/// Unlike [`ToolCallRecord`], this deliberately carries neither arguments nor
+/// host-operation details. Protocols can safely replay it to a model as an
+/// execution ledger without exposing inputs or confusing a source module call
+/// with the host tool it resolved to.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ExecutedCallRecord {
+    pub operation: String,
+    pub outcome: ExecutedCallOutcome,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutedCallOutcome {
+    Ok,
+    Err,
+}
+
+impl ExecutedCallOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Err => "err",
+        }
+    }
+}
+
 /// An image emitted by a trajectory step.
 ///
 /// Printed images deliberately live outside the provider-attachment source
@@ -35,6 +63,8 @@ pub struct ExecResponse {
     pub observations: Vec<String>,
     pub observation_truncation: Vec<TextProjectionMetadata>,
     pub tool_calls: Vec<ToolCallRecord>,
+    #[serde(default)]
+    pub executed_calls: Vec<ExecutedCallRecord>,
     pub images: Vec<ExecImage>,
     pub printed_images: Vec<AttachmentRef>,
     pub error: Option<String>,

@@ -15,9 +15,9 @@ impl GoogleOAuthProvider {
 
     /// Which of the caller's generation options a Cloud Code request carries.
     ///
-    /// `generationConfig` expresses all three — `maxOutputTokens` is always
-    /// written, and both sampling controls are written whenever the caller set
-    /// them — so nothing this runtime can ask for is dropped on this wire.
+    /// `generationConfig` expresses every supported generation control:
+    /// `maxOutputTokens` is always written, while sampling controls and stop
+    /// sequences are written whenever the caller sets them.
     pub(crate) fn generation_disposition(req: &LlmRequest) -> GenerationDisposition {
         GenerationDisposition {
             output_token_cap: GenerationOptionDisposition::applied(
@@ -25,6 +25,9 @@ impl GoogleOAuthProvider {
             ),
             temperature: GenerationOptionDisposition::applied(req.generation.temperature.is_some()),
             seed: GenerationOptionDisposition::applied(req.generation.seed.is_some()),
+            stop_sequences: GenerationOptionDisposition::applied(
+                !req.generation.stop_sequences.is_empty(),
+            ),
             cache: lash_llm_transport::cache_intent_disposition(req, None),
         }
     }

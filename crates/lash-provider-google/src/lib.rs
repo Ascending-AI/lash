@@ -1002,6 +1002,24 @@ mod tests {
     }
 
     #[test]
+    fn stop_sequences_reach_the_generation_config() {
+        let provider = GoogleOAuthProvider::new("access", "refresh", 0);
+        let mut req = request(None);
+        req.generation.stop_sequences = vec!["</lashlang>".to_string()];
+
+        let body = GoogleOAuthProvider::build_request(&provider, &req, Vec::new(), None);
+
+        assert_eq!(
+            body["request"]["generationConfig"]["stopSequences"],
+            json!(["</lashlang>"])
+        );
+        assert_eq!(
+            GoogleOAuthProvider::generation_disposition(&req).stop_sequences,
+            lash_core::GenerationOptionDisposition::Applied
+        );
+    }
+
+    #[test]
     fn caller_sampling_controls_reach_the_generation_config() {
         let provider = GoogleOAuthProvider::new("access", "refresh", 0);
 

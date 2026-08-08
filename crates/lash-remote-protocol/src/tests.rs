@@ -41,6 +41,7 @@ fn remote_llm_request_json_round_trips() {
             output_token_cap: Some(128),
             temperature: Some(serde_json::Number::from_f64(0.25).expect("finite")),
             seed: Some(-9),
+            stop_sequences: Vec::new(),
         },
         metadata: HashMap::new(),
     };
@@ -140,6 +141,7 @@ fn remote_llm_response_json_round_trips() {
             output_token_cap: RemoteGenerationOptionDisposition::Applied,
             temperature: RemoteGenerationOptionDisposition::OmittedSamplingPinned,
             seed: RemoteGenerationOptionDisposition::OmittedUnsupported,
+            stop_sequences: RemoteGenerationOptionDisposition::NotRequested,
             cache: RemoteGenerationOptionDisposition::Applied,
         }),
     };
@@ -152,6 +154,7 @@ fn remote_llm_response_json_round_trips() {
             "output_token_cap": "applied",
             "temperature": "omitted_sampling_pinned",
             "seed": "omitted_unsupported",
+            "stop_sequences": "not_requested",
             "cache": "applied",
         })
     );
@@ -542,7 +545,7 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 28, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 30, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         id: "process:1".to_string(),
@@ -1042,6 +1045,7 @@ fn process_execution_policy_carries_session_generation_options() {
         output_token_cap: Some(512),
         temperature: Some(serde_json::Number::from_f64(0.25).expect("finite temperature")),
         seed: Some(7),
+        stop_sequences: Vec::new(),
     };
     let value = serde_json::to_value(&policy).expect("serialize policy");
     assert_eq!(

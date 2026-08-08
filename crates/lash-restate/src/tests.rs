@@ -5578,7 +5578,9 @@ async fn replay_test_runtime_with_plugins_and_registry(
     if let Some(process_registry) = process_registry {
         builder = builder.with_process_registry(process_registry);
     }
-    builder.build().await.expect("build replay test runtime")
+    Box::pin(builder.build())
+        .await
+        .expect("build replay test runtime")
 }
 
 async fn run_restate_replay_turn(

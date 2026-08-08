@@ -78,11 +78,24 @@ pub struct RlmProtocolPluginFactory {
 impl RlmProtocolPluginFactory {
     /// Construct the factory. The Lashlang artifact store is a required argument:
     /// there is no valid RLM deployment without one, so the previously build-time
-    /// "missing artifact store" error is now unrepresentable.
+    /// "missing artifact store" error is now unrepresentable. When redaction roots
+    /// are not configured, this captures cwd and HOME here exactly once. That is
+    /// deterministic within this process; cross-worker redrives should configure
+    /// deployment-stable roots explicitly.
     pub fn new(
-        config: RlmProtocolPluginConfig,
+        mut config: RlmProtocolPluginConfig,
         artifact_store: Arc<dyn LashlangArtifactStore>,
     ) -> Self {
+        if config.redaction_roots.is_none() {
+            let mut roots = Vec::new();
+            if let Ok(current_dir) = std::env::current_dir() {
+                roots.push(current_dir);
+            }
+            if let Some(home) = std::env::var_os("HOME") {
+                roots.push(home.into());
+            }
+            config.redaction_roots = Some(roots);
+        }
         Self {
             config,
             projection_resolver: Arc::new(ProjectionRegistry::default()),
@@ -388,5 +401,37 @@ impl SessionPlugin for RlmProtocolPlugin {
             self.lashlang_surface.clone(),
             Arc::clone(&self.last_prompt_usage),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn factory_captures_default_redaction_roots_once() {
+        let factory = RlmProtocolPluginFactory::default();
+        let roots = factory
+            .config
+            .redaction_roots
+            .as_ref()
+            .expect("factory resolves default redaction roots");
+
+        if let Ok(current_dir) = std::env::current_dir() {
+            assert!(roots.contains(&current_dir));
+        }
+        if let Some(home) = std::env::var_os("HOME") {
+            assert!(roots.contains(&home.into()));
+        }
+    }
+
+    #[test]
+    fn explicit_empty_redaction_roots_disable_factory_defaults() {
+        let factory = RlmProtocolPluginFactory::new(
+            RlmProtocolPluginConfig::default().with_redaction_roots(Vec::new()),
+            lashlang::global_in_memory_lashlang_artifact_store(),
+        );
+
+        assert_eq!(factory.config.redaction_roots, Some(Vec::new()));
     }
 }

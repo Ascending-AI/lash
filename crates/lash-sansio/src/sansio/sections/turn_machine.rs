@@ -708,6 +708,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
         text_streamed: bool,
     ) -> bool {
         let outcome = match llm_response.terminal_reason {
+            LlmTerminalReason::OutputLimit
+                if self.config.protocol_driver.handles_output_limit_response() =>
+            {
+                return false;
+            }
             LlmTerminalReason::OutputLimit => TurnOutcome::Stopped(TurnStop::Incomplete),
             LlmTerminalReason::ContextOverflow => TurnOutcome::Stopped(TurnStop::ProviderError),
             LlmTerminalReason::ContentFilter => TurnOutcome::Stopped(TurnStop::ProviderError),
@@ -718,14 +723,18 @@ impl<M: TurnProtocol> TurnMachine<M> {
             }
         };
 
-        if !text_streamed && !llm_response.full_text.is_empty() {
+        let visible_text = self
+            .config
+            .protocol_driver
+            .project_visible_assistant_prose(&llm_response.full_text);
+        if !text_streamed && !visible_text.is_empty() {
             self.emit(SessionStreamEvent::TextDelta {
-                content: llm_response.full_text.clone(),
+                content: visible_text.clone(),
             });
         }
         self.emit(SessionStreamEvent::LlmResponse {
             protocol_iteration: self.protocol_iteration,
-            content: llm_response.full_text.clone(),
+            content: visible_text,
             duration_ms: 0,
         });
         let reason = llm_response.terminal_reason;

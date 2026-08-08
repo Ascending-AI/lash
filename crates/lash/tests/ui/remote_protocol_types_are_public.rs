@@ -107,6 +107,7 @@ fn main() {
                     output_token_cap: Some(256),
                     temperature: None,
                     seed: Some(7),
+                    stop_sequences: Vec::new(),
                 },
                 ..Default::default()
             },
@@ -123,6 +124,7 @@ fn main() {
         output_token_cap: lash::remote::llm::RemoteGenerationOptionDisposition::Applied,
         temperature: lash::remote::llm::RemoteGenerationOptionDisposition::OmittedSamplingPinned,
         seed: lash::remote::llm::RemoteGenerationOptionDisposition::OmittedUnsupported,
+        stop_sequences: lash::remote::llm::RemoteGenerationOptionDisposition::NotRequested,
         cache: lash::remote::llm::RemoteGenerationOptionDisposition::Applied,
     };
     assert_ne!(

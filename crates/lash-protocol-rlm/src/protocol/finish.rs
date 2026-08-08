@@ -107,16 +107,14 @@ pub(super) fn finish_required_reminder_message(id: String, requires_schema: bool
     }
 }
 
-pub(super) fn finish_schema_mismatch_message(id: String, error_text: &str) -> Message {
+pub(super) fn finish_schema_mismatch_message(id: String) -> Message {
     Message {
         id: id.clone(),
         role: MessageRole::System,
         parts: shared_parts(vec![Part {
             id: format!("{id}.p0"),
             kind: PartKind::Text,
-            content: format!(
-                "The `finish` value didn't match the required output schema:\n{error_text}\n\nFix the value and call `finish <corrected>` from another paired `<lashlang>...</lashlang>` block."
-            ),
+            content: "The `finish` value didn't match the required output schema. Fix the value described in the failed-step observation and call `finish <corrected>` from another paired `<lashlang>...</lashlang>` block.".to_string(),
             attachment: None,
             tool_call_id: None,
             tool_name: None,
@@ -141,6 +139,34 @@ pub(super) fn invalid_lashlang_cell_message(id: String, error_text: &str) -> Mes
             kind: PartKind::Text,
             content: format!(
                 "{error_text}\n\nReply again using exactly one paired `<lashlang>...</lashlang>` block, with no text after `</lashlang>`."
+            ),
+            attachment: None,
+            tool_call_id: None,
+            tool_name: None,
+            tool_replay: None,
+            prune_state: PruneState::Intact,
+            reasoning_meta: None,
+            response_meta: None,
+        }]),
+        origin: Some(lash_core::MessageOrigin::Plugin {
+            plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+            transient: false,
+        }),
+    }
+}
+
+pub(super) fn output_limit_retry_message(id: String, output_token_cap: Option<usize>) -> Message {
+    let cap = output_token_cap
+        .map(|cap| format!(" (the request cap was {cap} tokens)"))
+        .unwrap_or_default();
+    Message {
+        id: id.clone(),
+        role: MessageRole::System,
+        parts: shared_parts(vec![Part {
+            id: format!("{id}.p0"),
+            kind: PartKind::Text,
+            content: format!(
+                "Your answer was cut off by the output limit{cap} — retry with a shorter answer. Do less per cell and continue in a later step."
             ),
             attachment: None,
             tool_call_id: None,

@@ -27,6 +27,12 @@ impl ProtocolDriverPlugin for RlmProtocolDriver {
                 last_prompt_usage: Arc::clone(&self.last_prompt_usage),
                 prompt_features: self.config.prompt_features,
                 lashlang_surface: self.lashlang_surface.clone(),
+                redaction_roots: self
+                    .config
+                    .redaction_roots
+                    .clone()
+                    .unwrap_or_default()
+                    .into(),
             },
             Arc::clone(&self.bound_variables_prompt),
         )

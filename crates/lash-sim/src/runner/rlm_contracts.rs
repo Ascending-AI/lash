@@ -722,7 +722,7 @@ fn rlm_contract_config_with_turn_options(
 ) -> Result<lash_core::TurnMachineConfig, FixedScriptRunnerError> {
     let protocol_driver: Arc<
         dyn lash_core::sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol>,
-    > = Arc::new(lash_protocol_rlm::RlmDriver);
+    > = Arc::new(lash_protocol_rlm::RlmDriver::default());
     Ok(lash_core::TurnMachineConfig {
         protocol_driver,
         projector: Arc::new(lash_core::sansio::ChatContextProjector),
@@ -805,6 +805,7 @@ fn rlm_exec_response(
         observations: output.iter().map(|value| (*value).to_string()).collect(),
         observation_truncation: Vec::new(),
         tool_calls: Vec::new(),
+        executed_calls: Vec::new(),
         images: Vec::new(),
         printed_images: Vec::new(),
         error: error.map(str::to_string),
@@ -820,10 +821,22 @@ fn rlm_exec_response_with_tool_calls(
     tool_calls: Vec<lash_core::ToolCallRecord>,
     duration_ms: u64,
 ) -> lash_core::ExecResponse {
+    let executed_calls = tool_calls
+        .iter()
+        .map(|call| lash_core::ExecutedCallRecord {
+            operation: format!("tools.{}", call.tool),
+            outcome: if call.output.is_success() {
+                lash_core::ExecutedCallOutcome::Ok
+            } else {
+                lash_core::ExecutedCallOutcome::Err
+            },
+        })
+        .collect();
     lash_core::ExecResponse {
         observations: output.iter().map(|value| (*value).to_string()).collect(),
         observation_truncation: Vec::new(),
         tool_calls,
+        executed_calls,
         images: Vec::new(),
         printed_images: Vec::new(),
         error: error.map(str::to_string),

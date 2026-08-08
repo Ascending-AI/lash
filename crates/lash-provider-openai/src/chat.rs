@@ -400,6 +400,9 @@ impl OpenAiCompatibleProvider {
         if let Some(seed) = policy.seed {
             body["seed"] = json!(seed);
         }
+        if !policy.stop_sequences.is_empty() {
+            body["stop"] = json!(policy.stop_sequences);
+        }
         if !tools.is_empty() {
             body["tools"] = Value::Array(tools);
             body["tool_choice"] = json!(tool_choice_value(&req.tool_choice));

@@ -32,6 +32,10 @@ pub use turn_input::*;
 pub use turn_result::*;
 pub use usage_activity::*;
 
+// Bumped to 30: generation disposition reports when a protocol replaces a
+// caller's stop-sequence list with protocol-owned response boundaries. Version
+// 29 belongs to the concurrent registry-union wire change (#316), so this
+// branch takes the next value to avoid a version collision.
 // Bumped to 28: `RemoteToolFailureClass` gained the `Io` variant (FIG-1098);
 // older peers reject the unknown variant mid-payload, so the addition needs a
 // clean version rejection.
@@ -56,7 +60,7 @@ pub use usage_activity::*;
 // generation options, mirroring `SessionPolicy.generation`. A version 19 peer
 // would drop them on the way in and resume a session with uncontrolled
 // sampling instead of the caller's.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 28;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 30;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {

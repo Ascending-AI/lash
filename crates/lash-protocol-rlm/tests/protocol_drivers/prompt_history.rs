@@ -38,9 +38,9 @@ const VISIBLE_PROSE_BEFORE_CELL: RlmPromptHistoryFocusedCheck = rlm_prompt_histo
     "Visible prose before a Lashlang cell is recorded as visible prose, not reasoning."
 );
 const SUFFIX_REPAIR: RlmPromptHistoryFocusedCheck = rlm_prompt_history_coverage!(
-    rlm_prompt_history_text_after_closing_tag_requests_repair_without_exec,
-    "repair after suffix text",
-    "Text after a closing cell tag requests repair without executing the malformed cell."
+    rlm_prompt_history_text_after_closing_tag_is_silently_cut_and_executes,
+    "cut suffix text",
+    "Text after a closing cell tag is silently cut before executing the cell."
 );
 const REASONING_VISIBLE_LANES: RlmPromptHistoryFocusedCheck = rlm_prompt_history_coverage!(
     rlm_prompt_history_reasoning_and_visible_prose_are_independent_lanes,
@@ -175,16 +175,14 @@ fn rlm_prompt_history_visible_text_before_cell_is_recorded_as_prose_not_reasonin
 }
 
 #[test]
-fn rlm_prompt_history_text_after_closing_tag_requests_repair_without_exec() {
+fn rlm_prompt_history_text_after_closing_tag_is_silently_cut_and_executes() {
     RlmProtocolScenario::new(SUFFIX_REPAIR.display_name)
         .termination(RlmTermination::FinishRequired { schema: None })
         .llm_response(vec![text_part(
             "Before\n<lashlang>\nprint \"hi\"\n</lashlang>\nIgnored suffix",
         )])
         .expect(RlmProtocolExpectations {
-            checkpoints: vec![CheckpointKind::AfterWork],
-            no_exec_code: true,
-            system_message_contains: vec!["non-whitespace text after", "exactly one paired"],
+            exec_codes: vec!["print \"hi\""],
             ..RlmProtocolExpectations::default()
         })
         .run();

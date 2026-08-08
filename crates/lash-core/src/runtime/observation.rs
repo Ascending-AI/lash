@@ -747,18 +747,20 @@ mod tests {
 
     #[tokio::test]
     async fn runtime_rejects_bad_cursors_before_replay_store_gap_handling() {
-        let runtime = LashRuntime::builder()
-            .with_session_id("session-a")
-            .with_policy(crate::SessionPolicy {
-                model: crate::ModelSpec::builder("test-model")
-                    .context_window_tokens(1024)
-                    .build()
-                    .expect("model"),
-                ..Default::default()
-            })
-            .build()
-            .await
-            .expect("runtime");
+        let runtime = Box::pin(
+            LashRuntime::builder()
+                .with_session_id("session-a")
+                .with_policy(crate::SessionPolicy {
+                    model: crate::ModelSpec::builder("test-model")
+                        .context_window_tokens(1024)
+                        .build()
+                        .expect("model"),
+                    ..Default::default()
+                })
+                .build(),
+        )
+        .await
+        .expect("runtime");
         let handle = RuntimeHandle::with_live_replay_store(runtime, Arc::new(PanicLiveReplayStore));
         let wrong_session = SessionCursor::new("session-b", SessionRevision(0), 99);
         let malformed = SessionCursor::from_raw_for_testing("bad");
@@ -791,18 +793,20 @@ mod tests {
 
     #[tokio::test]
     async fn publish_revision_matches_the_single_export_across_a_commit() {
-        let runtime = LashRuntime::builder()
-            .with_session_id("revision-equivalence")
-            .with_policy(crate::SessionPolicy {
-                model: crate::ModelSpec::builder("test-model")
-                    .context_window_tokens(1024)
-                    .build()
-                    .expect("model"),
-                ..Default::default()
-            })
-            .build()
-            .await
-            .expect("runtime");
+        let runtime = Box::pin(
+            LashRuntime::builder()
+                .with_session_id("revision-equivalence")
+                .with_policy(crate::SessionPolicy {
+                    model: crate::ModelSpec::builder("test-model")
+                        .context_window_tokens(1024)
+                        .build()
+                        .expect("model"),
+                    ..Default::default()
+                })
+                .build(),
+        )
+        .await
+        .expect("runtime");
         let handle = RuntimeHandle::new(runtime);
         let writer = handle.writer();
         let mut runtime = writer.lock().await;
@@ -820,18 +824,20 @@ mod tests {
 
     #[tokio::test]
     async fn publish_keeps_frame_switch_immediately_before_commit() {
-        let runtime = LashRuntime::builder()
-            .with_session_id("publish-order")
-            .with_policy(crate::SessionPolicy {
-                model: crate::ModelSpec::builder("test-model")
-                    .context_window_tokens(1024)
-                    .build()
-                    .expect("model"),
-                ..Default::default()
-            })
-            .build()
-            .await
-            .expect("runtime");
+        let runtime = Box::pin(
+            LashRuntime::builder()
+                .with_session_id("publish-order")
+                .with_policy(crate::SessionPolicy {
+                    model: crate::ModelSpec::builder("test-model")
+                        .context_window_tokens(1024)
+                        .build()
+                        .expect("model"),
+                    ..Default::default()
+                })
+                .build(),
+        )
+        .await
+        .expect("runtime");
         let handle = RuntimeHandle::new(runtime);
         let cursor = handle.observe().cursor().clone();
         let writer = handle.writer();
@@ -862,18 +868,20 @@ mod tests {
     #[ignore = "manual lane-O publish_from timing measurement"]
     async fn measure_publish_from_wall_clock() {
         const COMMITS: usize = 5_000;
-        let runtime = LashRuntime::builder()
-            .with_session_id("publish-perf")
-            .with_policy(crate::SessionPolicy {
-                model: crate::ModelSpec::builder("test-model")
-                    .context_window_tokens(1024)
-                    .build()
-                    .expect("model"),
-                ..Default::default()
-            })
-            .build()
-            .await
-            .expect("runtime");
+        let runtime = Box::pin(
+            LashRuntime::builder()
+                .with_session_id("publish-perf")
+                .with_policy(crate::SessionPolicy {
+                    model: crate::ModelSpec::builder("test-model")
+                        .context_window_tokens(1024)
+                        .build()
+                        .expect("model"),
+                    ..Default::default()
+                })
+                .build(),
+        )
+        .await
+        .expect("runtime");
         let handle = RuntimeHandle::with_live_replay_store(
             runtime,
             Arc::new(InMemoryLiveReplayStore::with_bounds(

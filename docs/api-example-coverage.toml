@@ -7988,6 +7988,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
+symbol = "lash::direct::GenerationDisposition::stop_sequences"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::GenerationDisposition::stop_sequences"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
+
+[[api]]
 symbol = "lash::direct::GenerationDisposition::temperature"
 kind = "field"
 availability = "default+all-features"
@@ -8049,6 +8058,15 @@ aliases = ["lash_core::GenerationOptionDisposition::OmittedUnsupported"]
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
+
+[[api]]
+symbol = "lash::direct::GenerationOptionDisposition::ReplacedProtocolOwned"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::GenerationOptionDisposition::ReplacedProtocolOwned"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: protocol-driver implementers that replace caller stop sequences; shipped RLM tests assert the replacement and its reported disposition."
 
 [[api]]
 symbol = "lash::direct::GenerationOptionDisposition::applied"
@@ -8132,6 +8150,24 @@ disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
+symbol = "lash::direct::GenerationOptions::projection_provenance"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::GenerationOptions::projection_provenance"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: protocol-driver implementers; the opaque provenance value is set through the replacement helper and consumed by the runtime disposition ledger."
+
+[[api]]
+symbol = "lash::direct::GenerationOptions::replace_stop_sequences_for_protocol"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::GenerationOptions::replace_stop_sequences_for_protocol"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: protocol-driver implementers that own a grammar boundary; shipped RLM tests assert caller-stop replacement and equal-value ownership."
+
+[[api]]
 symbol = "lash::direct::GenerationOptions::seed"
 kind = "field"
 availability = "default+all-features"
@@ -8139,6 +8175,24 @@ aliases = ["lash_core::GenerationOptions::seed"]
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
+
+[[api]]
+symbol = "lash::direct::GenerationOptions::stop_sequences"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::GenerationOptions::stop_sequences"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: remote transports and protocol-driver implementers; a protocol-owned grammar boundary may replace caller stops and reports ReplacedProtocolOwned rather than Applied."
+
+[[api]]
+symbol = "lash::direct::GenerationOptions::stop_sequences_replaced_by_protocol"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::GenerationOptions::stop_sequences_replaced_by_protocol"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime and protocol-driver implementers; shipped RLM and runtime tests assert that protocol ownership propagates into response and attempt dispositions."
 
 [[api]]
 symbol = "lash::direct::GenerationOptions::temperature"
@@ -31025,6 +31079,14 @@ disposition = "unused-add"
 reason = "Add lash::remote::llm::RemoteGenerationDisposition::seed to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::remote::llm::RemoteGenerationDisposition::stop_sequences"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-add"
+reason = "Add lash::remote::llm::RemoteGenerationDisposition::stop_sequences to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::remote::llm::RemoteGenerationDisposition::temperature"
 kind = "field"
 availability = "default+all-features"
@@ -31081,6 +31143,14 @@ disposition = "unused-add"
 reason = "Add lash::remote::llm::RemoteGenerationOptionDisposition::OmittedUnsupported to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::remote::llm::RemoteGenerationOptionDisposition::ReplacedProtocolOwned"
+kind = "variant"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-add"
+reason = "Add the protocol-owned stop-sequence replacement disposition to the docs-snippets remote/direct protocol flow example and assert its round-trip result."
+
+[[api]]
 symbol = "lash::remote::llm::RemoteGenerationOptions"
 kind = "struct"
 availability = "default+all-features"
@@ -31111,6 +31181,14 @@ availability = "default+all-features"
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::remote::llm::RemoteGenerationOptions::seed to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::remote::llm::RemoteGenerationOptions::stop_sequences"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-add"
+reason = "Add lash::remote::llm::RemoteGenerationOptions::stop_sequences to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::llm::RemoteGenerationOptions::temperature"
@@ -41749,6 +41827,14 @@ disposition = "unused-add"
 reason = "Add lash::rlm::RlmProtocolPluginConfig::prompt_features to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::rlm::RlmProtocolPluginConfig::redaction_roots"
+kind = "field"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add explicit RLM redaction roots to the agent-workbench plugin setup example and assert that captured model-visible errors omit only those roots."
+
+[[api]]
 symbol = "lash::rlm::RlmProtocolPluginConfig::with_lashlang_abilities"
 kind = "function"
 availability = "all-features"
@@ -41763,6 +41849,14 @@ availability = "all-features"
 area = "plugins"
 disposition = "unused-add"
 reason = "Add lash::rlm::RlmProtocolPluginConfig::with_lashlang_language_features to the agent-workbench plugin/tool setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::rlm::RlmProtocolPluginConfig::with_redaction_roots"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add the RLM redaction-root builder to the agent-workbench plugin setup example and assert its capture-time projection result."
 
 [[api]]
 symbol = "lash::rlm::RlmProtocolPluginFactory"
@@ -61732,6 +61826,70 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+
+[[api]]
+symbol = "lash_core::ExecResponse::executed_calls"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative protocol executors report source-level effect outcomes for durable observation assembly."
+
+[[api]]
+symbol = "lash_core::ExecutedCallOutcome"
+kind = "enum"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative protocol executors report source-level effect outcomes for durable observation assembly."
+
+[[api]]
+symbol = "lash_core::ExecutedCallOutcome::Err"
+kind = "variant"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative protocol executors report failed source-level effects for durable observation assembly."
+
+[[api]]
+symbol = "lash_core::ExecutedCallOutcome::Ok"
+kind = "variant"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative protocol executors report successful source-level effects for durable observation assembly."
+
+[[api]]
+symbol = "lash_core::ExecutedCallOutcome::as_str"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative protocol history renderers format compact source-level effect outcomes."
+
+[[api]]
+symbol = "lash_core::ExecutedCallRecord"
+kind = "struct"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative protocol executors report source-level effect outcomes for durable observation assembly."
+
+[[api]]
+symbol = "lash_core::ExecutedCallRecord::operation"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative protocol executors preserve the source module.operation instead of a host tool alias."
+
+[[api]]
+symbol = "lash_core::ExecutedCallRecord::outcome"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative protocol executors report whether each source-level effect succeeded or failed."
 
 [[api]]
 symbol = "lash_core::HostTurnProtocol"

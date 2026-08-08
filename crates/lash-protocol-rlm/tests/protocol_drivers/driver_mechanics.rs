@@ -126,6 +126,383 @@ fn native_tool_call_failure_preserves_the_offending_llm_response_event() {
 }
 
 #[test]
+fn applied_provider_stop_does_not_reconstruct_an_unclosed_cell() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("respond")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    let text = "Before\n<lashlang>\nprint \"hi\"";
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse {
+            full_text: text.to_string(),
+            parts: vec![text_part(text)],
+            terminal_reason: lash_core::LlmTerminalReason::Stop,
+            generation_disposition: Some(lash_core::GenerationDisposition {
+                stop_sequences: lash_core::GenerationOptionDisposition::Applied,
+                ..Default::default()
+            }),
+            ..LlmResponse::default()
+        }),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(find_checkpoint(&effects).is_some());
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
+    );
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
+            if content == "Before"
+    )));
+    assert!(
+        machine
+            .messages()
+            .iter()
+            .any(|message| message.parts.iter().any(|part| part
+                .content
+                .contains("stop sequence may consume a literal `</lashlang>`")))
+    );
+}
+
+#[test]
+fn natural_stop_without_applied_boundary_does_not_close_or_execute_a_cell() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("respond")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    let text = "Visible plan.\n<lashlang>\nprint \"unfinished\"";
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse {
+            full_text: text.to_string(),
+            parts: vec![text_part(text)],
+            terminal_reason: lash_core::LlmTerminalReason::Stop,
+            ..LlmResponse::default()
+        }),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
+    );
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
+            if content == "Visible plan."
+    )));
+    assert!(!effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
+            if content.contains("<lashlang>")
+    )));
+}
+
+#[test]
+fn illustrative_prose_with_an_unclosed_cell_retries_without_execution() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("how do you run code?")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    let text = "You wrap it like:\n<lashlang>\nfiles.delete \"old\"\n";
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse {
+            full_text: text.to_string(),
+            parts: vec![text_part(text)],
+            terminal_reason: lash_core::LlmTerminalReason::Stop,
+            generation_disposition: Some(lash_core::GenerationDisposition {
+                stop_sequences: lash_core::GenerationOptionDisposition::Applied,
+                ..Default::default()
+            }),
+            ..LlmResponse::default()
+        }),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(find_checkpoint(&effects).is_some());
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
+    );
+}
+
+#[test]
+fn natural_end_turn_with_a_partial_program_retries_without_execution() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("swap the file")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    let text = "<lashlang>\nfiles.delete \"old\"";
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse {
+            full_text: text.to_string(),
+            parts: vec![text_part(text)],
+            terminal_reason: lash_core::LlmTerminalReason::Stop,
+            generation_disposition: Some(lash_core::GenerationDisposition {
+                stop_sequences: lash_core::GenerationOptionDisposition::Applied,
+                ..Default::default()
+            }),
+            ..LlmResponse::default()
+        }),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(find_checkpoint(&effects).is_some());
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
+    );
+}
+
+#[test]
+fn output_limit_unclosed_cell_retries_with_shorten_block_diagnostic() {
+    let mut config = test_config();
+    config.generation.output_token_cap = std::num::NonZeroUsize::new(4096);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("respond")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    let text = "<lashlang>\nprint \"too long\"";
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse {
+            full_text: text.to_string(),
+            parts: vec![text_part(text)],
+            terminal_reason: lash_core::LlmTerminalReason::OutputLimit,
+            ..LlmResponse::default()
+        }),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(find_checkpoint(&effects).is_some());
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
+    );
+    assert!(
+        machine
+            .messages()
+            .iter()
+            .any(|message| message.parts.iter().any(|part| {
+                part.content.contains("shorter block")
+                    && part.content.contains("output limit")
+                    && part.content.contains("4096")
+                    && part.content.contains("do less per cell")
+            }))
+    );
+    assert!(assistant_visible_texts(&machine).is_empty());
+    assert!(!effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
+            if content.contains("<lashlang>")
+    )));
+}
+
+#[test]
+fn multiple_cells_are_rejected_without_emitting_raw_markup() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("respond")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    let text = "Visible plan.\n<lashlang>\nprint 1\n</lashlang>\n<lashlang>\nprint 2\n</lashlang>";
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(rlm_response(vec![text_part(text)])),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
+    );
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
+            if content == "Visible plan."
+    )));
+    assert!(!machine.messages().iter().any(|message| {
+        message.role == MessageRole::Assistant
+            && message
+                .parts
+                .iter()
+                .any(|part| part.content.contains("<lashlang>"))
+    }));
+}
+
+#[test]
+fn output_limit_prose_retries_with_the_request_cap() {
+    let mut config = test_config();
+    config.generation.output_token_cap = std::num::NonZeroUsize::new(2048);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("explain at length")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    let text = "Here is the long explanation that got cut off mid-sen";
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse {
+            full_text: text.to_string(),
+            parts: vec![text_part(text)],
+            terminal_reason: lash_core::LlmTerminalReason::OutputLimit,
+            ..LlmResponse::default()
+        }),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(find_checkpoint(&effects).is_some());
+    assert!(!effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Checkpoint { checkpoint, .. }
+            if *checkpoint == CheckpointKind::BeforeCompletion
+    )));
+    assert_eq!(
+        single_llm_extraction_payload(&machine)["decision"],
+        "retry_output_limit_prose"
+    );
+    assert!(
+        machine
+            .messages()
+            .iter()
+            .any(|message| message.parts.iter().any(|part| part
+                .content
+                .contains("answer was cut off")
+                && part.content.contains("2048")
+                && part.content.contains("shorter answer")))
+    );
+}
+
+#[test]
+fn output_limit_prose_cut_at_a_close_tag_mention_retries() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("what closes a cell?")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    let text = "A cell is closed by ";
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse {
+            full_text: text.to_string(),
+            parts: vec![text_part(text)],
+            terminal_reason: lash_core::LlmTerminalReason::OutputLimit,
+            generation_disposition: Some(lash_core::GenerationDisposition {
+                stop_sequences: lash_core::GenerationOptionDisposition::Applied,
+                ..Default::default()
+            }),
+            ..LlmResponse::default()
+        }),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert_eq!(
+        single_llm_extraction_payload(&machine)["decision"],
+        "retry_output_limit_prose"
+    );
+    assert!(!effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Checkpoint { checkpoint, .. }
+            if *checkpoint == CheckpointKind::BeforeCompletion
+    )));
+}
+
+#[test]
+fn terminal_provider_paths_emit_only_visible_prose() {
+    for terminal_reason in [
+        lash_core::LlmTerminalReason::ContentFilter,
+        lash_core::LlmTerminalReason::ContextOverflow,
+        lash_core::LlmTerminalReason::ProviderError,
+    ] {
+        let mut machine = TurnMachine::new(
+            test_config(),
+            vec![user_message("respond")],
+            Arc::new(Vec::new()),
+            0,
+        );
+        let effects = drain_effects(&mut machine);
+        let llm_id = *find_llm_call(&effects).expect("llm call");
+        let text = "Visible plan.\n<lashlang>\nfiles.delete \"old\"";
+        machine.handle_response(Response::LlmComplete {
+            id: llm_id,
+            text_streamed: false,
+            result: Ok(LlmResponse {
+                full_text: text.to_string(),
+                parts: vec![text_part(text)],
+                terminal_reason,
+                ..LlmResponse::default()
+            }),
+        });
+
+        let effects = drain_effects(&mut machine);
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            Effect::Emit(SessionStreamEvent::TextDelta { content })
+                if content == "Visible plan."
+        )));
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
+                if content == "Visible plan."
+        )));
+        assert!(!effects.iter().any(|effect| matches!(
+            effect,
+            Effect::Emit(SessionStreamEvent::TextDelta { content })
+                | Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
+                if content.contains("<lashlang>")
+        )));
+    }
+}
+
+#[test]
 fn rlm_driver_state_with_wrong_plugin_id_fails_loudly() {
     let config = test_config();
     let msgs = vec![user_message("run some code")];
@@ -239,6 +616,7 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
                 )),
                 duration_ms: 1,
             }],
+            executed_calls: Vec::new(),
             images: Vec::new(),
             printed_images: Vec::new(),
             error: None,
@@ -342,6 +720,20 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
                     duration_ms: 3,
                 },
             ],
+            executed_calls: vec![
+                lash_core::ExecutedCallRecord {
+                    operation: "module.ok".to_string(),
+                    outcome: lash_core::ExecutedCallOutcome::Ok,
+                },
+                lash_core::ExecutedCallRecord {
+                    operation: "module.fail".to_string(),
+                    outcome: lash_core::ExecutedCallOutcome::Err,
+                },
+                lash_core::ExecutedCallRecord {
+                    operation: "module.stop".to_string(),
+                    outcome: lash_core::ExecutedCallOutcome::Err,
+                },
+            ],
             images: Vec::new(),
             printed_images: Vec::new(),
             error: None,
@@ -392,6 +784,23 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
             .is_none()
     );
     assert_eq!(entry.output, vec!["fanout done".to_string()]);
+    assert_eq!(
+        entry.calls,
+        vec![
+            lash_rlm_types::RlmExecutedCall {
+                operation: "module.ok".to_string(),
+                outcome: lash_rlm_types::RlmExecutedCallOutcome::Ok,
+            },
+            lash_rlm_types::RlmExecutedCall {
+                operation: "module.fail".to_string(),
+                outcome: lash_rlm_types::RlmExecutedCallOutcome::Err,
+            },
+            lash_rlm_types::RlmExecutedCall {
+                operation: "module.stop".to_string(),
+                outcome: lash_rlm_types::RlmExecutedCallOutcome::Err,
+            },
+        ]
+    );
     let (_, checkpoint) = find_checkpoint(&effects).expect("after-work checkpoint");
     assert_eq!(checkpoint, CheckpointKind::AfterWork);
 }

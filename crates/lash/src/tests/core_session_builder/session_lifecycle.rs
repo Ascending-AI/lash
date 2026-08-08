@@ -1087,7 +1087,7 @@ async fn park_then_resume_preserves_session_transcript() -> Result<()> {
     assert_eq!(parked.session_id(), "parked");
 
     // Resume rebuilds a live session; the flushed transcript is visible again.
-    let resumed = core.resume(parked).await?;
+    let resumed = Box::pin(core.resume(parked)).await?;
     let after = resumed
         .read_view()
         .messages()

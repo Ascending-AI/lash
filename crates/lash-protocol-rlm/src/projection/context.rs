@@ -352,6 +352,8 @@ fn history_item_from_lashlang_step(entry: &RlmTrajectoryEntry) -> RlmHistoryItem
         code: entry.code.clone(),
         output: entry.output.clone(),
         images: entry.images.iter().map(image_ref).collect(),
+        calls: entry.calls.clone(),
+        calls_omitted: entry.calls_omitted,
         error: entry.error.clone(),
         final_output: entry.final_output.clone(),
     }
@@ -451,6 +453,8 @@ mod tests {
             code: "print big".to_string(),
             output: vec![output.to_string()],
             images: Vec::new(),
+            calls: Vec::new(),
+            calls_omitted: 0,
             error: None,
             final_output: None,
         };
@@ -512,6 +516,8 @@ mod tests {
             code: "finish { answer: 42 }".to_string(),
             output: vec!["terminal output".to_string()],
             images: Vec::new(),
+            calls: Vec::new(),
+            calls_omitted: 0,
             error: None,
             final_output: Some(serde_json::json!({ "answer": 42 })),
         };
@@ -521,6 +527,8 @@ mod tests {
             code: "print \"next\"".to_string(),
             output: vec!["next".to_string()],
             images: Vec::new(),
+            calls: Vec::new(),
+            calls_omitted: 0,
             error: None,
             final_output: None,
         };
@@ -589,6 +597,8 @@ mod tests {
             code: "missing_name".to_string(),
             output: Vec::new(),
             images: Vec::new(),
+            calls: Vec::new(),
+            calls_omitted: 0,
             error: Some("unknown name".to_string()),
             final_output: None,
         };
@@ -598,6 +608,8 @@ mod tests {
             code: "finish \"done\"".to_string(),
             output: Vec::new(),
             images: Vec::new(),
+            calls: Vec::new(),
+            calls_omitted: 0,
             error: None,
             final_output: Some(serde_json::json!("done")),
         };

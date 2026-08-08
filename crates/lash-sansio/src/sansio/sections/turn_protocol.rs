@@ -433,6 +433,10 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
         self.config.max_turns
     }
 
+    pub fn generation(&self) -> &crate::llm::types::GenerationOptions {
+        &self.config.generation
+    }
+
     pub fn termination(&self) -> &M::Termination {
         &self.config.termination
     }
@@ -560,6 +564,21 @@ fn render_messages_for_projector(
 }
 
 pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync {
+    /// Project raw provider text onto the assistant-visible prose surface.
+    /// Protocols that embed executable markup override this so terminal
+    /// provider paths cannot bypass their normal visibility rules.
+    fn project_visible_assistant_prose(&self, text: &str) -> String {
+        text.to_string()
+    }
+
+    /// Whether a completed response that hit the provider output limit should
+    /// still reach the protocol. Most protocols treat it as an incomplete
+    /// terminal turn; protocols with a partial-response grammar can convert it
+    /// into typed repair feedback.
+    fn handles_output_limit_response(&self) -> bool {
+        false
+    }
+
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_, M>) -> Vec<DriverAction<M>>;
     fn handle_llm_success(
         &self,

@@ -170,6 +170,8 @@ pub struct RemoteGenerationDisposition {
     #[serde(default)]
     pub seed: RemoteGenerationOptionDisposition,
     #[serde(default)]
+    pub stop_sequences: RemoteGenerationOptionDisposition,
+    #[serde(default)]
     pub cache: RemoteGenerationOptionDisposition,
 }
 
@@ -180,6 +182,7 @@ pub enum RemoteGenerationOptionDisposition {
     #[default]
     NotRequested,
     Applied,
+    ReplacedProtocolOwned,
     OmittedUnsupported,
     OmittedSamplingPinned,
     ClampedToCapacity,
@@ -360,11 +363,16 @@ pub struct RemoteGenerationOptions {
     pub temperature: Option<serde_json::Number>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stop_sequences: Vec<String>,
 }
 
 impl RemoteGenerationOptions {
     pub fn is_empty(&self) -> bool {
-        self.output_token_cap.is_none() && self.temperature.is_none() && self.seed.is_none()
+        self.output_token_cap.is_none()
+            && self.temperature.is_none()
+            && self.seed.is_none()
+            && self.stop_sequences.is_empty()
     }
 
     pub(crate) fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {

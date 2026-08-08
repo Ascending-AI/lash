@@ -487,6 +487,8 @@ fn generation_policy_prefers_request_then_provider_then_default() {
         output_token_cap: NonZeroUsize::new(2_048),
         temperature: Some(NonNegativeFiniteF64::new(0.25).expect("finite temperature")),
         seed: Some(-7),
+        stop_sequences: Vec::new(),
+        projection_provenance: Default::default(),
     };
     let request_limited =
         resolve_generation_policy(&request_generation, &provider_options, 32_768, ());
@@ -575,6 +577,8 @@ fn generation_options_round_trip_and_stay_comparable() {
         output_token_cap: NonZeroUsize::new(2_048),
         temperature: Some(NonNegativeFiniteF64::new(0.0).expect("finite")),
         seed: Some(42),
+        stop_sequences: Vec::new(),
+        projection_provenance: Default::default(),
     };
     let encoded = serde_json::to_value(&options).expect("serialize");
     assert_eq!(

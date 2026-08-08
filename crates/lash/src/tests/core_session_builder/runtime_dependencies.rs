@@ -1021,6 +1021,8 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
         output_token_cap: std::num::NonZeroUsize::new(4_096),
         temperature: Some(lash_core::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
         seed: Some(42),
+        stop_sequences: Vec::new(),
+        projection_provenance: Default::default(),
     };
     let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let core = explicit_ephemeral_facets(LashCore::standard_builder())

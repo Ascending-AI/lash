@@ -81,6 +81,32 @@ fn record_clamped_output_token_cap(
     }
 }
 
+/// Narrow the adapter's wire-level report when protocol projection replaced
+/// caller-owned stop sequences before the request reached the adapter.
+fn record_protocol_owned_stop_replacement(
+    result: &mut Result<LlmResponse, LlmCallError>,
+    call_record: Option<&mut crate::LlmCallRecord>,
+) {
+    fn replace(disposition: &mut Option<crate::GenerationDisposition>) {
+        disposition.get_or_insert_default().stop_sequences =
+            crate::GenerationOptionDisposition::ReplacedProtocolOwned;
+    }
+
+    match result {
+        Ok(response) => replace(&mut response.generation_disposition),
+        Err(error) => {
+            if let Some(partial) = error.partial_response.as_deref_mut() {
+                replace(&mut partial.generation_disposition);
+            }
+        }
+    }
+    if let Some(call_record) = call_record {
+        for attempt in &mut call_record.attempts {
+            replace(&mut attempt.generation_disposition);
+        }
+    }
+}
+
 impl RuntimeTurnDriver<'_> {
     pub(super) async fn invoke_turn_llm_effect(
         &mut self,
@@ -204,6 +230,8 @@ impl RuntimeTurnDriver<'_> {
         cancel: &CancellationToken,
     ) -> RuntimeLlmCallOutcome {
         let mut request = (*request).clone();
+        let protocol_replaced_stop_sequences =
+            request.generation.stop_sequences_replaced_by_protocol();
         let clamped_output_token_cap = self
             .policy
             .model
@@ -326,15 +354,15 @@ impl RuntimeTurnDriver<'_> {
                     if *stream_state.abort_requested {
                         // A plugin stream hook asked us to end the LLM
                         // call now after seeing a complete response block.
-                        // Drain events already sitting in the buffer, then
-                        // wait briefly for the provider's final completion
-                        // event. Some providers attach usage there, and the
-                        // next prompt's budget contribution depends on the
-                        // driver seeing that accounting before the next
-                        // protocol_iteration starts.
+                        // The response is committed once the plugin asks to
+                        // abort. Continue forwarding late text, signed
+                        // reasoning, and usage into that response, but stop at
+                        // an attempt-reset boundary rather than erasing the
+                        // already-complete cell.
                         if let Err(err) = self
-                            .drain_provider_stream_queue(
+                            .collect_trailing_stream_events_before_abort(
                                 &mut host_forwarder,
+                                &mut llm_task,
                                 &mut llm_stream_rx,
                                 &mut stream_state,
                             )
@@ -342,18 +370,11 @@ impl RuntimeTurnDriver<'_> {
                         {
                             break Err(err);
                         }
-                        streamed_usage = collect_trailing_usage_before_abort(
-                            &mut llm_task,
-                            &mut llm_stream_rx,
-                            streamed_usage.clone(),
-                            self.host.core.clock.as_ref(),
-                        )
-                        .await;
-
+                        let final_streamed_usage = stream_state.streamed_usage.clone();
                         let mut resp = LlmResponse {
-                            full_text: stream_accumulator.full_text(),
+                            full_text: stream_state.stream_accumulator.full_text(),
                             parts: Vec::new(),
-                            usage: streamed_usage.clone(),
+                            usage: final_streamed_usage,
                             terminal_reason: crate::LlmTerminalReason::Stop,
                             terminal_diagnostic: None,
                             provider_usage: None,
@@ -363,7 +384,7 @@ impl RuntimeTurnDriver<'_> {
                             generation_disposition: None,
                             response_metadata: Default::default(),
                         };
-                        stream_accumulator.apply_to_response(&mut resp);
+                        stream_state.stream_accumulator.apply_to_response(&mut resp);
                         let resp = match self
                             .transform_assistant_response(&mut host_forwarder, resp)
                             .await
@@ -468,6 +489,9 @@ impl RuntimeTurnDriver<'_> {
         host_forwarder.finish(cancelled).await;
         if clamped_output_token_cap {
             record_clamped_output_token_cap(&mut result, call_record.as_mut());
+        }
+        if protocol_replaced_stop_sequences {
+            record_protocol_owned_stop_replacement(&mut result, call_record.as_mut());
         }
 
         self.finish_assistant_stream_hooks(assistant_stream_finish_reason(
@@ -1014,6 +1038,38 @@ impl RuntimeTurnDriver<'_> {
         Ok(())
     }
 
+    /// Wait briefly for provider events emitted after a protocol-owned abort.
+    /// `AttemptReset` is a hard boundary: the completed response belongs to
+    /// the accepted attempt and must not be cleared by a provider retry that
+    /// raced with cancellation. If the deadline wins, an uncooperative
+    /// provider's late usage is unavailable for this attempt.
+    async fn collect_trailing_stream_events_before_abort<T>(
+        &mut self,
+        forwarder: &mut ProviderHostForwarder<'_>,
+        llm_task: &mut tokio::task::JoinHandle<T>,
+        llm_stream_rx: &mut tokio::sync::mpsc::UnboundedReceiver<LlmStreamEvent>,
+        state: &mut LlmStreamState<'_>,
+    ) -> Result<(), LlmCallError> {
+        let deadline = self.host.core.clock.now() + std::time::Duration::from_millis(2_000);
+        loop {
+            tokio::select! {
+                _ = self.host.core.clock.sleep_until(deadline) => break,
+                event = llm_stream_rx.recv() => match event {
+                    None | Some(LlmStreamEvent::AttemptReset) => break,
+                    Some(event) => {
+                        let has_final_usage = matches!(event, LlmStreamEvent::Usage(_));
+                        self.forward_provider_stream_event(forwarder, event, state).await?;
+                        if has_final_usage {
+                            break;
+                        }
+                    }
+                },
+            }
+        }
+        llm_task.abort();
+        Ok(())
+    }
+
     async fn drain_provider_stream_queue(
         &mut self,
         forwarder: &mut ProviderHostForwarder<'_>,
@@ -1126,35 +1182,6 @@ fn remember_attempt_correlation(
 #[path = "streaming/tests.rs"]
 mod provider_host_forwarding_tests;
 
-/// Wait up to 2s for a late `Usage` event from the provider after an
-/// a plugin stream-mask abort. The usage is returned on the response itself so
-/// sansio records it synchronously, which makes prompt-budget guidance
-/// available to the next protocol iteration.
-async fn collect_trailing_usage_before_abort<T>(
-    llm_task: &mut tokio::task::JoinHandle<T>,
-    llm_stream_rx: &mut tokio::sync::mpsc::UnboundedReceiver<LlmStreamEvent>,
-    initial_usage: LlmUsage,
-    clock: &dyn crate::Clock,
-) -> LlmUsage {
-    let deadline = clock.now() + std::time::Duration::from_millis(2_000);
-    let mut latest = initial_usage;
-    loop {
-        tokio::select! {
-            _ = clock.sleep_until(deadline) => break,
-            event = llm_stream_rx.recv() => match event {
-                None => break,
-                Some(LlmStreamEvent::Usage(usage)) => {
-                    latest = usage;
-                    break;
-                }
-                Some(_) => continue,
-            },
-        }
-    }
-    llm_task.abort();
-    latest
-}
-
 #[cfg(test)]
 mod clamp_report_tests {
     use super::*;
@@ -1164,6 +1191,7 @@ mod clamp_report_tests {
             output_token_cap: crate::GenerationOptionDisposition::Applied,
             temperature: crate::GenerationOptionDisposition::Applied,
             seed: crate::GenerationOptionDisposition::NotRequested,
+            stop_sequences: crate::GenerationOptionDisposition::NotRequested,
             cache: crate::GenerationOptionDisposition::NotRequested,
         })
     }
@@ -1251,6 +1279,49 @@ mod clamp_report_tests {
         assert_eq!(
             cap_of(dropped.expect("ok").generation_disposition),
             crate::GenerationOptionDisposition::OmittedUnsupported
+        );
+    }
+
+    #[test]
+    fn protocol_stop_replacement_updates_response_and_attempt_ledger() {
+        let mut result: Result<LlmResponse, LlmCallError> = Ok(LlmResponse {
+            generation_disposition: applied(),
+            ..LlmResponse::default()
+        });
+        let mut call_record = crate::LlmCallRecord {
+            call_id: crate::LlmCallId("call".to_string()),
+            label: None,
+            attempts: vec![crate::AttemptRecord {
+                ordinal: 1,
+                started_at: 0,
+                duration: std::time::Duration::ZERO,
+                outcome: crate::AttemptOutcome::Completed,
+                protocol_position: crate::ProtocolPosition::OutputStarted,
+                retry_budget_consumed: false,
+                retry_decision: None,
+                error: None,
+                evidence: None,
+                generation_disposition: applied(),
+                usage: None,
+            }],
+        };
+
+        record_protocol_owned_stop_replacement(&mut result, Some(&mut call_record));
+
+        let response = result.expect("response");
+        assert_eq!(
+            response
+                .generation_disposition
+                .expect("response disposition")
+                .stop_sequences,
+            crate::GenerationOptionDisposition::ReplacedProtocolOwned
+        );
+        assert_eq!(
+            call_record.attempts[0]
+                .generation_disposition
+                .expect("attempt disposition")
+                .stop_sequences,
+            crate::GenerationOptionDisposition::ReplacedProtocolOwned
         );
     }
 }

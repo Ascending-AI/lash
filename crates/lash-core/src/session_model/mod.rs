@@ -281,7 +281,7 @@ impl std::ops::DerefMut for RuntimeSessionPolicy {
 /// How a [`SessionSpec`] layers generation intent over the policy it resolves
 /// against.
 ///
-/// [`crate::GenerationOptions`] is three independently optional options, not
+/// [`crate::GenerationOptions`] is a set of independently optional controls, not
 /// one value, so the default overlay is per-field: a child that caps output
 /// tokens keeps the temperature and seed its parent pinned. Discarding
 /// inherited intent stays available, but it has to be asked for.
@@ -506,6 +506,8 @@ mod tests {
             output_token_cap: std::num::NonZeroUsize::new(4096),
             temperature: Some(crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
             seed: Some(1234),
+            stop_sequences: Vec::new(),
+            projection_provenance: Default::default(),
         };
         let value = serde_json::to_value(&policy).expect("serialize policy");
         assert_eq!(
@@ -566,6 +568,7 @@ mod tests {
                     crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature"),
                 ),
                 seed: Some(42),
+                stop_sequences: Vec::new(),
                 ..Default::default()
             },
             ..SessionPolicy::default()
@@ -584,6 +587,8 @@ mod tests {
                 output_token_cap: std::num::NonZeroUsize::new(4096),
                 temperature: base.generation.temperature.clone(),
                 seed: Some(42),
+                stop_sequences: base.generation.stop_sequences.clone(),
+                projection_provenance: Default::default(),
             }
         );
     }

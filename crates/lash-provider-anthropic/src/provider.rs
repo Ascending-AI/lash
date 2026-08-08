@@ -204,6 +204,9 @@ impl AnthropicProvider {
                 GenerationOptionDisposition::sampling_pinned(req.generation.temperature.is_some())
             },
             seed: GenerationOptionDisposition::unsupported(req.generation.seed.is_some()),
+            stop_sequences: GenerationOptionDisposition::applied(
+                !req.generation.stop_sequences.is_empty(),
+            ),
             cache: lash_llm_transport::cache_intent_disposition(req, Some(body)),
         }
     }

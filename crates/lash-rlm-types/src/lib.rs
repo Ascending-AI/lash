@@ -29,10 +29,21 @@ pub struct RlmTrajectoryEntry {
     pub output: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<AttachmentRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calls: Vec<RlmExecutedCall>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub calls_omitted: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_output: Option<serde_json::Value>,
+}
+
+pub type RlmExecutedCall = lash_sansio::ExecutedCallRecord;
+pub type RlmExecutedCallOutcome = lash_sansio::ExecutedCallOutcome;
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 impl RlmTrajectoryEntry {
@@ -93,6 +104,10 @@ pub enum RlmHistoryItem {
         output: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         images: Vec<RlmImageRef>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        calls: Vec<RlmExecutedCall>,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        calls_omitted: usize,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

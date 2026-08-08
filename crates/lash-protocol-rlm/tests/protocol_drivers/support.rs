@@ -37,7 +37,7 @@ pub(crate) fn test_config_with_protocol_turn_options(
     termination: lash_core::ProtocolTurnOptions,
 ) -> TurnMachineConfig {
     let protocol_driver: Arc<dyn ProtocolDriverHandle<lash_core::HostTurnProtocol>> =
-        Arc::new(RlmDriver);
+        Arc::new(RlmDriver::default());
     TurnMachineConfig {
         protocol_driver,
         projector: Arc::new(ChatContextProjector),
@@ -334,6 +334,7 @@ pub(crate) fn exec_response(
         observations: output.iter().map(|item| (*item).to_string()).collect(),
         observation_truncation: Vec::new(),
         tool_calls: Vec::new(),
+        executed_calls: Vec::new(),
         images: Vec::new(),
         printed_images: Vec::new(),
         error: error.map(str::to_string),

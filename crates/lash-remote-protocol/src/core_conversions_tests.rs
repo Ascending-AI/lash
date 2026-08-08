@@ -222,6 +222,8 @@ fn llm_request_and_response_round_trip_owned_dtos() {
                 core_llm::NonNegativeFiniteF64::new(0.25).expect("finite temperature"),
             ),
             seed: Some(-9),
+            stop_sequences: Vec::new(),
+            projection_provenance: Default::default(),
         },
         scope: core_llm::LlmRequestScope::new(
             "session-1",
@@ -577,6 +579,8 @@ fn process_start_requests_round_trip_core_values() {
                     lash_core::NonNegativeFiniteF64::new(0.25).expect("finite temperature"),
                 ),
                 seed: Some(4242),
+                stop_sequences: Vec::new(),
+                projection_provenance: Default::default(),
             },
             ..Default::default()
         },
@@ -1543,6 +1547,8 @@ fn remote_generation_options_round_trip_sampling_controls_losslessly() {
         output_token_cap: NonZeroUsize::new(2_048),
         temperature: Some(core_llm::NonNegativeFiniteF64::new(0.7).expect("finite temperature")),
         seed: Some(-1),
+        stop_sequences: Vec::new(),
+        projection_provenance: Default::default(),
     };
     let remote = RemoteGenerationOptions::from(core.clone());
     let wire = serde_json::to_value(&remote).expect("serialize remote generation options");
@@ -1615,6 +1621,7 @@ fn remote_generation_options_reject_a_negative_temperature() {
         output_token_cap: None,
         temperature: Some(serde_json::Number::from_f64(-0.5).expect("finite")),
         seed: None,
+        stop_sequences: Vec::new(),
     };
     let error = core_llm::GenerationOptions::try_from(remote)
         .expect_err("a negative temperature must not convert");
@@ -1639,6 +1646,7 @@ fn every_generation_option_disposition_crosses_the_boundary_in_both_directions()
     for core in [
         core_llm::GenerationOptionDisposition::NotRequested,
         core_llm::GenerationOptionDisposition::Applied,
+        core_llm::GenerationOptionDisposition::ReplacedProtocolOwned,
         core_llm::GenerationOptionDisposition::OmittedUnsupported,
         core_llm::GenerationOptionDisposition::OmittedSamplingPinned,
         core_llm::GenerationOptionDisposition::ClampedToCapacity,
@@ -1648,8 +1656,8 @@ fn every_generation_option_disposition_crosses_the_boundary_in_both_directions()
     }
 
     assert_eq!(
-        serde_json::to_value(RemoteGenerationOptionDisposition::ClampedToCapacity)
+        serde_json::to_value(RemoteGenerationOptionDisposition::ReplacedProtocolOwned)
             .expect("serialize"),
-        serde_json::json!("clamped_to_capacity")
+        serde_json::json!("replaced_protocol_owned")
     );
 }

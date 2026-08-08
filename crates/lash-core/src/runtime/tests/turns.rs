@@ -6975,6 +6975,8 @@ async fn session_generation_options_reach_every_provider_request() {
         output_token_cap: NonZeroUsize::new(64),
         temperature: Some(crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
         seed: Some(1234),
+        stop_sequences: Vec::new(),
+        ..Default::default()
     };
     runtime
         .update_session_config(crate::SessionConfigPatch {
@@ -7015,6 +7017,7 @@ async fn omitted_generation_options_are_reported_on_the_turn_llm_call_record() {
         output_token_cap: crate::GenerationOptionDisposition::Applied,
         temperature: crate::GenerationOptionDisposition::OmittedSamplingPinned,
         seed: crate::GenerationOptionDisposition::OmittedUnsupported,
+        stop_sequences: crate::GenerationOptionDisposition::NotRequested,
         cache: crate::GenerationOptionDisposition::NotRequested,
     };
     let provider = TestProvider::builder()
@@ -7044,6 +7047,8 @@ async fn omitted_generation_options_are_reported_on_the_turn_llm_call_record() {
                         crate::NonNegativeFiniteF64::new(0.2).expect("finite temperature"),
                     ),
                     seed: Some(99),
+                    stop_sequences: Vec::new(),
+                    ..Default::default()
                 },
             )),
             ..Default::default()
@@ -7117,6 +7122,7 @@ async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
                         output_token_cap: crate::GenerationOptionDisposition::Applied,
                         temperature: crate::GenerationOptionDisposition::Applied,
                         seed: crate::GenerationOptionDisposition::NotRequested,
+                        stop_sequences: crate::GenerationOptionDisposition::NotRequested,
                         cache: crate::GenerationOptionDisposition::NotRequested,
                     }),
                     ..LlmResponse::default()
@@ -7144,6 +7150,8 @@ async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
                         crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature"),
                     ),
                     seed: None,
+                    stop_sequences: Vec::new(),
+                    ..Default::default()
                 },
             )),
             ..Default::default()
@@ -7216,6 +7224,8 @@ async fn a_mid_run_generation_patch_merges_like_the_spec_overlay_does() {
         output_token_cap: None,
         temperature: Some(crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
         seed: Some(42),
+        stop_sequences: Vec::new(),
+        ..Default::default()
     };
     runtime
         .update_session_config(crate::SessionConfigPatch {
@@ -7241,6 +7251,8 @@ async fn a_mid_run_generation_patch_merges_like_the_spec_overlay_does() {
             output_token_cap: NonZeroUsize::new(4_096),
             temperature: pinned.temperature.clone(),
             seed: Some(42),
+            stop_sequences: Vec::new(),
+            ..Default::default()
         },
         "a patch that names only a cap keeps the sampling the session pinned"
     );
