@@ -174,6 +174,8 @@ fn store_error_variant(error: &StoreError) -> String {
         StoreError::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion",
         StoreError::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion",
         StoreError::CheckpointComponentMissing { .. } => "CheckpointComponentMissing",
+        StoreError::StoredDataCorrupt { .. } => "StoredDataCorrupt",
+        StoreError::StorageFailure { .. } => "StorageFailure",
         other => return format!("Unmapped:{}", other.variant_name()),
     }
     .to_string()

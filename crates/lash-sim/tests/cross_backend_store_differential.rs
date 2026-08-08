@@ -2097,6 +2097,8 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion".to_string(),
         StoreError::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion".to_string(),
         StoreError::CheckpointComponentMissing { .. } => "CheckpointComponentMissing".to_string(),
+        StoreError::StoredDataCorrupt { .. } => "StoredDataCorrupt".to_string(),
+        StoreError::StorageFailure { .. } => "StorageFailure".to_string(),
         StoreError::ProcessWakeSequenceRewound { .. } => "ProcessWakeSequenceRewound".to_string(),
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch".to_string(),
         StoreError::NodeIdCollision { .. } => "NodeIdCollision".to_string(),
@@ -2130,12 +2132,6 @@ fn unmapped_store_error_keys_remain_variant_distinct() {
 
 fn normalized_backend_error(backend: &str, message: &str) -> String {
     match backend {
-        "sqlite" if message.contains("UNIQUE constraint failed") => {
-            "Backend(sqlite:2067:SQLITE_CONSTRAINT_UNIQUE)".to_string()
-        }
-        "sqlite" if message.contains("database is locked") => {
-            "Backend(sqlite:5:SQLITE_BUSY)".to_string()
-        }
         "postgres" if message.contains("duplicate key value violates unique constraint") => {
             "Backend(postgres:23505:unique_violation)".to_string()
         }

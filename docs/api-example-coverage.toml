@@ -16578,6 +16578,60 @@ disposition = "unused-justify"
 reason = "Concrete host class: durable-store implementers identify the session whose token-guarded renewal was refused."
 
 [[api]]
+symbol = "lash::persistence::StoreError::StorageFailure"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::StorageFailure"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: backends distinguish substrate and connection failures from absent state and corrupt payloads."
+
+[[api]]
+symbol = "lash::persistence::StoreError::StorageFailure::backend"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::StorageFailure::backend"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: hosts identify which storage backend failed."
+
+[[api]]
+symbol = "lash::persistence::StoreError::StorageFailure::message"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::StorageFailure::message"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: hosts retain the backend diagnostic for an unavailable substrate."
+
+[[api]]
+symbol = "lash::persistence::StoreError::StoredDataCorrupt"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::StoredDataCorrupt"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: backends distinguish malformed durable payloads from absent rows and substrate failures."
+
+[[api]]
+symbol = "lash::persistence::StoreError::StoredDataCorrupt::message"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::StoredDataCorrupt::message"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: hosts retain the codec diagnostic for corrupt durable data."
+
+[[api]]
+symbol = "lash::persistence::StoreError::StoredDataCorrupt::record_kind"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::StoredDataCorrupt::record_kind"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: hosts identify the durable record kind whose payload is corrupt."
+
+[[api]]
 symbol = "lash::persistence::StoreError::TokenUsageAccountingOverflow"
 kind = "variant"
 availability = "default+all-features"

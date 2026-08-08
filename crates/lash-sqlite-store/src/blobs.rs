@@ -145,17 +145,21 @@ impl Store {
         Ok(())
     }
 
-    pub(crate) fn get_blob_conn(conn: &Connection, blob_ref: &BlobRef) -> Option<Vec<u8>> {
-        let bytes: Vec<u8> = conn
+    pub(crate) fn get_blob_conn(
+        conn: &Connection,
+        blob_ref: &BlobRef,
+    ) -> Result<Option<Vec<u8>>, StoreError> {
+        let bytes: Option<Vec<u8>> = conn
             .query_row(
                 "SELECT content FROM blobs WHERE hash = ?1",
                 params![blob_ref.as_str()],
                 |row| row.get(0),
             )
             .optional()
-            .ok()
-            .flatten()?;
-        decode_artifact_blob(&bytes).or(Some(bytes))
+            .map_err(sqlite_error)?;
+        bytes
+            .map(|bytes| decode_artifact_blob(&bytes).map(|decoded| decoded.unwrap_or(bytes)))
+            .transpose()
     }
 
     fn get_checkpoint_component_conn<T: serde::de::DeserializeOwned>(
@@ -166,16 +170,17 @@ impl Store {
         let Some(blob_ref) = blob_ref else {
             return Ok(None);
         };
-        let bytes = Self::get_blob_conn(conn, blob_ref).ok_or_else(|| {
+        let bytes = Self::get_blob_conn(conn, blob_ref)?.ok_or_else(|| {
             StoreError::CheckpointComponentMissing {
                 component,
                 blob_ref: blob_ref.clone(),
             }
         })?;
         decode_msgpack(&bytes).map(Some).ok_or_else(|| {
-            StoreError::Backend(format!(
-                "failed to decode checkpoint {component} component `{blob_ref}`"
-            ))
+            stored_data_corrupt(
+                "SessionCheckpoint component",
+                format_args!("failed to decode {component} component `{blob_ref}`"),
+            )
         })
     }
 
@@ -183,7 +188,7 @@ impl Store {
         conn: &Connection,
         blob_ref: &BlobRef,
     ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
-        let Some(bytes) = Self::get_blob_conn(conn, blob_ref) else {
+        let Some(bytes) = Self::get_blob_conn(conn, blob_ref)? else {
             return Ok(None);
         };
         let record = decode_checkpoint(&bytes)?;
@@ -275,13 +280,12 @@ impl Store {
             .await
     }
 
-    pub async fn get_blob(&self, blob_ref: &BlobRef) -> Option<Vec<u8>> {
+    pub async fn get_blob(&self, blob_ref: &BlobRef) -> Result<Option<Vec<u8>>, StoreError> {
         let blob_ref = blob_ref.clone();
         self.conn
-            .call(move |conn| Ok(Self::get_blob_conn(conn, &blob_ref)))
+            .call(move |conn| Self::get_blob_conn(conn, &blob_ref).map_err(sqlite_conversion_error))
             .await
-            .ok()
-            .flatten()
+            .map_err(sqlite_error)
     }
 
     pub async fn put_typed_blob<T: serde::Serialize>(&self, value: &T) -> BlobRef {
@@ -301,9 +305,16 @@ impl Store {
     pub async fn get_typed_blob<T: serde::de::DeserializeOwned>(
         &self,
         blob_ref: &BlobRef,
-    ) -> Option<T> {
-        let bytes = self.get_blob(blob_ref).await?;
-        decode_msgpack(&bytes)
+    ) -> Result<Option<T>, StoreError> {
+        let Some(bytes) = self.get_blob(blob_ref).await? else {
+            return Ok(None);
+        };
+        decode_msgpack(&bytes).map(Some).ok_or_else(|| {
+            stored_data_corrupt(
+                "typed blob",
+                format_args!("failed to decode blob `{blob_ref}`"),
+            )
+        })
     }
 
     pub async fn put_checkpoint(
@@ -318,25 +329,26 @@ impl Store {
             .expect("checkpoint blob should persist")
     }
 
-    pub async fn get_checkpoint(&self, blob_ref: &BlobRef) -> Option<HydratedSessionCheckpoint> {
+    pub async fn get_checkpoint(
+        &self,
+        blob_ref: &BlobRef,
+    ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
         let blob_ref = blob_ref.clone();
         self.conn
-            .call(move |conn| Ok(Self::get_checkpoint_conn(conn, &blob_ref)))
+            .call(move |conn| {
+                Self::get_checkpoint_conn(conn, &blob_ref).map_err(sqlite_conversion_error)
+            })
             .await
-            .ok()
-            .and_then(Result::ok)
-            .flatten()
+            .map_err(sqlite_error)
     }
 
-    pub async fn load_usage_deltas(&self) -> Vec<lash_core::TokenLedgerEntry> {
-        let Ok(session_id) = self.selected_session_id() else {
-            return Vec::new();
-        };
+    pub async fn load_usage_deltas(&self) -> Result<Vec<lash_core::TokenLedgerEntry>, StoreError> {
+        let session_id = self.selected_session_id()?;
         self.conn
-            .call(move |conn| Ok(Self::load_usage_deltas_conn(conn, &session_id)))
+            .call(move |conn| {
+                Self::load_usage_deltas_conn(conn, &session_id).map_err(sqlite_conversion_error)
+            })
             .await
-            .ok()
-            .and_then(Result::ok)
-            .unwrap_or_default()
+            .map_err(sqlite_error)
     }
 }

@@ -107,6 +107,15 @@ pub(crate) struct SqliteConnection {
 }
 
 impl SqliteConnection {
+    #[cfg(test)]
+    pub(crate) async fn close_for_testing(&self) {
+        self.inner
+            .clone()
+            .close()
+            .await
+            .expect("close SQLite test connection");
+    }
+
     /// Open (or create) a file-backed database, applying WAL + busy-timeout
     /// PRAGMAs on the connection thread.
     pub(crate) async fn open(path: &std::path::Path) -> tokio_rusqlite::Result<Self> {

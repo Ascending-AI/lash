@@ -3,7 +3,8 @@
 //! This is one of the two reference modules (with `blobs.rs`) establishing the
 //! tokio-rusqlite translation pattern every other module follows:
 //!
-//! * The async public methods keep the *exact* the prior store signatures.
+//! * Async public reads return `Result` so SQLite and decode failures cannot be
+//!   mistaken for missing session state.
 //! * A read goes through `self.conn.call(move |c| { ... })`, where the closure
 //!   is a *synchronous* rusqlite body returning `rusqlite::Result<T>`.
 //! * A read-then-write goes through `self.conn.write(move |tx| { ... })`.
@@ -179,8 +180,10 @@ impl Store {
         })
     }
 
-    pub async fn load_picker_info(&self) -> Option<SessionPickerInfo> {
-        let selected_session_id = self.session_id.get()?.clone();
+    pub async fn load_picker_info(&self) -> Result<Option<SessionPickerInfo>, StoreError> {
+        let Some(selected_session_id) = self.session_id.get().cloned() else {
+            return Ok(None);
+        };
         self.conn
             .call(move |conn| {
                 let meta = conn
@@ -191,7 +194,15 @@ impl Store {
                         |row| {
                             let relation_json: Option<String> = row.get(2)?;
                             let relation = relation_json
-                                .and_then(|json| serde_json::from_str(&json).ok())
+                                .map(|json| {
+                                    serde_json::from_str(&json).map_err(|error| {
+                                        sqlite_conversion_error(stored_data_corrupt(
+                                            "SessionMeta relation",
+                                            error,
+                                        ))
+                                    })
+                                })
+                                .transpose()?
                                 .unwrap_or_default();
                             Ok((
                                 row.get::<_, String>(0)?,
@@ -222,7 +233,9 @@ impl Store {
                     "SessionHeadMeta",
                     lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
                 )
-                .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
+                .map_err(|error| {
+                    sqlite_conversion_error(map_record_decode_error("SessionHeadMeta", error))
+                })?;
                 let head_meta = SessionHeadMeta::assemble(
                     payload,
                     head_revision as u64,
@@ -231,7 +244,7 @@ impl Store {
                 );
                 let graph =
                     Self::load_session_graph_from_conn(conn, &session_id, head_meta.leaf_node_id)
-                        .unwrap_or_default();
+                        .map_err(sqlite_conversion_error)?;
 
                 Ok(Some(SessionPickerInfo {
                     session_id,
@@ -242,8 +255,7 @@ impl Store {
                 }))
             })
             .await
-            .ok()
-            .flatten()
+            .map_err(sqlite_error)
     }
 
     pub async fn memory() -> tokio_rusqlite::Result<Self> {
@@ -307,18 +319,23 @@ impl Store {
         )
     }
 
-    pub async fn load_session_head_meta(&self) -> Option<SessionHeadMeta> {
-        let session_id = self.session_id.get()?.clone();
+    pub async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
+        let Some(session_id) = self.session_id.get().cloned() else {
+            return Ok(None);
+        };
         self.conn
-            .call(move |conn| Ok(load_session_head_meta_from_conn(conn, &session_id)))
+            .call(move |conn| {
+                try_load_session_head_meta_from_conn(conn, &session_id)
+                    .map_err(sqlite_conversion_error)
+            })
             .await
-            .ok()
-            .flatten()
+            .map_err(sqlite_error)
     }
 
     pub async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
         self.bind_session(&meta.session_id)?;
-        let relation_json = serde_json::to_string(&meta.relation).ok();
+        let relation_json = serde_json::to_string(&meta.relation)
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<(), StoreError> = (|| {
@@ -355,13 +372,14 @@ impl Store {
         Ok(())
     }
 
-    pub async fn load_session_meta(&self) -> Option<SessionMeta> {
+    pub async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
         let selected = self.session_id.get().cloned();
         let meta = self
             .conn
             .call(move |conn| {
                 if let Some(session_id) = selected {
-                    return Ok(load_session_meta_from_conn(conn, &session_id));
+                    return load_session_meta_from_conn(conn, &session_id)
+                        .map_err(sqlite_conversion_error);
                 }
                 let mut stmt = conn.prepare(
                     "SELECT session_id FROM session_meta ORDER BY session_id ASC LIMIT 2",
@@ -370,17 +388,17 @@ impl Store {
                     .query_map([], |row| row.get::<_, String>(0))?
                     .collect::<Result<Vec<_>, _>>()?;
                 if session_ids.len() == 1 {
-                    Ok(load_session_meta_from_conn(conn, &session_ids[0]))
+                    load_session_meta_from_conn(conn, &session_ids[0])
+                        .map_err(sqlite_conversion_error)
                 } else {
                     Ok(None)
                 }
             })
             .await
-            .ok()
-            .flatten();
+            .map_err(sqlite_error)?;
         if let Some(meta) = &meta {
-            let _ = self.bind_session(&meta.session_id);
+            self.bind_session(&meta.session_id)?;
         }
-        meta
+        Ok(meta)
     }
 }

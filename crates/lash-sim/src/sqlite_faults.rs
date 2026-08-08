@@ -248,11 +248,11 @@ async fn run_seed(
         .await
         .map_err(|_| ScenarioFailure::oracle(scenario, "injected commit hung for five seconds"))?;
         let error_message = match injected {
-            Err(StoreError::Backend(message)) => message,
+            Err(StoreError::StorageFailure { message, .. }) => message,
             Err(other) => {
                 return Err(ScenarioFailure::oracle(
                     scenario,
-                    format!("injected commit returned non-backend error {other:?}"),
+                    format!("injected commit returned non-storage-failure error {other:?}"),
                 ));
             }
             Ok(result) => {
@@ -276,9 +276,9 @@ async fn run_seed(
         oracles.push(SqliteFaultOracle {
             oracle_id: "sim.oracle.sqlite-fault-typed-error.v1",
             status: "passed",
-            assertion: "the substrate fault returns StoreError::Backend within the timeout rather than hanging or panicking",
+            assertion: "the substrate fault returns StoreError::StorageFailure within the timeout rather than hanging or panicking",
             evidence: json!({
-                "store_error_variant": "Backend",
+                "store_error_variant": "StorageFailure",
                 "message": error_message,
                 "timeout_seconds": 5,
             }),

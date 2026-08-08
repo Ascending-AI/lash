@@ -243,10 +243,30 @@ pub enum StoreError {
         actual: String,
         expected: u32,
     },
+    /// Checkpoint-specialized dangling-pointer failure; other unreadable durable
+    /// records use [`Self::StoredDataCorrupt`].
     #[error("checkpoint {component} component `{blob_ref}` is not present in the store")]
     CheckpointComponentMissing {
         component: &'static str,
         blob_ref: crate::BlobRef,
+    },
+    /// A durable row was present but unreadable; checkpoint dangling pointers
+    /// use the specialized [`Self::CheckpointComponentMissing`] variant.
+    #[error("stored {record_kind} data is corrupt: {message}")]
+    StoredDataCorrupt {
+        /// Stable name of the durable record whose payload was unreadable.
+        record_kind: &'static str,
+        /// Backend codec diagnostic describing the malformed payload.
+        message: String,
+    },
+    /// The storage substrate failed an operation before a trustworthy value
+    /// could be returned.
+    #[error("{backend} storage failure: {message}")]
+    StorageFailure {
+        /// Stable backend name, such as `sqlite` or `postgres`.
+        backend: &'static str,
+        /// Backend diagnostic for the failed storage operation.
+        message: String,
     },
     #[error("store backend error: {0}")]
     Backend(String),
@@ -304,6 +324,8 @@ impl StoreError {
             Self::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion",
             Self::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion",
             Self::CheckpointComponentMissing { .. } => "CheckpointComponentMissing",
+            Self::StoredDataCorrupt { .. } => "StoredDataCorrupt",
+            Self::StorageFailure { .. } => "StorageFailure",
             Self::Backend(_) => "Backend",
         }
     }

@@ -188,12 +188,17 @@ impl SessionCommitStore for Store {
                     if !graph.nodes.is_empty() {
                         graph.set_leaf_node_id(leaf_node_id);
                     }
-                    let checkpoint = meta
-                        .checkpoint_ref
-                        .as_ref()
-                        .map(|blob_ref| Self::get_checkpoint_conn(&tx, blob_ref))
-                        .transpose()?
-                        .flatten();
+                    let checkpoint = match meta.checkpoint_ref.as_ref() {
+                        Some(blob_ref) => {
+                            Some(Self::get_checkpoint_conn(&tx, blob_ref)?.ok_or_else(|| {
+                                StoreError::CheckpointComponentMissing {
+                                    component: "manifest",
+                                    blob_ref: blob_ref.clone(),
+                                }
+                            })?)
+                        }
+                        None => None,
+                    };
                     Ok(Some(PersistedSessionRead {
                         session_id: meta.session_id,
                         head_revision: meta.head_revision,
@@ -253,7 +258,7 @@ impl SessionCommitStore for Store {
             .map_err(sqlite_error)?;
         row.map(|(node_id, parent_node_id, node_json)| {
             lash_core::SessionNodeRecord::decode_storage_body(node_id, parent_node_id, &node_json)
-                .map_err(|err| StoreError::Backend(format!("failed to decode graph node: {err}")))
+                .map_err(|error| stored_data_corrupt("SessionGraph node", error))
         })
         .transpose()
     }
@@ -853,7 +858,7 @@ impl SessionCommitStore for Store {
     }
 
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
-        Ok(Store::load_session_meta(self).await)
+        Store::load_session_meta(self).await
     }
 }
 

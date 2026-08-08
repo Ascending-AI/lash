@@ -55,9 +55,7 @@ impl Store {
                     parent_node_id,
                     &node_json,
                 )
-                .map_err(|err| {
-                    StoreError::Backend(format!("failed to decode session graph node: {err}"))
-                })
+                .map_err(|error| stored_data_corrupt("SessionGraph node", error))
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
         Ok(lash_core::SessionGraph::from_nodes(nodes, leaf_node_id))
@@ -128,9 +126,7 @@ impl Store {
                 parent_node_id,
                 &node_json,
             )
-            .map_err(|err| {
-                StoreError::Backend(format!("failed to decode session graph node: {err}"))
-            })?;
+            .map_err(|error| stored_data_corrupt("SessionGraph node", error))?;
             nodes.push(node);
         }
         let retained_leaf = (!nodes.is_empty()).then_some(leaf_node_id);
@@ -147,16 +143,15 @@ impl Store {
         }
     }
 
-    pub async fn load_session_graph(&self) -> lash_core::SessionGraph {
-        let Ok(session_id) = self.selected_session_id() else {
-            return lash_core::SessionGraph::default();
-        };
+    pub async fn load_session_graph(&self) -> Result<lash_core::SessionGraph, StoreError> {
+        let session_id = self.selected_session_id()?;
         self.conn
-            .call(move |conn| Ok(Self::load_session_graph_from_conn(conn, &session_id, None)))
+            .call(move |conn| {
+                Self::load_session_graph_from_conn(conn, &session_id, None)
+                    .map_err(sqlite_conversion_error)
+            })
             .await
-            .ok()
-            .and_then(Result::ok)
-            .unwrap_or_default()
+            .map_err(sqlite_error)
     }
 
     pub async fn gc_unreachable(&self) -> GcReport {
@@ -262,7 +257,7 @@ impl Store {
             let Some(bytes) = bytes else {
                 continue;
             };
-            let content = decode_artifact_blob(&bytes).unwrap_or(bytes);
+            let content = decode_artifact_blob(&bytes)?.unwrap_or(bytes);
             let checkpoint = decode_checkpoint(&content)?;
             stack.extend(retained_artifact_refs(&checkpoint));
         }

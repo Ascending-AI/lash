@@ -70,7 +70,10 @@ impl Store {
                 let Some(blob_ref) = blob_ref else {
                     return Ok(None);
                 };
-                Ok(Some(Self::get_blob_conn(conn, &BlobRef(blob_ref))))
+                Ok(Some(
+                    Self::get_blob_conn(conn, &BlobRef(blob_ref))
+                        .map_err(sqlite_conversion_error)?,
+                ))
             })
             .await
             .map_err(sqlite_error)?;
@@ -78,7 +81,10 @@ impl Store {
             return Ok(None);
         };
         blob.ok_or_else(|| {
-            StoreError::Backend(format!("{missing_diagnostic} points at a missing blob"))
+            stored_data_corrupt(
+                "artifact reference",
+                format_args!("{missing_diagnostic} points at a missing blob"),
+            )
         })
         .map(Some)
     }
@@ -180,8 +186,25 @@ impl lashlang::LashlangArtifactStore for Store {
                         |row| row.get(0),
                     )
                     .optional()?;
-                let previous_bytes = previous_blob_ref
-                    .and_then(|blob_ref| Self::get_blob_conn(tx, &BlobRef(blob_ref)));
+                let previous_bytes = match previous_blob_ref {
+                    // This pointer is GC-rooted, so a missing blob proves durable
+                    // corruption. Keep the hard error: silently replacing it would
+                    // recreate the self-healing defect class FIG-1031 removes. An
+                    // operator can recover by deleting the corrupt artifact_refs row.
+                    Some(blob_ref) => Some(
+                        Self::get_blob_conn(tx, &BlobRef(blob_ref.clone()))
+                            .map_err(sqlite_conversion_error)?
+                            .ok_or_else(|| {
+                                sqlite_conversion_error(stored_data_corrupt(
+                                    "artifact reference",
+                                    format_args!(
+                                        "current trigger manifest points at missing blob `{blob_ref}`"
+                                    ),
+                                ))
+                            })?,
+                    ),
+                    None => None,
+                };
                 let blob_ref = Self::insert_artifact_blob_conn(
                     tx,
                     BlobArtifactDescriptor::lashlang_module(),
@@ -426,12 +449,18 @@ impl AttachmentManifest for Store {
                             owner_kind: match owner_kind.as_deref() {
                                 Some("turn") => Some(AttachmentOwnerKind::Turn),
                                 Some("process") => Some(AttachmentOwnerKind::Process),
-                                _ => None,
+                                None => None,
+                                Some(value) => {
+                                    return Err(sqlite_conversion_error(stored_data_corrupt(
+                                        "AttachmentManifest owner kind",
+                                        format_args!("unknown value `{value}`"),
+                                    )));
+                                }
                             },
                             owner_id,
                         })
                     })?;
-                    Ok(rows.filter_map(Result::ok).collect())
+                    rows.collect::<rusqlite::Result<Vec<_>>>()
                 })
                 .await
                 .map_err(sqlite_error)
@@ -600,7 +629,7 @@ impl AttachmentManifest for Store {
                         let id: String = row.get(0)?;
                         Ok(AttachmentId::new(id))
                     })?;
-                    Ok(rows.filter_map(Result::ok).collect())
+                    rows.collect::<rusqlite::Result<Vec<_>>>()
                 })
                 .await
                 .map_err(sqlite_error)
