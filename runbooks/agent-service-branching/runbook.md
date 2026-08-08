@@ -4,9 +4,10 @@
 > screenshot, polling, real-token, Abort/RCA, and teardown rules. This runbook adds only
 > the user-visible branching scenario.
 
-**Purpose.** Prove that a user can retain a completed turn, advance the source chat, fork
-the retained turn into a new chat, and continue both siblings independently. The browser,
-host-owned chat database, and Lash durable store must agree at every checkpoint.
+**Purpose.** Prove that agent-service exposes canonical raw turn activities as live NDJSON,
+and that a user can retain a completed turn, advance the source chat, fork the retained turn
+into a new chat, and continue both siblings independently. The browser, host-owned chat
+database, and Lash durable store must agree at every checkpoint.
 
 **Real tokens.** Turns use OpenRouter. Judge exact app state and structural transcript
 changes, not model prose.
@@ -26,6 +27,10 @@ changes, not model prose.
    sibling's transcript and board. Reopening the other chat must reproduce its own state.
 5. **Durability is not DOM memory.** Replace the service process once both branches have
    diverged and require both chats to reconstruct from the same data directory.
+6. **Raw activities are the canonical remote projection.**
+   `POST /api/chats/{chat_id}/activities` runs a real local-durability turn through
+   `RemoteTurnActivitySink`. Judge only NDJSON structure, sequence, and framing; model prose
+   is not evidence.
 
 ## Working material
 
@@ -41,7 +46,8 @@ changes, not model prose.
   `GET /api/chats`,
   `GET /api/chats/{id}/messages`,
   `GET /api/chats/{id}/board`, and
-  `GET /api/chats/{id}/branch-points`.
+  `GET /api/chats/{id}/branch-points`; raw turn activity is
+  `POST /api/chats/{id}/activities` with `{"text":"exercise raw activity transport"}`.
 - Durable truth: `<data-dir>/app.db` and
   `<data-dir>/lash-sessions/durable-core.db`. Save query results as JSON artifacts; do
   not count a terminal printout alone as evidence.
@@ -52,7 +58,24 @@ Open the browser, wait for the composer, board, and branch controls, and record 
 source chat id from `GET /api/chats`. Require the rendered active chat to match that row.
 Save `00-ready.png`.
 
-## Phase 1 — Complete and pin one turn
+## Phase 1 — Assert live raw-activity NDJSON
+
+Using the active chat id from Phase 0, POST the fixed request
+`{"text":"exercise raw activity transport"}` to
+`/api/chats/{id}/activities`. Save response headers as
+`01-raw-activity-headers.txt` and the exact body as `01-raw-activities.ndjson`.
+
+Require HTTP 200 and `Content-Type: application/x-ndjson; charset=utf-8`. Require the body
+to end in byte `0a`, contain at least two non-empty lines, and parse every line independently
+as JSON. Require sequence values to be exactly `0..line_count-1`; on every line require a
+positive numeric `protocol_version`, non-empty string `id` and `correlation_id`, and a string
+`type`. Require exactly one line whose `type` is `final_value`, and require it to be the
+last line. These are structure-only gates: do not assert model prose or any non-terminal
+activity variant. Require the messages API to contain the submitted user row and a later
+terminal assistant row, reload the browser, and require the rendered transcript to agree.
+Save `01-raw-activity-turn.png`.
+
+## Phase 2 — Complete and pin one turn
 
 Click one empty board cell. Poll until the response stream closes, the board returns to
 `X to move`, and both the rendered transcript and messages API contain the completed user
@@ -61,28 +84,28 @@ turn plus its terminal assistant row.
 Click **Pin current turn**. Poll for the rendered `Pinned … messages as a retained turn.`
 status. Save:
 
-- the exact messages response as `01-pinned-messages.json`;
-- the exact board response as `01-pinned-board.json`;
-- the branch-point response as `01-pinned-point.json`.
+- the exact messages response as `02-pinned-messages.json`;
+- the exact board response as `02-pinned-board.json`;
+- the branch-point response as `02-pinned-point.json`.
 
 Require exactly one visible selector option whose message count equals the saved message
 array length. Query `node_anchors` by its node id and require one row. Save the fully
-scrolled UI as `01-pinned-source.png`.
+scrolled UI as `02-pinned-source.png`.
 
 The product database publishes a branch only after Lash creates its durable head.
 Until that second write finishes, the copied product projection remains pending and
 is omitted from chat reads. On restart, the service rolls back every pending
 projection and its possibly-created Lash session before admitting traffic.
 
-## Phase 2 — Advance only the source
+## Phase 3 — Advance only the source
 
 Click a second legal source-board cell different from the first. Poll until the turn
 settles. Require the source messages count to be greater than the saved pinned count and
-the source board response to differ from `01-pinned-board.json`. The branch-point API
+the source board response to differ from `02-pinned-board.json`. The branch-point API
 must still return the same node id and pinned message count. Save
-`02-advanced-source-state.json` and `02-advanced-source.png`.
+`03-advanced-source-state.json` and `03-advanced-source.png`.
 
-## Phase 3 — Fork the retained turn
+## Phase 4 — Fork the retained turn
 
 Select the saved point and click **Fork from pin**. Poll for the rendered
 `Branched from … at a pinned turn.` status and a newly active chat whose title ends in
@@ -91,17 +114,17 @@ Select the saved point and click **Fork from pin**. Poll for the rendered
 Require:
 
 - `GET /api/chats` contains distinct source and fork ids;
-- the fork messages response exactly matches `01-pinned-messages.json` after normalizing
+- the fork messages response exactly matches `02-pinned-messages.json` after normalizing
   database-assigned message ids and `chat_id`;
-- the fork board response exactly matches `01-pinned-board.json`;
-- the source messages and board still equal `02-advanced-source-state.json`;
+- the fork board response exactly matches `02-pinned-board.json`;
+- the source messages and board still equal `03-advanced-source-state.json`;
 - `session_head` contains both session ids, while the fork's active ancestry includes the
   pinned node id.
 
 Save the API/store extracts and the fully scrolled branch UI as
-`03-fork-restored.json` and `03-fork-restored.png`.
+`04-fork-restored.json` and `04-fork-restored.png`.
 
-## Phase 4 — Prove sibling independence
+## Phase 5 — Prove sibling independence
 
 On the fork, click a legal cell that produces a board different from the advanced source.
 Poll until settled and save the fork messages/board. Switch to the source chat in the
@@ -109,31 +132,33 @@ browser and require its rendered transcript and board to match the unchanged sou
 Switch back to the fork and require its own rendered state to match its APIs.
 
 Query the durable graph and require two distinct live heads whose ancestry converges at
-the pinned node. Save `04-sibling-heads.json`, `04-source.png`, and `04-fork.png`.
+the pinned node. Save `05-sibling-heads.json`, `05-source.png`, and `05-fork.png`.
 
-## Phase 5 — Cold reconstruction
+## Phase 6 — Cold reconstruction
 
 Terminate the service, restart it with the same command and data directory, and poll the
 settings endpoint. Reload the browser. Visit each sibling and require its rendered
-transcript and board to match the Phase 4 API artifacts exactly. Save
-`05-reconstructed-source.png` and `05-reconstructed-fork.png`.
+transcript and board to match the Phase 5 API artifacts exactly. Save
+`06-reconstructed-source.png` and `06-reconstructed-fork.png`.
 
-## Phase 6 — Teardown and score
+## Phase 7 — Teardown and score
 
 Stop the service and confirm the port is closed.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
 | Browser surface | composer, board, pin, selector, and fork affordances render | | `00-ready.png` |
-| Retained turn | UI status, branch-point API, app snapshot, and one anchor row agree | | `01-pinned-*` |
-| Source advance | source changes while the retained point stays fixed | | `02-advanced-source*` |
-| Zero-copy fork story | new id restores the pinned app projection and shares the durable prefix | | `03-fork-restored.*` |
-| Sibling independence | each UI agrees with its API; two live heads converge only in shared ancestry | | `04-*` |
-| Cold durability | both divergent chats reconstruct after process replacement | | `05-*` |
+| Raw activity NDJSON | 200, media type, trailing newline, ≥2 valid sequential activity lines, exactly one terminal `final_value` last, and UI/API completion agree | | `01-raw-activit*` |
+| Retained turn | UI status, branch-point API, app snapshot, and one anchor row agree | | `02-pinned-*` |
+| Source advance | source changes while the retained point stays fixed | | `03-advanced-source*` |
+| Zero-copy fork story | new id restores the pinned app projection and shares the durable prefix | | `04-fork-restored.*` |
+| Sibling independence | each UI agrees with its API; two live heads converge only in shared ancestry | | `05-*` |
+| Cold durability | both divergent chats reconstruct after process replacement | | `06-*` |
 
-**Aggregate:** did the browser make pin → advance → fork → independent continuation
-understandable, while the API and durable stores proved that the new chat shares history
-without moving or corrupting the source?
+**Aggregate:** did the raw endpoint prove canonical activity framing, and did the browser
+make pin → advance → fork → independent continuation understandable while the API and
+durable stores proved that the new chat shares history without moving or corrupting the
+source?
 
 ---
 

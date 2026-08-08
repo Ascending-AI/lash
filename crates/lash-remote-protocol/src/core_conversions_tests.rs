@@ -1043,6 +1043,96 @@ fn remote_activity_exposes_typed_turn_input_application_without_display_text() {
 }
 
 #[test]
+fn remote_turn_activity_sink_writes_exact_newline_delimited_json() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    #[derive(Debug, Default)]
+    struct FlushTrackingWriter {
+        bytes: Vec<u8>,
+        flushes: usize,
+    }
+
+    impl std::io::Write for FlushTrackingWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flushes += 1;
+            Ok(())
+        }
+    }
+
+    let activities = [
+        lash_core::TurnActivity {
+            id: lash_core::TurnActivityId::new("activity-1"),
+            correlation_id: lash_core::TurnActivityId::new("correlation-1"),
+            event: lash_core::TurnEvent::AssistantProseDelta {
+                text: "hello".into(),
+            },
+        },
+        lash_core::TurnActivity {
+            id: lash_core::TurnActivityId::new("activity-2"),
+            correlation_id: lash_core::TurnActivityId::new("correlation-2"),
+            event: lash_core::TurnEvent::ReasoningDelta {
+                text: "checking".into(),
+            },
+        },
+    ];
+    let expected = activities
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(sequence, activity)| {
+            serde_json::to_string(&RemoteTurnActivity::from_core(sequence as u64, activity))
+                .expect("serialize expected remote activity")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let (result_tx, result_rx) = mpsc::sync_channel(1);
+
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("test runtime");
+        let sink = RemoteTurnActivitySink::new(FlushTrackingWriter::default(), 0);
+        runtime.block_on(async {
+            for activity in activities {
+                lash_core::facade_support::TurnActivitySink::emit(&sink, activity).await;
+            }
+        });
+        let errors = sink.take_errors();
+        let writer = sink.into_inner().expect("remote sink writer lock");
+        let _ = result_tx.send((writer, errors));
+    });
+
+    let (writer, errors) = result_rx
+        .recv_timeout(Duration::from_millis(500))
+        .expect("remote activity sink timed out (possible writer-lock deadlock)");
+    assert!(errors.is_empty(), "remote sink errors: {errors:?}");
+    assert_eq!(writer.bytes, expected.as_bytes());
+    assert_eq!(writer.flushes, 2, "each activity must be flushed");
+    assert!(
+        writer.bytes.ends_with(b"\n"),
+        "NDJSON must be newline-terminated"
+    );
+
+    let lines = std::str::from_utf8(&writer.bytes)
+        .expect("NDJSON is UTF-8")
+        .lines()
+        .collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2);
+    for line in lines {
+        let activity: RemoteTurnActivity =
+            serde_json::from_str(line).expect("each NDJSON line is one remote activity");
+        activity.validate().expect("valid remote activity");
+    }
+}
+
+#[test]
 fn remote_session_observation_from_core_maps_snapshot_metadata() {
     let store = lash_core::facade_support::InMemoryLiveReplayStore::default();
     let event = lash_core::LiveReplayStore::append(

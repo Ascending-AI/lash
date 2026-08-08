@@ -149,6 +149,7 @@ async fn fold_session_event(event: Arc<SessionObservationEvent>) -> anyhow::Resu
 // docs:start:remote-ndjson-sink
 use lash_remote_protocol::RemoteTurnActivitySink;
 
+// agent-service exercises this sink live at POST /api/chats/{chat_id}/activities.
 async fn stream_turn_as_ndjson(session: &LashSession) -> anyhow::Result<Vec<u8>> {
     let sink = RemoteTurnActivitySink::new(Vec::<u8>::new(), 0);
 

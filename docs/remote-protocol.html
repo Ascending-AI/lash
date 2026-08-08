@@ -233,7 +233,7 @@ request.validate()?;</code></pre>
       </div>
       <div class="listing__row">
         <div class="listing__label">streaming</div>
-        <div class="listing__body"><p><code>RemoteTurnActivitySink&lt;W&gt;</code> serializes remote activities as newline-delimited JSON and records sink write errors for the host to inspect. It is a DTO adapter, not an HTTP route; the host still owns transport, auth, and reconnect policy.</p></div>
+        <div class="listing__body"><p><code>RemoteTurnActivitySink&lt;W&gt;</code> serializes each remote activity, appends a newline, and flushes that complete record while holding one writer lock. It records write errors for the host to inspect. It is a DTO adapter, not an HTTP route; the host still owns transport, auth, and reconnect policy. The agent-service example exercises it live at <code>POST /api/chats/{chat_id}/activities</code>.</p></div>
       </div>
       <div class="listing__row">
         <div class="listing__label">triggers</div>

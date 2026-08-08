@@ -4376,8 +4376,9 @@ kind = "struct"
 availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivityFanout", "lash::turn::TurnActivityFanout"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::TurnActivityFanout to the docs-snippets embedding/turns example and assert its externally observable result."
+disposition = "used-asserted"
+usage = "examples/agent-service/src/raw_activities.rs:92#let events = TurnActivityFanout::new(["
+assertion = "examples/agent-service/src/raw_activities.rs:256#messages.iter().any(|message| message.kind == \"code_block\"),"
 
 [[api]]
 symbol = "lash::TurnActivityFanout::new"
@@ -4385,8 +4386,9 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivityFanout::new", "lash::turn::TurnActivityFanout::new"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::TurnActivityFanout::new to the docs-snippets embedding/turns example and assert its externally observable result."
+disposition = "used-asserted"
+usage = "examples/agent-service/src/raw_activities.rs:92#let events = TurnActivityFanout::new(["
+assertion = "examples/agent-service/src/raw_activities.rs:256#messages.iter().any(|message| message.kind == \"code_block\"),"
 
 [[api]]
 symbol = "lash::TurnActivityId"
@@ -4423,8 +4425,9 @@ kind = "trait"
 availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivitySink"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "The current example use of lash::TurnActivitySink is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
+disposition = "used-asserted"
+usage = "examples/agent-service/src/raw_activities.rs:93#Arc::clone(&remote_events) as Arc<dyn TurnActivitySink>,"
+assertion = "examples/agent-service/src/raw_activities.rs:222#lines.len() >= 2,"
 
 [[api]]
 symbol = "lash::TurnActivitySink::emit"

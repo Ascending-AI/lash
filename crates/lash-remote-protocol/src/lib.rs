@@ -61,10 +61,10 @@ pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     }
 }
 
-#[cfg(feature = "core-conversions")]
+#[cfg(any(feature = "core-conversions", test))]
 mod core_conversions;
 
-#[cfg(feature = "core-conversions")]
+#[cfg(any(feature = "core-conversions", test))]
 pub use core_conversions::{RemoteTurnActivitySink, replay_collected_activities};
 
 #[cfg(test)]

@@ -19,6 +19,7 @@ mod board;
 mod db;
 mod demo_plugin;
 mod lease_triage;
+mod raw_activities;
 #[cfg(feature = "restate")]
 mod restate;
 mod routes;
@@ -49,6 +50,7 @@ fn default_openrouter_model_capability_for(model: lash::ModelSpec) -> lash::Mode
 use crate::db::AppDb;
 #[cfg(feature = "restate")]
 use crate::demo_plugin::{DemoPlugin, DemoPluginConfig};
+use crate::raw_activities::stream_raw_activities;
 #[cfg(feature = "restate")]
 use crate::restate::{AgentServiceTurnWorkflow, AgentServiceTurnWorkflowImpl};
 use crate::routes::{
@@ -358,6 +360,10 @@ async fn async_main() -> anyhow_like::Result<()> {
         .route(
             "/api/chats/{chat_id}/messages",
             get(list_messages).post(send_message),
+        )
+        .route(
+            "/api/chats/{chat_id}/activities",
+            axum::routing::post(stream_raw_activities),
         )
         .route("/api/chats/{chat_id}/board", get(chat_board))
         .route(
