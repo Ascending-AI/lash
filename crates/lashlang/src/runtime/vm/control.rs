@@ -1,8 +1,8 @@
 use std::time::Instant;
 
 use super::super::{
-    COOPERATIVE_YIELD_INSTRUCTION_BUDGET, ExecutionHost, ExecutionMode, ExecutionOutcome,
-    RuntimeError, RuntimeFailure, Value,
+    COOPERATIVE_YIELD_INSTRUCTION_BUDGET, ExecutionBound, ExecutionHost, ExecutionMode,
+    ExecutionOutcome, RuntimeError, RuntimeFailure, Value,
 };
 use super::effects::VmEffect;
 use super::{Vm, VmRunOutcome};
@@ -208,9 +208,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
     async fn run_loop(&mut self, stop_after_effect: bool) -> Result<VmOutcome, VmTrap> {
         let mut budget = COOPERATIVE_YIELD_INSTRUCTION_BUDGET;
+        let mut active_started = Instant::now();
+        if let Err(error) = self.enforce_execution_bounds() {
+            return Err(VmTrap {
+                error,
+                instruction_ip: self.ip.min(self.chunk.code.len().saturating_sub(1)),
+                span: None,
+            });
+        }
         while let Some(instruction) = self.chunk.code.get(self.ip).copied() {
             let instruction_ip = self.ip;
             self.ip += 1;
+            self.instructions_executed = self.instructions_executed.saturating_add(1);
             let profile = self
                 .profile
                 .as_ref()
@@ -223,37 +232,123 @@ impl<H: ExecutionHost> Vm<'_, H> {
             let completed_effect = matches!(&step, Ok(VmStep::Effect(_)));
             let result = match step {
                 Ok(VmStep::Continue) => Ok(None),
-                Ok(VmStep::Effect(effect)) => self.resolve_effect(effect, instruction_ip).await,
+                Ok(VmStep::Effect(effect)) => {
+                    self.active_execution_elapsed += active_started.elapsed();
+                    if let Err(error) = self.enforce_execution_bounds() {
+                        return Err(VmTrap {
+                            error,
+                            instruction_ip,
+                            span: None,
+                        });
+                    }
+                    let result = self.resolve_effect(effect, instruction_ip).await;
+                    active_started = Instant::now();
+                    result
+                }
                 Err(error) => Err(error),
             };
             if let Some((tag, start)) = profile {
                 self.record_instruction_profile(tag, start.elapsed().as_nanos());
             }
-            match result {
-                Ok(Some(outcome)) => return Ok(outcome),
-                Ok(None) => {}
-                Err(error) => {
-                    let span = self.pending_error_span.take();
+            if result.is_ok() && matches!(instruction, super::Instruction::Intrinsic(_)) {
+                self.active_execution_elapsed += active_started.elapsed();
+                if let Err(error) = self.enforce_execution_bounds() {
                     return Err(VmTrap {
                         error,
                         instruction_ip,
-                        span,
+                        span: None,
                     });
+                }
+                active_started = Instant::now();
+            }
+            match result {
+                Ok(Some(outcome)) => {
+                    return self.finish_run_loop(active_started, Ok(outcome), instruction_ip);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    let span = self.pending_error_span.take();
+                    return self.finish_run_loop(
+                        active_started,
+                        Err(VmTrap {
+                            error,
+                            instruction_ip,
+                            span,
+                        }),
+                        instruction_ip,
+                    );
                 }
             }
             if stop_after_effect && completed_effect {
-                return Ok(VmOutcome::EffectCompleted);
+                return self.finish_run_loop(
+                    active_started,
+                    Ok(VmOutcome::EffectCompleted),
+                    instruction_ip,
+                );
             }
             #[cfg(test)]
             if self.test_suspension.should_suspend(completed_effect) {
-                return Ok(VmOutcome::Suspended);
+                return self.finish_run_loop(
+                    active_started,
+                    Ok(VmOutcome::Suspended),
+                    instruction_ip,
+                );
             }
             budget -= 1;
             if budget == 0 {
+                self.active_execution_elapsed += active_started.elapsed();
+                if let Err(error) = self.enforce_execution_bounds() {
+                    return Err(VmTrap {
+                        error,
+                        instruction_ip,
+                        span: None,
+                    });
+                }
                 self.host.yield_now().await;
+                active_started = Instant::now();
                 budget = COOPERATIVE_YIELD_INSTRUCTION_BUDGET;
             }
         }
-        Ok(VmOutcome::Continued)
+        self.finish_run_loop(
+            active_started,
+            Ok(VmOutcome::Continued),
+            self.ip.saturating_sub(1),
+        )
+    }
+
+    fn finish_run_loop(
+        &mut self,
+        active_started: Instant,
+        result: Result<VmOutcome, VmTrap>,
+        instruction_ip: usize,
+    ) -> Result<VmOutcome, VmTrap> {
+        self.active_execution_elapsed += active_started.elapsed();
+        if result.is_ok()
+            && let Err(error) = self.enforce_execution_bounds()
+        {
+            return Err(VmTrap {
+                error,
+                instruction_ip,
+                span: None,
+            });
+        }
+        result
+    }
+
+    fn enforce_execution_bounds(&self) -> Result<(), RuntimeError> {
+        let bounds = self.host.execution_bounds();
+        if let ExecutionBound::Bounded(limit) = bounds.instruction_budget
+            && self.instructions_executed > limit.get()
+        {
+            return Err(RuntimeError::InstructionBudgetExceeded { limit: limit.get() });
+        }
+        if let ExecutionBound::Bounded(limit) = bounds.deadline
+            && self.active_execution_elapsed > limit
+        {
+            return Err(RuntimeError::ExecutionDeadlineExceeded {
+                limit_ms: limit.as_millis(),
+            });
+        }
+        Ok(())
     }
 }

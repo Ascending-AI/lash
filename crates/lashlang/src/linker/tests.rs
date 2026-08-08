@@ -2178,4 +2178,60 @@ mod tests {
 
         assert!(ModuleArtifact::from_store_bytes(b"not json").is_err());
     }
+
+    #[test]
+    fn shaping_builtins_link_valid_shapes_and_reject_every_known_wrong_shape() {
+        let valid = crate::parse(
+            r#"
+            finish {
+              sorted: sort([2, 1]),
+              sorted_by: sort_by([{ rank: 2 }, { rank: 1 }], "rank"),
+              total: sum([1, 2]),
+              least: min([1, 2]),
+              greatest: max([1, 2]),
+              rewritten: replace("aba", "a", "x"),
+              lower: lower("ABC"),
+              upper: upper("abc"),
+              unique: unique([1, 1]),
+              reversed: reverse([1, 2])
+            }
+            "#,
+        )
+        .expect("parse valid shaping builtins");
+        LinkedModule::link(valid, full_host_environment())
+            .expect("valid shaping builtin types should link");
+
+        let invalid = [
+            ("sort", r#"finish sort([1, "two"])"#),
+            ("sort_by", r#"finish sort_by([1], "rank")"#),
+            ("sum", r#"finish sum([1, "two"])"#),
+            ("min", "finish min([[1], [2]])"),
+            ("max", "finish max({ value: 1 })"),
+            ("replace", r#"finish replace("a", "a", 1)"#),
+            ("lower", "finish lower(1)"),
+            ("upper", "finish upper(false)"),
+            ("unique", "finish unique(1)"),
+            ("reverse", "finish reverse({ value: 1 })"),
+        ];
+        for (builtin, source) in invalid {
+            let program = crate::parse(source).expect("parse invalid shaping builtin");
+            assert!(
+                matches!(
+                    LinkedModule::link(program, full_host_environment()),
+                    Err(LinkError::IncompatibleBuiltinOperands { builtin: actual, .. })
+                        if actual == builtin
+                ),
+                "expected `{builtin}` typing failure for {source}"
+            );
+        }
+
+        let dict_items = crate::parse(
+            "process shape(items: dict) { finish reverse(items) }",
+        )
+        .expect("parse dict shaping input");
+        assert!(matches!(
+            LinkedModule::link(dict_items, full_host_environment()),
+            Err(LinkError::IncompatibleBuiltinOperands { builtin, .. }) if builtin == "reverse"
+        ));
+    }
 }

@@ -335,7 +335,10 @@ fn core(
     attachments: &tempfile::TempDir,
 ) -> Result<lash::LashCore> {
     let protocol = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::default(),
+        lash_protocol_rlm::RlmProtocolPluginConfig::new(
+            lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+            lash_protocol_rlm::ExecutionBound::secs(30),
+        ),
         Arc::new(storage.lashlang_artifact_store()),
     );
     lash::LashCore::rlm_builder(protocol)

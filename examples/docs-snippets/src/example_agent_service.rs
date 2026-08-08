@@ -38,7 +38,10 @@ async fn service_core(
     );
 
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::default(),
+        lash::rlm::RlmProtocolPluginConfig::new(
+            lash::rlm::ExecutionBound::instructions(1_000_000),
+            lash::rlm::ExecutionBound::secs(30),
+        ),
         artifact_store,
     );
     let core = lash::LashCore::rlm_builder(factory)

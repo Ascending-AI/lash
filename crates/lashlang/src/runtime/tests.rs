@@ -76,6 +76,17 @@ impl ExecutionHost for RejectingAwaitHost {
     }
 }
 
+struct SlowToolHost;
+
+impl ExecutionHost for SlowToolHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        if matches!(op, AbilityOp::ResourceOperation(_)) {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        Host.perform(op).await
+    }
+}
+
 #[derive(Default)]
 struct RecordingProcessHost {
     starts: Mutex<Vec<ProcessStart>>,
@@ -133,6 +144,121 @@ async fn exec_outcome(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
     let program = crate::parse(source).expect("program should parse");
     let mut state = State::new();
     execute_program(&program, &mut state, &Host).await
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn instruction_budget_exhaustion_is_typed_and_caret_rendered() {
+    let source = "i = 0\nwhile i < 5000 { i = i + 1 }\nfinish i";
+    let program = crate::parse(source).expect("program should parse");
+    let env = ExecutionEnvironment::new(&Host)
+        .traced()
+        .with_execution_bounds(ExecutionBounds::new(
+            ExecutionBound::instructions(1),
+            ExecutionBound::Unbounded,
+        ));
+    let mut state = State::new();
+    let error = execute_program(&program, &mut state, &env)
+        .await
+        .expect_err("long loop must exhaust its instruction budget");
+    assert!(matches!(
+        error,
+        RuntimeError::InstructionBudgetExceeded { limit: 1 }
+    ));
+    let failure = env.take_runtime_failure().expect("traced runtime failure");
+    let diagnostic = crate::format_runtime_diagnostic(source, &failure.error, failure.span);
+    assert!(diagnostic.contains("instruction budget of 1 instructions exceeded"));
+    assert!(diagnostic.contains('^'), "{diagnostic}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn effect_free_terminal_segment_enforces_tiny_instruction_budget() {
+    let program = crate::parse("value = 1").expect("program should parse");
+    let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
+        ExecutionBound::instructions(1),
+        ExecutionBound::Unbounded,
+    ));
+    let mut state = State::new();
+    assert!(matches!(
+        execute_program(&program, &mut state, &env).await,
+        Err(RuntimeError::InstructionBudgetExceeded { limit: 1 })
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn effect_free_intrinsic_dispatch_enforces_bounds_before_later_runtime_errors() {
+    let program = crate::parse("values = unique(range(0, 4000))\nfinish values.missing")
+        .expect("program should parse");
+    let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
+        ExecutionBound::instructions(10),
+        ExecutionBound::Unbounded,
+    ));
+    let mut state = State::new();
+    assert!(matches!(
+        execute_program(&program, &mut state, &env).await,
+        Err(RuntimeError::InstructionBudgetExceeded { limit: 10 })
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn shaping_collection_work_consumes_instruction_budget() {
+    let program = crate::parse("finish unique(range(0, 4000))").expect("program should parse");
+    let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
+        ExecutionBound::instructions(10),
+        ExecutionBound::Unbounded,
+    ));
+    let mut state = State::new();
+    assert!(matches!(
+        execute_program(&program, &mut state, &env).await,
+        Err(RuntimeError::InstructionBudgetExceeded { limit: 10 })
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn deadline_excludes_awaited_tool_time() {
+    let source = r#"
+value = tools.echo({ value: 1 })
+i = 0
+while i < 5000 { i = i + 1 }
+finish value
+"#;
+    let program = crate::parse(source).expect("program should parse");
+    let env = ExecutionEnvironment::new(&SlowToolHost).with_execution_bounds(ExecutionBounds::new(
+        ExecutionBound::Unbounded,
+        ExecutionBound::millis(20),
+    ));
+    let mut state = State::new();
+    let outcome = execute_program(&program, &mut state, &env)
+        .await
+        .expect("the tool's 50ms wait must not consume the 20ms VM deadline");
+    assert!(matches!(outcome, ExecutionOutcome::Finished(_)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn deadline_exhaustion_is_a_typed_runtime_error() {
+    let source = "i = 0\nwhile i < 5000 { i = i + 1 }\nfinish i";
+    let program = crate::parse(source).expect("program should parse");
+    let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
+        ExecutionBound::Unbounded,
+        ExecutionBound::Bounded(std::time::Duration::from_nanos(1)),
+    ));
+    let mut state = State::new();
+    let error = execute_program(&program, &mut state, &env)
+        .await
+        .expect_err("loop must exhaust its VM deadline");
+    assert!(matches!(
+        error,
+        RuntimeError::ExecutionDeadlineExceeded { .. }
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn string_membership_rejects_non_string_needles_without_coercion() {
+    let compiled = crate::compile("finish 1 in \"123\"").expect("source should compile");
+    let mut state = State::new();
+    let error = execute(&compiled, &mut state, &Host)
+        .await
+        .expect_err("numeric string needles must not be coerced");
+    assert_eq!(error, RuntimeError::InUnsupported);
 }
 
 fn compile_source(source: &str) -> Result<CompiledProgram, crate::ParseError> {
@@ -405,6 +531,71 @@ async fn golden_lashlang_diagnostic_corpus_is_exact() {
     cases.push(diagnostic_case(
         "parse_removed_parallel_keyword",
         format_parse_diagnostic("parallel {\n  start echo(value: 1)\n}"),
+    ));
+    cases.push(diagnostic_case(
+        "link_membership_requires_container",
+        link_diagnostic("finish 1 in 2"),
+    ));
+    cases.push(diagnostic_case(
+        "link_membership_requires_list_item_type",
+        link_diagnostic("finish \"one\" in [1, 2]"),
+    ));
+    cases.push(diagnostic_case(
+        "link_record_membership_requires_string_key",
+        link_diagnostic("finish 1 in { one: true }"),
+    ));
+    cases.push(diagnostic_case(
+        "runtime_sort_mixed_types",
+        runtime_diagnostic("finish sort([1, \"two\"])").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_sort_by_missing_path",
+        runtime_diagnostic("finish sort_by([{ profile: { score: 1 } }, {}], \"profile.score\")")
+            .await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_sort_by_not_a_record",
+        runtime_diagnostic("finish sort_by([{ score: 1 }, 2], \"score\")").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_sort_by_empty_path",
+        runtime_diagnostic("finish sort_by([{ score: 1 }], \"\")").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_sum_non_number",
+        runtime_diagnostic("finish sum([1, \"two\"])").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_min_incomparable",
+        runtime_diagnostic("finish min([[1], [2]])").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_min_empty_list",
+        runtime_diagnostic("finish min([])").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_max_requires_list",
+        runtime_diagnostic("finish max({ value: 1 })").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_replace_requires_text",
+        runtime_diagnostic("finish replace(1, \"1\", \"one\")").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_lower_requires_text",
+        runtime_diagnostic("finish lower(false)").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_upper_requires_text",
+        runtime_diagnostic("finish upper(1)").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_unique_requires_list",
+        runtime_diagnostic("finish unique(1)").await,
+    ));
+    cases.push(diagnostic_case(
+        "runtime_reverse_requires_list",
+        runtime_diagnostic("finish reverse(1)").await,
     ));
     cases.push(diagnostic_case(
         "runtime_bad_wrapper_unwrap",
@@ -868,6 +1059,16 @@ fn intrinsic_snapshot(chunk: &Chunk, op: IntrinsicOp) -> String {
         IntrinsicOp::CeilDiv => format!("intrinsic ceil_div argc={argc}"),
         IntrinsicOp::FloorDiv => format!("intrinsic floor_div argc={argc}"),
         IntrinsicOp::Push => format!("intrinsic push argc={argc}"),
+        IntrinsicOp::Sort => format!("intrinsic sort argc={argc}"),
+        IntrinsicOp::SortBy => format!("intrinsic sort_by argc={argc}"),
+        IntrinsicOp::Sum => format!("intrinsic sum argc={argc}"),
+        IntrinsicOp::Min => format!("intrinsic min argc={argc}"),
+        IntrinsicOp::Max => format!("intrinsic max argc={argc}"),
+        IntrinsicOp::Replace => format!("intrinsic replace argc={argc}"),
+        IntrinsicOp::Lower => format!("intrinsic lower argc={argc}"),
+        IntrinsicOp::Upper => format!("intrinsic upper argc={argc}"),
+        IntrinsicOp::Unique => format!("intrinsic unique argc={argc}"),
+        IntrinsicOp::Reverse => format!("intrinsic reverse argc={argc}"),
         IntrinsicOp::InvalidArity { name, .. } => {
             format!(
                 "intrinsic invalid_arity({}) argc={argc}",

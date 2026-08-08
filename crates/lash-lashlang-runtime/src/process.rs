@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+#[cfg(any(test, feature = "testing"))]
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use lash_core::facade_support::ToolChildExecutionTraceHook;
@@ -27,6 +29,8 @@ use crate::{
 };
 
 static SEGMENT_BOUNDARY_DECLINED_TOTAL: AtomicU64 = AtomicU64::new(0);
+#[cfg(any(test, feature = "testing"))]
+static EXECUTION_BOUND_EXHAUSTION_LOUD: AtomicBool = AtomicBool::new(true);
 
 fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'static str) {
     let declined_total = SEGMENT_BOUNDARY_DECLINED_TOTAL
@@ -77,7 +81,8 @@ fn validate_lashlang_program_hash(
         return Err(Box::new(process_lashlang_failure(
             LashlangProcessFailureCode::RestateSegmentProgramHashMismatch,
             format!(
-                "lashlang segment program identity mismatch: persisted {persisted}, current {current}"
+                "lashlang bytecode v{} segment program identity mismatch: persisted {persisted}, current {current}",
+                lashlang::BYTECODE_FORMAT_VERSION
             ),
             None,
         )));
@@ -215,6 +220,12 @@ pub async fn run_lashlang_process(
             }
         }
     };
+    let current_program_hash = lashlang_program_hash(&input);
+    if let Err(output) =
+        validate_lashlang_program_hash(persisted_program_hash.as_deref(), &current_program_hash)
+    {
+        return Ok((*output).into());
+    }
     let segment_state: Option<LashlangSegmentState> = match handover {
         Some(handover) => match serde_json::from_slice(&handover.engine_state) {
             Ok(state) => Some(state),
@@ -229,12 +240,6 @@ pub async fn run_lashlang_process(
         },
         None => None,
     };
-    let current_program_hash = lashlang_program_hash(&input);
-    if let Err(output) =
-        validate_lashlang_program_hash(persisted_program_hash.as_deref(), &current_program_hash)
-    {
-        return Ok((*output).into());
-    }
     let process_id = context.registration().id.clone();
     let session_id = context.session_id().to_string();
     let lashlang_execution_trace = LashlangProcessExecutionTrace::new(
@@ -291,7 +296,9 @@ pub async fn run_lashlang_process(
         signal_send_sequence: AtomicU64::new(signal_send_sequence),
         signal_wait_ordinals: tokio::sync::Mutex::new(signal_wait_ordinals),
     };
-    let env = lashlang::ExecutionEnvironment::new(&host).process();
+    let env = lashlang::ExecutionEnvironment::new(&host)
+        .process()
+        .with_execution_bounds(engine.execution_bounds);
     let output = {
         let _phase = host.ctx.named_phase("rlm_process.execute");
         execute_lashlang(
@@ -334,8 +341,18 @@ async fn execute_lashlang(
         match lashlang::Vm::resume_from(segment_state.vm, compiled.as_ref(), env) {
             Ok(vm) => vm,
             Err(err) => {
+                let exhausted = err.is_execution_bound_exhausted();
+                #[cfg(any(test, feature = "testing"))]
+                assert!(
+                    !EXECUTION_BOUND_EXHAUSTION_LOUD.load(Ordering::SeqCst) || !exhausted,
+                    "confidence durable process exhausted a required Lashlang bound: {err}"
+                );
                 return process_lashlang_failure(
-                    LashlangProcessFailureCode::ProcessSegmentResumeFailed,
+                    if exhausted {
+                        LashlangProcessFailureCode::ProcessExecutionBoundExhausted
+                    } else {
+                        LashlangProcessFailureCode::ProcessSegmentResumeFailed
+                    },
                     format!("failed to resume lashlang segment: {err}"),
                     None,
                 )
@@ -1282,11 +1299,23 @@ fn process_lashlang_execution_result(
             value: serde_json::Value::Null,
             control: None,
         },
-        Err(err) => process_lashlang_failure(
-            LashlangProcessFailureCode::ProcessRuntimeError,
-            err.to_string(),
-            None,
-        ),
+        Err(err) => {
+            let exhausted = err.is_execution_bound_exhausted();
+            #[cfg(any(test, feature = "testing"))]
+            assert!(
+                !EXECUTION_BOUND_EXHAUSTION_LOUD.load(Ordering::SeqCst) || !exhausted,
+                "confidence durable process exhausted a required Lashlang bound: {err}"
+            );
+            process_lashlang_failure(
+                if exhausted {
+                    LashlangProcessFailureCode::ProcessExecutionBoundExhausted
+                } else {
+                    LashlangProcessFailureCode::ProcessRuntimeError
+                },
+                err.to_string(),
+                None,
+            )
+        }
     }
 }
 
@@ -1418,7 +1447,8 @@ pub fn lashlang_type_expr_schema(ty: &lashlang::TypeExpr) -> serde_json::Value {
 #[cfg(test)]
 mod segment_trace_tests {
     use super::{
-        SEGMENT_BOUNDARY_DECLINED_TOTAL, record_segment_boundary_decline,
+        EXECUTION_BOUND_EXHAUSTION_LOUD, SEGMENT_BOUNDARY_DECLINED_TOTAL,
+        process_lashlang_execution_result, record_segment_boundary_decline,
         trace_lifecycle_for_segment, validate_lashlang_program_hash,
     };
     use std::sync::atomic::Ordering;
@@ -1467,5 +1497,19 @@ mod segment_trace_tests {
             SEGMENT_BOUNDARY_DECLINED_TOTAL.load(Ordering::Relaxed),
             before + 1
         );
+    }
+
+    #[test]
+    fn durable_exhaustion_has_a_typed_process_failure_surface() {
+        let previous = EXECUTION_BOUND_EXHAUSTION_LOUD.swap(false, Ordering::SeqCst);
+        let output = process_lashlang_execution_result(Err(
+            lashlang::RuntimeError::InstructionBudgetExceeded { limit: 1 },
+        ));
+        EXECUTION_BOUND_EXHAUSTION_LOUD.store(previous, Ordering::SeqCst);
+        assert!(matches!(
+            output,
+            lash_core::ProcessAwaitOutput::Failure { code, .. }
+                if code == "process_execution_bound_exhausted"
+        ));
     }
 }

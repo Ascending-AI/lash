@@ -6,7 +6,9 @@ use lash_core::{SessionError, SessionHistoryRecord};
 use lash_lashlang_runtime::{LashlangArtifactStore, LashlangSurface, SharedDeferredToolResolver};
 use lash_rlm_types::{RlmGlobalsPatchPluginBody, RlmProtocolEvent};
 
-use crate::executor::{RlmExecutionState, RlmLashlangExecutionTraceConfig, execute_code};
+use crate::executor::{
+    RlmExecutionState, RlmLashlangExecutionTraceConfig, execute_code_with_bounds,
+};
 use crate::projection::{
     ProjectionResolver, RlmProjectedBindings, RlmProjectionExtension, decode_rlm_protocol_event,
 };
@@ -20,6 +22,7 @@ pub(super) struct RlmRuntimeState {
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<SharedDeferredToolResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
+    execution_bounds: lashlang::ExecutionBounds,
     session_projected_bindings: tokio::sync::Mutex<RlmProjectedBindings>,
     execution: tokio::sync::Mutex<Option<RlmExecutionState>>,
     active_agent_frame_id: tokio::sync::Mutex<Option<String>>,
@@ -34,6 +37,7 @@ impl RlmRuntimeState {
         lashlang_surface: LashlangSurface,
         deferred_tool_resolver: Option<SharedDeferredToolResolver>,
         lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
+        execution_bounds: lashlang::ExecutionBounds,
     ) -> Result<Self, SessionError> {
         let mut bound_variable_render_cache = BoundVariableRenderCache::default();
         let bound_variables_prompt = Arc::new(std::sync::RwLock::new(render_bound_variables(
@@ -47,6 +51,7 @@ impl RlmRuntimeState {
             lashlang_surface,
             deferred_tool_resolver,
             lashlang_execution_trace_config,
+            execution_bounds,
             session_projected_bindings: tokio::sync::Mutex::new(RlmProjectedBindings::new()),
             active_agent_frame_id: tokio::sync::Mutex::new(None),
             bound_variable_render_cache: tokio::sync::Mutex::new(bound_variable_render_cache),
@@ -211,7 +216,7 @@ impl RlmRuntimeState {
             .take()
             .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?;
 
-        let result = execute_code(
+        let result = execute_code_with_bounds(
             state,
             ctx,
             request,
@@ -221,6 +226,7 @@ impl RlmRuntimeState {
             session_projected_bindings,
             Arc::clone(&self.projection_resolver),
             self.lashlang_execution_trace_config.clone(),
+            self.execution_bounds,
         )
         .await;
         match result {
@@ -404,6 +410,7 @@ mod tests {
                     ),
                     None,
                     RlmLashlangExecutionTraceConfig::default(),
+                    lashlang::ExecutionBounds::unbounded(),
                 )
                 .expect("runtime state");
                 let prompt = state.shared_bound_variables_prompt();

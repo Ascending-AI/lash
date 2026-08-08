@@ -1,0 +1,72 @@
+# Lashlang execution bounds span durable process lifetimes
+
+## Status
+
+Accepted.
+
+## Context
+
+Lashlang can execute in a foreground RLM block or as a durable process whose VM
+parks at effects and resumes from persisted continuations. Hosts need protection
+from both runaway instruction streams and expensive individual builtins. They
+also need to know whether a configured limit applies to one foreground block,
+one durable segment, or the whole logical process, and whether time spent
+waiting on tools consumes the deadline.
+
+A wall-clock deadline is necessarily less replay-stable than an instruction
+budget. In particular, an uncommitted segment tail is measured again after a
+crash. A redrive can therefore exhaust the active-time deadline even when the
+original attempt did not. Crash loops do not accumulate uncommitted tail time,
+because only committed continuation meters survive.
+
+## Decision
+
+Every RLM configuration must explicitly choose two independent bounds:
+
+- `instruction_budget: ExecutionBound<NonZeroU64>` limits VM instructions plus
+  collection work charged by builtins; and
+- `deadline: ExecutionBound<Duration>` limits active VM execution time.
+
+Hosts select a finite bound or `Unbounded` for each field. Rust callers should
+use `ExecutionBound::instructions(n)`, `ExecutionBound::millis(n)`, or
+`ExecutionBound::secs(n)`. Serialized configuration uses
+`{"bounded": 1000000}` for instructions and milliseconds, or the string
+`"unbounded"`; duration serialization never exposes Rust's internal
+seconds/nanoseconds representation.
+
+Foreground meters apply per executed Lashlang block. Durable-process meters are
+cumulative over the entire logical process lifetime and persist across every
+segment handover. This asymmetry is intentional and must inform the values a
+host chooses.
+
+The deadline measures active VM time only. Awaited host and tool latency is
+excluded. Bounds are checked on resume, after each intrinsic dispatch, before
+and after effect boundaries, at cooperative yields, and on every VM exit.
+Collection builtins charge at least their input size and sorting charges
+`n log n`, so enforcement has bounded overshoot rather than allowing one
+unbounded builtin to hide behind one bytecode instruction.
+
+Exhaustion is a typed terminal failure. Foreground confidence builds assert
+loudly; durable processes expose the stable
+`process_execution_bound_exhausted` failure code and confidence builds assert
+loudly there as well.
+
+The deadline's redrive divergence is accepted as inherent to a real time bound:
+a redrive may exhaust a segment tail that the original attempt completed inside
+the limit. Uncommitted tail measurements are discarded on crash, so crash loops
+do not accumulate time, while the instruction budget remains the deterministic
+upper bound.
+
+Adding persisted meters changes the continuation layout and raises
+`BYTECODE_FORMAT_VERSION` from v1 to v2. Deployments must drain or recreate
+parked Lashlang processes before the cutover; a v1 continuation is not migrated
+or decoded as v2.
+
+## Consequences
+
+- Hosts cannot accidentally inherit a hidden default or confuse tool latency
+  with VM compute time.
+- Durable segment handovers cannot reset either meter.
+- Time-bound redrives are intentionally not bit-for-bit outcome deterministic;
+  instruction-bound redrives remain deterministic.
+- A v1-to-v2 rollout is a clean cutover: drain or recreate parked processes.

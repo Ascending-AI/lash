@@ -28,7 +28,7 @@ fn deferred_tools_test_core(
         }
     }));
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::default()
+        lash::rlm::RlmProtocolPluginConfig::new(lash::rlm::ExecutionBound::instructions(1_000_000), lash::rlm::ExecutionBound::secs(30))
             .with_lashlang_abilities(workbench_lashlang_abilities()),
         artifact_store,
     )

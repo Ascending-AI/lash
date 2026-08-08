@@ -677,15 +677,24 @@ impl<'module> Linker<'module> {
                         span: scope.span,
                     });
                 }
+                let lowered_args = args
+                    .iter()
+                    .map(|arg| self.lower_expr(arg, scope))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let arg_types = lowered_args
+                    .iter()
+                    .map(|(_, binding)| binding_type(binding.as_ref()))
+                    .collect::<Vec<_>>();
+                self.validate_shaping_builtin(name.as_str(), &arg_types, scope.span)?;
                 (
                     Expr::BuiltinCall {
                         name: name.clone(),
-                        args: args
-                            .iter()
-                            .map(|arg| self.lower_expr(arg, scope).map(|(expr, _)| expr))
-                            .collect::<Result<Vec<_>, _>>()?,
+                        args: lowered_args.into_iter().map(|(expr, _)| expr).collect(),
                     },
-                    Some(Binding::Value(builtin_return_type(name.as_str()))),
+                    Some(Binding::Value(shaping_builtin_return_type(
+                        name.as_str(),
+                        &arg_types,
+                    ))),
                 )
             }
             Expr::Field { target, field } => {

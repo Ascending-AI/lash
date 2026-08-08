@@ -33,6 +33,7 @@ pub(super) fn register_rlm_protocol_plugin(
             lashlang_surface.clone(),
             deferred_tool_resolver,
             lashlang_execution_trace_config,
+            config.execution_bounds(),
         )
         .map_err(|err| PluginError::Session(err.to_string()))?,
     );

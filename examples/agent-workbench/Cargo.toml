@@ -30,7 +30,7 @@ lash-core = { workspace = true }
 lash-http-transport = { workspace = true }
 lashlang = { workspace = true }
 lash-plugin-process-controls = { workspace = true, features = ["lashlang"] }
-lash-protocol-rlm = { workspace = true }
+lash-protocol-rlm = { workspace = true, features = ["testing"] }
 lash-provider-openai = { workspace = true }
 lash-postgres-store = { workspace = true }
 lash-restate = { workspace = true }

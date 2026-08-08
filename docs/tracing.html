@@ -62,7 +62,10 @@ let core = lash::LashCore::standard_builder()
             <p>Host-level Lashlang execution graphs are a separate opt-in sink. They are observability only: they are not written to <code>process_events</code>, do not create process-registry storage, and the normal <code>trace_sink</code> does not receive them unless the host explicitly tees the sink itself. Commands remain on the process admin surfaces: the session-scoped <code>SessionProcessAdmin</code> and the runtime-level <code>LashCore::processes()</code> handle; observation is optional trace projection.</p>
           </div>
           <pre data-lang="rust" data-snippet="tracing#lashlang-execution-jsonl"><code>let factory = lash::rlm::RlmProtocolPluginFactory::new(
-    lash::rlm::RlmProtocolPluginConfig::default(),
+    lash::rlm::RlmProtocolPluginConfig::new(
+        lash::rlm::ExecutionBound::instructions(1_000_000),
+        lash::rlm::ExecutionBound::secs(30),
+    ),
     std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 )
 .with_lashlang_execution_jsonl_path("./.lash-data/lashlang-execution.jsonl");
@@ -88,7 +91,10 @@ let lashlang_execution_sink = Arc::new(TeeTraceSink::new([
 ]));
 
 let factory = lash::rlm::RlmProtocolPluginFactory::new(
-    lash::rlm::RlmProtocolPluginConfig::default(),
+    lash::rlm::RlmProtocolPluginConfig::new(
+        lash::rlm::ExecutionBound::instructions(1_000_000),
+        lash::rlm::ExecutionBound::secs(30),
+    ),
     Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 )
 .with_lashlang_execution_sink(lashlang_execution_sink);

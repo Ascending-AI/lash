@@ -277,7 +277,10 @@ impl Backend {
             None => Arc::new(lash::persistence::InMemoryLashlangArtifactStore::default()),
         };
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::default(),
+            lash_protocol_rlm::RlmProtocolPluginConfig::new(
+                lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+                lash_protocol_rlm::ExecutionBound::secs(30),
+            ),
             artifacts,
         );
         let core = lash::LashCore::rlm_builder(factory)

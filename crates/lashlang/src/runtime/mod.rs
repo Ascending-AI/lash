@@ -42,10 +42,10 @@ pub use entry_points::{
     compile_module_artifact_process, compile_process, execute, prewarm,
 };
 pub use host::{
-    AbilityOp, AbilityResult, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
-    ExecutionMode, ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart, ResourceOperation,
-    ResourceOperationBatch, ResourceOperationBatchResult, ResourceOperationResult, Sleep,
-    SleepKind,
+    AbilityOp, AbilityResult, ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost,
+    ExecutionHostError, ExecutionMode, ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart,
+    ResourceOperation, ResourceOperationBatch, ResourceOperationBatchResult,
+    ResourceOperationResult, Sleep, SleepKind,
 };
 #[allow(unused_imports)]
 pub(crate) use instruction::*;

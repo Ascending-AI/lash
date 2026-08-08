@@ -10,9 +10,9 @@
 //! Stage 6.
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use crate::ast::UnaryOp;
+use crate::ast::{BinaryOp, UnaryOp};
 use crate::lexer::Span;
 use crate::{
     LashlangExecutionChild, LashlangExecutionObservation, LashlangExecutionSite,
@@ -226,6 +226,8 @@ pub struct Vm<'a, H> {
     profile: Option<ProfileAccumulator>,
     validation_plans: FxHashMap<usize, (Arc<Record>, ValidationPlan)>,
     pending_error_span: Option<Span>,
+    instructions_executed: u64,
+    active_execution_elapsed: Duration,
     #[cfg(test)]
     test_suspension: TestSuspension,
 }
@@ -506,7 +508,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let right = self.pop_stack()?;
                 let left = self.pop_stack()?;
                 let value = match (left, right) {
-                    (Value::Number(left), Value::Number(right)) => {
+                    (Value::Number(left), Value::Number(right)) if op != BinaryOp::In => {
                         eval_number_binary_values(left, op, right)
                     }
                     (left, right) => eval_binary_values(left, op, right)?,
@@ -1415,8 +1417,19 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             _ => {
                 let argc = op.argc();
-                let values = self.stack_tail(argc)?;
-                let value = execute_intrinsic(op, &self.chunk.names, values).await?;
+                let start = self
+                    .stack
+                    .len()
+                    .checked_sub(argc)
+                    .ok_or(RuntimeError::VmStackUnderflow)?;
+                let values = &self.stack[start..];
+                let value = execute_intrinsic(
+                    op,
+                    &self.chunk.names,
+                    values,
+                    &mut self.instructions_executed,
+                )
+                .await?;
                 self.stack.truncate(self.stack.len() - argc);
                 self.stack.push(value);
             }

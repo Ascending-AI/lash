@@ -71,7 +71,10 @@
 use lash::TurnInput;
 
 let factory = lash::rlm::RlmProtocolPluginFactory::new(
-    lash::rlm::RlmProtocolPluginConfig::default(),
+    lash::rlm::RlmProtocolPluginConfig::new(
+        lash::rlm::ExecutionBound::instructions(1_000_000),
+        lash::rlm::ExecutionBound::secs(30),
+    ),
     Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 );
 let core = lash::LashCore::rlm_builder(factory)
@@ -95,6 +98,7 @@ let output = session
     .run()
     .await?;</code></pre>
       <p>For a complete core/provider setup, start from <a href="./quickstart.html#minimal-example">Quickstart</a> and switch the mode to RLM.</p>
+      <p>Every RLM host must choose both an instruction budget and an active-VM deadline, or explicitly choose <code>Unbounded</code> for either one. Foreground meters apply to one Lashlang block; durable-process meters are cumulative across the process lifetime and persist through segment handovers. The deadline excludes time parked on awaited host and tool effects. Enforcement runs after builtins, at effects and cooperative yields, on resume, and on terminal exits, with bounded overshoot. Exhaustion is a typed terminal failure. The v1-to-v2 bytecode cutover has no continuation migration: drain or recreate parked Lashlang processes before deploying it.</p>
     </div>
 
     <div class="section" id="provider-request-shape">

@@ -27,6 +27,128 @@ fn rlm_execution_section_no_images_prompt_is_golden() {
     });
 }
 
+fn prompt_lashlang_samples(prompt: &str) -> Vec<String> {
+    let mut samples = Vec::new();
+    let mut current = None::<String>;
+    for line in prompt.lines() {
+        match line.trim() {
+            "<lashlang>" => {
+                assert!(current.is_none(), "nested lashlang prompt sample");
+                current = Some(String::new());
+            }
+            "</lashlang>" => {
+                samples.push(current.take().expect("closing tag without opening tag"));
+            }
+            _ => {
+                if let Some(sample) = &mut current {
+                    sample.push_str(line);
+                    sample.push('\n');
+                }
+            }
+        }
+    }
+    assert!(current.is_none(), "unclosed lashlang prompt sample");
+    samples
+}
+
+#[test]
+fn every_rendered_prompt_sample_parses_and_links() {
+    let surface = full_prompt_host_environment();
+    for features in [
+        RlmPromptFeatures::default(),
+        RlmPromptFeatures {
+            images: false,
+            ..RlmPromptFeatures::default()
+        },
+    ] {
+        let prompt = rlm_execution_section_for_host_environment(features, &surface);
+        let samples = prompt_lashlang_samples(&prompt);
+        assert!(
+            !samples.is_empty(),
+            "prompt must contain executable samples"
+        );
+        for (index, sample) in samples.iter().enumerate() {
+            let program = lashlang::parse(sample).unwrap_or_else(|error| {
+                panic!("prompt sample {index} did not parse: {error}\n{sample}")
+            });
+            lashlang::LinkedModule::link(program, surface.clone()).unwrap_or_else(|error| {
+                panic!("prompt sample {index} did not link: {error}\n{sample}")
+            });
+        }
+    }
+}
+
+#[test]
+fn rendered_builtin_inventory_exactly_matches_runtime_registry() {
+    for features in [
+        RlmPromptFeatures::default(),
+        RlmPromptFeatures {
+            images: false,
+            ..RlmPromptFeatures::default()
+        },
+    ] {
+        let prompt =
+            rlm_execution_section_for_host_environment(features, &full_prompt_host_environment());
+        let line = prompt
+            .lines()
+            .find(|line| {
+                line.starts_with("Available builtins (generated from the runtime registry):")
+            })
+            .expect("generated builtin inventory line");
+        let rendered = line
+            .split_once(": ")
+            .expect("builtin inventory separator")
+            .1
+            .trim_end_matches('.')
+            .split(", ")
+            .map(|name| name.trim_matches('`'))
+            .collect::<Vec<_>>();
+        assert_eq!(rendered, lashlang::builtin_names().collect::<Vec<_>>());
+    }
+}
+
+#[test]
+fn rendered_builtin_bullets_are_bidirectionally_complete() {
+    let registry = lashlang::builtin_names().collect::<std::collections::BTreeSet<_>>();
+    for features in [
+        RlmPromptFeatures::default(),
+        RlmPromptFeatures {
+            images: false,
+            ..RlmPromptFeatures::default()
+        },
+    ] {
+        let prompt =
+            rlm_execution_section_for_host_environment(features, &full_prompt_host_environment());
+        let builtins = prompt
+            .split_once("### Builtins")
+            .expect("builtins section")
+            .1
+            .split_once("### Working with context")
+            .expect("section after builtins")
+            .0;
+        let mut counts = std::collections::BTreeMap::<&str, usize>::new();
+        for line in builtins.lines().filter(|line| line.starts_with("- `")) {
+            let lead = line
+                .strip_prefix("- `")
+                .and_then(|line| line.split_once('`'))
+                .map(|(signature, _)| signature.split('(').next().expect("signature name"))
+                .expect("builtin bullet lead");
+            assert!(
+                registry.contains(lead),
+                "prompt bullet lead `{lead}` is absent from the runtime registry"
+            );
+            *counts.entry(lead).or_default() += 1;
+        }
+        for name in &registry {
+            assert_eq!(
+                counts.get(name),
+                Some(&1),
+                "builtin `{name}` must have exactly one prompt bullet"
+            );
+        }
+    }
+}
+
 fn prompt_host_environment(
     resources: lashlang::LashlangHostCatalog,
     abilities: lashlang::LashlangAbilities,
@@ -69,11 +191,22 @@ fn tool_resources() -> lashlang::LashlangHostCatalog {
         lashlang::TypeExpr::Any,
         lashlang::TypeExpr::Any,
     );
+    resources.add_module_operation(
+        ["module"],
+        "Module",
+        "operation",
+        "module_operation",
+        lashlang::TypeExpr::Any,
+        lashlang::TypeExpr::Any,
+    );
     resources
 }
 
 fn full_prompt_host_environment() -> lashlang::LashlangHostEnvironment {
+    // Synthetic prompt surfaces deliberately model only known host contracts;
+    // do not widen them with `any` escape hatches just to make samples link.
     prompt_host_environment(tool_resources(), lashlang::LashlangAbilities::all())
+        .with_globals(["record"])
 }
 
 #[test]
@@ -114,6 +247,23 @@ fn execution_section_makes_paired_lashlang_tag_contract_explicit() {
     assert!(!section.contains("### Persistence"));
     assert!(!section.contains("Every message before the final answer"));
     assert!(!section.contains("Prose-only does not end the turn"));
+}
+
+#[test]
+fn execution_section_claims_the_operator_ladder_and_new_builtin_semantics() {
+    let section = rlm_execution_section_for_host_environment(
+        RlmPromptFeatures::default(),
+        &full_prompt_host_environment(),
+    );
+    assert!(section.contains("postfix calls/fields/indexing/result `?`"));
+    assert!(section.contains("comparisons `== != < <= > >= in`"));
+    assert!(section.contains("`sort(list)` — stable ascending sort"));
+    assert!(section.contains(
+        "`unique(list)` — stable typed-equality deduplication that keeps first occurrences"
+    ));
+    assert!(section.contains("`replace(s, from, to)` — literal Rust-style text replacement"));
+    assert!(section.contains("`min(list)` — least item from a non-empty list"));
+    assert!(section.contains("`sum(list)` — numeric total; `sum([])` is `0`"));
 }
 
 #[test]

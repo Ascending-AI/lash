@@ -1014,6 +1014,7 @@ fn write_binary_op(writer: &mut HashWriter, op: BinaryOp) {
         BinaryOp::LessEqual => "less-equal",
         BinaryOp::Greater => "greater",
         BinaryOp::GreaterEqual => "greater-equal",
+        BinaryOp::In => "in",
         BinaryOp::And => "and",
         BinaryOp::Or => "or",
     });

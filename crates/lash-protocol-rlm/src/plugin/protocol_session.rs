@@ -308,6 +308,7 @@ mod tests {
                 lash_lashlang_runtime::LashlangSurface::default(),
                 None,
                 crate::executor::RlmLashlangExecutionTraceConfig::default(),
+                lashlang::ExecutionBounds::unbounded(),
             )
             .expect("runtime state"),
         );
@@ -316,7 +317,10 @@ mod tests {
 
     #[tokio::test]
     async fn session_projection_extension_rejects_duplicate_names() {
-        let session = test_session(RlmProtocolPluginConfig::default());
+        let session = test_session(RlmProtocolPluginConfig::new(
+            lashlang::ExecutionBound::Unbounded,
+            lashlang::ExecutionBound::Unbounded,
+        ));
         session
             .apply_session_extension(crate::rlm_session_projection_extension(
                 RlmProjectedBindings::new()
@@ -341,7 +345,10 @@ mod tests {
 
     #[tokio::test]
     async fn session_projection_prompt_contribution_lists_names() {
-        let session = test_session(RlmProtocolPluginConfig::default());
+        let session = test_session(RlmProtocolPluginConfig::new(
+            lashlang::ExecutionBound::Unbounded,
+            lashlang::ExecutionBound::Unbounded,
+        ));
         session
             .apply_session_extension(crate::rlm_session_projection_extension(
                 RlmProjectedBindings::new()
@@ -365,7 +372,10 @@ mod tests {
     fn soft_budget_warning_emits_plugin_event_not_user_message() {
         let session = test_session(RlmProtocolPluginConfig {
             continue_as_soft_warn_tokens: Some(100_000),
-            ..Default::default()
+            ..RlmProtocolPluginConfig::new(
+                lashlang::ExecutionBound::Unbounded,
+                lashlang::ExecutionBound::Unbounded,
+            )
         });
         let state = lash_core::SessionSnapshot {
             token_usage: lash_core::TokenUsage {

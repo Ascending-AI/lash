@@ -251,6 +251,8 @@ fn resume_rejects_invalid_iterator_binding_and_zero_range_step() {
         mode: ExecutionMode::Process,
         profile: None,
         pending_error_span: None,
+        instructions_executed: 0,
+        active_execution_elapsed: std::time::Duration::ZERO,
     };
     let host = Host;
     let mut invalid_binding = base.clone();
@@ -444,4 +446,57 @@ async fn requested_boundary_at_non_capturable_point_is_safely_skipped() {
         vm.run_process_until_effect().await.expect("skip should continue"),
         VmRunOutcome::Complete(ExecutionOutcome::Finished(Value::Number(3.0)))
     );
+}
+
+struct BoundedContinuationHost {
+    bounds: ExecutionBounds,
+}
+
+impl ExecutionHost for BoundedContinuationHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        Host.perform(op).await
+    }
+
+    fn execution_bounds(&self) -> ExecutionBounds {
+        self.bounds
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn continuation_resume_accounts_for_pre_park_instruction_and_time_meters() {
+    let program = compile_source("i = 0\nwhile i < 5000 { i = i + 1 }\nfinish i")
+        .expect("program should compile");
+    let host = Host;
+    let mut state = State::new();
+    let mut vm = Vm::from_state(&program, &mut state, &host);
+    vm.suspend_after_instructions(1204);
+    assert_eq!(
+        vm.run_process_until_effect().await.expect("suspend run"),
+        VmRunOutcome::EffectCompleted
+    );
+    let continuation = vm.suspend().expect("continuation should capture");
+    assert_eq!(continuation.instructions_executed, 1204);
+    assert!(continuation.active_execution_elapsed > std::time::Duration::ZERO);
+
+    let instruction_host = BoundedContinuationHost {
+        bounds: ExecutionBounds::new(
+            ExecutionBound::instructions(602),
+            ExecutionBound::Unbounded,
+        ),
+    };
+    assert!(matches!(
+        Vm::resume_from(continuation.clone(), &program, &instruction_host),
+        Err(ContinuationError::InstructionBudgetExceeded { limit: 602 })
+    ));
+
+    let deadline_host = BoundedContinuationHost {
+        bounds: ExecutionBounds::new(
+            ExecutionBound::Unbounded,
+            ExecutionBound::millis(0),
+        ),
+    };
+    assert!(matches!(
+        Vm::resume_from(continuation, &program, &deadline_host),
+        Err(ContinuationError::ExecutionDeadlineExceeded { limit_ms: 0 })
+    ));
 }

@@ -93,6 +93,7 @@ impl LinkError {
             Self::OpaqueHostDescriptorAccess { .. } => "opaque_host_descriptor_access",
             Self::UnknownObjectField { .. } => "unknown_object_field",
             Self::IncompatibleBinaryOperands { .. } => "incompatible_binary_operands",
+            Self::IncompatibleBuiltinOperands { .. } => "incompatible_builtin_operands",
             Self::IncompatibleIterationTarget { .. } => "incompatible_iteration_target",
             Self::ModuleHash { .. } => "module_hash",
         }

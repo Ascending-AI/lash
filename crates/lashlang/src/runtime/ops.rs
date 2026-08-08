@@ -3,6 +3,8 @@
 //! dispatch (`intrinsic` and the per-intrinsic direct paths).
 
 use std::borrow::Cow;
+use std::cmp::Ordering;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::ast::BinaryOp;
@@ -30,6 +32,7 @@ pub(crate) async fn execute_intrinsic(
     builtin: IntrinsicOp,
     names: &[Name],
     values: &[Value],
+    instructions_executed: &mut u64,
 ) -> Result<Value, RuntimeError> {
     match builtin {
         IntrinsicOp::Len => {
@@ -262,6 +265,24 @@ pub(crate) async fn execute_intrinsic(
             expect_arg_count("push", values, 2)?;
             execute_push_builtin_async(values[0].clone(), values[1].clone()).await
         }
+        IntrinsicOp::Sort => execute_sort_builtin(values, instructions_executed).await,
+        IntrinsicOp::SortBy => execute_sort_by_builtin(values, instructions_executed).await,
+        IntrinsicOp::Sum => execute_sum_builtin(values, instructions_executed).await,
+        IntrinsicOp::Min => {
+            execute_extreme_builtin("min", values, Ordering::Less, instructions_executed).await
+        }
+        IntrinsicOp::Max => {
+            execute_extreme_builtin("max", values, Ordering::Greater, instructions_executed).await
+        }
+        IntrinsicOp::Replace => execute_replace_builtin(values, instructions_executed).await,
+        IntrinsicOp::Lower => {
+            execute_case_builtin("lower", values, str::to_lowercase, instructions_executed).await
+        }
+        IntrinsicOp::Upper => {
+            execute_case_builtin("upper", values, str::to_uppercase, instructions_executed).await
+        }
+        IntrinsicOp::Unique => execute_unique_builtin(values, instructions_executed).await,
+        IntrinsicOp::Reverse => execute_reverse_builtin(values, instructions_executed).await,
         IntrinsicOp::ValidateCompiled(_)
         | IntrinsicOp::PushAssign(_)
         | IntrinsicOp::FormatCompiled(_)
@@ -276,6 +297,280 @@ pub(crate) async fn execute_intrinsic(
             name: names[name].text.to_string(),
         }),
     }
+}
+
+fn charge_collection_work(instructions_executed: &mut u64, amount: usize) {
+    *instructions_executed = instructions_executed.saturating_add(amount as u64);
+}
+
+fn sorting_work(items: usize) -> usize {
+    if items < 2 {
+        return 0;
+    }
+    items.saturating_mul(usize::BITS.saturating_sub((items - 1).leading_zeros()) as usize)
+}
+
+async fn shaping_list(
+    builtin: &'static str,
+    value: &Value,
+    instructions_executed: &mut u64,
+) -> Result<Vec<Value>, RuntimeError> {
+    let value = materialize_projected_async(value.clone()).await;
+    match value {
+        Value::Tuple(items) | Value::List(items) => {
+            charge_collection_work(instructions_executed, items.len());
+            Ok(items.into_vec())
+        }
+        other => Err(RuntimeError::ShapingListRequired {
+            builtin,
+            actual: value_type_name(&other).to_string(),
+        }),
+    }
+}
+
+fn compare_shaping_values(left: &Value, right: &Value) -> Option<Ordering> {
+    match (left, right) {
+        (Value::Null, Value::Null) => Some(Ordering::Equal),
+        (Value::Bool(left), Value::Bool(right)) => Some(left.cmp(right)),
+        (Value::Number(left), Value::Number(right)) => Some(left.total_cmp(right)),
+        (Value::String(left), Value::String(right)) => Some(left.cmp(right)),
+        _ => None,
+    }
+}
+
+fn validate_comparable_items(builtin: &'static str, items: &[Value]) -> Result<(), RuntimeError> {
+    let Some(first) = items.first() else {
+        return Ok(());
+    };
+    for (index, item) in items.iter().enumerate() {
+        if compare_shaping_values(first, item).is_none() {
+            return Err(RuntimeError::ShapingComparableRequired {
+                builtin,
+                index,
+                reference: value_type_name(first).to_string(),
+                actual: value_type_name(item).to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
+async fn execute_sort_builtin(
+    values: &[Value],
+    instructions_executed: &mut u64,
+) -> Result<Value, RuntimeError> {
+    expect_arg_count("sort", values, 1)?;
+    let mut items = shaping_list("sort", &values[0], instructions_executed).await?;
+    validate_comparable_items("sort", &items)?;
+    charge_collection_work(instructions_executed, sorting_work(items.len()));
+    items.sort_by(|left, right| {
+        compare_shaping_values(left, right).expect("comparability was validated")
+    });
+    Ok(Value::List(items.into()))
+}
+
+fn field_path_value<'value>(value: &'value Value, path: &str) -> Option<&'value Value> {
+    if path.is_empty() {
+        return None;
+    }
+    let mut current = value;
+    for segment in path.split('.') {
+        if segment.is_empty() {
+            return None;
+        }
+        let Value::Record(record) = current else {
+            return None;
+        };
+        current = record.get(segment)?;
+    }
+    Some(current)
+}
+
+async fn execute_sort_by_builtin(
+    values: &[Value],
+    instructions_executed: &mut u64,
+) -> Result<Value, RuntimeError> {
+    expect_arg_count("sort_by", values, 2)?;
+    let items = shaping_list("sort_by", &values[0], instructions_executed).await?;
+    let path_value = materialize_projected_async(values[1].clone()).await;
+    let Value::String(path) = path_value else {
+        return Err(RuntimeError::ShapingTextRequired {
+            builtin: "sort_by",
+            argument: "field path",
+            actual: value_type_name(&path_value).to_string(),
+        });
+    };
+    if path.is_empty() {
+        return Err(RuntimeError::SortByEmptyPath);
+    }
+    let mut keyed = Vec::with_capacity(items.len());
+    for (index, item) in items.into_iter().enumerate() {
+        if !matches!(item, Value::Record(_)) {
+            return Err(RuntimeError::SortByRecordRequired {
+                index,
+                actual: value_type_name(&item).to_string(),
+            });
+        }
+        let key = field_path_value(&item, path.as_str())
+            .cloned()
+            .ok_or_else(|| RuntimeError::SortByMissingPath {
+                path: path.to_string(),
+                index,
+            })?;
+        keyed.push((key, item));
+    }
+    let keys = keyed.iter().map(|(key, _)| key.clone()).collect::<Vec<_>>();
+    validate_comparable_items("sort_by", &keys)?;
+    charge_collection_work(instructions_executed, sorting_work(keyed.len()));
+    keyed.sort_by(|(left, _), (right, _)| {
+        compare_shaping_values(left, right).expect("comparability was validated")
+    });
+    Ok(Value::List(
+        keyed
+            .into_iter()
+            .map(|(_, item)| item)
+            .collect::<Vec<_>>()
+            .into(),
+    ))
+}
+
+async fn execute_sum_builtin(
+    values: &[Value],
+    instructions_executed: &mut u64,
+) -> Result<Value, RuntimeError> {
+    expect_arg_count("sum", values, 1)?;
+    let items = shaping_list("sum", &values[0], instructions_executed).await?;
+    let mut total = 0.0;
+    for (index, item) in items.iter().enumerate() {
+        let Value::Number(number) = item else {
+            return Err(RuntimeError::ShapingNumberRequired {
+                builtin: "sum",
+                index,
+                actual: value_type_name(item).to_string(),
+            });
+        };
+        total += number;
+    }
+    Ok(Value::Number(total))
+}
+
+async fn execute_extreme_builtin(
+    builtin: &'static str,
+    values: &[Value],
+    wanted: Ordering,
+    instructions_executed: &mut u64,
+) -> Result<Value, RuntimeError> {
+    expect_arg_count(builtin, values, 1)?;
+    let items = shaping_list(builtin, &values[0], instructions_executed).await?;
+    validate_comparable_items(builtin, &items)?;
+    let Some(mut extreme) = items.first().cloned() else {
+        return Err(RuntimeError::ShapingEmptyList { builtin });
+    };
+    for item in &items[1..] {
+        if compare_shaping_values(item, &extreme) == Some(wanted) {
+            extreme = item.clone();
+        }
+    }
+    Ok(extreme)
+}
+
+async fn shaping_text(
+    builtin: &'static str,
+    argument: &'static str,
+    value: &Value,
+    instructions_executed: &mut u64,
+) -> Result<String, RuntimeError> {
+    let value = materialize_projected_async(value.clone()).await;
+    match value {
+        Value::String(value) => {
+            charge_collection_work(instructions_executed, value.chars().count());
+            Ok(value.to_string())
+        }
+        other => Err(RuntimeError::ShapingTextRequired {
+            builtin,
+            argument,
+            actual: value_type_name(&other).to_string(),
+        }),
+    }
+}
+
+async fn execute_replace_builtin(
+    values: &[Value],
+    instructions_executed: &mut u64,
+) -> Result<Value, RuntimeError> {
+    expect_arg_count("replace", values, 3)?;
+    let text = shaping_text("replace", "text", &values[0], instructions_executed).await?;
+    let from = shaping_text("replace", "needle", &values[1], instructions_executed).await?;
+    let to = shaping_text("replace", "replacement", &values[2], instructions_executed).await?;
+    Ok(Value::String(text.replace(&from, &to).into()))
+}
+
+async fn execute_case_builtin(
+    builtin: &'static str,
+    values: &[Value],
+    transform: fn(&str) -> String,
+    instructions_executed: &mut u64,
+) -> Result<Value, RuntimeError> {
+    expect_arg_count(builtin, values, 1)?;
+    let text = shaping_text(builtin, "value", &values[0], instructions_executed).await?;
+    Ok(Value::String(transform(&text).into()))
+}
+
+#[derive(Eq, Ord, PartialEq, PartialOrd)]
+enum ScalarEqualityKey {
+    Null,
+    Bool(bool),
+    Number(u64),
+    String(String),
+}
+
+fn scalar_equality_key(value: &Value) -> Option<ScalarEqualityKey> {
+    match value {
+        Value::Null => Some(ScalarEqualityKey::Null),
+        Value::Bool(value) => Some(ScalarEqualityKey::Bool(*value)),
+        Value::Number(value) if !value.is_nan() => {
+            Some(ScalarEqualityKey::Number(if *value == 0.0 {
+                0
+            } else {
+                value.to_bits()
+            }))
+        }
+        Value::String(value) => Some(ScalarEqualityKey::String(value.to_string())),
+        _ => None,
+    }
+}
+
+async fn execute_unique_builtin(
+    values: &[Value],
+    instructions_executed: &mut u64,
+) -> Result<Value, RuntimeError> {
+    expect_arg_count("unique", values, 1)?;
+    let items = shaping_list("unique", &values[0], instructions_executed).await?;
+    let mut unique = Vec::with_capacity(items.len());
+    let mut scalar_seen = BTreeSet::new();
+    for item in items {
+        let unseen = match scalar_equality_key(&item) {
+            Some(key) => scalar_seen.insert(key),
+            // Composite values retain Value's typed equality. This fallback is
+            // intentionally quadratic for records/collections; scalar-heavy
+            // inputs use the O(n log n) ordered-set path above.
+            None => !unique.contains(&item),
+        };
+        if unseen {
+            unique.push(item);
+        }
+    }
+    Ok(Value::List(unique.into()))
+}
+
+async fn execute_reverse_builtin(
+    values: &[Value],
+    instructions_executed: &mut u64,
+) -> Result<Value, RuntimeError> {
+    expect_arg_count("reverse", values, 1)?;
+    let mut items = shaping_list("reverse", &values[0], instructions_executed).await?;
+    items.reverse();
+    Ok(Value::List(items.into()))
 }
 
 fn invalid_arity_error(name: &str, argc: usize) -> RuntimeError {
@@ -348,6 +643,20 @@ pub(crate) fn execute_contains_direct(
         }
         (Value::Null, _) => Ok(false),
         _ => Err(RuntimeError::ContainsUnsupported),
+    }
+}
+
+pub(crate) fn execute_membership_direct(
+    haystack: &Value,
+    needle: &Value,
+) -> Result<bool, RuntimeError> {
+    match (haystack, needle) {
+        (Value::String(haystack), Value::String(needle)) => Ok(haystack.contains(needle.as_str())),
+        (Value::Tuple(items), needle) => Ok(items.contains(needle)),
+        (Value::List(items), needle) => Ok(items.contains(needle)),
+        (Value::Record(record), Value::String(needle)) => Ok(record.get(needle.as_str()).is_some()),
+        (Value::Null, _) => Ok(false),
+        _ => Err(RuntimeError::InUnsupported),
     }
 }
 
@@ -724,6 +1033,7 @@ pub(crate) fn eval_binary_values(
         BinaryOp::LessEqual => compare_ordered(left, right, |a, b| a <= b, |a, b| a <= b),
         BinaryOp::Greater => compare_ordered(left, right, |a, b| a > b, |a, b| a > b),
         BinaryOp::GreaterEqual => compare_ordered(left, right, |a, b| a >= b, |a, b| a >= b),
+        BinaryOp::In => execute_membership_direct(&right, &left).map(Value::Bool),
         BinaryOp::And | BinaryOp::Or => unreachable!("logical ops are compiled with jumps"),
     }
 }
@@ -741,6 +1051,7 @@ pub(crate) fn eval_number_binary_values(left: f64, op: BinaryOp, right: f64) -> 
         BinaryOp::LessEqual => Value::Bool(left <= right),
         BinaryOp::Greater => Value::Bool(left > right),
         BinaryOp::GreaterEqual => Value::Bool(left >= right),
+        BinaryOp::In => unreachable!("membership is not numeric"),
         BinaryOp::And | BinaryOp::Or => unreachable!("logical ops are compiled with jumps"),
     }
 }
@@ -764,6 +1075,7 @@ pub(crate) fn eval_number_compare_values(left: f64, op: BinaryOp, right: f64) ->
         BinaryOp::LessEqual => left <= right,
         BinaryOp::Greater => left > right,
         BinaryOp::GreaterEqual => left >= right,
+        BinaryOp::In => unreachable!("membership is not a numeric comparison"),
         _ => unreachable!("non-comparison op in fused slot branch"),
     }
 }
@@ -815,6 +1127,7 @@ pub(crate) fn eval_compare_values(
             BinaryOp::GreaterEqual => {
                 compare_ordered(left, right, |a, b| a >= b, |a, b| a >= b).map(expect_bool_value)
             }
+            BinaryOp::In => unreachable!("membership is not a fused comparison"),
             _ => unreachable!("non-comparison op in fused branch"),
         },
     }

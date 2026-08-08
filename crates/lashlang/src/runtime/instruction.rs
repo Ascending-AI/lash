@@ -293,6 +293,16 @@ pub(crate) enum IntrinsicOp {
     CeilDiv,
     FloorDiv,
     Push,
+    Sort,
+    SortBy,
+    Sum,
+    Min,
+    Max,
+    Replace,
+    Lower,
+    Upper,
+    Unique,
+    Reverse,
     InvalidArity {
         name: usize,
         argc: usize,
@@ -402,6 +412,14 @@ impl IntrinsicOp {
             | IntrinsicOp::ToInt
             | IntrinsicOp::ToFloat
             | IntrinsicOp::JsonParse
+            | IntrinsicOp::Sort
+            | IntrinsicOp::Sum
+            | IntrinsicOp::Min
+            | IntrinsicOp::Max
+            | IntrinsicOp::Lower
+            | IntrinsicOp::Upper
+            | IntrinsicOp::Unique
+            | IntrinsicOp::Reverse
             | IntrinsicOp::ValidateCompiled(_)
             | IntrinsicOp::PushAssign(_) => 1,
             IntrinsicOp::Contains
@@ -413,8 +431,9 @@ impl IntrinsicOp {
             | IntrinsicOp::Validate
             | IntrinsicOp::CeilDiv
             | IntrinsicOp::FloorDiv
-            | IntrinsicOp::Push => 2,
-            IntrinsicOp::Slice => 3,
+            | IntrinsicOp::Push
+            | IntrinsicOp::SortBy => 2,
+            IntrinsicOp::Slice | IntrinsicOp::Replace => 3,
             IntrinsicOp::Find(argc)
             | IntrinsicOp::Format(argc)
             | IntrinsicOp::Range(argc)
@@ -454,6 +473,16 @@ impl IntrinsicOp {
             IntrinsicOp::CeilDiv => BuiltinProfileTag::CeilDiv,
             IntrinsicOp::FloorDiv => BuiltinProfileTag::FloorDiv,
             IntrinsicOp::Push | IntrinsicOp::PushAssign(_) => BuiltinProfileTag::Push,
+            IntrinsicOp::Sort => BuiltinProfileTag::Sort,
+            IntrinsicOp::SortBy => BuiltinProfileTag::SortBy,
+            IntrinsicOp::Sum => BuiltinProfileTag::Sum,
+            IntrinsicOp::Min => BuiltinProfileTag::Min,
+            IntrinsicOp::Max => BuiltinProfileTag::Max,
+            IntrinsicOp::Replace => BuiltinProfileTag::Replace,
+            IntrinsicOp::Lower => BuiltinProfileTag::Lower,
+            IntrinsicOp::Upper => BuiltinProfileTag::Upper,
+            IntrinsicOp::Unique => BuiltinProfileTag::Unique,
+            IntrinsicOp::Reverse => BuiltinProfileTag::Reverse,
             IntrinsicOp::InvalidArity { .. } | IntrinsicOp::Unknown { .. } => {
                 BuiltinProfileTag::Unknown
             }
@@ -527,6 +556,16 @@ pub(crate) enum BuiltinProfileTag {
     CeilDiv,
     FloorDiv,
     Push,
+    Sort,
+    SortBy,
+    Sum,
+    Min,
+    Max,
+    Replace,
+    Lower,
+    Upper,
+    Unique,
+    Reverse,
     Unknown,
 }
 
@@ -628,6 +667,16 @@ const BUILTIN_PROFILE_NAMES: [&str; BUILTIN_PROFILE_COUNT] = [
     "ceil_div",
     "floor_div",
     "push",
+    "sort",
+    "sort_by",
+    "sum",
+    "min",
+    "max",
+    "replace",
+    "lower",
+    "upper",
+    "unique",
+    "reverse",
     "unknown",
 ];
 

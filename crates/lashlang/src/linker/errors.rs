@@ -176,6 +176,13 @@ pub enum LinkError {
         right: String,
         span: Option<Span>,
     },
+    #[error("builtin `{builtin}` expects {expected}, got {actual}")]
+    IncompatibleBuiltinOperands {
+        builtin: String,
+        expected: &'static str,
+        actual: String,
+        span: Option<Span>,
+    },
     #[error("cannot iterate over {actual}; expected a list")]
     IncompatibleIterationTarget {
         actual: String,
@@ -228,6 +235,7 @@ impl LinkError {
             | Self::OpaqueHostDescriptorAccess { span, .. }
             | Self::UnknownObjectField { span, .. }
             | Self::IncompatibleBinaryOperands { span, .. }
+            | Self::IncompatibleBuiltinOperands { span, .. }
             | Self::IncompatibleIterationTarget { span, .. } => *span,
             Self::ModuleHash { .. } => None,
         }

@@ -32,6 +32,11 @@ pub use ast::{
     ProcessStartExpr, Program, ResourceRefExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
     fold_expr_children, format_type_expr, walk_expr,
 };
+
+/// Names of every builtin accepted by the linker and runtime, in registry order.
+pub fn builtin_names() -> impl ExactSizeIterator<Item = &'static str> + Clone {
+    builtins::names()
+}
 pub use compile::{
     ModuleCompileDiagnostic, ModuleCompileError, ModuleCompileOutput, ModuleCompileRequest,
     ModuleCompileStage, compile_module,
@@ -58,26 +63,26 @@ pub use runtime::{
     AbilityOp, AbilityResult, BudgetedJsonProjectionConfig, BudgetedJsonProjector, CompileStats,
     CompiledLinkedProgram, CompiledProcessCache, CompiledProcessCacheKey, CompiledProgram,
     CompiledProgramCache, CompiledProgramCacheStats, ContinuationError, ExecutableProgram,
-    ExecutionEnvironment, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
-    ExecutionScratch, FormatError, ImageValue, LASH_HOST_DESCRIPTOR_TYPE_KEY,
-    LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY,
-    LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY,
-    LinkedProgramCache, LinkedProgramCacheError, ListValue, ProcessEvent, ProcessEventKind,
-    ProcessSignal, ProcessStart, ProfileReport, ProfileStat, ProjectedBindingError,
-    ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest,
-    ProjectedReadResponse, ProjectedValue, Record, ResourceHandle, ResourceOperation,
-    ResourceOperationBatch, ResourceOperationBatchResult, ResourceOperationResult, RuntimeError,
-    RuntimeFailure, Sleep, SleepKind, Snapshot, State, Value, ValueProjectionContext,
-    ValueProjector, Vm, VmContinuation, VmIteratorContinuation, VmIteratorCursor,
-    VmProfileContinuation, VmRunOutcome, compile, compile_linked, compile_linked_process,
-    compile_module_artifact_process, compile_process, execute, from_json, prewarm,
-    unwrap_type_value,
+    ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
+    ExecutionMode, ExecutionOutcome, ExecutionScratch, FormatError, ImageValue,
+    LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY,
+    LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY,
+    LASH_TYPE_KEY, LinkedProgramCache, LinkedProgramCacheError, ListValue, ProcessEvent,
+    ProcessEventKind, ProcessSignal, ProcessStart, ProfileReport, ProfileStat,
+    ProjectedBindingError, ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor,
+    ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record, ResourceHandle,
+    ResourceOperation, ResourceOperationBatch, ResourceOperationBatchResult,
+    ResourceOperationResult, RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot, State,
+    Value, ValueProjectionContext, ValueProjector, Vm, VmContinuation, VmIteratorContinuation,
+    VmIteratorCursor, VmProfileContinuation, VmRunOutcome, compile, compile_linked,
+    compile_linked_process, compile_module_artifact_process, compile_process, execute, from_json,
+    prewarm, unwrap_type_value,
 };
 
 /// Version of the compiled bytecode contract used for durable continuations.
 /// Increment whenever identical source/artifact identities may compile to a
 /// continuation-incompatible instruction stream.
-pub const BYTECODE_FORMAT_VERSION: u32 = 1;
+pub const BYTECODE_FORMAT_VERSION: u32 = 2;
 pub use source::{
     CanonicalSourceError, canonical_assign_target_source, canonical_expression_source,
     canonical_process_source, canonical_process_source_with_requirements, canonical_program_source,
@@ -166,6 +171,11 @@ fn format_message_with_hint(message: &str, hint: Option<&str>) -> String {
 }
 
 fn link_hint(error: &LinkError) -> Option<String> {
+    if let LinkError::UnknownName { name, .. } = error
+        && matches!(name.as_str(), "str" | "int" | "float" | "bool" | "any")
+    {
+        return Some("types belong in `Type { ... }` literals".to_string());
+    }
     let (prefix, suggestions) = match error {
         LinkError::UnknownResourceOperation { suggestions, .. } => {
             ("available operations: ", suggestions)
@@ -325,6 +335,20 @@ mod tests {
             Some(
                 "construct a host-provided trigger source value and call the trigger registry register operation"
             )
+        );
+    }
+
+    #[test]
+    fn scalar_type_keyword_in_value_position_has_type_literal_hint() {
+        let source = "finish { value: str }";
+        let program = crate::parse(source).expect("source should parse");
+        let error = crate::LinkedModule::link(program, crate::LashlangHostEnvironment::default())
+            .expect_err("scalar type keyword is not a value");
+        let diagnostic = format_link_diagnostic(source, &error);
+        assert!(diagnostic.contains("unknown name `str`"), "{diagnostic}");
+        assert!(
+            diagnostic.contains("hint: types belong in `Type { ... }` literals"),
+            "{diagnostic}"
         );
     }
 

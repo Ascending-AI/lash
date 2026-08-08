@@ -44,6 +44,134 @@ parallel {
 
 ---
 
+link_membership_requires_container
+operator `in` does not accept int and int
+--> line 1, column 8
+finish 1 in 2
+       ^~~~~~
+
+---
+
+link_membership_requires_list_item_type
+operator `in` does not accept str and list[int]
+--> line 1, column 8
+finish "one" in [1, 2]
+       ^~~~~~~~~~~~~~~
+
+---
+
+link_record_membership_requires_string_key
+operator `in` does not accept int and { one: bool }
+--> line 1, column 8
+finish 1 in { one: true }
+       ^~~~~~~~~~~~~~~~~~
+
+---
+
+runtime_sort_mixed_types
+`sort` item 1 (string) is not comparable with item 0 (number)
+--> line 1, column 1
+finish sort([1, "two"])
+^~~~~~~~~~~~~~~~~~~~~~~
+
+---
+
+runtime_sort_by_missing_path
+`sort_by` item 1 is missing field path `profile.score`
+--> line 1, column 1
+finish sort_by([{ profile: { score: 1 } }, {}], "profile.score")
+^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+---
+
+runtime_sort_by_not_a_record
+`sort_by` item 1 must be a record, got number
+--> line 1, column 1
+finish sort_by([{ score: 1 }, 2], "score")
+^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+---
+
+runtime_sort_by_empty_path
+`sort_by` field path must not be empty
+--> line 1, column 1
+finish sort_by([{ score: 1 }], "")
+^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+---
+
+runtime_sum_non_number
+`sum` item 1 must be a number, got string
+--> line 1, column 1
+finish sum([1, "two"])
+^~~~~~~~~~~~~~~~~~~~~~
+
+---
+
+runtime_min_incomparable
+`min` item 0 (list) is not comparable with item 0 (list)
+--> line 1, column 1
+finish min([[1], [2]])
+^~~~~~~~~~~~~~~~~~~~~~
+
+---
+
+runtime_min_empty_list
+`min` requires a non-empty list
+--> line 1, column 1
+finish min([])
+^~~~~~~~~~~~~~
+
+---
+
+runtime_max_requires_list
+`max` requires a list or tuple, got record
+--> line 1, column 1
+finish max({ value: 1 })
+^~~~~~~~~~~~~~~~~~~~~~~~
+
+---
+
+runtime_replace_requires_text
+`replace` text must be text, got number
+--> line 1, column 1
+finish replace(1, "1", "one")
+^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+---
+
+runtime_lower_requires_text
+`lower` value must be text, got bool
+--> line 1, column 1
+finish lower(false)
+^~~~~~~~~~~~~~~~~~~
+
+---
+
+runtime_upper_requires_text
+`upper` value must be text, got number
+--> line 1, column 1
+finish upper(1)
+^~~~~~~~~~~~~~~
+
+---
+
+runtime_unique_requires_list
+`unique` requires a list or tuple, got number
+--> line 1, column 1
+finish unique(1)
+^~~~~~~~~~~~~~~~
+
+---
+
+runtime_reverse_requires_list
+`reverse` requires a list or tuple, got number
+--> line 1, column 1
+finish reverse(1)
+^~~~~~~~~~~~~~~~~
+
+---
+
 runtime_bad_wrapper_unwrap
 `?` unwrapped failed tool result: boom
 --> line 1, column 1

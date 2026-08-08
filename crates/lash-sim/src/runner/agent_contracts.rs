@@ -634,7 +634,10 @@ async fn facade_final_value_execution_inner(
     let clock = crate::clock::SimClock::new();
     let events = Arc::new(RuntimeProofRecordingEvents::default());
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::default(),
+        lash_protocol_rlm::RlmProtocolPluginConfig::new(
+            lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+            lash_protocol_rlm::ExecutionBound::secs(30),
+        ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let mut builder = lash::LashCore::rlm_builder(factory)
@@ -956,7 +959,10 @@ fn agent_process_contract_core_with_options_and_effect_host(
     let clock = crate::clock::SimClock::new();
     let graph_store = Arc::new(lash::tracing::TraceLashlangGraphStore::default());
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::default(),
+        lash_protocol_rlm::RlmProtocolPluginConfig::new(
+            lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+            lash_protocol_rlm::ExecutionBound::secs(30),
+        ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     )
     .with_lashlang_execution_sink(Arc::clone(&graph_store) as Arc<dyn lash::tracing::TraceSink>);

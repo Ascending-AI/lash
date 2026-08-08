@@ -882,6 +882,7 @@ fn binary_op_source(op: BinaryOp) -> &'static str {
         BinaryOp::LessEqual => "<=",
         BinaryOp::Greater => ">",
         BinaryOp::GreaterEqual => ">=",
+        BinaryOp::In => "in",
         BinaryOp::And => "and",
         BinaryOp::Or => "or",
     }

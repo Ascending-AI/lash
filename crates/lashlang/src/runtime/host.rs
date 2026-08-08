@@ -4,6 +4,7 @@ use super::{ExecutionScratch, ProfileReport, ProjectedBindings, Record, RuntimeF
 use crate::LashlangExecutionObservation;
 use std::future::Future;
 use std::sync::Mutex;
+use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
@@ -122,6 +123,133 @@ pub enum ExecutionMode {
     Process,
 }
 
+/// An explicit finite execution limit or an explicit opt-out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExecutionBound<T> {
+    Bounded(T),
+    Unbounded,
+}
+
+impl ExecutionBound<std::num::NonZeroU64> {
+    /// Construct a finite instruction budget.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `instructions` is zero.
+    pub const fn instructions(instructions: u64) -> Self {
+        match std::num::NonZeroU64::new(instructions) {
+            Some(instructions) => Self::Bounded(instructions),
+            None => panic!("instruction budget must be non-zero"),
+        }
+    }
+}
+
+impl ExecutionBound<Duration> {
+    /// Construct a finite active-VM deadline in milliseconds.
+    pub const fn millis(milliseconds: u64) -> Self {
+        Self::Bounded(Duration::from_millis(milliseconds))
+    }
+
+    /// Construct a finite active-VM deadline in seconds.
+    pub const fn secs(seconds: u64) -> Self {
+        Self::Bounded(Duration::from_secs(seconds))
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ExecutionBoundWire<T> {
+    Bounded(T),
+    Unbounded,
+}
+
+impl serde::Serialize for ExecutionBound<std::num::NonZeroU64> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Bounded(value) => ExecutionBoundWire::Bounded(*value).serialize(serializer),
+            Self::Unbounded => {
+                ExecutionBoundWire::<std::num::NonZeroU64>::Unbounded.serialize(serializer)
+            }
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ExecutionBound<std::num::NonZeroU64> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(match ExecutionBoundWire::deserialize(deserializer)? {
+            ExecutionBoundWire::Bounded(value) => Self::Bounded(value),
+            ExecutionBoundWire::Unbounded => Self::Unbounded,
+        })
+    }
+}
+
+impl serde::Serialize for ExecutionBound<Duration> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Bounded(value) => {
+                let milliseconds =
+                    u64::try_from(value.as_millis()).map_err(serde::ser::Error::custom)?;
+                ExecutionBoundWire::Bounded(milliseconds).serialize(serializer)
+            }
+            Self::Unbounded => ExecutionBoundWire::<u64>::Unbounded.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ExecutionBound<Duration> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(
+            match ExecutionBoundWire::<u64>::deserialize(deserializer)? {
+                ExecutionBoundWire::Bounded(milliseconds) => Self::millis(milliseconds),
+                ExecutionBoundWire::Unbounded => Self::Unbounded,
+            },
+        )
+    }
+}
+
+/// Independent limits for active Lashlang VM execution.
+///
+/// Foreground executions receive fresh meters for each block. Durable process
+/// executions persist both meters in every continuation, so the limits are
+/// cumulative across segment handovers for the process's entire life. The
+/// deadline counts active VM time only: time parked on awaited host effects is
+/// excluded. Enforcement occurs after intrinsic dispatch, before and after
+/// effects, at cooperative yields, and at terminal VM exits, so instruction
+/// and time limits can overshoot only by one bounded dispatch/check interval.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExecutionBounds {
+    pub instruction_budget: ExecutionBound<std::num::NonZeroU64>,
+    pub deadline: ExecutionBound<Duration>,
+}
+
+impl ExecutionBounds {
+    pub const fn new(
+        instruction_budget: ExecutionBound<std::num::NonZeroU64>,
+        deadline: ExecutionBound<Duration>,
+    ) -> Self {
+        Self {
+            instruction_budget,
+            deadline,
+        }
+    }
+
+    pub const fn unbounded() -> Self {
+        Self::new(ExecutionBound::Unbounded, ExecutionBound::Unbounded)
+    }
+}
+
 pub trait ExecutionHost: Sync {
     fn perform(
         &self,
@@ -148,6 +276,10 @@ pub trait ExecutionHost: Sync {
         false
     }
 
+    fn execution_bounds(&self) -> ExecutionBounds {
+        ExecutionBounds::unbounded()
+    }
+
     fn take_scratch(&self) -> Option<ExecutionScratch> {
         None
     }
@@ -168,6 +300,7 @@ pub struct ExecutionEnvironment<'host, H: ExecutionHost> {
     scratch: Mutex<Option<ExecutionScratch>>,
     trace_runtime_errors: bool,
     profile_execution: bool,
+    execution_bounds: ExecutionBounds,
     runtime_failure: Mutex<Option<RuntimeFailure>>,
     profile: Mutex<Option<ProfileReport>>,
 }
@@ -181,6 +314,7 @@ impl<'host, H: ExecutionHost> ExecutionEnvironment<'host, H> {
             scratch: Mutex::new(host.take_scratch()),
             trace_runtime_errors: host.trace_runtime_errors(),
             profile_execution: host.profile_execution(),
+            execution_bounds: host.execution_bounds(),
             runtime_failure: Mutex::new(None),
             profile: Mutex::new(None),
         }
@@ -216,6 +350,11 @@ impl<'host, H: ExecutionHost> ExecutionEnvironment<'host, H> {
 
     pub fn profiled(mut self) -> Self {
         self.profile_execution = true;
+        self
+    }
+
+    pub fn with_execution_bounds(mut self, execution_bounds: ExecutionBounds) -> Self {
+        self.execution_bounds = execution_bounds;
         self
     }
 
@@ -255,6 +394,10 @@ impl<H: ExecutionHost> ExecutionHost for ExecutionEnvironment<'_, H> {
 
     fn profile_execution(&self) -> bool {
         self.profile_execution
+    }
+
+    fn execution_bounds(&self) -> ExecutionBounds {
+        self.execution_bounds
     }
 
     fn take_scratch(&self) -> Option<ExecutionScratch> {

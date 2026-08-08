@@ -2009,7 +2009,10 @@ fn inmem_artifact_store() -> Arc<dyn lash_lashlang_runtime::LashlangArtifactStor
 #[cfg(feature = "rlm")]
 fn rlm_factory() -> lash_protocol_rlm::RlmProtocolPluginFactory {
     lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::default(),
+        lash_protocol_rlm::RlmProtocolPluginConfig::new(
+            lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+            lash_protocol_rlm::ExecutionBound::secs(30),
+        ),
         inmem_artifact_store(),
     )
 }
