@@ -410,7 +410,13 @@ mod tests {
 
     #[test]
     fn factory_captures_default_redaction_roots_once() {
-        let factory = RlmProtocolPluginFactory::default();
+        let factory = RlmProtocolPluginFactory::new(
+            RlmProtocolPluginConfig::new(
+                lashlang::ExecutionBound::Unbounded,
+                lashlang::ExecutionBound::Unbounded,
+            ),
+            lashlang::global_in_memory_lashlang_artifact_store(),
+        );
         let roots = factory
             .config
             .redaction_roots
@@ -428,7 +434,11 @@ mod tests {
     #[test]
     fn explicit_empty_redaction_roots_disable_factory_defaults() {
         let factory = RlmProtocolPluginFactory::new(
-            RlmProtocolPluginConfig::default().with_redaction_roots(Vec::new()),
+            RlmProtocolPluginConfig::new(
+                lashlang::ExecutionBound::Unbounded,
+                lashlang::ExecutionBound::Unbounded,
+            )
+            .with_redaction_roots(Vec::new()),
             lashlang::global_in_memory_lashlang_artifact_store(),
         );
 
