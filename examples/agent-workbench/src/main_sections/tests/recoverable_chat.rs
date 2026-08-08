@@ -968,11 +968,17 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
     registry.reconcile_settled(
         session_id,
         &BTreeSet::new(),
+        &BTreeSet::from(["reconciled-turn".to_string()]),
         &BTreeSet::new(),
     );
     let reconciled = registry.snapshot(session_id);
     assert_eq!(reconciled.cursor, 2);
-    assert!(reconciled.events.is_empty());
+    assert_eq!(reconciled.events.len(), 1);
+    assert!(matches!(
+        &reconciled.events[0].item,
+        StreamItem::Message { message }
+            if message.id == workbench_turn_user_message_id("reconciled-turn")
+    ));
     assert!(
         !registry.publish_identified(
             session_id,
@@ -1000,7 +1006,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
         },
     );
     assert_eq!(
-        registry.snapshot(session_id).events[0].sequence,
+        registry.snapshot(session_id).events[1].sequence,
         3,
         "compaction must not reuse a cursor already observed by a client"
     );
@@ -1200,12 +1206,12 @@ async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_rec
     );
     assert_eq!(
         transcript_user_rows(&running),
-        vec![ui_row],
+        vec![ui_row.clone()],
         "the transcript projection suppresses the same committed copy"
     );
 
-    // Backfill: once the turn settles the UI-owned row is reconciled away, and
-    // the committed copy is what a reload renders — still exactly one row.
+    // Settlement leaves the session-scoped UI-owned row in place. The runtime
+    // copy remains typed provenance, not rendering authority.
     crate::restate::settle_workbench_turn(&state, &session_id, turn_id)
         .await
         .expect("settle the turn");
@@ -1214,13 +1220,292 @@ async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_rec
         .expect("materialize the settled snapshot");
     assert_eq!(
         user_rows(&settled),
-        vec![committed_row.clone()],
-        "with no UI-owned row left, the committed copy backfills the send"
+        vec![ui_row.clone()],
+        "the settled projection keeps the UI-owned send"
     );
     assert_eq!(
         transcript_user_rows(&settled),
+        vec![ui_row],
+        "the settled transcript keeps the UI-owned send"
+    );
+    assert_ne!(
+        user_rows(&settled),
         vec![committed_row],
-        "the transcript backfills from the same committed copy"
+        "the model-facing graph must not become the user-row authority"
+    );
+}
+
+#[tokio::test]
+async fn submit_failure_retires_a_user_row_for_a_turn_that_never_commits() {
+    let data_dir = tempfile::tempdir().expect("submit failure projection tempdir");
+    let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind failing Restate ingress");
+    let addr = listener.local_addr().expect("failing Restate ingress addr");
+    let app = Router::new().route(
+        "/{*path}",
+        post(|| async {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({ "error": "submission refused" })),
+            )
+        }),
+    );
+    tokio::spawn(async move {
+        if let Err(err) = axum::serve(listener, app).await {
+            eprintln!("failing Restate ingress stopped: {err}");
+        }
+    });
+    state.restate_ingress_url = format!("http://{addr}");
+    let never_committed = "optimistic row whose turn never commits";
+
+    let _ = send_turn(
+        State(state.clone()),
+        Query(SessionQuery::default()),
+        Json(TurnRequest {
+            text: never_committed.to_string(),
+            model: Some("test-model".to_string()),
+            model_variant: None,
+            attachment_id: None,
+        }),
+    )
+    .await
+    .expect_err("failing Restate submission must reject the send");
+
+    let Json(settled) = app_state(State(state), Query(SessionQuery::default()))
+        .await
+        .expect("project the refused send");
+    assert!(settled.active_turns.is_empty());
+    assert!(settled.messages.iter().all(|message| {
+        message.text != never_committed && !message.id.starts_with("workbench-user:")
+    }));
+    assert!(settled.transcript.iter().all(|row| match row {
+        TranscriptRow::Message { message } => {
+            message.text != never_committed && !message.id.starts_with("workbench-user:")
+        }
+        TranscriptRow::Reasoning { .. } | TranscriptRow::CodeBlock { .. } => true,
+    }));
+    assert!(settled.product_events.events.iter().all(|event| match &event.item {
+        StreamItem::Message { message } => {
+            message.text != never_committed && !message.id.starts_with("workbench-user:")
+        }
+        StreamItem::TurnInput { .. } | StreamItem::Done { .. } => true,
+    }));
+}
+
+#[tokio::test]
+async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survives_reload() {
+    let data_dir = tempfile::tempdir().expect("continue_as projection tempdir");
+    let product_events_path = data_dir.path().join("product-events.json");
+    let response_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let response_index_for_completion = Arc::clone(&response_index);
+    let provider = lash::testing::TestProvider::builder()
+        .kind("continue-as-workbench-projection")
+        .complete(move |_| {
+            let call = response_index_for_completion
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move {
+                Ok(match call {
+                    0 => text_response(
+                        "<lashlang>\nawait control.continue_as({ task: \"finish in the follow frame\", seed: { boundary_marker: \"protocol-only-seed\" } })?\n</lashlang>",
+                    ),
+                    1 => text_response("<lashlang>\nfinish \"follow frame answer\"\n</lashlang>"),
+                    other => panic!("unexpected continue_as provider call {other}"),
+                })
+            }
+        })
+        .build()
+        .into_handle();
+    let mut state =
+        recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    state.event_tx = SessionEventRegistry::persistent(product_events_path.clone(), 16)
+        .expect("open persistent product event registry");
+    let session_id = state.current_session_id();
+
+    let first_turn_id = "workbench-turn-before-continue-as";
+    let first_prompt = "first submitted row";
+    state.push_message_with_id_for_session(
+        &session_id,
+        workbench_turn_user_message_id(first_turn_id),
+        "user",
+        first_prompt,
+    );
+    let session = state
+        .core
+        .session(session_id.clone())
+        .open()
+        .await
+        .expect("open pre-switch session");
+    session
+        .admin()
+        .state()
+        .append_messages(vec![
+            lash::plugins::PluginMessage::text(
+                lash::messages::MessageRole::User,
+                first_prompt,
+            )
+            .with_id("runtime-first-user")
+            .with_origin(lash::messages::MessageOrigin::TurnInput {
+                turn_id: first_turn_id.to_string(),
+                input_id: Some("first-input".to_string()),
+            }),
+            lash::plugins::PluginMessage::text(
+                lash::messages::MessageRole::Assistant,
+                "old frame answer",
+            )
+            .with_id(workbench_turn_assistant_message_id(first_turn_id)),
+        ])
+        .await
+        .expect("seed the durable pre-switch conversation");
+
+    let switch_turn_id = "workbench-turn-continue-as";
+    let switch_prompt = "switch frames now";
+    state.track_turn_prompt(
+        &session_id,
+        switch_turn_id,
+        switch_prompt.to_string(),
+        None,
+    );
+    state.push_message_with_id_for_session(
+        &session_id,
+        workbench_turn_user_message_id(switch_turn_id),
+        "user",
+        switch_prompt,
+    );
+    let switch_turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
+    let switch_output = session
+        .turn(lash::TurnInput::text(switch_prompt))
+        .turn_id(switch_turn_id)
+        .require_finish()
+        .expect("require follow-frame finish")
+        .stream_to(&ChannelTurnEvents {
+            turn_state: Arc::clone(&switch_turn_state),
+        })
+        .await
+        .expect("run continue_as turn through its follow frame");
+    assert_eq!(
+        switch_output.final_value(),
+        Some(&json!("follow frame answer"))
+    );
+    crate::restate::record_turn_output(
+        &state,
+        &session,
+        switch_turn_id,
+        switch_output,
+        switch_turn_state,
+        "test.continue_as.follow_frame.completed",
+    )
+    .await
+    .expect("record follow-frame turn");
+    crate::restate::settle_workbench_turn(&state, &session_id, switch_turn_id)
+        .await
+        .expect("settle continue_as turn");
+
+    let durable_rows = session
+        .read_view()
+        .message_tree()
+        .into_iter()
+        .flat_map(|root| {
+            let mut rows = vec![(root.active, root.message)];
+            let mut pending = root.children;
+            while let Some(node) = pending.pop() {
+                rows.push((node.active, node.message));
+                pending.extend(node.children);
+            }
+            rows
+        })
+        .map(|(active, message)| (active, lash::message_role(&message), lash::message_text(&message)))
+        .collect::<Vec<_>>();
+    assert!(
+        durable_rows
+            .iter()
+            .any(|(_, role, text)| *role == "user" && text == first_prompt),
+        "the durable graph must retain the pre-switch user input"
+    );
+    assert!(
+        durable_rows
+            .iter()
+            .any(|(_, role, text)| *role == "assistant" && text == "old frame answer"),
+        "the old assistant must remain in the durable graph even though the current-frame projection collapses it"
+    );
+    session.close().await.expect("close switched session");
+
+    let Json(boundary) = Box::pin(app_state(
+        State(state.clone()),
+        Query(SessionQuery::default()),
+    ))
+    .await
+    .expect("project continue_as boundary state");
+    let expected_rows = vec![
+        (
+            workbench_turn_user_message_id(first_turn_id),
+            "user".to_string(),
+            first_prompt.to_string(),
+        ),
+        (
+            workbench_turn_user_message_id(switch_turn_id),
+            "user".to_string(),
+            switch_prompt.to_string(),
+        ),
+        (
+            workbench_turn_assistant_message_id(switch_turn_id),
+            "assistant".to_string(),
+            "follow frame answer".to_string(),
+        ),
+    ];
+    let projected_rows = boundary
+        .state
+        .messages
+        .iter()
+        .map(|message| (message.id.clone(), message.role.clone(), message.text.clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(projected_rows, expected_rows);
+    assert!(boundary.state.messages.iter().all(|message| {
+        message.text != "old frame answer" && message.text != "protocol-only-seed"
+    }));
+    assert_eq!(
+        boundary
+            .transcript
+            .iter()
+            .filter_map(|row| match row {
+                TranscriptRow::Message { message } => {
+                    Some((message.id.clone(), message.role.clone(), message.text.clone()))
+                }
+                TranscriptRow::Reasoning { .. } | TranscriptRow::CodeBlock { .. } => None,
+            })
+            .collect::<Vec<_>>(),
+        expected_rows,
+        "the browser transcript projection must match /api/state at the boundary"
+    );
+
+    drop(state);
+    let reload_provider = lash::testing::TestProvider::builder()
+        .kind("continue-as-workbench-reload")
+        .complete(|_| async { panic!("projection reload must not call the provider") })
+        .build()
+        .into_handle();
+    let mut reloaded_state =
+        recoverable_chat_test_state_with_provider(data_dir.path(), 16, reload_provider).await;
+    reloaded_state.event_tx = SessionEventRegistry::persistent(product_events_path, 16)
+        .expect("reload persistent product event registry");
+    let Json(reloaded) = Box::pin(app_state(
+        State(reloaded_state),
+        Query(SessionQuery {
+            session_id: Some(session_id),
+        }),
+    ))
+    .await
+    .expect("rebuild continue_as projection after reload");
+    assert_eq!(
+        reloaded
+            .state
+            .messages
+            .iter()
+            .map(|message| (message.id.clone(), message.role.clone(), message.text.clone()))
+            .collect::<Vec<_>>(),
+        expected_rows,
+        "reload must reproduce the same session-scoped projection"
     );
 }
 
@@ -1325,10 +1610,10 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
     assert_eq!(
         user_row_attachments(&settled),
         vec![(
-            "m_ingress_workbench-input-fig994".to_string(),
+            workbench_turn_user_message_id(turn_id),
             vec![expected_attachment],
         )],
-        "the committed attachment reference backfills after the UI row retires"
+        "the UI-owned attachment row remains session-scoped after settlement"
     );
 }
 
@@ -1688,21 +1973,34 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
         )),
         "settled state must reconstruct code execution and output from durable history"
     );
+    assert_eq!(
+        settled
+            .product_events
+            .events
+            .iter()
+            .filter_map(|event| match &event.item {
+                StreamItem::Message { message } => {
+                    Some((message.id.clone(), message.role.clone(), message.text.clone()))
+                }
+                StreamItem::TurnInput { .. } | StreamItem::Done { .. } => None,
+            })
+            .collect::<Vec<_>>(),
+        vec![(
+            workbench_turn_user_message_id(&turn_id),
+            "user".to_string(),
+            turn_text.to_string(),
+        )],
+        "settlement must retain only the session-scoped UI-owned user row"
+    );
     assert!(
-        settled.product_events.events.iter().all(|event| {
-            !matches!(
-                &event.item,
-                StreamItem::Message { message }
-                    if settled.messages.iter().any(|committed| committed.id == message.id)
-            ) && !matches!(
-                &event.item,
-                StreamItem::Done {
-                    turn_id: Some(done_turn_id),
-                    ..
-                } if done_turn_id == &turn_id
-            )
-        }),
-        "settled message and Done rows must leave the product-event lane"
+        settled.product_events.events.iter().all(|event| !matches!(
+            &event.item,
+            StreamItem::Done {
+                turn_id: Some(done_turn_id),
+                ..
+            } if done_turn_id == &turn_id
+        )),
+        "settled Done rows must leave the product-event lane"
     );
 }
 

@@ -7,13 +7,13 @@
 /// optimistic rows still live in the product-event log, plus the prompt rows the
 /// workbench replays for a running turn whose product row a restart lost.
 ///
-/// Returns the turns those rows speak for and the replayed prompt rows, which
-/// the caller appends after the product rows so ordering is unchanged.
-fn ui_owned_user_rows(
+/// Returns replayed prompt rows, which the caller appends after the product
+/// rows so ordering is unchanged.
+fn replayed_active_user_rows(
     state: &AppState,
     active_turns: &[lash::TurnAddress],
     product_messages: &[ChatMessage],
-) -> (BTreeSet<String>, Vec<ChatMessage>) {
+) -> Vec<ChatMessage> {
     let mut turn_ids = product_messages
         .iter()
         .filter_map(|message| workbench_turn_id_from_user_message_id(&message.id))
@@ -43,26 +43,25 @@ fn ui_owned_user_rows(
                 .collect(),
         });
     }
-    (turn_ids, replayed_prompts)
+    replayed_prompts
 }
 
-/// The committed messages this snapshot must not render because a UI-owned row
-/// already speaks for them.
+/// The committed messages this snapshot replaces with UI-owned user rows.
 ///
 /// The runtime stamps every committed turn-input message with
 /// `MessageOrigin::TurnInput`, so the workbench recognizes its own send in the
 /// durable transcript without pinning or parsing a runtime message id
-/// (FIG-972). Only the turn's *opening* input is suppressed — one per turn, in
+/// (FIG-972). Only the turn's *opening* input is replaced — one per turn, in
 /// commit order — because an input injected mid-turn is a further turn-input
 /// message on the same turn that no UI-owned row stands in for. When no UI row
 /// survives (the product log was truncated, or the turn came from a trigger or
-/// mail rather than the chat box) nothing is suppressed and the committed copy
+/// mail rather than the chat box) nothing is replaced and the committed copy
 /// is what the transcript renders.
-fn suppressed_turn_input_message_ids(
+fn ui_owned_turn_input_replacements(
     read_view: &lash::persistence::SessionReadView,
-    ui_user_turn_ids: &BTreeSet<String>,
-) -> BTreeSet<String> {
-    let mut suppressed = BTreeSet::new();
+    ui_user_rows: &BTreeMap<String, ChatMessage>,
+) -> BTreeMap<String, ChatMessage> {
+    let mut replacements = BTreeMap::new();
     let mut turns_already_covered = BTreeSet::new();
     for message in read_view.messages() {
         let Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) =
@@ -70,14 +69,54 @@ fn suppressed_turn_input_message_ids(
         else {
             continue;
         };
-        if !ui_user_turn_ids.contains(turn_id) {
+        let Some(ui_row) = ui_user_rows.get(turn_id) else {
             continue;
-        }
+        };
         if turns_already_covered.insert(turn_id.clone()) {
-            suppressed.insert(message.id.clone());
+            replacements.insert(message.id.clone(), ui_row.clone());
         }
     }
-    suppressed
+    replacements
+}
+
+/// The current frame's opening task is protocol state, not another chat send.
+///
+/// A `continue_as` frame is identified by its typed `AgentFrameReason`; its
+/// first typed `MessageOrigin::TurnInput` is the task that drives the follow
+/// frame. Hiding it does not depend on either the runtime message id or a
+/// textual comparison with the tool arguments. Later turn inputs remain chat
+/// rows, including inputs injected while the follow turn is running.
+fn continue_as_protocol_state_message_ids(
+    read_view: &lash::persistence::SessionReadView,
+) -> BTreeSet<String> {
+    let graph = read_view.session_graph();
+    // Session nodes are sequence-ordered, and frame-open nodes on the active
+    // path therefore end with the current frame. Keep this hand-walk local
+    // until lash-core exposes a current-frame facade accessor.
+    let current_frame_is_continue_as = graph
+        .nodes
+        .iter()
+        .filter(|node| graph.active_path_contains(&node.node_id))
+        .filter_map(|node| node.frame_open().map(|(reason, _, _)| reason))
+        .next_back()
+        .is_some_and(|reason| reason.as_str() == "continue_as");
+    if !current_frame_is_continue_as {
+        return BTreeSet::new();
+    }
+    // This first-TurnInput heuristic rests on the follow task always committing
+    // first: AgentFrameTask materializes a non-empty input, and `task` is
+    // required by the continue_as schema.
+    read_view
+        .messages()
+        .iter()
+        .find(|message| {
+            matches!(
+                message.origin,
+                Some(lash::messages::MessageOrigin::TurnInput { .. })
+            )
+        })
+        .map(|message| BTreeSet::from([message.id.clone()]))
+        .unwrap_or_default()
 }
 
 fn chat_message_from_committed(message: &lash::messages::Message) -> ChatMessage {
@@ -100,21 +139,26 @@ fn chat_message_from_committed(message: &lash::messages::Message) -> ChatMessage
 
 fn transcript_rows_from_committed(
     read_view: &lash::persistence::SessionReadView,
-    suppressed_message_ids: &BTreeSet<String>,
+    user_replacements: &BTreeMap<String, ChatMessage>,
+    protocol_state_message_ids: &BTreeSet<String>,
 ) -> Vec<TranscriptRow> {
     read_view
         .chronological_projection()
         .into_entries()
         .into_iter()
         .filter_map(|entry| match entry.payload {
-            lash::persistence::ChronologicalPayload::Message(message)
-                if !suppressed_message_ids.contains(&message.id) =>
-            {
+            lash::persistence::ChronologicalPayload::Message(message) => {
+                if protocol_state_message_ids.contains(&message.id) {
+                    return None;
+                }
+                let message = user_replacements
+                    .get(&message.id)
+                    .cloned()
+                    .unwrap_or_else(|| chat_message_from_committed(&message));
                 Some(TranscriptRow::Message {
-                    message: chat_message_from_committed(&message),
+                    message,
                 })
             }
-            lash::persistence::ChronologicalPayload::Message(_) => None,
             lash::persistence::ChronologicalPayload::ProtocolEvent(event) => {
                 match lash_protocol_rlm::decode_rlm_protocol_event(&event) {
                     Some(lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(content))
@@ -151,4 +195,90 @@ fn transcript_rows_from_committed(
             }
         })
         .collect()
+}
+
+struct ChatProjection {
+    messages: Vec<ChatMessage>,
+    transcript: Vec<TranscriptRow>,
+}
+
+/// Builds the two public chat projections from one set of replacement,
+/// historical-row, protocol-state, and stable-id deduplication rules.
+fn project_chat(
+    state: &AppState,
+    read_view: &lash::persistence::SessionReadView,
+    active_turns: &[lash::TurnAddress],
+    committed_input_turn_ids: &BTreeSet<String>,
+    current_frame_input_turn_ids: &BTreeSet<String>,
+    product_messages: Vec<ChatMessage>,
+) -> ChatProjection {
+    let replayed_active_rows = replayed_active_user_rows(state, active_turns, &product_messages);
+    let ui_user_rows = product_messages
+        .iter()
+        .chain(replayed_active_rows.iter())
+        .filter_map(|message| {
+            workbench_turn_id_from_user_message_id(&message.id)
+                .map(|turn_id| (turn_id.to_string(), message.clone()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let user_replacements = ui_owned_turn_input_replacements(read_view, &ui_user_rows);
+    let protocol_state_message_ids = continue_as_protocol_state_message_ids(read_view);
+    let replaced_committed_ids = user_replacements.keys().cloned().collect::<BTreeSet<_>>();
+    let historical_ui_rows = product_messages
+        .iter()
+        .filter(|message| {
+            workbench_turn_id_from_user_message_id(&message.id).is_some_and(|turn_id| {
+                committed_input_turn_ids.contains(turn_id)
+                    && !current_frame_input_turn_ids.contains(turn_id)
+            })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let mut messages = historical_ui_rows.clone();
+    messages.extend(read_view.messages().iter().filter_map(|message| {
+        if protocol_state_message_ids.contains(&message.id) {
+            return None;
+        }
+        Some(
+            user_replacements
+                .get(&message.id)
+                .cloned()
+                .unwrap_or_else(|| chat_message_from_committed(message)),
+        )
+    }));
+    let mut transcript = historical_ui_rows
+        .into_iter()
+        .map(|message| TranscriptRow::Message { message })
+        .collect::<Vec<_>>();
+    transcript.extend(transcript_rows_from_committed(
+        read_view,
+        &user_replacements,
+        &protocol_state_message_ids,
+    ));
+
+    let mut message_ids = messages
+        .iter()
+        .map(|message| message.id.clone())
+        .collect::<BTreeSet<_>>();
+    for message in product_messages.into_iter().chain(replayed_active_rows) {
+        // A replaced committed message stays replaced however it reached this
+        // list: the workbench mirrors committed ingress messages into the
+        // product log, and that mirror is the same runtime copy for which the
+        // UI-owned row already speaks.
+        if replaced_committed_ids.contains(&message.id) {
+            continue;
+        }
+        if message_ids.insert(message.id.clone()) {
+            transcript.push(TranscriptRow::Message {
+                message: message.clone(),
+            });
+            messages.push(message);
+        }
+    }
+
+    ChatProjection {
+        messages,
+        transcript,
+    }
 }
