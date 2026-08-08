@@ -12,7 +12,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::ast::UnaryOp;
+use crate::ast::{BinaryOp, UnaryOp};
 use crate::lexer::Span;
 use crate::{
     LashlangExecutionChild, LashlangExecutionObservation, LashlangExecutionSite,
@@ -506,7 +506,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let right = self.pop_stack()?;
                 let left = self.pop_stack()?;
                 let value = match (left, right) {
-                    (Value::Number(left), Value::Number(right)) => {
+                    (Value::Number(left), Value::Number(right)) if op != BinaryOp::In => {
                         eval_number_binary_values(left, op, right)
                     }
                     (left, right) => eval_binary_values(left, op, right)?,

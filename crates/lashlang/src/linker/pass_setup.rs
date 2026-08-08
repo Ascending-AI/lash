@@ -448,7 +448,12 @@ impl<'module> Linker<'module> {
     ) -> Result<(), LinkError> {
         let left = self.resolve_type_aliases(left);
         let right = self.resolve_type_aliases(right);
-        if binary_operands_compatible(op, &left, &right) {
+        let compatible = if op == crate::ast::BinaryOp::In {
+            self.membership_operands_compatible(&left, &right)
+        } else {
+            binary_operands_compatible(op, &left, &right)
+        };
+        if compatible {
             Ok(())
         } else {
             Err(LinkError::IncompatibleBinaryOperands {
@@ -457,6 +462,21 @@ impl<'module> Linker<'module> {
                 right: format_type_expr(&right),
                 span,
             })
+        }
+    }
+
+    fn membership_operands_compatible(&self, needle: &TypeExpr, haystack: &TypeExpr) -> bool {
+        match haystack {
+            TypeExpr::Any | TypeExpr::Ref(_) => true,
+            TypeExpr::Str | TypeExpr::Enum(_) => {
+                matches!(needle, TypeExpr::Str | TypeExpr::Enum(_))
+            }
+            TypeExpr::List(item) => self.is_type_assignable(needle, item),
+            TypeExpr::Object(_) | TypeExpr::Dict => membership_key_type(needle),
+            TypeExpr::Union(items) => items
+                .iter()
+                .all(|item| self.membership_operands_compatible(needle, item)),
+            _ => false,
         }
     }
 

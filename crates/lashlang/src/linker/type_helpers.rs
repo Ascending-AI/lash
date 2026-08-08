@@ -401,6 +401,7 @@ fn binary_return_type(op: crate::ast::BinaryOp) -> TypeExpr {
         | crate::ast::BinaryOp::LessEqual
         | crate::ast::BinaryOp::Greater
         | crate::ast::BinaryOp::GreaterEqual
+        | crate::ast::BinaryOp::In
         | crate::ast::BinaryOp::And
         | crate::ast::BinaryOp::Or => TypeExpr::Bool,
         crate::ast::BinaryOp::Add
@@ -424,6 +425,7 @@ fn binary_op_source(op: crate::ast::BinaryOp) -> &'static str {
         crate::ast::BinaryOp::LessEqual => "<=",
         crate::ast::BinaryOp::Greater => ">",
         crate::ast::BinaryOp::GreaterEqual => ">=",
+        crate::ast::BinaryOp::In => "in",
         crate::ast::BinaryOp::And => "and",
         crate::ast::BinaryOp::Or => "or",
     }
@@ -460,6 +462,7 @@ fn binary_operands_compatible(
         | crate::ast::BinaryOp::GreaterEqual => {
             type_is_scalar(left) && type_is_scalar(right)
         }
+        crate::ast::BinaryOp::In => false,
     }
 }
 
@@ -489,6 +492,14 @@ fn type_is_scalar(ty: &TypeExpr) -> bool {
         | TypeExpr::Null
         | TypeExpr::Enum(_) => true,
         TypeExpr::Union(items) => items.iter().all(type_is_scalar),
+        _ => false,
+    }
+}
+
+fn membership_key_type(ty: &TypeExpr) -> bool {
+    match ty {
+        TypeExpr::Any | TypeExpr::Ref(_) | TypeExpr::Str | TypeExpr::Enum(_) => true,
+        TypeExpr::Union(items) => items.iter().all(membership_key_type),
         _ => false,
     }
 }

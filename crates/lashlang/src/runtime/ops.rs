@@ -351,6 +351,20 @@ pub(crate) fn execute_contains_direct(
     }
 }
 
+pub(crate) fn execute_membership_direct(
+    haystack: &Value,
+    needle: &Value,
+) -> Result<bool, RuntimeError> {
+    match (haystack, needle) {
+        (Value::String(haystack), Value::String(needle)) => Ok(haystack.contains(needle.as_str())),
+        (Value::Tuple(items), needle) => Ok(items.contains(needle)),
+        (Value::List(items), needle) => Ok(items.contains(needle)),
+        (Value::Record(record), Value::String(needle)) => Ok(record.get(needle.as_str()).is_some()),
+        (Value::Null, _) => Ok(false),
+        _ => Err(RuntimeError::InUnsupported),
+    }
+}
+
 pub(crate) async fn execute_find_builtin(values: &[Value]) -> Result<Value, RuntimeError> {
     if !(values.len() == 2 || values.len() == 3) {
         return Err(RuntimeError::InvalidArgumentCount {
@@ -724,6 +738,7 @@ pub(crate) fn eval_binary_values(
         BinaryOp::LessEqual => compare_ordered(left, right, |a, b| a <= b, |a, b| a <= b),
         BinaryOp::Greater => compare_ordered(left, right, |a, b| a > b, |a, b| a > b),
         BinaryOp::GreaterEqual => compare_ordered(left, right, |a, b| a >= b, |a, b| a >= b),
+        BinaryOp::In => execute_membership_direct(&right, &left).map(Value::Bool),
         BinaryOp::And | BinaryOp::Or => unreachable!("logical ops are compiled with jumps"),
     }
 }
@@ -741,6 +756,7 @@ pub(crate) fn eval_number_binary_values(left: f64, op: BinaryOp, right: f64) -> 
         BinaryOp::LessEqual => Value::Bool(left <= right),
         BinaryOp::Greater => Value::Bool(left > right),
         BinaryOp::GreaterEqual => Value::Bool(left >= right),
+        BinaryOp::In => unreachable!("membership is not numeric"),
         BinaryOp::And | BinaryOp::Or => unreachable!("logical ops are compiled with jumps"),
     }
 }
@@ -764,6 +780,7 @@ pub(crate) fn eval_number_compare_values(left: f64, op: BinaryOp, right: f64) ->
         BinaryOp::LessEqual => left <= right,
         BinaryOp::Greater => left > right,
         BinaryOp::GreaterEqual => left >= right,
+        BinaryOp::In => unreachable!("membership is not a numeric comparison"),
         _ => unreachable!("non-comparison op in fused slot branch"),
     }
 }
@@ -815,6 +832,7 @@ pub(crate) fn eval_compare_values(
             BinaryOp::GreaterEqual => {
                 compare_ordered(left, right, |a, b| a >= b, |a, b| a >= b).map(expect_bool_value)
             }
+            BinaryOp::In => unreachable!("membership is not a fused comparison"),
             _ => unreachable!("non-comparison op in fused branch"),
         },
     }

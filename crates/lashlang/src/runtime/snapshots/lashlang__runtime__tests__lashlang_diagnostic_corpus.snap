@@ -44,6 +44,30 @@ parallel {
 
 ---
 
+link_membership_requires_container
+operator `in` does not accept int and int
+--> line 1, column 8
+finish 1 in 2
+       ^~~~~~
+
+---
+
+link_membership_requires_list_item_type
+operator `in` does not accept str and list[int]
+--> line 1, column 8
+finish "one" in [1, 2]
+       ^~~~~~~~~~~~~~~
+
+---
+
+link_record_membership_requires_string_key
+operator `in` does not accept int and { one: bool }
+--> line 1, column 8
+finish 1 in { one: true }
+       ^~~~~~~~~~~~~~~~~~
+
+---
+
 runtime_bad_wrapper_unwrap
 `?` unwrapped failed tool result: boom
 --> line 1, column 1

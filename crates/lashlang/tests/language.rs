@@ -2255,6 +2255,47 @@ async fn negative_indices_and_record_contains_are_supported() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn membership_operator_supports_lists_record_keys_and_string_substrings() {
+    let host = TestHost::default();
+    let mut state = State::new();
+
+    let value = finished(
+        execute(
+            r#"
+        needle = 2
+        haystack = [1, 2, 3]
+        substring = "bc"
+        text = "abcd"
+        finish {
+          list_present: needle in haystack,
+          list_missing: 4 in [1, 2, 3],
+          record_present: "foo" in { foo: 1, bar: 2 },
+          record_missing: "baz" in { foo: 1, bar: 2 },
+          string_present: substring in text,
+          string_missing: "xz" in text,
+          string_negated: !("xz" in text)
+        }
+        "#,
+            &mut state,
+            &host,
+        )
+        .await
+        .expect("execution should succeed"),
+    );
+
+    let Value::Record(record) = value else {
+        panic!("expected record");
+    };
+    assert_eq!(record["list_present"], Value::Bool(true));
+    assert_eq!(record["list_missing"], Value::Bool(false));
+    assert_eq!(record["record_present"], Value::Bool(true));
+    assert_eq!(record["record_missing"], Value::Bool(false));
+    assert_eq!(record["string_present"], Value::Bool(true));
+    assert_eq!(record["string_missing"], Value::Bool(false));
+    assert_eq!(record["string_negated"], Value::Bool(true));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn dynamic_record_indexing_reads_fields() {
     let host = TestHost::default();
     let mut state = State::new();

@@ -166,6 +166,11 @@ fn format_message_with_hint(message: &str, hint: Option<&str>) -> String {
 }
 
 fn link_hint(error: &LinkError) -> Option<String> {
+    if let LinkError::UnknownName { name, .. } = error
+        && matches!(name.as_str(), "str" | "int" | "float" | "bool" | "any")
+    {
+        return Some("types belong in `Type { ... }` literals".to_string());
+    }
     let (prefix, suggestions) = match error {
         LinkError::UnknownResourceOperation { suggestions, .. } => {
             ("available operations: ", suggestions)
@@ -325,6 +330,20 @@ mod tests {
             Some(
                 "construct a host-provided trigger source value and call the trigger registry register operation"
             )
+        );
+    }
+
+    #[test]
+    fn scalar_type_keyword_in_value_position_has_type_literal_hint() {
+        let source = "finish { value: str }";
+        let program = crate::parse(source).expect("source should parse");
+        let error = crate::LinkedModule::link(program, crate::LashlangHostEnvironment::default())
+            .expect_err("scalar type keyword is not a value");
+        let diagnostic = format_link_diagnostic(source, &error);
+        assert!(diagnostic.contains("unknown name `str`"), "{diagnostic}");
+        assert!(
+            diagnostic.contains("hint: types belong in `Type { ... }` literals"),
+            "{diagnostic}"
         );
     }
 

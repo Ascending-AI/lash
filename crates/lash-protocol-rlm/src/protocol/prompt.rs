@@ -3,11 +3,10 @@ pub const LASHLANG_TYPE_LITERALS_SECTION: &str = r#"### Type literals
 `Type { field: shape, ... }` describes a record shape. Field separators are commas (trailing comma OK).
 
 - Scalars: `str`, `int`, `float`, `bool`, `dict`, `any`, `null`.
-- Collections: `list[shape]`, `enum["a", "b"]`, nested `Type { ... }`.
+- Collections: `list[shape]`, `enum["a", "b"]`, nested `{ ... }` (or the equivalent explicit `Type { ... }`).
 - **Optional field** — put `?` after the type: `email: str?` means the field may be absent from the record. If the field IS present, its value must be a string; `null` is **not** allowed.
 - **Nullable field** — use a union with `null`: `email: str | null` means the field is required and its value is either a string or null.
 - **Unions** — `a | b | c`, e.g. `status: str | int`, `value: str | null`.
-- Nested shapes require the `Type` keyword: `nested: Type { ok: bool }` (bare `{ ok: bool }` is rejected — that's a record value, not a type).
 
     <lashlang>
     profile = validate(record, Type { name: str, email: str?, tags: list[str] })

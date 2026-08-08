@@ -135,6 +135,15 @@ async fn exec_outcome(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
     execute_program(&program, &mut state, &Host).await
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn string_membership_rejects_non_string_needles_without_coercion() {
+    let compiled = crate::compile("finish 1 in \"123\"").expect("source should compile");
+    let mut state = State::new();
+    let error = execute(&compiled, &mut state, &Host)
+        .await
+        .expect_err("numeric string needles must not be coerced");
+    assert_eq!(error, RuntimeError::InUnsupported);
+}
 fn compile_source(source: &str) -> Result<CompiledProgram, crate::ParseError> {
     let program = crate::parse(source)?;
     if source.contains("tools.")
@@ -405,6 +414,18 @@ async fn golden_lashlang_diagnostic_corpus_is_exact() {
     cases.push(diagnostic_case(
         "parse_removed_parallel_keyword",
         format_parse_diagnostic("parallel {\n  start echo(value: 1)\n}"),
+    ));
+    cases.push(diagnostic_case(
+        "link_membership_requires_container",
+        link_diagnostic("finish 1 in 2"),
+    ));
+    cases.push(diagnostic_case(
+        "link_membership_requires_list_item_type",
+        link_diagnostic("finish \"one\" in [1, 2]"),
+    ));
+    cases.push(diagnostic_case(
+        "link_record_membership_requires_string_key",
+        link_diagnostic("finish 1 in { one: true }"),
     ));
     cases.push(diagnostic_case(
         "runtime_bad_wrapper_unwrap",

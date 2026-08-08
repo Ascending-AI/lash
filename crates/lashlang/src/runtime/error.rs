@@ -125,6 +125,11 @@ pub enum RuntimeError {
         "`contains` requires a string/string, tuple/value, list/value, record/key, or null/value pair"
     )]
     ContainsUnsupported,
+    /// The `in` operator received an unsupported haystack and needle pair.
+    #[error(
+        "`in` requires a string/string, tuple/value, list/value, record/key, or null/value pair"
+    )]
+    InUnsupported,
     /// `join` received a first argument that is neither a tuple nor a list.
     #[error("`join` requires a tuple or list as the first argument")]
     JoinUnsupported,
@@ -372,6 +377,7 @@ mod tests {
             },
             RuntimeError::LenUnsupported,
             RuntimeError::ContainsUnsupported,
+            RuntimeError::InUnsupported,
             RuntimeError::JoinUnsupported,
             RuntimeError::PushUnsupported,
             RuntimeError::InvalidRangeBound,
@@ -568,6 +574,9 @@ mod tests {
                 }
                 RuntimeError::ContainsUnsupported => {
                     "`contains` requires a string/string, tuple/value, list/value, record/key, or null/value pair"
+                }
+                RuntimeError::InUnsupported => {
+                    "`in` requires a string/string, tuple/value, list/value, record/key, or null/value pair"
                 }
                 RuntimeError::JoinUnsupported => {
                     "`join` requires a tuple or list as the first argument"

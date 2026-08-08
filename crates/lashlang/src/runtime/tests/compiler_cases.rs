@@ -1411,6 +1411,7 @@ async fn builtin_error_matrix_is_covered() {
                 | RuntimeError::ValuesUnsupported
                 | RuntimeError::LenUnsupported
                 | RuntimeError::ContainsUnsupported
+                | RuntimeError::InUnsupported
                 | RuntimeError::InvalidCharacterIndex { .. }
                 | RuntimeError::ExpectedText { .. }
                 | RuntimeError::EmptyGrepNeedle
