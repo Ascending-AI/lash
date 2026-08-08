@@ -91,6 +91,9 @@ pub enum RuntimeErrorCode {
     RuntimeEffectControllerTaskClosed,
     RuntimePerfStartGateRetry,
     RuntimeStore,
+    /// Durable state is corrupt or an authoritative monotonic counter has
+    /// exhausted its representable domain. Retrying unchanged cannot heal it.
+    RuntimeStoreCorrupt,
     SessionCommandClaim,
     SessionCommandIdempotencyKey,
     SessionCommandPostDriveRefresh,
@@ -206,6 +209,7 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectControllerTaskClosed => "runtime_effect_controller_task_closed",
             Self::RuntimePerfStartGateRetry => "runtime_perf_start_gate_retry",
             Self::RuntimeStore => "runtime_store",
+            Self::RuntimeStoreCorrupt => "runtime_store_corrupt",
             Self::SessionCommandClaim => "session_command_claim",
             Self::SessionCommandIdempotencyKey => "session_command_idempotency_key",
             Self::SessionCommandPostDriveRefresh => "session_command_post_drive_refresh",
@@ -304,6 +308,7 @@ impl RuntimeErrorCode {
                 | Self::RestateSegmentProgramHashMismatch
                 | Self::RestateTurnTerminalDecode
                 | Self::RestateTurnTerminalInvalidResolution
+                | Self::RuntimeStoreCorrupt
                 | Self::SessionCommandClaim
                 | Self::SessionCommandIdempotencyKey
                 | Self::SessionDeleteScopeMismatch
@@ -397,6 +402,7 @@ impl RuntimeErrorCode {
             "runtime_effect_controller_task_closed" => Self::RuntimeEffectControllerTaskClosed,
             "runtime_perf_start_gate_retry" => Self::RuntimePerfStartGateRetry,
             "runtime_store" => Self::RuntimeStore,
+            "runtime_store_corrupt" => Self::RuntimeStoreCorrupt,
             "session_command_claim" => Self::SessionCommandClaim,
             "session_command_idempotency_key" => Self::SessionCommandIdempotencyKey,
             "session_command_post_drive_refresh" => Self::SessionCommandPostDriveRefresh,
@@ -631,6 +637,7 @@ mod tests {
             | RuntimeErrorCode::RestateSegmentProgramHashMismatch
             | RuntimeErrorCode::RestateTurnTerminalDecode
             | RuntimeErrorCode::RestateTurnTerminalInvalidResolution
+            | RuntimeErrorCode::RuntimeStoreCorrupt
             | RuntimeErrorCode::SessionCommandClaim
             | RuntimeErrorCode::SessionCommandIdempotencyKey
             | RuntimeErrorCode::SessionDeleteScopeMismatch
@@ -740,6 +747,7 @@ mod tests {
             RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
             RuntimeErrorCode::RuntimePerfStartGateRetry,
             RuntimeErrorCode::RuntimeStore,
+            RuntimeErrorCode::RuntimeStoreCorrupt,
             RuntimeErrorCode::SessionCommandClaim,
             RuntimeErrorCode::SessionCommandIdempotencyKey,
             RuntimeErrorCode::SessionCommandPostDriveRefresh,

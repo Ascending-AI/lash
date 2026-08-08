@@ -178,6 +178,8 @@ async fn enqueue_queued_work_with_outcome_tx(
     batch: &QueuedWorkBatchDraft,
     now: u64,
 ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
+    let sql_available_at_ms =
+        sql_counter_value("queued_work_available_at_ms", batch.available_at_ms)?;
     let allocation_floor = if let Some(wake_source) = batch.process_wake_source.as_ref() {
         if let Some(source_key) = batch.source_key.as_deref() {
             lock_process_wake_source_tx(tx, &batch.session_id, source_key).await?;
@@ -211,15 +213,18 @@ async fn enqueue_queued_work_with_outcome_tx(
             return Ok(QueuedWorkEnqueueOutcome::Existing(existing));
         }
     }
+    let allocation_floor = allocation_floor
+        .map(|value| u64_from_sql("WakeAllocationFloor", "allocation_floor", value))
+        .transpose()?;
     if let (Some(wake_source), Some(allocation_floor)) =
         (batch.process_wake_source.as_ref(), allocation_floor)
-        && wake_source.sequence <= allocation_floor as u64
+        && wake_source.sequence <= allocation_floor
     {
         return Err(StoreError::ProcessWakeSequenceRewound {
             session_id: batch.session_id.clone(),
             process_id: wake_source.process_id.clone(),
             sequence: wake_source.sequence,
-            allocation_floor: allocation_floor as u64,
+            allocation_floor,
         });
     }
     let enqueue_seq: i64 = sqlx::query_scalar(
@@ -231,11 +236,12 @@ async fn enqueue_queued_work_with_outcome_tx(
     .fetch_one(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
+    let enqueue_seq_u64 = u64_from_sql("QueuedWorkBatch", "enqueue_seq", enqueue_seq)?;
     let batch_id = derive_batch_id(
         &batch.session_id,
         batch.source_key.as_deref(),
         now,
-        Some(enqueue_seq as u64),
+        Some(enqueue_seq_u64),
     );
     sqlx::query(
         "INSERT INTO lash_queued_work_batches (
@@ -251,7 +257,7 @@ async fn enqueue_queued_work_with_outcome_tx(
     .bind(batch.delivery_policy.as_str())
     .bind(batch.slot_policy.as_str())
     .bind(encode_json(&batch.merge_key))
-    .bind(batch.available_at_ms as i64)
+    .bind(sql_available_at_ms)
     .bind(now as i64)
     .execute(&mut **tx)
     .await
@@ -273,7 +279,7 @@ async fn enqueue_queued_work_with_outcome_tx(
     let queued = load_queued_batch(tx, &batch_id)
         .await?
         .ok_or_else(|| StoreError::Backend("queued work insert disappeared".to_string()))?;
-    debug_assert_eq!(queued.enqueue_seq, enqueue_seq as u64);
+    debug_assert_eq!(queued.enqueue_seq, enqueue_seq_u64);
     Ok(QueuedWorkEnqueueOutcome::Inserted(queued))
 }
 
@@ -501,7 +507,12 @@ impl SessionCommitStore for PostgresSessionStore {
             .fetch_optional(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
-            Some(locked_revision.map_or(0, |revision| revision as u64))
+            Some(
+                locked_revision
+                    .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
+                    .transpose()?
+                    .unwrap_or(0),
+            )
         } else {
             None
         };
@@ -595,6 +606,11 @@ impl SessionCommitStore for PostgresSessionStore {
             old_leaf_is_live,
             derived_frame_node_id,
         })?;
+        let sql_head_revision = sql_monotonic_counter_value(
+            "session_head_revision",
+            plan.actual_head_revision(),
+            plan.next_head_revision(),
+        )?;
         for completed in &commit.completed_queue_claims {
             ensure_queued_work_completion_tx(&mut tx, completed).await?;
         }
@@ -662,7 +678,7 @@ impl SessionCommitStore for PostgresSessionStore {
              WHERE lash_sessions.head_revision = $6",
         )
         .bind(&commit.session_id)
-        .bind(plan.next_head_revision() as i64)
+        .bind(sql_head_revision)
         .bind(encode_json(&meta.payload()))
         .bind(checkpoint_ref.as_str())
         .bind(meta.leaf_node_id.as_deref())
@@ -692,7 +708,9 @@ impl SessionCommitStore for PostgresSessionStore {
             .fetch_optional(&mut *tx)
             .await
             .map_err(store_sqlx_error)?
-            .map_or(plan.actual_head_revision(), |revision| revision as u64);
+            .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
+            .transpose()?
+            .unwrap_or(plan.actual_head_revision());
             return Err(plan.head_publication_conflict(actual_now));
         }
         if plan.head_changed()
@@ -1053,6 +1071,8 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
                 .is_some_and(|current_owner| current_owner.same_incarnation(owner))
             {
                 let expires_at = now.saturating_add(lease_ttl_ms);
+                let sql_expires_at =
+                    sql_counter_value("session_execution_lease_expires_at_ms", expires_at)?;
                 let claimed_at = current.claimed_at_ms;
                 sqlx::query(
                     "UPDATE lash_session_execution_leases
@@ -1064,7 +1084,7 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
                 .bind(session_id)
                 .bind(lease_token)
                 .bind(claimed_at as i64)
-                .bind(expires_at as i64)
+                .bind(sql_expires_at)
                 .execute(&mut *tx)
                 .await
                 .map_err(store_sqlx_error)?;
@@ -1165,6 +1185,8 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
             });
         }
         let expires_at = now.saturating_add(lease_ttl_ms);
+        let sql_expires_at =
+            sql_counter_value("session_execution_lease_expires_at_ms", expires_at)?;
         let renewed = sqlx::query(
             "UPDATE lash_session_execution_leases
              SET lease_expires_at_ms = $5
@@ -1177,7 +1199,7 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         .bind(&fence.owner.owner_id)
         .bind(&fence.owner.incarnation_id)
         .bind(&fence.lease_token)
-        .bind(expires_at as i64)
+        .bind(sql_expires_at)
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -1300,7 +1322,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             QueuedWorkClaimBoundary::Idle,
         ))
         .bind(session_id)
-        .bind(generation as i64)
+        .bind(sql_session_lease_generation(generation)?)
         .bind(claim_scan_limit(1))
         .fetch_all(&mut *tx)
         .await
@@ -1343,9 +1365,16 @@ impl QueuedWorkStore for PostgresSessionStore {
         selected.truncate(selected_len);
         selected_batches.truncate(selected_len);
         let lease =
-            WorkClaimLease::derive_queued_work(&candidates[0], session_id, owner, now, generation);
+            WorkClaimLease::derive_queued_work(&candidates[0], session_id, owner, now, generation)?;
+        let sql_fencing_tokens = sql_claim_fencing_tokens(
+            "queued_work_claim_fencing_token",
+            candidates
+                .iter()
+                .take(selected_len)
+                .map(|candidate| candidate.claim_fencing_token),
+        )?;
         let liveness_json: Option<&str> = None;
-        for row in &selected {
+        for (row, sql_fencing_token) in selected.iter().zip(sql_fencing_tokens.iter().copied()) {
             let changed = sqlx::query(
                 "UPDATE lash_queued_work_batches
                  SET claim_id = $3,
@@ -1353,7 +1382,7 @@ impl QueuedWorkStore for PostgresSessionStore {
                      claim_owner_incarnation_id = $5,
                      claim_owner_liveness_json = $6,
                      claim_token = $7,
-                     claim_fencing_token = claim_fencing_token + 1,
+                     claim_fencing_token = $9,
                      claim_session_lease_generation = $8
                  WHERE session_id = $1
                    AND batch_id = $2
@@ -1369,7 +1398,10 @@ impl QueuedWorkStore for PostgresSessionStore {
             .bind(&owner.incarnation_id)
             .bind(liveness_json)
             .bind(&lease.lease_token)
-            .bind(lease.session_lease_generation as i64)
+            .bind(sql_session_lease_generation(
+                lease.session_lease_generation,
+            )?)
+            .bind(sql_fencing_token)
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?
@@ -1410,7 +1442,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let rows = sqlx::query(&postgres_queued_work_claim_candidates_sql(boundary))
             .bind(session_id)
-            .bind(generation as i64)
+            .bind(sql_session_lease_generation(generation)?)
             .bind(claim_scan_limit(max_batches))
             .fetch_all(&mut *tx)
             .await
@@ -1453,9 +1485,16 @@ impl QueuedWorkStore for PostgresSessionStore {
         selected.truncate(selected_len);
         selected_batches.truncate(selected_len);
         let lease =
-            WorkClaimLease::derive_queued_work(&candidates[0], session_id, owner, now, generation);
+            WorkClaimLease::derive_queued_work(&candidates[0], session_id, owner, now, generation)?;
+        let sql_fencing_tokens = sql_claim_fencing_tokens(
+            "queued_work_claim_fencing_token",
+            candidates
+                .iter()
+                .take(selected_len)
+                .map(|candidate| candidate.claim_fencing_token),
+        )?;
         let liveness_json: Option<&str> = None;
-        for row in &selected {
+        for (row, sql_fencing_token) in selected.iter().zip(sql_fencing_tokens.iter().copied()) {
             let changed = sqlx::query(
                 "UPDATE lash_queued_work_batches
                  SET claim_id = $3,
@@ -1463,7 +1502,7 @@ impl QueuedWorkStore for PostgresSessionStore {
                      claim_owner_incarnation_id = $5,
                      claim_owner_liveness_json = $6,
                      claim_token = $7,
-                     claim_fencing_token = claim_fencing_token + 1,
+                     claim_fencing_token = $9,
                      claim_session_lease_generation = $8
                  WHERE session_id = $1
                    AND batch_id = $2
@@ -1479,7 +1518,10 @@ impl QueuedWorkStore for PostgresSessionStore {
             .bind(&owner.incarnation_id)
             .bind(liveness_json)
             .bind(&lease.lease_token)
-            .bind(lease.session_lease_generation as i64)
+            .bind(sql_session_lease_generation(
+                lease.session_lease_generation,
+            )?)
+            .bind(sql_fencing_token)
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?
@@ -1606,7 +1648,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             .bind(session_id)
             .bind(batch_id)
             .bind(now as i64)
-            .bind(generation as i64)
+            .bind(sql_session_lease_generation(generation)?)
             .fetch_optional(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -1641,14 +1683,20 @@ impl QueuedWorkStore for PostgresSessionStore {
             return Ok(None);
         }
         let lease =
-            WorkClaimLease::derive_queued_work(&candidates[0], session_id, owner, now, generation);
+            WorkClaimLease::derive_queued_work(&candidates[0], session_id, owner, now, generation)?;
+        let sql_fencing_tokens = sql_claim_fencing_tokens(
+            "queued_work_claim_fencing_token",
+            candidates
+                .iter()
+                .map(|candidate| candidate.claim_fencing_token),
+        )?;
         let liveness_json: Option<&str> = None;
-        for row in &selected {
+        for (row, sql_fencing_token) in selected.iter().zip(sql_fencing_tokens.iter().copied()) {
             let changed = sqlx::query(
                 "UPDATE lash_queued_work_batches
                  SET claim_id = $3, claim_owner_id = $4,
                      claim_owner_incarnation_id = $5, claim_owner_liveness_json = $6,
-                     claim_token = $7, claim_fencing_token = claim_fencing_token + 1,
+                     claim_token = $7, claim_fencing_token = $9,
                      claim_session_lease_generation = $8
                  WHERE session_id = $1 AND batch_id = $2
                    AND (claim_token IS NULL OR claim_session_lease_generation <> $8)",
@@ -1660,7 +1708,8 @@ impl QueuedWorkStore for PostgresSessionStore {
             .bind(&owner.incarnation_id)
             .bind(liveness_json)
             .bind(&lease.lease_token)
-            .bind(generation as i64)
+            .bind(sql_session_lease_generation(generation)?)
+            .bind(sql_fencing_token)
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?
@@ -1857,12 +1906,13 @@ impl TurnInputStore for PostgresSessionStore {
         .fetch_one(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
+        let enqueue_seq_u64 = u64_from_sql("PendingTurnInput", "enqueue_seq", enqueue_seq)?;
         let input_id = draft.input_id.clone().unwrap_or_else(|| {
             lash_core::store_backend_support::derive_pending_turn_input_id(
                 &draft.session_id,
                 draft.source_key.as_deref(),
                 now,
-                enqueue_seq as u64,
+                enqueue_seq_u64,
             )
         });
         let state = match draft.ingress {
@@ -2417,7 +2467,7 @@ async fn checkpoint_work_pending_postgres(
     );
     sqlx::query_scalar(&sql)
         .bind(session_id)
-        .bind(generation as i64)
+        .bind(sql_session_lease_generation(generation)?)
         .bind(turn_id)
         .bind(match checkpoint {
             lash_core::CheckpointKind::AfterWork => "after_work",
@@ -2446,7 +2496,7 @@ async fn claim_ready_queued_work_postgres_tx(
     let now = postgres_transaction_epoch_ms(tx).await?;
     let rows = sqlx::query(&postgres_queued_work_claim_candidates_sql(boundary))
         .bind(session_id)
-        .bind(generation as i64)
+        .bind(sql_session_lease_generation(generation)?)
         .bind(claim_scan_limit(max_batches))
         .fetch_all(&mut **tx)
         .await
@@ -2488,9 +2538,16 @@ async fn claim_ready_queued_work_postgres_tx(
     selected.truncate(selected_len);
     selected_batches.truncate(selected_len);
     let lease =
-        WorkClaimLease::derive_queued_work(&candidates[0], session_id, owner, now, generation);
+        WorkClaimLease::derive_queued_work(&candidates[0], session_id, owner, now, generation)?;
+    let sql_fencing_tokens = sql_claim_fencing_tokens(
+        "queued_work_claim_fencing_token",
+        candidates
+            .iter()
+            .take(selected_len)
+            .map(|candidate| candidate.claim_fencing_token),
+    )?;
     let liveness_json: Option<&str> = None;
-    for row in &selected {
+    for (row, sql_fencing_token) in selected.iter().zip(sql_fencing_tokens.iter().copied()) {
         let changed = sqlx::query(
             "UPDATE lash_queued_work_batches
              SET claim_id = $3,
@@ -2498,7 +2555,7 @@ async fn claim_ready_queued_work_postgres_tx(
                  claim_owner_incarnation_id = $5,
                  claim_owner_liveness_json = $6,
                  claim_token = $7,
-                 claim_fencing_token = claim_fencing_token + 1,
+                 claim_fencing_token = $9,
                  claim_session_lease_generation = $8
              WHERE session_id = $1
                AND batch_id = $2
@@ -2514,7 +2571,10 @@ async fn claim_ready_queued_work_postgres_tx(
         .bind(&owner.incarnation_id)
         .bind(liveness_json)
         .bind(&lease.lease_token)
-        .bind(lease.session_lease_generation as i64)
+        .bind(sql_session_lease_generation(
+            lease.session_lease_generation,
+        )?)
+        .bind(sql_fencing_token)
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
@@ -2578,7 +2638,7 @@ async fn claim_pending_turn_inputs_postgres_tx(
                 claim_token IS NULL
                 OR claim_session_lease_generation <> ",
         )
-        .push_bind(generation as i64)
+        .push_bind(sql_session_lease_generation(generation)?)
         .push("\n           )");
     if let lash_core::TurnInputClaimMode::ActiveTurn {
         turn_id,
@@ -2615,14 +2675,18 @@ async fn claim_pending_turn_inputs_postgres_tx(
     let Some((head, _)) = selected.first() else {
         return Ok(ClaimTransactionOutcome::Commit(None));
     };
-    let lease = TurnInputClaimLease::derive(head, session_id, owner, now, generation);
+    let lease = TurnInputClaimLease::derive(head, session_id, owner, now, generation)?;
+    let sql_fencing_tokens = sql_claim_fencing_tokens(
+        "turn_input_claim_fencing_token",
+        selected.iter().map(|(row, _)| row.claim_fencing_token),
+    )?;
     let liveness_json: Option<&str> = None;
     let state_after_claim = match &mode {
         lash_core::TurnInputClaimMode::ActiveTurn { .. } => lash_core::TurnInputState::Accepted,
         lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
     };
     let mut inputs = Vec::new();
-    for (row, mut input) in selected {
+    for ((row, mut input), sql_fencing_token) in selected.into_iter().zip(sql_fencing_tokens) {
         let changed = sqlx::query(
             "UPDATE lash_pending_turn_inputs
              SET state = $3,
@@ -2631,7 +2695,7 @@ async fn claim_pending_turn_inputs_postgres_tx(
                  claim_owner_incarnation_id = $6,
                  claim_owner_liveness_json = $7,
                  claim_token = $8,
-                 claim_fencing_token = claim_fencing_token + 1,
+                 claim_fencing_token = $10,
                  claim_session_lease_generation = $9
              WHERE session_id = $1
                AND input_id = $2
@@ -2648,7 +2712,10 @@ async fn claim_pending_turn_inputs_postgres_tx(
         .bind(&owner.incarnation_id)
         .bind(liveness_json)
         .bind(&lease.lease_token)
-        .bind(lease.session_lease_generation as i64)
+        .bind(sql_session_lease_generation(
+            lease.session_lease_generation,
+        )?)
+        .bind(sql_fencing_token)
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
@@ -2719,7 +2786,7 @@ async fn claim_pending_turn_inputs_postgres(
                 claim_token IS NULL
                 OR claim_session_lease_generation <> ",
         )
-        .push_bind(generation as i64)
+        .push_bind(sql_session_lease_generation(generation)?)
         .push("\n           )");
     if let lash_core::TurnInputClaimMode::ActiveTurn {
         turn_id,
@@ -2757,14 +2824,18 @@ async fn claim_pending_turn_inputs_postgres(
         tx.commit().await.map_err(store_sqlx_error)?;
         return Ok(None);
     };
-    let lease = TurnInputClaimLease::derive(head, session_id, owner, now, generation);
+    let lease = TurnInputClaimLease::derive(head, session_id, owner, now, generation)?;
+    let sql_fencing_tokens = sql_claim_fencing_tokens(
+        "turn_input_claim_fencing_token",
+        selected.iter().map(|(row, _)| row.claim_fencing_token),
+    )?;
     let liveness_json: Option<&str> = None;
     let state_after_claim = match &mode {
         lash_core::TurnInputClaimMode::ActiveTurn { .. } => lash_core::TurnInputState::Accepted,
         lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
     };
     let mut inputs = Vec::new();
-    for (row, mut input) in selected {
+    for ((row, mut input), sql_fencing_token) in selected.into_iter().zip(sql_fencing_tokens) {
         let changed = sqlx::query(
             "UPDATE lash_pending_turn_inputs
              SET state = $3,
@@ -2773,7 +2844,7 @@ async fn claim_pending_turn_inputs_postgres(
                  claim_owner_incarnation_id = $6,
                  claim_owner_liveness_json = $7,
                  claim_token = $8,
-                 claim_fencing_token = claim_fencing_token + 1,
+                 claim_fencing_token = $10,
                  claim_session_lease_generation = $9
              WHERE session_id = $1
                AND input_id = $2
@@ -2790,7 +2861,10 @@ async fn claim_pending_turn_inputs_postgres(
         .bind(&owner.incarnation_id)
         .bind(liveness_json)
         .bind(&lease.lease_token)
-        .bind(lease.session_lease_generation as i64)
+        .bind(sql_session_lease_generation(
+            lease.session_lease_generation,
+        )?)
+        .bind(sql_fencing_token)
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?
@@ -2850,7 +2924,8 @@ pub(crate) async fn read_session_execution_lease_unlocked(
     .fetch_optional(pool)
     .await
     .map_err(store_sqlx_error)?;
-    Ok(row.map(session_execution_lease_row_from_columns))
+    row.map(session_execution_lease_row_from_columns)
+        .transpose()
 }
 
 pub(crate) async fn load_session_execution_lease_tx(
@@ -2869,19 +2944,20 @@ pub(crate) async fn load_session_execution_lease_tx(
     .fetch_optional(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    Ok(row.map(session_execution_lease_row_from_columns))
+    row.map(session_execution_lease_row_from_columns)
+        .transpose()
 }
 
 fn session_execution_lease_row_from_columns(
     row: sqlx::postgres::PgRow,
-) -> SessionExecutionLeaseRow {
-    SessionExecutionLeaseRow {
+) -> Result<SessionExecutionLeaseRow, StoreError> {
+    Ok(SessionExecutionLeaseRow {
         owner: lease_owner_from_columns(row.get(0), row.get(5), row.get(6)),
         lease_token: row.get(1),
-        fencing_token: row.get::<i64, _>(2) as u64,
-        claimed_at_ms: row.get::<i64, _>(3) as u64,
-        expires_at_ms: row.get::<i64, _>(4) as u64,
-    }
+        fencing_token: u64_from_sql("SessionExecutionLease", "fencing_token", row.get(2))?,
+        claimed_at_ms: u64_from_sql("SessionExecutionLease", "claimed_at_ms", row.get(3))?,
+        expires_at_ms: u64_from_sql("SessionExecutionLease", "expires_at_ms", row.get(4))?,
+    })
 }
 
 pub(crate) fn lease_owner_from_columns(
@@ -2944,8 +3020,17 @@ async fn acquire_session_execution_lease_tx(
     now: u64,
     lease_ttl_ms: u64,
 ) -> Result<SessionExecutionLease, StoreError> {
-    let fencing_token = previous_fencing_token.saturating_add(1);
+    let fencing_token = StoreError::checked_monotonic_increment(
+        "session_execution_lease_fencing_token",
+        previous_fencing_token,
+    )?;
+    let sql_fencing_token = sql_monotonic_counter_value(
+        "session_execution_lease_fencing_token",
+        previous_fencing_token,
+        fencing_token,
+    )?;
     let expires_at = now.saturating_add(lease_ttl_ms);
+    let sql_expires_at = sql_counter_value("session_execution_lease_expires_at_ms", expires_at)?;
     sqlx::query(
         "INSERT INTO lash_session_execution_leases (
             session_id, lease_owner_id, lease_owner_incarnation_id, lease_owner_liveness_json,
@@ -2966,9 +3051,9 @@ async fn acquire_session_execution_lease_tx(
     .bind(&owner.incarnation_id)
     .bind(Option::<&str>::None)
     .bind(lease_token)
-    .bind(fencing_token as i64)
+    .bind(sql_fencing_token)
     .bind(now as i64)
-    .bind(expires_at as i64)
+    .bind(sql_expires_at)
     .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;

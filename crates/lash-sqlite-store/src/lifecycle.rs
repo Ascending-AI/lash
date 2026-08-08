@@ -238,7 +238,7 @@ impl Store {
                 })?;
                 let head_meta = SessionHeadMeta::assemble(
                     payload,
-                    head_revision as u64,
+                    u64_from_sql("SessionHeadMeta", "head_revision", head_revision)?,
                     checkpoint_ref.map(Into::into),
                     leaf_node_id,
                 );

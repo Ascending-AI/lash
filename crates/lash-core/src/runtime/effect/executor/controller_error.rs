@@ -96,11 +96,46 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
             }
             _ => None,
         };
+        let code = match &err {
+            crate::StoreError::StoredDataCorrupt { .. }
+            | crate::StoreError::MonotonicCounterOverflow { .. } => {
+                crate::RuntimeErrorCode::RuntimeStoreCorrupt.as_str()
+            }
+            _ => crate::RuntimeErrorCode::RuntimeStore.as_str(),
+        };
         Self {
-            code: "runtime_store".to_string(),
+            code: code.to_string(),
             message: err.to_string(),
             summary: None,
             cause,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn permanent_store_integrity_errors_are_terminal_and_non_retryable() {
+        for store_error in [
+            crate::StoreError::StoredDataCorrupt {
+                record_kind: "RuntimeEffectReplay",
+                message: "negative lease_expires_at_ms".to_string(),
+            },
+            crate::StoreError::MonotonicCounterOverflow {
+                counter: "effect_replay_fence",
+                current: i64::MAX as u64,
+            },
+        ] {
+            let controller_error = RuntimeEffectControllerError::from(store_error);
+            let runtime_error = controller_error.into_runtime_error();
+            assert_eq!(
+                runtime_error.code,
+                crate::RuntimeErrorCode::RuntimeStoreCorrupt
+            );
+            assert!(!runtime_error.is_retryable());
+            assert!(runtime_error.is_terminal());
         }
     }
 }

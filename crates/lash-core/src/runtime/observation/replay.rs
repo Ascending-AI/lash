@@ -551,7 +551,9 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         let buffer = sessions
             .entry(session_id.to_string())
             .or_insert_with(LiveReplaySessionBuffer::new);
-        buffer.tail_position = buffer.tail_position.saturating_add(1);
+        buffer.tail_position = buffer.tail_position.checked_add(1).ok_or_else(|| {
+            LiveReplayStoreError::Store("live replay position overflow".to_string())
+        })?;
         let cursor = SessionCursor::new(session_id, revision, buffer.tail_position);
         let event = Arc::new(SessionObservationEvent {
             session_id: session_id.to_string(),

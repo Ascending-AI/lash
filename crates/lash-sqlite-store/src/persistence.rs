@@ -476,6 +476,11 @@ impl SessionCommitStore for Store {
                         old_leaf_is_live,
                         derived_frame_node_id,
                     })?;
+                    let sql_head_revision = sql_monotonic_counter_value(
+                        "session_head_revision",
+                        plan.actual_head_revision(),
+                        plan.next_head_revision(),
+                    )?;
                     for completed in &commit.completed_queue_claims {
                         ensure_queued_work_completion_conn(tx, completed)?;
                     }
@@ -497,6 +502,22 @@ impl SessionCommitStore for Store {
                                 )
                                 .optional()
                                 .map_err(sqlite_error)?;
+                            let authority = authority
+                                .map(|(claim_id, claim_token, generation)| {
+                                    Ok((
+                                        claim_id,
+                                        claim_token,
+                                        u64::try_from(generation).map_err(|_| {
+                                            stored_data_corrupt(
+                                                "PendingTurnInput",
+                                                format!(
+                                                    "claim_session_lease_generation must be non-negative, got {generation}"
+                                                ),
+                                            )
+                                        })?,
+                                    ))
+                                })
+                                .transpose()?;
                             let owns_row = authority.as_ref().is_some_and(
                                 |(claim_id, claim_token, _)| {
                                     claim_id.as_deref() == Some(completed.claim_id.as_str())
@@ -518,7 +539,7 @@ impl SessionCommitStore for Store {
                                         .and_then(|(claim_id, _, generation)| {
                                             claim_id
                                                 .as_ref()
-                                                .map(|_| Box::new(*generation as u64))
+                                                .map(|_| Box::new(*generation))
                                         }),
                                 });
                             }
@@ -591,7 +612,7 @@ impl SessionCommitStore for Store {
                         params![
                             meta.session_id,
                             encode_json(&meta.payload()),
-                            meta.head_revision as i64,
+                            sql_head_revision,
                             meta.leaf_node_id,
                             meta.checkpoint_ref.as_ref().map(BlobRef::as_str),
                         ],
@@ -760,11 +781,17 @@ impl SessionCommitStore for Store {
                     }
                     let mut enqueued_queue_batches = Vec::new();
                     for (index, batch) in commit.enqueued_queue_batches.iter().enumerate() {
+                        let enqueue_nonce = enqueue_nonce_start
+                            .checked_add(index as u64)
+                            .ok_or(StoreError::MonotonicCounterOverflow {
+                                counter: "queued_work_enqueue_sequence",
+                                current: enqueue_nonce_start,
+                            })?;
                         enqueued_queue_batches.push(enqueue_queued_work_conn(
                             tx,
                             batch,
                             now,
-                            enqueue_nonce_start.saturating_add(index as u64),
+                            enqueue_nonce,
                         )?);
                     }
                     let result = plan.result(
@@ -893,6 +920,10 @@ impl SessionExecutionLeaseStore for Store {
                             .is_some_and(|current_owner| current_owner.same_incarnation(&owner))
                         {
                             let expires_at = now.saturating_add(lease_ttl_ms);
+                            let sql_expires_at = sql_counter_value(
+                                "session_execution_lease_expires_at_ms",
+                                expires_at,
+                            )?;
                             let claimed_at = current.claimed_at_ms;
                             tx.execute(
                                 "UPDATE session_execution_leases
@@ -900,12 +931,7 @@ impl SessionExecutionLeaseStore for Store {
                                      lease_claimed_at_ms = ?3,
                                      lease_expires_at_ms = ?4
                                  WHERE session_id = ?1",
-                                params![
-                                    session_id,
-                                    lease_token,
-                                    claimed_at as i64,
-                                    expires_at as i64
-                                ],
+                                params![session_id, lease_token, claimed_at as i64, sql_expires_at],
                             )
                             .map_err(sqlite_error)?;
                             // Reentry advances no generation: nobody is displaced.
@@ -1009,6 +1035,10 @@ impl SessionExecutionLeaseStore for Store {
                         });
                     }
                     let expires_at = now.saturating_add(lease_ttl_ms);
+                    let sql_expires_at = sql_counter_value(
+                        "session_execution_lease_expires_at_ms",
+                        expires_at,
+                    )?;
                     tx.execute(
                         "UPDATE session_execution_leases
                          SET lease_expires_at_ms = ?5
@@ -1021,7 +1051,7 @@ impl SessionExecutionLeaseStore for Store {
                             fence.owner.owner_id,
                             fence.owner.incarnation_id,
                             fence.lease_token,
-                            expires_at as i64
+                            sql_expires_at
                         ],
                     )
                     .map_err(sqlite_error)?;
@@ -1190,7 +1220,7 @@ impl QueuedWorkStore for Store {
                                 params![
                                     session_id,
                                     now as i64,
-                                    generation as i64,
+                                    sql_session_lease_generation(generation)?,
                                     claim_scan_limit(1)
                                 ],
                                 queued_batch_row_from_sql,
@@ -1244,9 +1274,18 @@ impl QueuedWorkStore for Store {
                         &owner,
                         now,
                         generation,
-                    );
+                    )?;
+                    let sql_fencing_tokens = sql_claim_fencing_tokens(
+                        "queued_work_claim_fencing_token",
+                        candidates
+                            .iter()
+                            .take(selected_len)
+                            .map(|candidate| candidate.claim_fencing_token),
+                    )?;
                     let liveness_json: Option<&str> = None;
-                    for row in &selected {
+                    for (row, sql_fencing_token) in
+                        selected.iter().zip(sql_fencing_tokens.iter().copied())
+                    {
                         let claimed = tx
                             .execute(
                                 "UPDATE queued_work_batches
@@ -1255,7 +1294,7 @@ impl QueuedWorkStore for Store {
                                      claim_owner_incarnation_id = ?5,
                                      claim_owner_liveness_json = ?6,
                                      claim_token = ?7,
-                                     claim_fencing_token = claim_fencing_token + 1,
+                                     claim_fencing_token = ?9,
                                      claim_session_lease_generation = ?8
                                  WHERE session_id = ?1
                                    AND batch_id = ?2
@@ -1271,7 +1310,8 @@ impl QueuedWorkStore for Store {
                                     owner.incarnation_id.as_str(),
                                     liveness_json,
                                     lease.lease_token,
-                                    lease.session_lease_generation as i64,
+                                    sql_session_lease_generation(lease.session_lease_generation,)?,
+                                    sql_fencing_token,
                                 ],
                             )
                             .map_err(sqlite_error)?;
@@ -1336,7 +1376,7 @@ impl QueuedWorkStore for Store {
                                 params![
                                     session_id,
                                     now as i64,
-                                    generation as i64,
+                                    sql_session_lease_generation(generation)?,
                                     claim_scan_limit(max_batches)
                                 ],
                                 queued_batch_row_from_sql,
@@ -1388,9 +1428,18 @@ impl QueuedWorkStore for Store {
                         &owner,
                         now,
                         generation,
-                    );
+                    )?;
+                    let sql_fencing_tokens = sql_claim_fencing_tokens(
+                        "queued_work_claim_fencing_token",
+                        candidates
+                            .iter()
+                            .take(selected_len)
+                            .map(|candidate| candidate.claim_fencing_token),
+                    )?;
                     let liveness_json: Option<&str> = None;
-                    for row in &selected {
+                    for (row, sql_fencing_token) in
+                        selected.iter().zip(sql_fencing_tokens.iter().copied())
+                    {
                         // Under `BEGIN IMMEDIATE` this connection already holds
                         // the write lock, but the row could still have been
                         // claimed by an earlier committed writer (its
@@ -1407,7 +1456,7 @@ impl QueuedWorkStore for Store {
                                      claim_owner_incarnation_id = ?5,
                                      claim_owner_liveness_json = ?6,
                                      claim_token = ?7,
-                                     claim_fencing_token = claim_fencing_token + 1,
+                                     claim_fencing_token = ?9,
                                      claim_session_lease_generation = ?8
                                  WHERE session_id = ?1
                                    AND batch_id = ?2
@@ -1423,7 +1472,8 @@ impl QueuedWorkStore for Store {
                                     owner.incarnation_id.as_str(),
                                     liveness_json,
                                     lease.lease_token,
-                                    lease.session_lease_generation as i64,
+                                    sql_session_lease_generation(lease.session_lease_generation,)?,
+                                    sql_fencing_token,
                                 ],
                             )
                             .map_err(sqlite_error)?;
@@ -1587,7 +1637,12 @@ impl QueuedWorkStore for Store {
                                    AND available_at_ms <= ?3
                                    AND (claim_token IS NULL
                                         OR claim_session_lease_generation <> ?4)",
-                                params![session_id, batch_id, now as i64, generation as i64],
+                                params![
+                                    session_id,
+                                    batch_id,
+                                    now as i64,
+                                    sql_session_lease_generation(generation)?,
+                                ],
                                 queued_batch_row_from_sql,
                             )
                             .optional()
@@ -1628,16 +1683,24 @@ impl QueuedWorkStore for Store {
                         &owner,
                         now,
                         generation,
-                    );
+                    )?;
+                    let sql_fencing_tokens = sql_claim_fencing_tokens(
+                        "queued_work_claim_fencing_token",
+                        candidates
+                            .iter()
+                            .map(|candidate| candidate.claim_fencing_token),
+                    )?;
                     let owner_liveness_json: Option<&str> = None;
-                    for row in &rows {
+                    for (row, sql_fencing_token) in
+                        rows.iter().zip(sql_fencing_tokens.iter().copied())
+                    {
                         let changed = tx
                             .execute(
                                 "UPDATE queued_work_batches
                                  SET claim_id = ?3, claim_owner_id = ?4,
                                      claim_owner_incarnation_id = ?5,
                                      claim_owner_liveness_json = ?6, claim_token = ?7,
-                                     claim_fencing_token = claim_fencing_token + 1,
+                                     claim_fencing_token = ?9,
                                      claim_session_lease_generation = ?8
                                  WHERE session_id = ?1 AND batch_id = ?2
                                    AND (claim_token IS NULL
@@ -1650,7 +1713,8 @@ impl QueuedWorkStore for Store {
                                     owner.incarnation_id,
                                     owner_liveness_json,
                                     lease.lease_token,
-                                    generation as i64,
+                                    sql_session_lease_generation(generation)?,
+                                    sql_fencing_token,
                                 ],
                             )
                             .map_err(sqlite_error)?;
@@ -2522,7 +2586,7 @@ async fn checkpoint_work_pending_sqlite(
                     params![
                         session_id,
                         now as i64,
-                        generation as i64,
+                        sql_session_lease_generation(generation)?,
                         lash_core::TurnInputState::PendingActive.as_str(),
                         turn_id,
                         match checkpoint {
@@ -2566,7 +2630,7 @@ fn claim_ready_queued_work_sqlite_conn(
                 params![
                     session_id,
                     now as i64,
-                    generation as i64,
+                    sql_session_lease_generation(generation)?,
                     claim_scan_limit(max_batches)
                 ],
                 queued_batch_row_from_sql,
@@ -2610,9 +2674,16 @@ fn claim_ready_queued_work_sqlite_conn(
     let mut selected_batches = candidate_batches;
     selected_batches.truncate(selected_len);
     let lease =
-        WorkClaimLease::derive_queued_work(&candidates[0], session_id, owner, now, generation);
+        WorkClaimLease::derive_queued_work(&candidates[0], session_id, owner, now, generation)?;
+    let sql_fencing_tokens = sql_claim_fencing_tokens(
+        "queued_work_claim_fencing_token",
+        candidates
+            .iter()
+            .take(selected_len)
+            .map(|candidate| candidate.claim_fencing_token),
+    )?;
     let liveness_json: Option<&str> = None;
-    for row in &selected {
+    for (row, sql_fencing_token) in selected.iter().zip(sql_fencing_tokens.iter().copied()) {
         let claimed = tx
             .execute(
                 "UPDATE queued_work_batches
@@ -2621,7 +2692,7 @@ fn claim_ready_queued_work_sqlite_conn(
                      claim_owner_incarnation_id = ?5,
                      claim_owner_liveness_json = ?6,
                      claim_token = ?7,
-                     claim_fencing_token = claim_fencing_token + 1,
+                     claim_fencing_token = ?9,
                      claim_session_lease_generation = ?8
                  WHERE session_id = ?1
                    AND batch_id = ?2
@@ -2637,7 +2708,8 @@ fn claim_ready_queued_work_sqlite_conn(
                     owner.incarnation_id.as_str(),
                     liveness_json,
                     lease.lease_token,
-                    lease.session_lease_generation as i64,
+                    sql_session_lease_generation(lease.session_lease_generation)?,
+                    sql_fencing_token,
                 ],
             )
             .map_err(sqlite_error)?;
@@ -2696,7 +2768,7 @@ fn claim_pending_turn_inputs_sqlite_conn(
             session_id.to_string().into(),
             wanted_state.as_str().to_string().into(),
             i64::from(active_turn).into(),
-            (generation as i64).into(),
+            sql_session_lease_generation(generation)?.into(),
         ];
         if let lash_core::TurnInputClaimMode::ActiveTurn {
             turn_id,
@@ -2733,14 +2805,18 @@ fn claim_pending_turn_inputs_sqlite_conn(
     let Some((head, _)) = selected.first() else {
         return Ok(TxOutcome::Commit(None));
     };
-    let lease = TurnInputClaimLease::derive(head, session_id, owner, now, generation);
+    let lease = TurnInputClaimLease::derive(head, session_id, owner, now, generation)?;
+    let sql_fencing_tokens = sql_claim_fencing_tokens(
+        "turn_input_claim_fencing_token",
+        selected.iter().map(|(row, _)| row.claim_fencing_token),
+    )?;
     let liveness_json: Option<&str> = None;
     let state_after_claim = match &mode {
         lash_core::TurnInputClaimMode::ActiveTurn { .. } => lash_core::TurnInputState::Accepted,
         lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
     };
     let mut inputs = Vec::new();
-    for (row, mut input) in selected {
+    for ((row, mut input), sql_fencing_token) in selected.into_iter().zip(sql_fencing_tokens) {
         let claimed = tx
             .execute(
                 "UPDATE pending_turn_inputs
@@ -2750,7 +2826,7 @@ fn claim_pending_turn_inputs_sqlite_conn(
                      claim_owner_incarnation_id = ?6,
                      claim_owner_liveness_json = ?7,
                      claim_token = ?8,
-                     claim_fencing_token = claim_fencing_token + 1,
+                     claim_fencing_token = ?10,
                      claim_session_lease_generation = ?9
                  WHERE session_id = ?1
                    AND input_id = ?2
@@ -2767,7 +2843,8 @@ fn claim_pending_turn_inputs_sqlite_conn(
                     owner.incarnation_id.as_str(),
                     liveness_json,
                     lease.lease_token,
-                    lease.session_lease_generation as i64,
+                    sql_session_lease_generation(lease.session_lease_generation)?,
+                    sql_fencing_token,
                 ],
             )
             .map_err(sqlite_error)?;
@@ -2844,7 +2921,7 @@ async fn claim_pending_turn_inputs_sqlite(
                     session_id.clone().into(),
                     wanted_state.as_str().to_string().into(),
                     i64::from(active_turn).into(),
-                    (generation as i64).into(),
+                    sql_session_lease_generation(generation)?.into(),
                 ];
                 if let lash_core::TurnInputClaimMode::ActiveTurn {
                     turn_id,
@@ -2883,7 +2960,13 @@ async fn claim_pending_turn_inputs_sqlite(
             let Some((head, _)) = selected.first() else {
                 return Ok(TxOutcome::Commit(None));
             };
-            let lease = TurnInputClaimLease::derive(head, &session_id, &owner, now, generation);
+            let lease = TurnInputClaimLease::derive(head, &session_id, &owner, now, generation)?;
+            let sql_fencing_tokens = sql_claim_fencing_tokens(
+                "turn_input_claim_fencing_token",
+                selected
+                    .iter()
+                    .map(|(row, _)| row.claim_fencing_token),
+            )?;
             let liveness_json: Option<&str> = None;
             let state_after_claim = match &mode {
                 lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
@@ -2894,7 +2977,9 @@ async fn claim_pending_turn_inputs_sqlite(
                 }
             };
             let mut inputs = Vec::new();
-            for (row, mut input) in selected {
+            for ((row, mut input), sql_fencing_token) in
+                selected.into_iter().zip(sql_fencing_tokens)
+            {
                 let claimed = tx
                     .execute(
                         "UPDATE pending_turn_inputs
@@ -2904,7 +2989,7 @@ async fn claim_pending_turn_inputs_sqlite(
                              claim_owner_incarnation_id = ?6,
                              claim_owner_liveness_json = ?7,
                              claim_token = ?8,
-                             claim_fencing_token = claim_fencing_token + 1,
+                             claim_fencing_token = ?10,
                              claim_session_lease_generation = ?9
                          WHERE session_id = ?1
                            AND input_id = ?2
@@ -2921,7 +3006,8 @@ async fn claim_pending_turn_inputs_sqlite(
                             owner.incarnation_id.as_str(),
                             liveness_json,
                             lease.lease_token,
-                            lease.session_lease_generation as i64,
+                            sql_session_lease_generation(lease.session_lease_generation)?,
+                            sql_fencing_token,
                         ],
                     )
                     .map_err(sqlite_error)?;
@@ -2983,9 +3069,21 @@ fn load_session_execution_lease_row_conn(
                 Ok(SessionExecutionLeaseRow {
                     owner: lease_owner_from_columns(owner_id, incarnation_id, liveness_json),
                     lease_token: row.get(1)?,
-                    fencing_token: row.get::<_, i64>(2)? as u64,
-                    claimed_at_ms: row.get::<_, i64>(3)? as u64,
-                    expires_at_ms: row.get::<_, i64>(4)? as u64,
+                    fencing_token: u64_from_sql(
+                        "SessionExecutionLease",
+                        "fencing_token",
+                        row.get(2)?,
+                    )?,
+                    claimed_at_ms: u64_from_sql(
+                        "SessionExecutionLease",
+                        "claimed_at_ms",
+                        row.get(3)?,
+                    )?,
+                    expires_at_ms: u64_from_sql(
+                        "SessionExecutionLease",
+                        "expires_at_ms",
+                        row.get(4)?,
+                    )?,
                 })
             },
         )
@@ -3032,8 +3130,17 @@ fn acquire_session_execution_lease_conn(
     now: u64,
     lease_ttl_ms: u64,
 ) -> Result<SessionExecutionLease, StoreError> {
-    let fencing_token = previous_fencing_token.saturating_add(1);
+    let fencing_token = StoreError::checked_monotonic_increment(
+        "session_execution_lease_fencing_token",
+        previous_fencing_token,
+    )?;
+    let sql_fencing_token = sql_monotonic_counter_value(
+        "session_execution_lease_fencing_token",
+        previous_fencing_token,
+        fencing_token,
+    )?;
     let expires_at = now.saturating_add(lease_ttl_ms);
+    let sql_expires_at = sql_counter_value("session_execution_lease_expires_at_ms", expires_at)?;
     conn.execute(
         "INSERT INTO session_execution_leases (
             session_id, lease_owner_id, lease_owner_incarnation_id, lease_owner_liveness_json,
@@ -3054,9 +3161,9 @@ fn acquire_session_execution_lease_conn(
             owner.incarnation_id,
             Option::<&str>::None,
             lease_token,
-            fencing_token as i64,
+            sql_fencing_token,
             now as i64,
-            expires_at as i64
+            sql_expires_at
         ],
     )
     .map_err(sqlite_error)?;

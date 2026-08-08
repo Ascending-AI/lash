@@ -69,9 +69,10 @@ pub(super) fn mutate_enabled(
     };
     ensure_live_revision(existing, expected_revision, None)?;
     if existing.enabled != enabled {
+        let next_revision = next_trigger_revision(existing)?;
         existing.enabled = enabled;
         existing.registrant = actor;
-        existing.revision = existing.revision.saturating_add(1);
+        existing.revision = next_revision;
         existing.updated_at_ms = now;
     }
     let disposition = if enabled {

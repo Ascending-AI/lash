@@ -406,8 +406,9 @@ impl ProcessRegistry for PostgresProcessRegistry {
         .bind(process_id)
         .fetch_optional(&self.pool)
         .await
-        .map(|value| value.map(|value| value as u64))
-        .map_err(plugin_sqlx_error)
+        .map_err(plugin_sqlx_error)?
+        .map(|value| plugin_u64_from_sql("WakeAllocationFloor", "allocation_floor", value))
+        .transpose()
     }
 
     async fn append_event(
@@ -923,7 +924,11 @@ impl ProcessRegistry for PostgresProcessRegistry {
             return Err(registry_transitions::process_no_longer_retained(
                 registry_transitions::ProcessTombstoneStamp {
                     terminal_label: row.get(0),
-                    pruned_at_ms: row.get::<i64, _>(1) as u64,
+                    pruned_at_ms: plugin_u64_from_sql(
+                        "ProcessTombstone",
+                        "pruned_at_ms",
+                        row.get(1),
+                    )?,
                 },
             ));
         }
@@ -1035,7 +1040,11 @@ impl ProcessRegistry for PostgresProcessRegistry {
                     tombstone: serde_json::from_str(&json).map_err(process_decode_error)?,
                 }
             });
-            next_cursor = ProcessChangeCursor::from_store_sequence(change_seq as u64);
+            next_cursor = ProcessChangeCursor::from_store_sequence(plugin_u64_from_sql(
+                "ProcessChange",
+                "change_seq",
+                change_seq,
+            )?);
         }
         Ok((records, next_cursor))
     }
@@ -1277,7 +1286,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
             registry_transitions::ProcessLeaseClaimDecision::AcquireOnRetainedFence => {
                 registry_transitions::next_process_lease_fencing_token(
                     retained_process_lease_fencing_token(&mut tx, process_id).await?,
-                )
+                )?
             }
         };
         let lease =
@@ -1299,13 +1308,13 @@ impl ProcessRegistry for PostgresProcessRegistry {
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
         let current = load_process_lease_tx(&mut tx, process_id).await?;
         let fencing_token =
-            match registry_transitions::decide_process_lease_reclaim(current.as_ref(), now) {
+            match registry_transitions::decide_process_lease_reclaim(current.as_ref(), now)? {
                 registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence => {
                     // Free (or released) lease: acquire on the retained fencing
                     // token like a plain claim would.
                     registry_transitions::next_process_lease_fencing_token(
                         retained_process_lease_fencing_token(&mut tx, process_id).await?,
-                    )
+                    )?
                 }
                 registry_transitions::ProcessLeaseReclaimDecision::AcquireOnObservedFence {
                     fencing_token,

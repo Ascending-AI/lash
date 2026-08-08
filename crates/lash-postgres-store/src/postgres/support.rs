@@ -34,6 +34,81 @@ pub(crate) fn store_sqlx_error(err: sqlx::Error) -> StoreError {
     }
 }
 
+pub(crate) fn u64_from_sql(
+    record_kind: &'static str,
+    field: &'static str,
+    value: i64,
+) -> Result<u64, StoreError> {
+    u64::try_from(value).map_err(|_| StoreError::StoredDataCorrupt {
+        record_kind,
+        message: format!("{field} must be non-negative, got {value}"),
+    })
+}
+
+pub(crate) fn plugin_u64_from_sql(
+    record_kind: &'static str,
+    field: &'static str,
+    value: i64,
+) -> Result<u64, PluginError> {
+    u64::try_from(value).map_err(|_| PluginError::StoredDataCorrupt {
+        record_kind: record_kind.to_string(),
+        message: format!("{field} must be non-negative, got {value}"),
+    })
+}
+
+pub(crate) fn sql_monotonic_counter_value(
+    counter: &'static str,
+    current: u64,
+    next: u64,
+) -> Result<i64, StoreError> {
+    i64::try_from(next).map_err(|_| StoreError::MonotonicCounterOverflow { counter, current })
+}
+
+pub(crate) fn sql_counter_value(counter: &'static str, value: u64) -> Result<i64, StoreError> {
+    i64::try_from(value).map_err(|_| StoreError::MonotonicCounterOverflow {
+        counter,
+        current: value,
+    })
+}
+
+pub(crate) fn sql_session_lease_generation(value: u64) -> Result<i64, StoreError> {
+    sql_counter_value("session_lease_generation", value)
+}
+
+pub(crate) fn sql_claim_fencing_tokens(
+    counter: &'static str,
+    currents: impl IntoIterator<Item = u64>,
+) -> Result<Vec<i64>, StoreError> {
+    currents
+        .into_iter()
+        .map(|current| {
+            let next = StoreError::checked_monotonic_increment(counter, current)?;
+            sql_monotonic_counter_value(counter, current, next)
+        })
+        .collect()
+}
+
+pub(crate) fn plugin_sql_monotonic_counter_value(
+    counter: &'static str,
+    current: u64,
+    value: u64,
+) -> Result<i64, PluginError> {
+    i64::try_from(value).map_err(|_| PluginError::MonotonicCounterOverflow {
+        counter: counter.to_string(),
+        current,
+    })
+}
+
+pub(crate) fn plugin_sql_counter_value(
+    counter: &'static str,
+    value: u64,
+) -> Result<i64, PluginError> {
+    i64::try_from(value).map_err(|_| PluginError::MonotonicCounterOverflow {
+        counter: counter.to_string(),
+        current: value,
+    })
+}
+
 /// Postgres SQLSTATEs that signal transient write contention rather than a hard
 /// failure: serialization failure, deadlock, and lock-acquisition timeout.
 /// These mean the transaction can retry its identical commit unchanged.
@@ -273,7 +348,7 @@ pub(crate) async fn load_session_head_meta_tx(
     )?;
     Ok(Some(SessionHeadMeta::assemble(
         payload,
-        head_revision as u64,
+        u64_from_sql("SessionHeadMeta", "head_revision", head_revision)?,
         checkpoint_ref.map(Into::into),
         leaf_node_id,
     )))

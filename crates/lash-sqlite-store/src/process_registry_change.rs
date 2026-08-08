@@ -79,7 +79,11 @@ pub(crate) fn processes_changed_since_conn(
                 tombstone: serde_json::from_str(&record_json).map_err(process_decode_error)?,
             }
         };
-        next_cursor = ProcessChangeCursor::from_store_sequence(change_seq as u64);
+        next_cursor = ProcessChangeCursor::from_store_sequence(plugin_u64_from_sql(
+            "ProcessChange",
+            "change_seq",
+            change_seq,
+        )?);
         records.push(change);
     }
     Ok((records, next_cursor))

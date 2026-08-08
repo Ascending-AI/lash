@@ -489,21 +489,33 @@ async fn select_effect_row_for_update(
     .fetch_optional(&mut **tx)
     .await
     .map_err(effect_store_error)?;
-    Ok(row.map(stored_effect_row))
+    row.map(stored_effect_row).transpose()
 }
 
-fn stored_effect_row(row: PgRow) -> StoredEffectRow {
-    StoredEffectRow {
+fn stored_effect_row(row: PgRow) -> Result<StoredEffectRow, RuntimeEffectControllerError> {
+    let corrupt = |field, value| {
+        effect_store_message(
+            StoreError::StoredDataCorrupt {
+                record_kind: "RuntimeEffectReplay",
+                message: format!("{field} must be non-negative, got {value}"),
+            }
+            .to_string(),
+        )
+    };
+    let lease_expires_at_ms = row.get::<i64, _>("lease_expires_at_ms");
+    let due_at_ms = row.get::<Option<i64>, _>("due_at_ms");
+    Ok(StoredEffectRow {
         envelope_hash: row.get("envelope_hash"),
         envelope_json: row.get("envelope_json"),
         status: row.get("status"),
         outcome_json: row.get("outcome_json"),
         error_json: row.get("error_json"),
-        lease_expires_at_ms: row.get::<i64, _>("lease_expires_at_ms") as u64,
-        due_at_ms: row
-            .get::<Option<i64>, _>("due_at_ms")
-            .map(|value| value as u64),
-    }
+        lease_expires_at_ms: u64::try_from(lease_expires_at_ms)
+            .map_err(|_| corrupt("lease_expires_at_ms", lease_expires_at_ms))?,
+        due_at_ms: due_at_ms
+            .map(|value| u64::try_from(value).map_err(|_| corrupt("due_at_ms", value)))
+            .transpose()?,
+    })
 }
 
 /// Insert a fresh claim, reporting `false` when a concurrent inserter won.
@@ -573,4 +585,22 @@ fn effect_store_error(err: sqlx::Error) -> RuntimeEffectControllerError {
 
 fn effect_store_message(message: String) -> RuntimeEffectControllerError {
     RuntimeEffectControllerError::new(VOCABULARY.code("store"), message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stored_effect_corruption_is_non_retryable() {
+        let error = effect_store_message(
+            StoreError::StoredDataCorrupt {
+                record_kind: "RuntimeEffectReplay",
+                message: "lease_expires_at_ms must be non-negative, got -1".to_string(),
+            }
+            .to_string(),
+        );
+        assert_eq!(error.code, "postgres_effect_replay_store");
+        assert!(!lash_core::RuntimeErrorCode::from_wire_code(&error.code).is_retryable());
+    }
 }

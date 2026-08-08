@@ -1013,7 +1013,10 @@ async fn commit_operation(
     )
     .map_err(|error| error.to_string())?;
     if stale_head {
-        commit.expected_head_revision = model.head_revision.saturating_add(1);
+        commit.expected_head_revision = model
+            .head_revision
+            .checked_add(1)
+            .expect("generated model head revision must remain in range");
     }
     if let Some(claim) = &work_claim {
         commit = commit.completing_queue_claim(claim.completion());

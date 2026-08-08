@@ -51,12 +51,16 @@ pub(crate) async fn require_process_tx(
     .fetch_optional(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
+    let tombstone = row
+        .map(|row| {
+            Ok::<_, PluginError>(registry_transitions::ProcessTombstoneStamp {
+                terminal_label: row.get(0),
+                pruned_at_ms: plugin_u64_from_sql("ProcessTombstone", "pruned_at_ms", row.get(1))?,
+            })
+        })
+        .transpose()?;
     Err(registry_transitions::absent_process_error(
-        process_id,
-        row.map(|row| registry_transitions::ProcessTombstoneStamp {
-            terminal_label: row.get(0),
-            pruned_at_ms: row.get::<i64, _>(1) as u64,
-        }),
+        process_id, tombstone,
     ))
 }
 
@@ -129,7 +133,7 @@ pub(crate) async fn next_process_change_seq_tx(
     .fetch_one(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
-    Ok(seq as u64)
+    plugin_u64_from_sql("ProcessChangeClock", "current_seq", seq)
 }
 
 pub(crate) async fn load_event_by_key_tx(
@@ -168,7 +172,9 @@ pub(crate) async fn next_process_event_sequence_tx(
     .fetch_one(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
-    let last_sequence = last_sequence.map(|sequence| sequence as u64);
+    let last_sequence = last_sequence
+        .map(|sequence| plugin_u64_from_sql("ProcessEvent", "sequence", sequence))
+        .transpose()?;
     let sender_floor = if let Some(target_session_id) = target_session_id {
         sqlx::query_scalar::<_, i64>(
             "SELECT allocation_floor FROM lash_wake_allocation_floors
@@ -179,7 +185,8 @@ pub(crate) async fn next_process_event_sequence_tx(
         .fetch_optional(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?
-        .map(|floor| floor as u64)
+        .map(|floor| plugin_u64_from_sql("WakeAllocationFloor", "allocation_floor", floor))
+        .transpose()?
     } else {
         None
     };
@@ -371,6 +378,11 @@ pub(crate) async fn acquire_process_lease_tx(
         now,
         lease_ttl_ms,
     );
+    let sql_fencing_token = plugin_sql_monotonic_counter_value(
+        "process_lease_fencing_token",
+        fencing_token.saturating_sub(1),
+        lease.fencing_token,
+    )?;
     sqlx::query(
         "INSERT INTO lash_process_leases (
             process_id, lease_owner_id, lease_owner_incarnation_id,
@@ -392,7 +404,7 @@ pub(crate) async fn acquire_process_lease_tx(
     .bind(&lease.owner.incarnation_id)
     .bind(Option::<&str>::None)
     .bind(&lease.lease_token)
-    .bind(lease.fencing_token as i64)
+    .bind(sql_fencing_token)
     .bind(lease.claimed_at_epoch_ms as i64)
     .bind(lease.expires_at_epoch_ms as i64)
     .execute(&mut **tx)
@@ -412,7 +424,10 @@ pub(crate) async fn retained_process_lease_fencing_token(
     .fetch_optional(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
-    Ok(existing_fence.unwrap_or(0) as u64)
+    existing_fence
+        .map(|value| plugin_u64_from_sql("ProcessLease", "lease_fencing_token", value))
+        .transpose()
+        .map(|value| value.unwrap_or(0))
 }
 
 pub(crate) async fn validate_process_execution_authority_tx(
@@ -471,5 +486,8 @@ pub(crate) async fn process_lease_now_epoch_ms_tx(
             .fetch_one(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
-    Ok(now.max(0) as u64)
+    u64::try_from(now).map_err(|_| PluginError::ClockBeforeUnixEpoch {
+        clock: "Postgres database clock".to_string(),
+        epoch_ms: now,
+    })
 }

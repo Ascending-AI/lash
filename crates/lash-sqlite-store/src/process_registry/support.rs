@@ -22,7 +22,12 @@ pub(super) async fn wake_allocation_floor_for_testing(
                     |row| row.get::<_, i64>(0),
                 )
                 .optional()
-                .map(|value| value.map(|value| value as u64))
+                .map(|value| {
+                    value
+                        .map(|value| u64_from_sql("WakeAllocationFloor", "allocation_floor", value))
+                        .transpose()
+                })
+                .and_then(|value| value)
                 .map_err(process_sqlite_error))
         })
         .await
@@ -30,6 +35,22 @@ pub(super) async fn wake_allocation_floor_for_testing(
 }
 
 impl SqliteProcessRegistry {
+    pub(crate) fn retained_process_lease_fencing_token_conn(
+        conn: &Connection,
+        process_id: &str,
+    ) -> Result<u64, lash_core::PluginError> {
+        conn.query_row(
+            "SELECT lease_fencing_token FROM process_leases WHERE process_id = ?1",
+            params![process_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(process_sqlite_error)?
+        .map(|value| plugin_u64_from_sql("ProcessLease", "lease_fencing_token", value))
+        .transpose()
+        .map(|value| value.unwrap_or(0))
+    }
+
     pub(crate) fn require_process_conn(
         conn: &rusqlite::Connection,
         process_id: &str,
@@ -48,12 +69,18 @@ impl SqliteProcessRegistry {
             .map_err(process_sqlite_error)?;
         Err(registry_transitions::absent_process_error(
             process_id,
-            tombstone.map(|(terminal_label, pruned_at_ms)| {
-                registry_transitions::ProcessTombstoneStamp {
-                    terminal_label,
-                    pruned_at_ms: pruned_at_ms as u64,
-                }
-            }),
+            tombstone
+                .map(|(terminal_label, pruned_at_ms)| {
+                    Ok::<_, lash_core::PluginError>(registry_transitions::ProcessTombstoneStamp {
+                        terminal_label,
+                        pruned_at_ms: plugin_u64_from_sql(
+                            "ProcessTombstone",
+                            "pruned_at_ms",
+                            pruned_at_ms,
+                        )?,
+                    })
+                })
+                .transpose()?,
         ))
     }
 
@@ -272,9 +299,8 @@ impl SqliteProcessRegistry {
         conn.query_row(
             "SELECT current_seq FROM process_change_clock WHERE singleton = 1",
             [],
-            |row| row.get::<_, i64>(0),
+            |row| u64_from_sql("ProcessChangeClock", "current_seq", row.get::<_, i64>(0)?),
         )
-        .map(|seq| seq as u64)
         .map_err(process_sqlite_error)
     }
 
@@ -449,7 +475,9 @@ impl SqliteProcessRegistry {
                 |row| row.get::<_, Option<i64>>(0),
             )
             .map_err(process_sqlite_error)?;
-        let last_sequence = last_sequence.map(|sequence| sequence as u64);
+        let last_sequence = last_sequence
+            .map(|sequence| plugin_u64_from_sql("ProcessEvent", "sequence", sequence))
+            .transpose()?;
         let sender_floor = target_session_id
             .map(|target_session_id| {
                 conn.query_row(
@@ -463,7 +491,8 @@ impl SqliteProcessRegistry {
             })
             .transpose()?
             .flatten()
-            .map(|floor| floor as u64);
+            .map(|floor| plugin_u64_from_sql("WakeAllocationFloor", "allocation_floor", floor))
+            .transpose()?;
         let sequence =
             lash_core::runtime::allocate_process_event_sequence(last_sequence, sender_floor)?;
         Ok((last_sequence, sequence))
@@ -538,6 +567,11 @@ impl SqliteProcessRegistry {
             now,
             lease_ttl_ms,
         );
+        let sql_fencing_token = plugin_sql_monotonic_counter_value(
+            "process_lease_fencing_token",
+            fencing_token.saturating_sub(1),
+            lease.fencing_token,
+        )?;
         conn.execute(
             "INSERT INTO process_leases (
                 process_id, lease_owner_id, lease_owner_incarnation_id,
@@ -559,7 +593,7 @@ impl SqliteProcessRegistry {
                 lease.owner.incarnation_id.as_str(),
                 Option::<&str>::None,
                 lease.lease_token.as_str(),
-                lease.fencing_token as i64,
+                sql_fencing_token,
                 lease.claimed_at_epoch_ms as i64,
                 lease.expires_at_epoch_ms as i64,
             ],

@@ -75,6 +75,72 @@ fn intent_fixture() -> RuntimeCommit {
 }
 
 #[test]
+fn claim_settlement_refuses_foreign_completions_in_both_directions() {
+    let mut commit = intent_fixture();
+    commit.completed_queue_claims = vec![crate::QueuedWorkCompletion {
+        session_id: commit.session_id.clone(),
+        claim_id: "foreign-queue".to_string(),
+        lease_token: "token".to_string(),
+        data: crate::QueuedWorkCompletionData {
+            batch_ids: vec!["batch".to_string()],
+        },
+    }];
+    let queue_error = commit
+        .validate_claim_settlement(&[], &[])
+        .expect_err("foreign queued-work completion must be refused");
+    assert!(matches!(
+        queue_error,
+        StoreError::ForeignQueuedWorkCompletion { ref claim_id, .. }
+            if claim_id == "foreign-queue"
+    ));
+
+    commit.completed_queue_claims.clear();
+    commit.completed_turn_input_claims = vec![crate::TurnInputCompletion {
+        session_id: commit.session_id.clone(),
+        claim_id: "foreign-input".to_string(),
+        lease_token: "token".to_string(),
+        data: crate::TurnInputCompletionData {
+            input_ids: vec!["input".to_string()],
+            applications: Vec::new(),
+        },
+    }];
+    let input_error = commit
+        .validate_claim_settlement(&[], &[])
+        .expect_err("foreign turn-input completion must be refused");
+    assert!(matches!(
+        input_error,
+        StoreError::ForeignTurnInputCompletion { ref claim_id, .. }
+            if claim_id == "foreign-input"
+    ));
+}
+
+#[test]
+fn claim_settlement_refuses_duplicate_completion_count() {
+    let mut commit = intent_fixture();
+    let completion = crate::QueuedWorkCompletion {
+        session_id: commit.session_id.clone(),
+        claim_id: "originating-queue".to_string(),
+        lease_token: "token".to_string(),
+        data: crate::QueuedWorkCompletionData {
+            batch_ids: vec!["batch".to_string()],
+        },
+    };
+    commit.completed_queue_claims = vec![completion.clone(), completion.clone()];
+
+    let error = commit
+        .validate_claim_settlement(&[completion], &[])
+        .expect_err("duplicate queued-work completion must be refused");
+    assert!(matches!(
+        error,
+        StoreError::ClaimSettlementCountMismatch {
+            claim_kind: "queued-work",
+            originating_count: 1,
+            completed_count: 2,
+        }
+    ));
+}
+
+#[test]
 fn first_persisted_state_commit_derives_and_installs_node_ids() {
     let placeholder = "draft-node/v2:first".to_string();
     let mut state = crate::RuntimeSessionState {

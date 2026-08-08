@@ -229,6 +229,37 @@ pub enum StoreError {
         claim_id: String,
     },
     #[error(
+        "runtime commit for session `{session_id}` attempts to settle foreign queued-work claim `{claim_id}`"
+    )]
+    ForeignQueuedWorkCompletion {
+        session_id: String,
+        claim_id: String,
+    },
+    #[error(
+        "runtime commit for session `{session_id}` attempts to settle foreign turn-input claim `{claim_id}`"
+    )]
+    ForeignTurnInputCompletion {
+        session_id: String,
+        claim_id: String,
+    },
+    #[error(
+        "runtime commit has {completed_count} {claim_kind} completions for {originating_count} originating claims"
+    )]
+    ClaimSettlementCountMismatch {
+        claim_kind: &'static str,
+        originating_count: usize,
+        completed_count: usize,
+    },
+    #[error(
+        "store confirmed {confirmed_count} usage identities, but only {staged_count} were staged"
+    )]
+    UnstagedUsageConfirmation {
+        confirmed_count: usize,
+        staged_count: usize,
+    },
+    #[error("monotonic counter `{counter}` cannot advance past {current}")]
+    MonotonicCounterOverflow { counter: &'static str, current: u64 },
+    #[error(
         "pending turn input source_key `{source_key}` for session `{session_id}` is already bound to input `{existing_input_id}` with different submitted content"
     )]
     PendingTurnInputSourceKeyConflict {
@@ -313,6 +344,16 @@ pub enum StoreError {
 }
 
 impl StoreError {
+    /// Advances a fence, generation, sequence, or revision without allowing
+    /// wraparound or a silent no-op at the numeric ceiling.
+    #[doc(hidden)]
+    pub fn checked_monotonic_increment(counter: &'static str, current: u64) -> Result<u64, Self> {
+        if current >= i64::MAX as u64 {
+            return Err(Self::MonotonicCounterOverflow { counter, current });
+        }
+        Ok(current + 1)
+    }
+
     /// Stable name of this error's enum variant.
     ///
     /// The match is deliberately exhaustive inside `lash-core` so adding a
@@ -354,6 +395,11 @@ impl StoreError {
             Self::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded",
             Self::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim",
             Self::UnsettledTurnInputClaim { .. } => "UnsettledTurnInputClaim",
+            Self::ForeignQueuedWorkCompletion { .. } => "ForeignQueuedWorkCompletion",
+            Self::ForeignTurnInputCompletion { .. } => "ForeignTurnInputCompletion",
+            Self::ClaimSettlementCountMismatch { .. } => "ClaimSettlementCountMismatch",
+            Self::UnstagedUsageConfirmation { .. } => "UnstagedUsageConfirmation",
+            Self::MonotonicCounterOverflow { .. } => "MonotonicCounterOverflow",
             Self::PendingTurnInputSourceKeyConflict { .. } => "PendingTurnInputSourceKeyConflict",
             Self::ProcessWakeSequenceRewound { .. } => "ProcessWakeSequenceRewound",
             Self::SessionExecutionLeaseExpired { .. } => "SessionExecutionLeaseExpired",

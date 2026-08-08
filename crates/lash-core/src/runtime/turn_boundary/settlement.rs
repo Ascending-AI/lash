@@ -52,9 +52,27 @@ pub(super) fn drop_superseded_recovered_queue_settlement(
     claim_generations.get(claim_id).is_some_and(|stale_generation| {
         let recovered = current_session_lease_generation
             .is_some_and(|current| *stale_generation < current);
-        let removed = recovered
-            && drop_queue_settlement_row(completed_claims, claim_id, row_id)
-            && drop_queue_settlement_row(originating_claims, claim_id, row_id);
+        let drop_completed = recovered
+            && completed_claims.iter().any(|claim| {
+                claim.claim_id == *claim_id
+                    && claim
+                        .batch_ids
+                        .iter()
+                        .any(|id| id.as_str() == row_id.as_ref())
+            });
+        let drop_originating = recovered
+            && originating_claims.iter().any(|claim| {
+                claim.claim_id == *claim_id
+                    && claim
+                        .batch_ids
+                        .iter()
+                        .any(|id| id.as_str() == row_id.as_ref())
+            });
+        let removed = drop_completed && drop_originating;
+        if removed {
+            drop_queue_settlement_row(completed_claims, claim_id, row_id);
+            drop_queue_settlement_row(originating_claims, claim_id, row_id);
+        }
         if removed {
             tracing::warn!(
                 target: "lash_core::claim_settlement",
@@ -97,9 +115,27 @@ pub(super) fn drop_superseded_recovered_turn_input_settlement(
     claim_generations.get(claim_id).is_some_and(|stale_generation| {
         let recovered = current_session_lease_generation
             .is_some_and(|current| *stale_generation < current);
-        let removed = recovered
-            && drop_turn_input_settlement_row(completed_claims, claim_id, row_id)
-            && drop_turn_input_settlement_row(originating_claims, claim_id, row_id);
+        let drop_completed = recovered
+            && completed_claims.iter().any(|claim| {
+                claim.claim_id == *claim_id
+                    && claim
+                        .input_ids
+                        .iter()
+                        .any(|id| id.as_str() == row_id.as_ref())
+            });
+        let drop_originating = recovered
+            && originating_claims.iter().any(|claim| {
+                claim.claim_id == *claim_id
+                    && claim
+                        .input_ids
+                        .iter()
+                        .any(|id| id.as_str() == row_id.as_ref())
+            });
+        let removed = drop_completed && drop_originating;
+        if removed {
+            drop_turn_input_settlement_row(completed_claims, claim_id, row_id);
+            drop_turn_input_settlement_row(originating_claims, claim_id, row_id);
+        }
         if removed {
             tracing::warn!(
                 target: "lash_core::claim_settlement",

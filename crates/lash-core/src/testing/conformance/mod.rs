@@ -25,6 +25,7 @@ mod attachment_owner;
 mod attachment_store;
 mod await_event_cold;
 mod effect_host;
+mod fence_integrity;
 mod helpers;
 mod live_replay;
 mod observer_intent;
@@ -51,6 +52,7 @@ pub use attachment_owner::*;
 pub use attachment_store::*;
 pub use await_event_cold::*;
 pub use effect_host::*;
+pub use fence_integrity::*;
 pub use helpers::*;
 pub use live_replay::*;
 pub use observer_intent::*;
@@ -101,6 +103,93 @@ use lash_sansio::{AttachmentCreateMeta, AttachmentTypeMetadata, MediaType};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct InMemoryFenceIntegrityInjector {
+        runtime: Arc<crate::InMemorySessionStore>,
+        triggers: Arc<crate::InMemoryTriggerStore>,
+    }
+
+    #[async_trait::async_trait]
+    impl FenceIntegrityInjector for InMemoryFenceIntegrityInjector {
+        async fn inject_raw_value(&self, target: &FenceIntegrityTarget, value: i64) {
+            match target {
+                FenceIntegrityTarget::QueuedWorkClaimFence { batch_id } => {
+                    self.runtime.inject_raw_counter_for_testing(
+                        "queued_work_claim_fencing_token",
+                        batch_id,
+                        value,
+                    )
+                }
+                FenceIntegrityTarget::SessionHeadRevision { session_id } => self
+                    .runtime
+                    .inject_raw_counter_for_testing("session_head_revision", session_id, value),
+                FenceIntegrityTarget::SessionLeaseFencingToken { session_id } => {
+                    self.runtime.inject_raw_counter_for_testing(
+                        "session_lease_fencing_token",
+                        session_id,
+                        value,
+                    )
+                }
+                FenceIntegrityTarget::TriggerRevision { subscription_id } => self
+                    .triggers
+                    .inject_revision_for_testing(subscription_id, value),
+            }
+        }
+
+        async fn observe_raw_value(
+            &self,
+            target: &FenceIntegrityTarget,
+        ) -> FenceIntegrityObservation {
+            let snapshot = match target {
+                FenceIntegrityTarget::QueuedWorkClaimFence { batch_id } => self
+                    .runtime
+                    .raw_counter_snapshot_for_testing("queued_work_claim_fencing_token", batch_id),
+                FenceIntegrityTarget::SessionHeadRevision { session_id } => self
+                    .runtime
+                    .raw_counter_snapshot_for_testing("session_head_revision", session_id),
+                FenceIntegrityTarget::SessionLeaseFencingToken { session_id } => self
+                    .runtime
+                    .raw_counter_snapshot_for_testing("session_lease_fencing_token", session_id),
+                FenceIntegrityTarget::TriggerRevision { subscription_id } => {
+                    self.triggers.revision_snapshot_for_testing(subscription_id)
+                }
+            };
+            let value = match target {
+                FenceIntegrityTarget::TriggerRevision { .. } => {
+                    serde_json::from_str::<serde_json::Value>(&snapshot)
+                        .expect("decode in-memory trigger snapshot")["revision"]
+                        .as_i64()
+                        .expect("trigger revision is signed-domain compatible")
+                }
+                _ => snapshot
+                    .split(':')
+                    .next_back()
+                    .filter(|_| snapshot.starts_with("defect:"))
+                    .or_else(|| snapshot.split(':').next())
+                    .expect("counter snapshot value")
+                    .parse()
+                    .expect("parse counter snapshot value"),
+            };
+            FenceIntegrityObservation {
+                value,
+                mutation_fingerprint: snapshot,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn in_memory_fence_integrity_conformance() {
+        fence_integrity_conformance(|_| async {
+            let runtime = Arc::new(crate::InMemorySessionStore::new());
+            let triggers = Arc::new(crate::InMemoryTriggerStore::default());
+            FenceIntegrityHandles {
+                runtime: Arc::clone(&runtime) as Arc<dyn crate::RuntimePersistence>,
+                triggers: Arc::clone(&triggers) as Arc<dyn crate::TriggerStore>,
+                injector: Arc::new(InMemoryFenceIntegrityInjector { runtime, triggers }),
+            }
+        })
+        .await;
+    }
 
     #[tokio::test]
     async fn in_memory_attachment_store_satisfies_conformance() {

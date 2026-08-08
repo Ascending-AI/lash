@@ -53,7 +53,10 @@ impl InMemorySessionStore {
                 allocation_floor,
             });
         }
-        *next_seq = next_seq.saturating_add(1);
+        *next_seq = crate::StoreError::checked_monotonic_increment(
+            "queued_work_enqueue_sequence",
+            *next_seq,
+        )?;
         let batch_id = format!("recording-qwb-{next_seq}");
         let stored = crate::QueuedWorkBatch {
             batch_id: batch_id.clone(),
@@ -288,8 +291,17 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         {
             return Ok(None);
         }
+        let next_fencing_tokens = indices
+            .iter()
+            .map(|index| {
+                crate::StoreError::checked_monotonic_increment(
+                    "queued_work_claim_fencing_token",
+                    queued[*index].claim_fencing_token,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let first = &queued[indices[0]];
-        let fencing_token = first.claim_fencing_token.saturating_add(1);
+        let fencing_token = next_fencing_tokens[0];
         let claim_id = crate::store::queued_work::derive_claim_id(
             crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
             first.batch.enqueue_seq,
@@ -300,12 +312,12 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             session_id, owner.owner_id, owner.incarnation_id
         );
         let mut batches = Vec::new();
-        for index in indices {
+        for (index, next_fencing_token) in indices.into_iter().zip(next_fencing_tokens) {
             let entry = &mut queued[index];
             entry.claim_id = Some(claim_id.clone());
             entry.claim_token = Some(lease_token.clone());
             entry.claim_owner = Some(owner.clone());
-            entry.claim_fencing_token = entry.claim_fencing_token.saturating_add(1);
+            entry.claim_fencing_token = next_fencing_token;
             entry.claim_session_lease_generation = generation;
             batches.push(entry.batch.clone());
         }
@@ -372,6 +384,8 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         &self,
         session_id: &str,
     ) -> Result<Vec<crate::QueuedWorkBatch>, crate::store::StoreError> {
+        #[cfg(test)]
+        self.refuse_injected_counter_defect("queued_work_claim_fencing_token")?;
         let mut batches = self
             .queued_work
             .lock()
@@ -395,6 +409,8 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         &self,
         session_id: &str,
     ) -> Result<Vec<crate::QueuedWorkBatch>, crate::store::StoreError> {
+        #[cfg(test)]
+        self.refuse_injected_counter_defect("queued_work_claim_fencing_token")?;
         let _transaction = self
             .write_transaction
             .lock()

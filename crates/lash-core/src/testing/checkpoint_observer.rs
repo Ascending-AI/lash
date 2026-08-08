@@ -852,7 +852,9 @@ mod tests {
             .commit_runtime_state(commit)
             .await
             .expect("commit recorded usage");
-        staged.confirm_identities(&result.committed_usage_delta_identities);
+        staged
+            .confirm_identities(&result.committed_usage_delta_identities)
+            .expect("confirm committed usage identities");
 
         let write = collector.events().pop().expect("observed accepted commit");
         let mut transcript = Transcript::new();

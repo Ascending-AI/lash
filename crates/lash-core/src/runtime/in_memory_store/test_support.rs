@@ -41,6 +41,130 @@ impl SessionExecutionLeaseReleaseGate {
 }
 
 impl InMemorySessionStore {
+    pub(super) fn refuse_injected_counter_defect(
+        &self,
+        field: &'static str,
+    ) -> Result<(), crate::StoreError> {
+        if let Some(value) = self
+            .raw_counter_defects
+            .lock()
+            .expect("lock raw counter defects")
+            .get(field)
+            .copied()
+        {
+            let (record_kind, stored_field) = match field {
+                "queued_work_claim_fencing_token" => ("QueuedWorkBatch", "claim_fencing_token"),
+                "session_head_revision" => ("SessionHeadMeta", "head_revision"),
+                "session_lease_fencing_token" => ("SessionExecutionLease", "fencing_token"),
+                _ => ("InMemoryDurableRecord", field),
+            };
+            return Err(crate::StoreError::StoredDataCorrupt {
+                record_kind,
+                message: format!("{stored_field} must be non-negative, got {value}"),
+            });
+        }
+        Ok(())
+    }
+
+    pub(crate) fn inject_raw_counter_for_testing(
+        &self,
+        field: &'static str,
+        record_id: &str,
+        value: i64,
+    ) {
+        if value < 0 {
+            self.raw_counter_defects
+                .lock()
+                .expect("lock raw counter defects")
+                .insert(field.to_string(), value);
+            return;
+        }
+        let value = value as u64;
+        match field {
+            "queued_work_claim_fencing_token" => {
+                let mut queued = self.queued_work.lock().expect("lock queued work");
+                let row = queued
+                    .iter_mut()
+                    .find(|row| row.batch.batch_id == record_id)
+                    .expect("queued-work counter injection row");
+                row.claim_fencing_token = value;
+            }
+            "session_head_revision" => {
+                self.session_head_meta
+                    .lock()
+                    .expect("lock session head")
+                    .as_mut()
+                    .expect("session-head counter injection row")
+                    .head_revision = value;
+            }
+            "session_lease_fencing_token" => {
+                self.session_execution_leases
+                    .lock()
+                    .expect("lock session leases")
+                    .get_mut(record_id)
+                    .expect("session-lease counter injection row")
+                    .fencing_token = value;
+            }
+            other => panic!("unsupported in-memory raw counter injection field: {other}"),
+        }
+    }
+
+    pub(crate) fn raw_counter_snapshot_for_testing(
+        &self,
+        field: &'static str,
+        record_id: &str,
+    ) -> String {
+        if let Some(value) = self
+            .raw_counter_defects
+            .lock()
+            .expect("lock raw counter defects")
+            .get(field)
+        {
+            return format!("defect:{field}:{value}");
+        }
+        match field {
+            "queued_work_claim_fencing_token" => {
+                let queued = self.queued_work.lock().expect("lock queued work");
+                let row = queued
+                    .iter()
+                    .find(|row| row.batch.batch_id == record_id)
+                    .expect("queued-work counter snapshot row");
+                format!(
+                    "{}:{:?}:{:?}:{}",
+                    row.claim_fencing_token,
+                    row.claim_id,
+                    row.claim_token,
+                    row.claim_session_lease_generation
+                )
+            }
+            "session_head_revision" => {
+                let head = self.session_head_meta.lock().expect("lock session head");
+                let row = head.as_ref().expect("session-head counter snapshot row");
+                format!(
+                    "{}:{:?}:{:?}",
+                    row.head_revision, row.checkpoint_ref, row.leaf_node_id
+                )
+            }
+            "session_lease_fencing_token" => {
+                let leases = self
+                    .session_execution_leases
+                    .lock()
+                    .expect("lock session leases");
+                let row = leases
+                    .get(record_id)
+                    .expect("session-lease counter snapshot row");
+                format!(
+                    "{}:{:?}:{:?}:{}:{}",
+                    row.fencing_token,
+                    row.owner,
+                    row.lease_token,
+                    row.claimed_at_epoch_ms,
+                    row.expires_at_epoch_ms
+                )
+            }
+            other => panic!("unsupported in-memory raw counter snapshot field: {other}"),
+        }
+    }
     pub(super) fn run_claim_after_lease_validation_hook(&self) {
         let hook = self
             .claim_after_lease_validation_hook
@@ -342,6 +466,63 @@ mod tests {
             0,
             "budget validation must reject before the backend transaction boundary"
         );
+    }
+
+    #[test]
+    fn queued_work_claim_refuses_exhausted_in_memory_fence() {
+        let store = super::super::InMemorySessionStore::new();
+        store.queued_work.lock().expect("lock queued work").push(
+            super::super::InMemoryQueuedBatch {
+                batch: QueuedWorkBatch {
+                    batch_id: "exhausted-batch".to_string(),
+                    session_id: "session".to_string(),
+                    enqueue_seq: 1,
+                    source_key: None,
+                    delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
+                    slot_policy: SlotPolicy::Exclusive,
+                    merge_key: MergeKey::Never,
+                    available_at_ms: 0,
+                    enqueued_at_ms: 0,
+                    items: vec![crate::runtime::QueuedWorkItem {
+                        item_id: "exhausted-item".to_string(),
+                        payload: crate::runtime::QueuedWorkPayload::agent_frame_task(
+                            "frame", "task", None,
+                        ),
+                    }],
+                },
+                claim_id: None,
+                claim_token: None,
+                claim_owner: None,
+                claim_fencing_token: i64::MAX as u64,
+                claim_session_lease_generation: 0,
+            },
+        );
+        let owner = crate::LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
+        let authority = crate::SessionExecutionLeaseAuthority {
+            session_id: "session".to_string(),
+            owner: owner.clone(),
+            lease_token: "session-lease".to_string(),
+            fencing_token: 1,
+        };
+
+        let error = store
+            .claim_ready_queued_work_after_lease_validation(
+                "session",
+                &authority,
+                &owner,
+                super::super::InMemoryQueuedWorkClaimKind::TurnWork {
+                    boundary: crate::QueuedWorkClaimBoundary::Idle,
+                    max_batches: 1,
+                },
+            )
+            .expect_err("exhausted in-memory fence must refuse");
+        assert!(matches!(
+            error,
+            StoreError::MonotonicCounterOverflow {
+                counter: "queued_work_claim_fencing_token",
+                current,
+            } if current == i64::MAX as u64
+        ));
     }
 
     #[tokio::test]

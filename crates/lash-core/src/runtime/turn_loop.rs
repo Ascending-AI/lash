@@ -349,9 +349,9 @@ impl CommittedTurn {
         runtime: &mut LashRuntime,
         trace_turn_id: &str,
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
-    ) -> PostCommitDelivery {
+    ) -> Result<PostCommitDelivery, crate::StoreError> {
         let (enqueued_queue_batches, confirmed_usage) = self.accepted.into_parts();
-        self.staged_usage.confirm_identities(&confirmed_usage);
+        self.staged_usage.confirm_identities(&confirmed_usage)?;
         if self.release_session_execution_lease
             && let Some(lease) = session_execution_lease
         {
@@ -366,12 +366,12 @@ impl CommittedTurn {
         };
         runtime.last_committed_observation_turn =
             Some((observation_revision, trace_turn_id.to_string()));
-        PostCommitDelivery {
+        Ok(PostCommitDelivery {
             turn: self.turn,
             events: self.events,
             enqueued_queue_batches,
             post_commit_delivery_failed: false,
-        }
+        })
     }
 }
 
@@ -1067,7 +1067,9 @@ impl LashRuntime {
         };
         self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
         self.mark_phase_begin(CommittedTurn::RUNTIME_PHASE);
-        let mut delivery = committed.adopt(self, &trace_turn_id, session_execution_lease);
+        let mut delivery = committed
+            .adopt(self, &trace_turn_id, session_execution_lease)
+            .map_err(runtime_error_from_store_commit)?;
         self.mark_phase_end(CommittedTurn::RUNTIME_PHASE);
         self.mark_phase_begin(PostCommitDelivery::RUNTIME_PHASE);
 

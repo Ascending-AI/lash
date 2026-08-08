@@ -38,6 +38,28 @@ pub enum PluginError {
         /// Count carried by the retry, when present.
         attempted: Option<u64>,
     },
+    /// A durable plugin-owned record contained a value outside its declared
+    /// representation. Retrying cannot repair the stored bytes.
+    #[error("stored {record_kind} data is corrupt: {message}")]
+    StoredDataCorrupt {
+        /// Stable name of the durable record whose payload was unreadable.
+        record_kind: String,
+        /// Backend diagnostic describing the malformed field or payload.
+        message: String,
+    },
+    /// A store response confirmed usage identities outside the set staged by
+    /// this operation. Applying it would discard unrelated usage.
+    #[error(
+        "store confirmed {confirmed_count} usage identities, but only {staged_count} were staged"
+    )]
+    UnstagedUsageConfirmation {
+        confirmed_count: usize,
+        staged_count: usize,
+    },
+    /// A backend-owned authoritative clock produced a value before the Unix
+    /// epoch, outside the runtime clock contract.
+    #[error("{clock} returned a pre-Unix-epoch millisecond value: {epoch_ms}")]
+    ClockBeforeUnixEpoch { clock: String, epoch_ms: i64 },
     #[error("process handle `{process_id}` is not live or visible in this session")]
     ProcessNotVisible { process_id: String },
     #[error(transparent)]
@@ -55,6 +77,8 @@ pub enum PluginError {
     },
     #[error("process lease for `{process_id}` is missing or expired (superseded)")]
     ProcessLeaseSuperseded { process_id: String },
+    #[error("monotonic counter `{counter}` cannot advance past {current}")]
+    MonotonicCounterOverflow { counter: String, current: u64 },
     #[error(
         "process outcome is no longer retained (terminal state `{terminal_label}`, pruned at {pruned_at_ms}ms)"
     )]

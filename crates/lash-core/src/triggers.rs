@@ -1035,6 +1035,13 @@ pub enum TriggerOperationError {
     },
     #[error("trigger subscription request is invalid: {message}")]
     Invalid { message: String },
+    #[error(
+        "trigger subscription `{subscription_key}` revision cannot advance past {current_revision}"
+    )]
+    RevisionOverflow {
+        subscription_key: String,
+        current_revision: u64,
+    },
     #[error("trigger subscription operation failed: {message}")]
     Store { message: String },
 }
@@ -1048,6 +1055,29 @@ impl From<PluginError> for TriggerOperationError {
 }
 
 pub type TriggerEffectResult = Result<TriggerCommandOutcome, TriggerOperationError>;
+
+pub fn next_trigger_revision(
+    record: &TriggerSubscriptionRecord,
+) -> Result<u64, TriggerOperationError> {
+    if record.revision >= i64::MAX as u64 {
+        return Err(TriggerOperationError::RevisionOverflow {
+            subscription_key: record.subscription_key.clone(),
+            current_revision: record.revision,
+        });
+    }
+    Ok(record.revision + 1)
+}
+
+#[doc(hidden)]
+pub fn next_trigger_store_revision(record: &TriggerSubscriptionRecord) -> Result<u64, PluginError> {
+    if record.revision >= i64::MAX as u64 {
+        return Err(PluginError::MonotonicCounterOverflow {
+            counter: "trigger_subscription_revision".to_string(),
+            current: record.revision,
+        });
+    }
+    Ok(record.revision + 1)
+}
 
 // Measured 112 B on rustc 1.97.0, x86_64-unknown-linux-gnu (FIG-595).
 const _: () = assert!(std::mem::size_of::<TriggerEffectResult>() <= 144);

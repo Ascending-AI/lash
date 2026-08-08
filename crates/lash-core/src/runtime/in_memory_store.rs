@@ -168,6 +168,8 @@ pub struct InMemorySessionStore {
     #[cfg(test)]
     session_execution_lease_release_attempt_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
+    raw_counter_defects: Mutex<HashMap<String, i64>>,
+    #[cfg(test)]
     abandoned_queued_work_claim_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     abandoned_turn_input_claim_count: std::sync::atomic::AtomicUsize,
@@ -269,6 +271,8 @@ impl InMemorySessionStore {
             session_execution_lease_release_gate: Mutex::new(None),
             #[cfg(test)]
             session_execution_lease_release_attempt_count: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            raw_counter_defects: Mutex::new(HashMap::new()),
             #[cfg(test)]
             abandoned_queued_work_claim_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
@@ -378,13 +382,16 @@ impl InMemorySessionStore {
         current: &mut InMemorySessionExecutionLease,
         now: u64,
         lease_ttl_ms: u64,
-    ) -> crate::SessionExecutionLease {
-        current.fencing_token = current.fencing_token.saturating_add(1);
+    ) -> Result<crate::SessionExecutionLease, crate::StoreError> {
+        current.fencing_token = crate::StoreError::checked_monotonic_increment(
+            "session_execution_lease_fencing_token",
+            current.fencing_token,
+        )?;
         current.owner = Some(owner.clone());
         current.lease_token = Some(lease_token.to_string());
         current.claimed_at_epoch_ms = now;
         current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
-        Self::in_memory_session_execution_lease(session_id, current)
+        Ok(Self::in_memory_session_execution_lease(session_id, current))
     }
 
     fn queued_batch_work_class(
@@ -488,9 +495,22 @@ impl InMemorySessionStore {
         if selected_len == 0 {
             return Ok(None);
         }
-        let first_index = claimable_indices[0];
+        let selected_indices = claimable_indices
+            .into_iter()
+            .take(selected_len)
+            .collect::<Vec<_>>();
+        let next_fencing_tokens = selected_indices
+            .iter()
+            .map(|index| {
+                crate::StoreError::checked_monotonic_increment(
+                    "queued_work_claim_fencing_token",
+                    queued[*index].claim_fencing_token,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let first_index = selected_indices[0];
         let first = queued[first_index].batch.clone();
-        let fencing_token = queued[first_index].claim_fencing_token.saturating_add(1);
+        let fencing_token = next_fencing_tokens[0];
         let claim_id = crate::store::queued_work::derive_claim_id(
             crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
             first.enqueue_seq,
@@ -501,12 +521,12 @@ impl InMemorySessionStore {
             session_id, owner.owner_id, owner.incarnation_id
         );
         let mut batches = Vec::new();
-        for index in claimable_indices.into_iter().take(selected_len) {
+        for (index, next_fencing_token) in selected_indices.into_iter().zip(next_fencing_tokens) {
             let entry = &mut queued[index];
             entry.claim_id = Some(claim_id.clone());
             entry.claim_token = Some(lease_token.clone());
             entry.claim_owner = Some(owner.clone());
-            entry.claim_fencing_token = entry.claim_fencing_token.saturating_add(1);
+            entry.claim_fencing_token = next_fencing_token;
             entry.claim_session_lease_generation = generation;
             batches.push(entry.batch.clone());
         }
@@ -603,7 +623,16 @@ impl InMemorySessionStore {
         let Some(first_index) = selected_indices.first().copied() else {
             return Ok(None);
         };
-        let fencing_token = pending[first_index].claim_fencing_token.saturating_add(1);
+        let next_fencing_tokens = selected_indices
+            .iter()
+            .map(|index| {
+                crate::StoreError::checked_monotonic_increment(
+                    "turn_input_claim_fencing_token",
+                    pending[*index].claim_fencing_token,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let fencing_token = next_fencing_tokens[0];
         let claim_id = crate::store::queued_work::derive_claim_id(
             crate::store::queued_work::ClaimIdDialect::RecordingTurnInput,
             pending[first_index].input.enqueue_seq,
@@ -614,12 +643,12 @@ impl InMemorySessionStore {
             session_id, owner.owner_id, owner.incarnation_id
         );
         let mut inputs = Vec::new();
-        for index in selected_indices {
+        for (index, next_fencing_token) in selected_indices.into_iter().zip(next_fencing_tokens) {
             let entry = &mut pending[index];
             entry.claim_id = Some(claim_id.clone());
             entry.claim_token = Some(lease_token.clone());
             entry.claim_owner = Some(owner.clone());
-            entry.claim_fencing_token = entry.claim_fencing_token.saturating_add(1);
+            entry.claim_fencing_token = next_fencing_token;
             entry.claim_session_lease_generation = generation;
             if matches!(mode, crate::TurnInputClaimMode::ActiveTurn { .. }) {
                 entry.input.state = crate::TurnInputState::Accepted;
@@ -710,6 +739,8 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
     async fn load_session(
         &self,
     ) -> Result<Option<crate::store::PersistedSessionRead>, crate::store::StoreError> {
+        #[cfg(test)]
+        self.refuse_injected_counter_defect("session_head_revision")?;
         #[cfg(test)]
         let load_call = self
             .load_session_count

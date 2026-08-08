@@ -444,8 +444,16 @@ impl AttachmentManifest for Store {
                             attachment_id: AttachmentId::new(id),
                             session_id,
                             canonical_uri,
-                            intent_at_epoch_ms: intent_at_ms as u64,
-                            committed_at_epoch_ms: committed_at_ms.map(|v| v as u64),
+                            intent_at_epoch_ms: u64_from_sql(
+                                "AttachmentManifest",
+                                "intent_at_ms",
+                                intent_at_ms,
+                            )?,
+                            committed_at_epoch_ms: committed_at_ms
+                                .map(|value| {
+                                    u64_from_sql("AttachmentManifest", "committed_at_ms", value)
+                                })
+                                .transpose()?,
                             owner_kind: match owner_kind.as_deref() {
                                 Some("turn") => Some(AttachmentOwnerKind::Turn),
                                 Some("process") => Some(AttachmentOwnerKind::Process),

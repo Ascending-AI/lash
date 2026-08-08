@@ -188,9 +188,11 @@ impl UsageCapability {
             err => crate::PluginError::Session(err.to_string()),
         })?;
         let confirmed_usage = result.committed_usage_delta_identities.clone();
+        staged
+            .confirm_identities(&confirmed_usage)
+            .map_err(plugin_error_from_usage_confirmation)?;
         state.apply_persisted_commit_result(result);
         state.mark_node_ids_persisted(persisted_node_ids);
-        staged.confirm_identities(&confirmed_usage);
         Ok(())
     }
 }
@@ -205,7 +207,11 @@ impl StagedTokenLedger {
         &self.deltas
     }
 
-    pub(crate) fn confirm_identities(self, confirmed: &[crate::store::RuntimeUsageDeltaIdentity]) {
+    pub(crate) fn confirm_identities(
+        self,
+        confirmed: &[crate::store::RuntimeUsageDeltaIdentity],
+    ) -> Result<(), crate::StoreError> {
+        let confirmed_count = confirmed.len();
         let confirmed = confirmed
             .iter()
             .cloned()
@@ -214,12 +220,43 @@ impl StagedTokenLedger {
             .ledger
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
+        let staged = ledger
+            .iter()
+            .filter_map(|pending| pending.identity.clone())
+            .collect::<std::collections::HashSet<_>>();
+        let staged_count = confirmed
+            .iter()
+            .filter(|identity| staged.contains(*identity))
+            .count();
+        let confirmations_are_unique = confirmed.len() == confirmed_count;
+        let confirmations_are_staged = confirmed.iter().all(|identity| staged.contains(identity));
+        if !confirmations_are_unique || !confirmations_are_staged || staged_count != confirmed_count
+        {
+            return Err(crate::StoreError::UnstagedUsageConfirmation {
+                confirmed_count,
+                staged_count,
+            });
+        }
         ledger.retain(|pending| {
             pending
                 .identity
                 .as_ref()
                 .is_none_or(|identity| !confirmed.contains(identity))
         });
+        Ok(())
+    }
+}
+
+pub(super) fn plugin_error_from_usage_confirmation(error: crate::StoreError) -> crate::PluginError {
+    match error {
+        crate::StoreError::UnstagedUsageConfirmation {
+            confirmed_count,
+            staged_count,
+        } => crate::PluginError::UnstagedUsageConfirmation {
+            confirmed_count,
+            staged_count,
+        },
+        error => crate::PluginError::Session(error.to_string()),
     }
 }
 
@@ -538,10 +575,38 @@ mod staging_tests {
             .iter()
             .map(|delta| delta.identity.clone())
             .collect::<Vec<_>>();
-        staged.confirm_identities(&identities);
+        staged
+            .confirm_identities(&identities)
+            .expect("confirm staged identities");
         let pending = ledger.lock().unwrap_or_else(|poison| poison.into_inner());
         assert_eq!(pending.len(), 1);
         assert!(pending[0].identity.is_none());
         assert_eq!(pending[0].usage.input_tokens, 7);
+    }
+
+    #[test]
+    fn confirmation_refuses_unstaged_identity_without_removing_staged_usage() {
+        let ledger = Arc::new(std::sync::Mutex::new(vec![
+            PendingTokenLedgerEntry::unstaged(entry(5)),
+        ]));
+        let staged =
+            stage_token_ledger_shared(&ledger, &operation("unstaged")).expect("stage usage");
+        let staged_identity = staged.deltas()[0].identity.clone();
+        let mut foreign_identity = staged_identity.clone();
+        foreign_identity.entry_ordinal += 1;
+
+        let error = staged
+            .confirm_identities(&[staged_identity, foreign_identity])
+            .expect_err("foreign confirmation must be refused");
+        assert!(matches!(
+            error,
+            crate::StoreError::UnstagedUsageConfirmation {
+                confirmed_count: 2,
+                staged_count: 1,
+            }
+        ));
+        let pending = ledger.lock().expect("pending usage ledger");
+        assert_eq!(pending.len(), 1);
+        assert!(pending[0].identity.is_some());
     }
 }

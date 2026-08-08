@@ -231,6 +231,64 @@ async fn malformed_durable_rows_surface_typed_corruption() {
 }
 
 #[tokio::test]
+async fn negative_and_exhausted_queued_work_fences_refuse_with_typed_errors() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("fence-corrupt.db");
+    let store = Store::open(&path).await.expect("open store");
+    let session_id = "fence-corrupt";
+    let owner = LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
+    let lease = store
+        .try_claim_session_execution_lease_with_token(
+            session_id,
+            &owner,
+            &lash_core::LeaseClaimNonce::new(),
+            120_000,
+        )
+        .await
+        .expect("claim session lease")
+        .acquired()
+        .expect("session lease acquired");
+    let batch = store
+        .enqueue_queued_work(lash_core::runtime::QueuedWorkBatchDraft::new(
+            session_id,
+            lash_core::DeliveryPolicy::EarliestSafeBoundary,
+            lash_core::SlotPolicy::Exclusive,
+            vec![lash_core::runtime::QueuedWorkPayload::session_command(
+                lash_core::runtime::SessionCommand::RefreshToolCatalog {
+                    reason: "fence test".to_string(),
+                },
+            )],
+        ))
+        .await
+        .expect("enqueue queued work");
+    let raw = rusqlite::Connection::open(&path).expect("open raw connection");
+
+    raw.execute(
+        "UPDATE queued_work_batches SET claim_fencing_token = -1 WHERE batch_id = ?1",
+        params![batch.batch_id],
+    )
+    .expect("inject negative fence");
+    assert_corrupt(store.list_queued_work(session_id).await, "QueuedWorkBatch");
+
+    raw.execute(
+        "UPDATE queued_work_batches SET claim_fencing_token = ?1 WHERE batch_id = ?2",
+        params![i64::MAX, batch.batch_id],
+    )
+    .expect("seed exhausted fence");
+    let error = store
+        .claim_leading_ready_session_command(session_id, &lease.authority(), &owner)
+        .await
+        .expect_err("exhausted SQL fence must refuse");
+    assert!(matches!(
+        error,
+        StoreError::MonotonicCounterOverflow {
+            counter: "queued_work_claim_fencing_token",
+            current,
+        } if current == i64::MAX as u64
+    ));
+}
+
+#[tokio::test]
 async fn closed_connection_surfaces_storage_failure_for_every_read_family() {
     let store = Store::memory().await.expect("open store");
     store.bind_session("closed").expect("bind store");

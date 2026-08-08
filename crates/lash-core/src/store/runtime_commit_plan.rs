@@ -389,7 +389,10 @@ impl RuntimeCommitPlanner {
                 .map_err(StoreError::Backend)?;
         }
 
-        let next_head_revision = facts.actual_head_revision + 1;
+        let next_head_revision = StoreError::checked_monotonic_increment(
+            "session_head_revision",
+            facts.actual_head_revision,
+        )?;
         Ok(RuntimeCommitPlan {
             commit: &self.commit,
             turn_commit_hash: self.turn_commit_hash.clone(),
@@ -558,6 +561,37 @@ mod tests {
             error,
             StoreError::RuntimeCommitLeaseAuthorityConflict { session_id }
                 if session_id == "lease-plan-conflict"
+        ));
+    }
+
+    #[test]
+    fn fresh_commit_plan_refuses_exhausted_head_revision() {
+        let state = crate::RuntimeSessionState {
+            session_id: "revision-overflow".to_string(),
+            head_revision: i64::MAX as u64,
+            ..crate::RuntimeSessionState::default()
+        };
+        let commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let planner = RuntimeCommitPlanner::prepare(commit).expect("prepare commit");
+        let error = match planner.plan(FreshRuntimeCommitFacts {
+            actual_head_revision: i64::MAX as u64,
+            old_leaf_node_id: None,
+            requested_ancestor_is_active: true,
+            occupied_node_ids: HashSet::new(),
+            selected_leaf_is_live: false,
+            has_live_nodes: false,
+            old_leaf_is_live: false,
+            derived_frame_node_id: None,
+        }) {
+            Ok(_) => panic!("exhausted head revision must refuse"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            StoreError::MonotonicCounterOverflow {
+                counter: "session_head_revision",
+                current,
+            } if current == i64::MAX as u64
         ));
     }
 }

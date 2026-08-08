@@ -68,6 +68,28 @@ impl InMemoryTriggerStore {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn inject_revision_for_testing(&self, subscription_id: &str, value: i64) {
+        assert!(value >= 0, "in-memory trigger revisions cannot be negative");
+        self.state
+            .lock()
+            .expect("trigger store lock")
+            .subscriptions
+            .get_mut(subscription_id)
+            .expect("trigger revision injection row")
+            .revision = value as u64;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn revision_snapshot_for_testing(&self, subscription_id: &str) -> String {
+        let state = self.state.lock().expect("trigger store lock");
+        let record = state
+            .subscriptions
+            .get(subscription_id)
+            .expect("trigger revision snapshot row");
+        serde_json::to_string(record).expect("encode trigger revision snapshot")
+    }
+
     fn list_deliveries_matching(
         &self,
         matches: impl Fn(&InMemoryTriggerDeliveryRecord) -> bool,
@@ -211,12 +233,13 @@ impl TriggerStore for InMemoryTriggerStore {
         for record in state.subscriptions.values_mut().filter(|record| {
             record.registrant_session_id() == Some(session_id) && !record.tombstoned
         }) {
+            let next_revision = next_trigger_store_revision(record)?;
             record.enabled = false;
             record.tombstoned = true;
             record.deleted_at_ms = Some(now);
-            record.revision = record.revision.saturating_add(1);
+            record.revision = next_revision;
             record.updated_at_ms = now;
-            changed = changed.saturating_add(1);
+            changed += 1;
         }
         Ok(changed)
     }
@@ -565,13 +588,14 @@ pub(super) fn apply_in_memory_trigger_command_with_incarnation(
                 ));
             };
             ensure_live_revision(&existing, expected_revision, Some(requested_hash.clone()))?;
+            let next_revision = next_trigger_revision(&existing)?;
             let record = subscription_record_from_draft(
                 owner_scope,
                 actor,
                 draft,
                 subscription_id.clone(),
                 existing.incarnation,
-                existing.revision.saturating_add(1),
+                next_revision,
                 requested_hash,
                 existing.enabled,
                 existing.created_at_ms,
@@ -629,11 +653,12 @@ pub(super) fn apply_in_memory_trigger_command_with_incarnation(
                 ));
             };
             ensure_live_revision(existing, expected_revision, None)?;
+            let next_revision = next_trigger_revision(existing)?;
             existing.registrant = actor;
             existing.enabled = false;
             existing.tombstoned = true;
             existing.deleted_at_ms = Some(now);
-            existing.revision = existing.revision.saturating_add(1);
+            existing.revision = next_revision;
             existing.updated_at_ms = now;
             Ok(TriggerCommandOutcome::Mutation {
                 receipt: Box::new(TriggerMutationReceipt::from_record(
@@ -669,13 +694,14 @@ pub(super) fn apply_in_memory_trigger_command_with_incarnation(
                     "revive requires the current tombstone revision",
                 ));
             }
+            let next_revision = next_trigger_revision(&existing)?;
             let record = subscription_record_from_draft(
                 owner_scope,
                 actor,
                 draft,
                 subscription_id.clone(),
                 new_incarnation(),
-                existing.revision.saturating_add(1),
+                next_revision,
                 requested_hash,
                 true,
                 existing.created_at_ms,

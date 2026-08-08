@@ -1384,7 +1384,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                     leases
                         .get(process_id)
                         .map_or(0, |current| current.fencing_token),
-                );
+                )?;
                 let lease = registry_transitions::acquired_process_lease(
                     process_id,
                     owner,
@@ -1414,7 +1414,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .cloned();
         let _ = observed_holder;
         let fencing_token =
-            match registry_transitions::decide_process_lease_reclaim(observed.as_ref(), now) {
+            match registry_transitions::decide_process_lease_reclaim(observed.as_ref(), now)? {
                 registry_transitions::ProcessLeaseReclaimDecision::ReportBusy { holder } => {
                     return Ok(ProcessLeaseClaimOutcome::Busy { holder });
                 }
@@ -1423,7 +1423,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                         leases
                             .get(process_id)
                             .map_or(0, |current| current.fencing_token),
-                    )
+                    )?
                 }
                 registry_transitions::ProcessLeaseReclaimDecision::AcquireOnObservedFence {
                     fencing_token,
