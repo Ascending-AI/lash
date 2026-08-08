@@ -421,6 +421,8 @@ mod tests {
             output_token_cap: NonZeroUsize::new(32_000),
             temperature: Some(crate::NonNegativeFiniteF64::new(0.0).expect("finite temperature")),
             seed: Some(42),
+            stop_sequences: Vec::new(),
+            projection_provenance: Default::default(),
         };
 
         let bounded = ModelSpec::builder("small")

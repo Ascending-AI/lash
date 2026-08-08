@@ -390,6 +390,51 @@ mod tests {
     }
 
     #[test]
+    fn client_abort_preserves_preceding_signed_reasoning_part() {
+        let mut detector = CellDetector::new();
+        let transformed =
+            detector.process_chunk("Visible.\n<lashlang>\nprint \"hi\"\n</lashlang>\nignored");
+        assert!(transformed.abort_stream);
+
+        let replay = lash_core::llm::types::ProviderReasoningReplay {
+            item_id: Some("reasoning-1".to_string()),
+            encrypted_content: None,
+            signature: Some("signed".to_string()),
+            redacted: false,
+            summary: vec!["thought".to_string()],
+        };
+        let response = transform_final_response(
+            &detector,
+            lash_core::LlmResponse {
+                full_text: "provider partial".to_string(),
+                parts: vec![
+                    lash_core::LlmOutputPart::Reasoning {
+                        text: "thought".to_string(),
+                        replay: Some(replay.clone()),
+                    },
+                    lash_core::LlmOutputPart::Text {
+                        text: "provider partial".to_string(),
+                        response_meta: None,
+                    },
+                ],
+                ..Default::default()
+            },
+        );
+
+        assert!(matches!(
+            response.parts.first(),
+            Some(lash_core::LlmOutputPart::Reasoning {
+                replay: Some(actual),
+                ..
+            }) if actual == &replay
+        ));
+        assert_eq!(
+            response.full_text,
+            "Visible.\n<lashlang>\nprint \"hi\"\n</lashlang>"
+        );
+    }
+
+    #[test]
     fn incomplete_block_does_not_abort_and_does_not_close() {
         let mut d = CellDetector::new();
         let t = d.process_chunk("Visible.\n<lashlang>\nfinish 1");

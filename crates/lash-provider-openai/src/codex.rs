@@ -209,6 +209,9 @@ impl CodexProvider {
                 req.generation.temperature.is_some(),
             ),
             seed: GenerationOptionDisposition::unsupported(req.generation.seed.is_some()),
+            stop_sequences: GenerationOptionDisposition::unsupported(
+                !req.generation.stop_sequences.is_empty(),
+            ),
             cache: lash_llm_transport::cache_intent_disposition(req, Some(body)),
         }
     }

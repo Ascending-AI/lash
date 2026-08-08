@@ -41,6 +41,36 @@ fn output_token_cap_maps_to_wire_fields() {
     assert_eq!(provider_limited_chat_body["max_tokens"], 9999);
 }
 
+#[test]
+fn stop_sequences_reach_chat_but_are_omitted_by_responses_and_codex() {
+    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.model = "anthropic/claude-sonnet-4.6".to_string();
+    req.generation.stop_sequences = vec!["</lashlang>".to_string()];
+
+    let chat = openrouter_provider()
+        .build_chat_request_body(&req, true)
+        .expect("chat body");
+    assert_eq!(chat["stop"], json!(["</lashlang>"]));
+    assert_eq!(
+        crate::common::generation_disposition(&req, &chat).stop_sequences,
+        lash_core::GenerationOptionDisposition::Applied
+    );
+
+    let responses = OpenAiProvider::new("key")
+        .build_responses_request_body(&req, true)
+        .expect("responses body");
+    assert!(responses.get("stop").is_none());
+    assert_eq!(
+        crate::common::generation_disposition(&req, &responses).stop_sequences,
+        lash_core::GenerationOptionDisposition::OmittedUnsupported
+    );
+
+    let codex =
+        CodexProvider::build_request_body(&CodexProvider::new("token", "refresh", 0), &req, true)
+            .expect("codex body");
+    assert!(codex.get("stop").is_none());
+}
+
 /// Records every outgoing HTTP body while replaying a scripted status
 /// sequence, so a retried call can be inspected attempt by attempt.
 #[derive(Debug)]

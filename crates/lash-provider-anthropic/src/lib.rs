@@ -1001,6 +1001,21 @@ mod tests {
         assert_eq!(provider_limited_body["max_tokens"], 9999);
     }
 
+    #[test]
+    fn stop_sequences_reach_the_messages_request() {
+        let provider = AnthropicProvider::new("key");
+        let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+        req.generation.stop_sequences = vec!["</lashlang>".to_string()];
+
+        let body = provider.build_request_body(&req).expect("body");
+
+        assert_eq!(body["stop_sequences"], json!(["</lashlang>"]));
+        assert_eq!(
+            AnthropicProvider::generation_disposition(&req, &body).stop_sequences,
+            lash_core::GenerationOptionDisposition::Applied
+        );
+    }
+
     /// Cross-provider response-normalization conformance. Anthropic is
     /// streaming-first (no non-streaming `parts_from_value`), so each scenario's
     /// `body` carries the SSE event sequence as a JSON array of strings, and all

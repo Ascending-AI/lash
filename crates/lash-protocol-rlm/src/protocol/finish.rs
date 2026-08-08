@@ -157,6 +157,34 @@ pub(super) fn invalid_lashlang_cell_message(id: String, error_text: &str) -> Mes
     }
 }
 
+pub(super) fn output_limit_retry_message(id: String, output_token_cap: Option<usize>) -> Message {
+    let cap = output_token_cap
+        .map(|cap| format!(" (the request cap was {cap} tokens)"))
+        .unwrap_or_default();
+    Message {
+        id: id.clone(),
+        role: MessageRole::System,
+        parts: shared_parts(vec![Part {
+            id: format!("{id}.p0"),
+            kind: PartKind::Text,
+            content: format!(
+                "Your answer was cut off by the output limit{cap} — retry with a shorter answer. Do less per cell and continue in a later step."
+            ),
+            attachment: None,
+            tool_call_id: None,
+            tool_name: None,
+            tool_replay: None,
+            prune_state: PruneState::Intact,
+            reasoning_meta: None,
+            response_meta: None,
+        }]),
+        origin: Some(lash_core::MessageOrigin::Plugin {
+            plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+            transient: false,
+        }),
+    }
+}
+
 pub(super) fn validate_finish_value(value: &Value, schema: &Value) -> Result<(), String> {
     let compiled = jsonschema::JSONSchema::compile(schema)
         .map_err(|err| format!("required output schema is invalid: {err}"))?;

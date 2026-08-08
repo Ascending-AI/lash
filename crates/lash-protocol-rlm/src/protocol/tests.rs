@@ -407,18 +407,25 @@ fn cell_extraction_returns_none_for_prose_only() {
 }
 
 #[test]
-fn cell_extraction_requires_complete_paired_block() {
+fn cell_extraction_rejects_a_started_but_unclosed_block() {
+    assert!(matches!(
+        extract_lashlang_cell("<lashlang>\nfinish 1"),
+        Err(super::cell::CellExtractionError::UnclosedCell)
+    ));
+}
+
+#[test]
+fn cell_extraction_leaves_non_cell_markup_as_prose() {
     for text in [
         "<lashlang>",
-        "<lashlang>\nfinish 1",
         "</lashlang>\nfinish 1",
         "%%lashlang\nfinish 1",
     ] {
         assert!(
             extract_lashlang_cell(text)
-                .expect("incomplete or retired form is not an extraction error")
+                .expect("non-cell markup is not an extraction error")
                 .is_none(),
-            "incomplete or retired form should not parse: {text:?}"
+            "non-cell markup should not parse: {text:?}"
         );
         assert!(!contains_lashlang_cell(text));
     }
@@ -502,12 +509,13 @@ fn rendered_history_cell_round_trips_through_extractor() {
 }
 
 #[test]
-fn cell_extraction_rejects_trailing_text_after_cell() {
+fn cell_extraction_silently_drops_trailing_text_after_cell() {
     let text = "Before\n<lashlang>\nfinish 1\n</lashlang>\nafter";
-    assert!(matches!(
-        extract_lashlang_cell(text),
-        Err(super::cell::CellExtractionError::TrailingText)
-    ));
+    let extraction = extract_lashlang_cell(text)
+        .expect("trailing prose is ignored")
+        .expect("cell extracts");
+    assert_eq!(extraction.prose, "Before");
+    assert_eq!(extraction.code, "finish 1");
 }
 
 #[test]

@@ -381,12 +381,14 @@ impl From<core_llm::GenerationDisposition> for RemoteGenerationDisposition {
             output_token_cap,
             temperature,
             seed,
+            stop_sequences,
             cache,
         } = value;
         Self {
             output_token_cap: output_token_cap.into(),
             temperature: temperature.into(),
             seed: seed.into(),
+            stop_sequences: stop_sequences.into(),
             cache: cache.into(),
         }
     }
@@ -398,12 +400,14 @@ impl From<RemoteGenerationDisposition> for core_llm::GenerationDisposition {
             output_token_cap,
             temperature,
             seed,
+            stop_sequences,
             cache,
         } = value;
         Self {
             output_token_cap: output_token_cap.into(),
             temperature: temperature.into(),
             seed: seed.into(),
+            stop_sequences: stop_sequences.into(),
             cache: cache.into(),
         }
     }
@@ -414,6 +418,9 @@ impl From<core_llm::GenerationOptionDisposition> for RemoteGenerationOptionDispo
         match value {
             core_llm::GenerationOptionDisposition::NotRequested => Self::NotRequested,
             core_llm::GenerationOptionDisposition::Applied => Self::Applied,
+            core_llm::GenerationOptionDisposition::ReplacedProtocolOwned => {
+                Self::ReplacedProtocolOwned
+            }
             core_llm::GenerationOptionDisposition::OmittedUnsupported => Self::OmittedUnsupported,
             core_llm::GenerationOptionDisposition::OmittedSamplingPinned => {
                 Self::OmittedSamplingPinned
@@ -428,6 +435,9 @@ impl From<RemoteGenerationOptionDisposition> for core_llm::GenerationOptionDispo
         match value {
             RemoteGenerationOptionDisposition::NotRequested => Self::NotRequested,
             RemoteGenerationOptionDisposition::Applied => Self::Applied,
+            RemoteGenerationOptionDisposition::ReplacedProtocolOwned => {
+                Self::ReplacedProtocolOwned
+            }
             RemoteGenerationOptionDisposition::OmittedUnsupported => Self::OmittedUnsupported,
             RemoteGenerationOptionDisposition::OmittedSamplingPinned => {
                 Self::OmittedSamplingPinned
@@ -481,11 +491,14 @@ impl From<core_llm::GenerationOptions> for RemoteGenerationOptions {
             output_token_cap,
             temperature,
             seed,
+            stop_sequences,
+            projection_provenance: _,
         } = value;
         Self {
             output_token_cap: output_token_cap.map(|cap| cap.get() as u64),
             temperature: temperature.map(Into::into),
             seed,
+            stop_sequences,
         }
     }
 }
@@ -499,6 +512,7 @@ impl TryFrom<RemoteGenerationOptions> for core_llm::GenerationOptions {
             output_token_cap,
             temperature,
             seed,
+            stop_sequences,
         } = value;
         let temperature = temperature
             .map(core_llm::NonNegativeFiniteF64::try_from)
@@ -513,6 +527,8 @@ impl TryFrom<RemoteGenerationOptions> for core_llm::GenerationOptions {
                 .and_then(NonZeroUsize::new),
             temperature,
             seed,
+            stop_sequences,
+            projection_provenance: Default::default(),
         })
     }
 }

@@ -550,6 +550,11 @@ impl std::fmt::Display for NonNegativeFiniteF64Error {
 
 impl std::error::Error for NonNegativeFiniteF64Error {}
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GenerationProjectionProvenance {
+    stop_sequences_replaced_by_protocol: bool,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GenerationOptions {
@@ -565,6 +570,17 @@ pub struct GenerationOptions {
     /// `generationConfig`; wires without a seed field omit it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<i64>,
+    /// Literal sequences that terminate generation. Adapters emit these only
+    /// on provider wires with a native stop-sequence field; streaming callers
+    /// must still be prepared to stop locally when a provider cannot. A
+    /// protocol with a grammar-owned boundary may replace this entire list;
+    /// the resulting disposition is `ReplacedProtocolOwned`, not `Applied`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stop_sequences: Vec<String>,
+    /// In-process projection provenance. This is not caller generation intent
+    /// and does not cross persistence or remote request boundaries.
+    #[serde(skip)]
+    pub projection_provenance: GenerationProjectionProvenance,
 }
 
 impl GenerationOptions {
@@ -572,6 +588,19 @@ impl GenerationOptions {
         self.output_token_cap
             .map(NonZeroUsize::get)
             .map(|value| value as u64)
+    }
+
+    /// Replace caller stop sequences with a protocol-owned boundary and retain
+    /// whether a non-empty caller list was displaced for disposition reporting.
+    pub fn replace_stop_sequences_for_protocol(&mut self, stop_sequences: Vec<String>) {
+        self.projection_provenance
+            .stop_sequences_replaced_by_protocol = !self.stop_sequences.is_empty();
+        self.stop_sequences = stop_sequences;
+    }
+
+    pub fn stop_sequences_replaced_by_protocol(&self) -> bool {
+        self.projection_provenance
+            .stop_sequences_replaced_by_protocol
     }
 
     /// Layer these options over `base`: an option this value sets wins, an
@@ -589,6 +618,12 @@ impl GenerationOptions {
                 .clone()
                 .or_else(|| base.temperature.clone()),
             seed: self.seed.or(base.seed),
+            stop_sequences: if self.stop_sequences.is_empty() {
+                base.stop_sequences.clone()
+            } else {
+                self.stop_sequences.clone()
+            },
+            projection_provenance: GenerationProjectionProvenance::default(),
         }
     }
 }
@@ -609,10 +644,14 @@ pub enum GenerationOptionDisposition {
     NotRequested,
     /// The caller asked for it and the request carries it.
     Applied,
+    /// A protocol replaced the caller's non-empty stop list with its own
+    /// response boundary. This is intentional protocol ownership, but the
+    /// caller's requested value did not reach the wire.
+    ReplacedProtocolOwned,
     /// The caller asked for it and it is not expressible here: the endpoint
     /// has no field for it, or this adapter's use of the endpoint does not
-    /// send one. Codex declines all three by policy on a dialect that has
-    /// fields for them.
+    /// send one. Codex declines request controls by policy even when its
+    /// underlying dialect has related fields.
     OmittedUnsupported,
     /// The caller asked for it and sampling is pinned for this request, by the
     /// model's declared capability or by the thinking configuration in use.
@@ -655,7 +694,10 @@ impl GenerationOptionDisposition {
 
     /// Whether a requested option was dropped rather than sent.
     pub fn is_omitted(self) -> bool {
-        matches!(self, Self::OmittedUnsupported | Self::OmittedSamplingPinned)
+        matches!(
+            self,
+            Self::ReplacedProtocolOwned | Self::OmittedUnsupported | Self::OmittedSamplingPinned
+        )
     }
 
     /// Whether the request carries exactly what the caller asked for, if
@@ -680,6 +722,8 @@ pub struct GenerationDisposition {
     pub temperature: GenerationOptionDisposition,
     #[serde(default)]
     pub seed: GenerationOptionDisposition,
+    #[serde(default)]
+    pub stop_sequences: GenerationOptionDisposition,
     /// Fate of explicit prompt-cache breakpoints in the request.
     #[serde(default)]
     pub cache: GenerationOptionDisposition,
@@ -693,6 +737,7 @@ impl GenerationDisposition {
         !self.output_token_cap.is_omitted()
             && !self.temperature.is_omitted()
             && !self.seed.is_omitted()
+            && !self.stop_sequences.is_omitted()
             && !self.cache.is_omitted()
     }
 
@@ -701,6 +746,7 @@ impl GenerationDisposition {
         self.output_token_cap.is_honored()
             && self.temperature.is_honored()
             && self.seed.is_honored()
+            && self.stop_sequences.is_honored()
             && self.cache.is_honored()
     }
 }
@@ -1025,15 +1071,24 @@ mod generation_disposition_tests {
             output_token_cap: GenerationOptionDisposition::applied(false),
             temperature: GenerationOptionDisposition::sampling_pinned(false),
             seed: GenerationOptionDisposition::unsupported(false),
+            stop_sequences: GenerationOptionDisposition::unsupported(false),
             cache: GenerationOptionDisposition::unsupported(false),
         };
         assert_eq!(untouched, GenerationDisposition::default());
         assert!(untouched.nothing_omitted());
 
+        let replaced = GenerationDisposition {
+            stop_sequences: GenerationOptionDisposition::ReplacedProtocolOwned,
+            ..Default::default()
+        };
+        assert!(!replaced.nothing_omitted());
+        assert!(!replaced.fully_honored());
+
         let dropped = GenerationDisposition {
             output_token_cap: GenerationOptionDisposition::applied(true),
             temperature: GenerationOptionDisposition::sampling_pinned(true),
             seed: GenerationOptionDisposition::unsupported(true),
+            stop_sequences: GenerationOptionDisposition::unsupported(false),
             cache: GenerationOptionDisposition::unsupported(true),
         };
         assert_eq!(
@@ -1050,6 +1105,7 @@ mod generation_disposition_tests {
                 "output_token_cap": "applied",
                 "temperature": "omitted_sampling_pinned",
                 "seed": "omitted_unsupported",
+                "stop_sequences": "not_requested",
                 "cache": "omitted_unsupported",
             })
         );
@@ -1091,6 +1147,7 @@ mod attempt_record_tests {
                         output_token_cap: GenerationOptionDisposition::Applied,
                         temperature: GenerationOptionDisposition::OmittedSamplingPinned,
                         seed: GenerationOptionDisposition::OmittedUnsupported,
+                        stop_sequences: GenerationOptionDisposition::NotRequested,
                         cache: GenerationOptionDisposition::Applied,
                     }),
                     usage: None,

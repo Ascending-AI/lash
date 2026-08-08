@@ -47,6 +47,8 @@ fn process_execution_env_identity_golden_corpus() {
             output_token_cap: std::num::NonZeroUsize::new(1024),
             temperature: Some(crate::NonNegativeFiniteF64::new(0.25).expect("finite temperature")),
             seed: Some(-7),
+            stop_sequences: Vec::new(),
+            projection_provenance: Default::default(),
         },
     };
     let specs = [

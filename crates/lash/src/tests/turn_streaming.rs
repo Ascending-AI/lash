@@ -4160,6 +4160,148 @@ fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_raw() -> Res
 }
 
 #[cfg(feature = "rlm")]
+fn rlm_abort_drain_core(provider: ProviderHandle) -> Result<LashCore> {
+    explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+        .build()
+}
+
+#[cfg(feature = "rlm")]
+#[test]
+fn rlm_abort_drain_ignores_a_late_attempt_reset() -> Result<()> {
+    run_async_test_on_stack_budget("rlm-abort-drain-attempt-reset", || async {
+        let provider = crate::testing::TestProvider::builder()
+            .kind("rlm-abort-reset")
+            .requires_streaming(true)
+            .complete(|request| async move {
+                let stream = request.stream_events.expect("stream events");
+                stream.send(LlmStreamEvent::Delta(
+                    "<lashlang>\nfinish \"cell survived reset\"\n</lashlang>".to_string(),
+                ));
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                stream.send(LlmStreamEvent::AttemptReset);
+                std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
+            })
+            .build()
+            .into_handle();
+        let core = rlm_abort_drain_core(provider)?;
+        let session = core.session("rlm-abort-reset").open().await?;
+
+        let result = session.turn(TurnInput::text("finish")).run().await?;
+
+        assert_eq!(
+            result.final_value(),
+            Some(&serde_json::json!("cell survived reset"))
+        );
+        Ok(())
+    })
+}
+
+#[cfg(feature = "rlm")]
+#[test]
+fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Result<()> {
+    run_async_test_on_stack_budget("rlm-abort-drain-late-events", || async {
+        let provider = crate::testing::TestProvider::builder()
+            .kind("rlm-abort-late-events")
+            .requires_streaming(true)
+            .complete(|request| async move {
+                let stream = request.stream_events.expect("stream events");
+                stream.send(LlmStreamEvent::Delta(
+                    "<lashlang>\nfinish \"late events survived\"\n</lashlang>".to_string(),
+                ));
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                stream.send(LlmStreamEvent::Delta("provider suffix".to_string()));
+                stream.send(LlmStreamEvent::Part(LlmOutputPart::Reasoning {
+                    text: "signed reasoning".to_string(),
+                    replay: Some(lash_core::llm::types::ProviderReasoningReplay {
+                        item_id: Some("reasoning-after-abort".to_string()),
+                        encrypted_content: Some("encrypted-after-abort".to_string()),
+                        signature: Some("signature-after-abort".to_string()),
+                        redacted: false,
+                        summary: vec!["signed reasoning".to_string()],
+                    }),
+                }));
+                stream.send(LlmStreamEvent::Usage(lash_core::llm::types::LlmUsage {
+                    input_tokens: 17,
+                    output_tokens: 5,
+                    reasoning_output_tokens: 2,
+                    ..lash_core::llm::types::LlmUsage::default()
+                }));
+                std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
+            })
+            .build()
+            .into_handle();
+        let core = rlm_abort_drain_core(provider)?;
+        let session = core.session("rlm-abort-late-events").open().await?;
+
+        let result = session.turn(TurnInput::text("finish")).run().await?;
+
+        assert_eq!(result.result.usage.input_tokens, 17);
+        assert_eq!(result.result.usage.output_tokens, 5);
+        assert!(
+            result
+                .result
+                .state
+                .read_view()
+                .messages()
+                .iter()
+                .any(|message| {
+                    message.parts.iter().any(|part| {
+                        part.reasoning_meta.as_ref().is_some_and(|meta| {
+                            meta.signature.as_deref() == Some("signature-after-abort")
+                                && meta.encrypted_content.as_deref()
+                                    == Some("encrypted-after-abort")
+                        })
+                    })
+                })
+        );
+        Ok(())
+    })
+}
+
+#[cfg(feature = "rlm")]
+#[test]
+fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<()> {
+    run_async_test_on_stack_budget("rlm-abort-drain-no-usage", || async {
+        let provider = crate::testing::TestProvider::builder()
+            .kind("rlm-abort-no-usage")
+            .requires_streaming(true)
+            .complete(|request| async move {
+                request
+                    .stream_events
+                    .expect("stream events")
+                    .send(LlmStreamEvent::Delta(
+                        "<lashlang>\nfinish \"deadline survived\"\n</lashlang>".to_string(),
+                    ));
+                std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
+            })
+            .build()
+            .into_handle();
+        let core = rlm_abort_drain_core(provider)?;
+        let session = core.session("rlm-abort-no-usage").open().await?;
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            session.turn(TurnInput::text("finish")).run(),
+        )
+        .await
+        .expect("abort drain deadline must not wedge")?;
+
+        assert_eq!(
+            result.final_value(),
+            Some(&serde_json::json!("deadline survived"))
+        );
+        assert_eq!(result.result.usage, lash_core::TokenUsage::default());
+        Ok(())
+    })
+}
+
+#[cfg(feature = "rlm")]
 #[test]
 fn rlm_tool_calls_stream_from_live_exec_boundary() -> Result<()> {
     run_async_test_on_stack_budget("rlm-live-exec-boundary-test", || {

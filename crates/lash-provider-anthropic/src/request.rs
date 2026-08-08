@@ -425,6 +425,9 @@ impl AnthropicProvider {
         if let Some(system_value) = system_value {
             body["system"] = system_value;
         }
+        if !policy.stop_sequences.is_empty() {
+            body["stop_sequences"] = json!(policy.stop_sequences);
+        }
         if !tools.is_empty() {
             body["tools"] = Value::Array(tools);
             body["tool_choice"] = match req.tool_choice {

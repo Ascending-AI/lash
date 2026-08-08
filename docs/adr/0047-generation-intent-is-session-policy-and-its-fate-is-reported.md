@@ -30,7 +30,7 @@ already served by a direct request.
 
 The overlay **merges per option**, and discarding what is inherited has to be asked for
 (`GenerationOverlay::Replace`, spelled `.replace_generation(...)` / `.clear_generation()`).
-`GenerationOptions` is three independently optional options rather than one value, so
+`GenerationOptions` is a set of independently optional controls rather than one value, so
 wholesale replacement would let a subagent spec that sets only an output-token cap drop a
 parent's pinned temperature and seed — and the disposition below could not report that,
 because the child never *requested* a temperature. Per-option layering is also what the
@@ -76,10 +76,18 @@ host would need every model's capability before setting one — but silence is h
 repeatability request goes unhonored without anyone noticing. **Omission stays silent and
 becomes observable**: `GenerationDisposition` records, per option, whether the caller
 requested it and whether the assembled body carries it, with the reason when it does not.
-Adapters derive it from the body they just built, so the report cannot drift from what was
-sent. It rides the response, the per-attempt ledger of ADR 0032, the durable effect journal,
+Adapters derive it from the body they just built, except for the protocol-ownership carve-out
+below. It rides the response, the per-attempt ledger of ADR 0032, the durable effect journal,
 the trace record, and the remote mirror, so a host asserts "nothing was dropped" instead of
 trusting that one temperature survived every model a run touched.
+
+Protocol-owned response boundaries are the deliberate exception to caller ownership. A
+protocol projector may replace a non-empty caller `stop_sequences` list when its grammar
+requires one unambiguous boundary. That replacement is not `Applied`: the runtime reports
+`ReplacedProtocolOwned`, which makes both `nothing_omitted()` and `fully_honored()` false.
+Projection provenance is carried in-process on the projected request, then copied onto the
+response, partial response, and every attempt record; it is not a caller-controlled wire
+flag. An empty caller list remains ordinary protocol intent rather than a replacement.
 
 Prompt-cache intent follows the same rule. An explicit `cache_breakpoint` is `Applied` when
 the adapter emits its cache-control dialect (including OpenAI's `prompt_cache_key`) and

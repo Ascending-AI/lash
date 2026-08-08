@@ -366,6 +366,9 @@ impl GoogleOAuthProvider {
         if let Some(seed) = policy.seed {
             request["request"]["generationConfig"]["seed"] = json!(seed);
         }
+        if !policy.stop_sequences.is_empty() {
+            request["request"]["generationConfig"]["stopSequences"] = json!(policy.stop_sequences);
+        }
         if let Some(system_instruction) = Self::system_instruction(req) {
             request["request"]["systemInstruction"] = system_instruction;
         }

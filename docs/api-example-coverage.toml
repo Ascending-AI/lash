@@ -8051,6 +8051,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
+symbol = "lash::direct::GenerationOptionDisposition::ReplacedProtocolOwned"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::GenerationOptionDisposition::ReplacedProtocolOwned"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: protocol-driver implementers that replace caller stop sequences; shipped RLM tests assert the replacement and its reported disposition."
+
+[[api]]
 symbol = "lash::direct::GenerationOptionDisposition::applied"
 kind = "function"
 availability = "default+all-features"
@@ -8132,6 +8141,24 @@ disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
+symbol = "lash::direct::GenerationOptions::projection_provenance"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::GenerationOptions::projection_provenance"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: protocol-driver implementers; the opaque provenance value is set through the replacement helper and consumed by the runtime disposition ledger."
+
+[[api]]
+symbol = "lash::direct::GenerationOptions::replace_stop_sequences_for_protocol"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::GenerationOptions::replace_stop_sequences_for_protocol"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: protocol-driver implementers that own a grammar boundary; shipped RLM tests assert caller-stop replacement and equal-value ownership."
+
+[[api]]
 symbol = "lash::direct::GenerationOptions::seed"
 kind = "field"
 availability = "default+all-features"
@@ -8139,6 +8166,24 @@ aliases = ["lash_core::GenerationOptions::seed"]
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
+
+[[api]]
+symbol = "lash::direct::GenerationOptions::stop_sequences"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::GenerationOptions::stop_sequences"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: remote transports and protocol-driver implementers; a protocol-owned grammar boundary may replace caller stops and reports ReplacedProtocolOwned rather than Applied."
+
+[[api]]
+symbol = "lash::direct::GenerationOptions::stop_sequences_replaced_by_protocol"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::GenerationOptions::stop_sequences_replaced_by_protocol"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime and protocol-driver implementers; shipped RLM and runtime tests assert that protocol ownership propagates into response and attempt dispositions."
 
 [[api]]
 symbol = "lash::direct::GenerationOptions::temperature"
@@ -31079,6 +31124,14 @@ availability = "default+all-features"
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::remote::llm::RemoteGenerationOptionDisposition::OmittedUnsupported to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::remote::llm::RemoteGenerationOptionDisposition::ReplacedProtocolOwned"
+kind = "variant"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-add"
+reason = "Add the protocol-owned stop-sequence replacement disposition to the docs-snippets remote/direct protocol flow example and assert its round-trip result."
 
 [[api]]
 symbol = "lash::remote::llm::RemoteGenerationOptions"

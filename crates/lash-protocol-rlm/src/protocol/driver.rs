@@ -10,9 +10,10 @@ use lash_core::session_model::{
 };
 use lash_core::{
     CheckpointKind, DriverAction, DriverContextView, ExecResponse, LlmOutputPart, LlmResponse,
-    ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolControl, ToolFailure, ToolFailureClass,
-    ToolValue, facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::TurnStop,
-    facade_support::append_assistant_text_part, facade_support::normalized_response_parts,
+    LlmTerminalReason, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolControl, ToolFailure,
+    ToolFailureClass, ToolValue, facade_support::TurnFinish, facade_support::TurnOutcome,
+    facade_support::TurnStop, facade_support::append_assistant_text_part,
+    facade_support::normalized_response_parts,
 };
 use lash_rlm_types::{RlmDiagnosticEvent, RlmProtocolEvent, RlmTermination, RlmTrajectoryEntry};
 use serde_json::Value;
@@ -24,11 +25,13 @@ use crate::projection::rlm_protocol_event;
 use crate::rlm_support::decode_rlm_termination_options;
 
 use super::actions::{invalid_driver_state_actions, invalid_turn_options_actions};
-use super::cell::{CellExtraction, extract_lashlang_cell};
+use super::cell::{
+    CellExtraction, CellExtractionError, extract_lashlang_cell, normalize_cell_boundary,
+};
 use super::finish::{
     finish_required_reminder_message, finish_schema_mismatch_message,
-    internal_assistant_prose_message, invalid_lashlang_cell_message, turn_limit_final_message,
-    validate_finish_value,
+    internal_assistant_prose_message, invalid_lashlang_cell_message, output_limit_retry_message,
+    turn_limit_final_message, validate_finish_value,
 };
 use super::state::{RlmDriverState, RlmReasoningPart, decode_rlm_driver_state, rlm_driver_state};
 
@@ -39,6 +42,14 @@ const MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES: usize = 64 * 1024;
 const EXEC_TOOL_CALL_OVERFLOW_NAME: &str = "lash.exec_tool_call_overflow";
 
 impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
+    fn project_visible_assistant_prose(&self, text: &str) -> String {
+        super::cell::project_visible_assistant_prose(text)
+    }
+
+    fn handles_output_limit_response(&self) -> bool {
+        true
+    }
+
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         if let Err(err) = decode_rlm_termination_options(ctx.termination()) {
             return invalid_turn_options_actions(err);
@@ -56,21 +67,28 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         llm_response: LlmResponse,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
-        let mut actions = vec![DriverAction::Emit(SessionStreamEvent::LlmResponse {
-            protocol_iteration: ctx.protocol_iteration(),
-            content: llm_response.full_text.clone(),
-            duration_ms: 0,
-        })];
+        let terminal_reason = llm_response.terminal_reason;
+        let mut actions = Vec::new();
 
         let projected = match project_response(normalized_response_parts(&llm_response)) {
             Ok(projected) => projected,
             Err(tool_call) => {
+                actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {
+                    protocol_iteration: ctx.protocol_iteration(),
+                    content: llm_response.full_text,
+                    duration_ms: 0,
+                }));
                 native_tool_call_failure_actions(&mut actions, ctx.protocol_iteration(), tool_call);
                 return actions;
             }
         };
-        let assistant_text = projected.assistant_text;
+        let assistant_text = normalize_cell_boundary(&projected.assistant_text);
         let reasoning = projected.reasoning;
+        actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {
+            protocol_iteration: ctx.protocol_iteration(),
+            content: assistant_text.clone(),
+            duration_ms: 0,
+        }));
 
         if assistant_text.trim().is_empty()
             && reasoning.iter().all(|part| part.text.trim().is_empty())
@@ -95,29 +113,50 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         let extraction = match extract_lashlang_cell(&assistant_text) {
             Ok(extraction) => extraction,
             Err(err) => {
+                let (decision, message) = match (err, terminal_reason) {
+                    (CellExtractionError::UnclosedCell, LlmTerminalReason::OutputLimit) => (
+                        "retry_output_limit_cell",
+                        output_limit_cell_message(
+                            ctx.generation()
+                                .output_token_cap
+                                .map(std::num::NonZeroUsize::get),
+                        ),
+                    ),
+                    (CellExtractionError::UnclosedCell, _) => {
+                        ("retry_unclosed_cell", err.message().to_string())
+                    }
+                    (CellExtractionError::MultipleCells, _) => {
+                        ("invalid_lashlang_cell", err.message().to_string())
+                    }
+                };
                 actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                     "llm_extraction",
                     llm_extraction_payload(
-                        "invalid_lashlang_cell",
+                        decision,
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
                     ),
                 )]));
                 let mut retry_events = Vec::new();
-                if !assistant_text.trim().is_empty() || !reasoning.is_empty() {
+                let retry_prose = if err == CellExtractionError::UnclosedCell {
+                    String::new()
+                } else {
+                    assistant_text
+                };
+                if !retry_prose.trim().is_empty() || !reasoning.is_empty() {
                     retry_events.push(conversation_event(internal_assistant_prose_message(
                         rlm_message_id(
                             ctx.turn_id(),
                             ctx.protocol_iteration(),
                             "assistant_response",
                         ),
-                        assistant_text,
+                        retry_prose,
                         &reasoning,
                     )));
                 }
                 retry_events.push(conversation_event(invalid_lashlang_cell_message(
                     rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "invalid_cell"),
-                    err.message(),
+                    &message,
                 )));
                 if let Err(err) =
                     continue_or_stop_after_nonterminal(&ctx, &mut actions, Vec::new(), retry_events)
@@ -128,6 +167,44 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             }
         };
         let Some(cell) = extraction else {
+            if terminal_reason == LlmTerminalReason::OutputLimit {
+                actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
+                    "llm_extraction",
+                    llm_extraction_payload(
+                        "retry_output_limit_prose",
+                        &termination,
+                        LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
+                    ),
+                )]));
+                let mut retry_events = Vec::new();
+                if !assistant_text.trim().is_empty() || !reasoning.is_empty() {
+                    retry_events.push(conversation_event(internal_assistant_prose_message(
+                        rlm_message_id(
+                            ctx.turn_id(),
+                            ctx.protocol_iteration(),
+                            "truncated_assistant_response",
+                        ),
+                        assistant_text,
+                        &reasoning,
+                    )));
+                }
+                retry_events.push(conversation_event(output_limit_retry_message(
+                    rlm_message_id(
+                        ctx.turn_id(),
+                        ctx.protocol_iteration(),
+                        "output_limit_retry",
+                    ),
+                    ctx.generation()
+                        .output_token_cap
+                        .map(std::num::NonZeroUsize::get),
+                )));
+                if let Err(err) =
+                    continue_or_stop_after_nonterminal(&ctx, &mut actions, Vec::new(), retry_events)
+                {
+                    return invalid_turn_options_actions(err);
+                }
+                return actions;
+            }
             if matches!(termination, RlmTermination::Natural) {
                 actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                     "llm_extraction",
@@ -361,6 +438,15 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         }
         actions
     }
+}
+
+fn output_limit_cell_message(output_token_cap: Option<usize>) -> String {
+    let cap = output_token_cap
+        .map(|cap| format!(" The request cap was {cap} tokens."))
+        .unwrap_or_default();
+    format!(
+        "Model output limit truncated the `<lashlang>` block before `</lashlang>`.{cap} Retry with a shorter block; do less per cell and continue in a later step."
+    )
 }
 
 struct ProjectedResponse {

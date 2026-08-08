@@ -171,6 +171,9 @@ pub struct ResolvedGenerationPolicy<TThinking> {
     /// Requested sampling seed, or `None`. Only wires that accept a seed emit
     /// it; the rest omit it.
     pub seed: Option<i64>,
+    /// Caller-requested literal generation boundaries. Provider adapters that
+    /// expose a native field copy these to the wire unchanged.
+    pub stop_sequences: Vec<String>,
     pub cache_retention: CacheRetention,
     pub expose_thinking: bool,
     pub thinking: TThinking,
@@ -190,6 +193,7 @@ pub fn resolve_generation_policy<TThinking>(
         max_output_tokens,
         temperature: generation.temperature.clone(),
         seed: generation.seed,
+        stop_sequences: generation.stop_sequences.clone(),
         cache_retention: options.cache_retention,
         expose_thinking: options.expose_thinking,
         thinking,

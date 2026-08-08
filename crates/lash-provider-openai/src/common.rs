@@ -67,10 +67,11 @@ pub(crate) fn empty_response_error(raw: String) -> lash_core::llm::transport::Ll
 /// body carries.
 ///
 /// The body is the evidence, so the record cannot drift from what was sent:
-/// a compat profile that omits the token-cap field, a dialect without a seed
-/// (Responses, Codex), and Codex declining both sampling controls all look the
-/// same on the wire — the key is simply absent. None of these endpoints drops
-/// a control because sampling is pinned; that is an Anthropic-only fact.
+/// a compat profile that omits the token-cap field, a dialect without a seed or
+/// stop field (Responses, Codex), and Codex declining sampling controls all
+/// look the same on the wire — the key is simply absent. None of these
+/// endpoints drops a control because sampling is pinned; that is an
+/// Anthropic-only fact.
 pub(crate) fn generation_disposition(
     request: &LlmRequest,
     body: &Value,
@@ -97,6 +98,10 @@ pub(crate) fn generation_disposition(
         seed: record(
             request.generation.seed.is_some(),
             body.get("seed").is_some(),
+        ),
+        stop_sequences: record(
+            !request.generation.stop_sequences.is_empty(),
+            body.get("stop").is_some() || body.get("stop_sequences").is_some(),
         ),
         cache: lash_llm_transport::cache_intent_disposition(request, Some(body)),
     }

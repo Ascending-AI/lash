@@ -256,6 +256,41 @@ fn rlm_protocol_scenario_prose_only_response_finishes_by_default() {
 }
 
 #[test]
+fn rlm_protocol_unclosed_cell_retries_in_natural_mode_without_journaling_markup() {
+    RlmProtocolScenario::new("natural unclosed cell retry")
+        .termination(RlmTermination::Natural)
+        .llm_response(vec![text_part(
+            "Visible plan.\n<lashlang>\nprint \"unfinished\"",
+        )])
+        .checkpoint()
+        .expect(RlmProtocolExpectations {
+            checkpoints: vec![CheckpointKind::AfterWork],
+            llm_call_count: Some(2),
+            no_exec_code: true,
+            system_message_contains: vec!["did not close", "complete paired block"],
+            assistant_visible_texts: Some(Vec::new()),
+            ..RlmProtocolExpectations::default()
+        })
+        .run();
+}
+
+#[test]
+fn rlm_protocol_unclosed_cell_retries_in_finish_required_mode() {
+    RlmProtocolScenario::new("finish-required unclosed cell retry")
+        .termination(RlmTermination::FinishRequired { schema: None })
+        .llm_response(vec![text_part("<lashlang>\nfinish { ok: true }")])
+        .checkpoint()
+        .expect(RlmProtocolExpectations {
+            checkpoints: vec![CheckpointKind::AfterWork],
+            llm_call_count: Some(2),
+            no_exec_code: true,
+            system_message_contains: vec!["did not close", "complete paired block"],
+            ..RlmProtocolExpectations::default()
+        })
+        .run();
+}
+
+#[test]
 fn rlm_protocol_scenario_typed_prose_only_response_requests_finish() {
     RlmProtocolScenario::new(FINISH_REQUIRED_PROSE_REQUESTS_FINISH.display_name)
         .user_message("hello")
