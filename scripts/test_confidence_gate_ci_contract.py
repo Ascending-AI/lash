@@ -1083,9 +1083,18 @@ derive_mutation_jobs() {{
             push_gate, "run_runtime_feature_boundary_check"
         )
         command = "cargo test -p lash-runtime --no-default-features --locked"
+        count_command = (
+            "count=$(cargo test -p lash-runtime --no-default-features --locked "
+            "--lib -- --list | grep -c ': test$')"
+        )
+        count_floor = (
+            '[ "$count" -ge 130 ] || { echo '
+            '"default-build lash-runtime tests regressed: $count"; exit 1; }'
+        )
 
-        self.assertIn(command, test_doc)
-        self.assertIn(command, feature_boundary)
+        for snippet in (command, count_command, count_floor):
+            self.assertIn(snippet, test_doc)
+            self.assertIn(snippet, feature_boundary)
 
     def test_publish_time_version_injection_has_only_post_release_docs_commit(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

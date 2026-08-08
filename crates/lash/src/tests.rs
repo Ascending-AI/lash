@@ -2073,7 +2073,6 @@ mod harness;
 use harness::{
     mock_model_spec, model_spec, run_async_test_on_stack_budget, run_async_test_on_stack_size,
 };
-#[cfg(feature = "rlm")]
 mod agent_scenarios;
 mod plugin_stack;
 #[cfg(feature = "rlm")]
