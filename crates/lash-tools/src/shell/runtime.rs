@@ -4,6 +4,7 @@
 //! layer. The output-buffer plumbing it relies on lives in
 //! [`crate::shell::output`].
 
+use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -22,10 +23,11 @@ use tokio_util::sync::CancellationToken;
 use lash_core::{ToolFailure, ToolFailureClass};
 
 use crate::shell::output::{
-    OUTPUT_QUIET_PERIOD_MS, PollOutcome, ProcessState, ShellOutputSpill, activate_spill,
-    clean_terminal_output, exit_status_code, kill_child, kill_process_group_and_reap,
-    render_buffer_output, spawn_async_reader, spawn_reader_thread, spawn_wait_thread,
-    terminate_pipe_process, truncate_exec_output, wait_for_buffer_settle, wait_for_child_exit,
+    OUTPUT_QUIET_PERIOD_MS, PollOutcome, ProcessState, ReaderSignals, ShellOutputSpill,
+    activate_spill, clean_terminal_output, exit_status_code, kill_child,
+    kill_process_group_and_reap, render_buffer_output, shell_reader_died_failure,
+    spawn_async_reader, spawn_reader_thread, spawn_wait_thread, terminate_pipe_process,
+    truncate_exec_output, wait_for_buffer_settle, wait_for_child_exit,
 };
 
 pub(crate) const DEFAULT_EXEC_COMMAND_TIMEOUT_MS: u64 = 10 * 60 * 1000;
@@ -64,6 +66,7 @@ struct ShellProcess {
     exit_code: Arc<StdMutex<Option<i32>>>,
     exit_notify: Arc<Notify>,
     output_notify: Arc<Notify>,
+    reader_died: Arc<AtomicBool>,
     spill: Arc<StdMutex<Option<ShellOutputSpill>>>,
     killer: Arc<StdMutex<Option<Box<dyn ChildKiller + Send + Sync>>>>,
     pid: Option<u32>,
@@ -147,9 +150,7 @@ impl Drop for ShellProcessTable {
         // Drop is sync, and the group SIGKILL is a sync libc call, so no
         // async teardown hook is needed. Each child is reaped by its detached
         // wait thread once the signal lands.
-        let Ok(mut processes) = self.processes.lock() else {
-            return;
-        };
+        let mut processes = self.processes.lock_recover();
         for (_, proc) in processes.drain() {
             kill_process_group_and_reap(proc.pid, &proc.killer);
         }
@@ -293,17 +294,18 @@ impl ShellRuntime {
         let exit_code = Arc::new(StdMutex::new(None));
         let exit_notify = Arc::new(Notify::new());
         let output_notify = Arc::new(Notify::new());
+        let reader_died = Arc::new(AtomicBool::new(false));
         let spill = Arc::new(StdMutex::new(None));
         let killer = Arc::new(StdMutex::new(Some(killer)));
 
-        spawn_reader_thread(
+        let _reader = spawn_reader_thread(
             id.clone(),
             reader,
             Arc::clone(&buffer),
             Arc::clone(&buffer_start),
             Arc::clone(&truncated),
             Arc::clone(&spill),
-            Arc::clone(&output_notify),
+            ReaderSignals::new(Arc::clone(&output_notify), Arc::clone(&reader_died)),
         );
         spawn_wait_thread(
             child,
@@ -322,11 +324,12 @@ impl ShellRuntime {
             exit_code,
             exit_notify,
             output_notify,
+            reader_died,
             spill,
             killer,
             pid,
         };
-        self.table.processes.lock().unwrap().insert(id, process);
+        self.table.processes.lock_recover().insert(id, process);
         Ok(())
     }
 
@@ -396,8 +399,7 @@ impl ShellRuntime {
     pub(crate) fn tracked_pid(&self, id: &str) -> Option<u32> {
         self.table
             .processes
-            .lock()
-            .unwrap()
+            .lock_recover()
             .get(id)
             .and_then(|proc| proc.pid)
     }
@@ -405,11 +407,11 @@ impl ShellRuntime {
     /// Count of tracked (non-detached) processes, for teardown tests.
     #[cfg(test)]
     pub(crate) fn tracked_len(&self) -> usize {
-        self.table.processes.lock().unwrap().len()
+        self.table.processes.lock_recover().len()
     }
 
     fn process_state(&self, id: &str) -> ShellResult<ProcessState> {
-        let procs = self.table.processes.lock().unwrap();
+        let procs = self.table.processes.lock_recover();
         let proc = procs.get(id).ok_or_else(|| {
             shell_invalid_request("unknown_shell_process", format!("No process with id: {id}"))
         })?;
@@ -418,6 +420,7 @@ impl ShellRuntime {
             exit_code: Arc::clone(&proc.exit_code),
             exit_notify: Arc::clone(&proc.exit_notify),
             output_notify: Arc::clone(&proc.output_notify),
+            reader_died: Arc::clone(&proc.reader_died),
             killer: Arc::clone(&proc.killer),
             pid: proc.pid,
         })
@@ -428,8 +431,8 @@ impl ShellRuntime {
         id: &str,
         max_output_tokens: Option<usize>,
     ) -> ShellResult<(String, Option<usize>, Option<PathBuf>)> {
-        let (buffer, buffer_start, truncated, read_cursor, spill) = {
-            let procs = self.table.processes.lock().unwrap();
+        let (buffer, buffer_start, truncated, read_cursor, spill, reader_died) = {
+            let procs = self.table.processes.lock_recover();
             let proc = procs.get(id).ok_or_else(|| {
                 shell_invalid_request("unknown_shell_process", format!("Unknown session id {id}"))
             })?;
@@ -439,17 +442,23 @@ impl ShellRuntime {
                 Arc::clone(&proc.truncated),
                 Arc::clone(&proc.read_cursor),
                 Arc::clone(&proc.spill),
+                Arc::clone(&proc.reader_died),
             )
         };
 
-        let buf = buffer.lock().unwrap();
-        let start_offset = *buffer_start.lock().unwrap();
+        if reader_died.load(Ordering::SeqCst) {
+            return Err(shell_reader_died_failure());
+        }
+
+        let buf = buffer.lock_recover();
+        let start_offset = *buffer_start.lock_recover();
         let end_offset = start_offset + buf.len();
-        let mut cursor = read_cursor.lock().unwrap();
+        let mut cursor = read_cursor.lock_recover();
         let had_gap = *cursor < start_offset;
         let start = (*cursor).max(start_offset);
+        let relative_start = start.saturating_sub(start_offset);
         let mut rendered =
-            String::from_utf8_lossy(&buf[start.saturating_sub(start_offset)..]).to_string();
+            String::from_utf8_lossy(buf.get(relative_start..).unwrap_or_default()).to_string();
         *cursor = end_offset;
         if !rendered.is_empty()
             && (had_gap || truncated.load(Ordering::SeqCst) && *cursor == end_offset)
@@ -462,7 +471,7 @@ impl ShellRuntime {
         let rendered = clean_terminal_output(&rendered);
         let (rendered, original_token_count, token_truncated) =
             truncate_exec_output(rendered, max_output_tokens);
-        let mut spill_guard = spill.lock().unwrap();
+        let mut spill_guard = spill.lock_recover();
         let mut full_output_path = spill_guard.as_ref().map(|spill| spill.path.clone());
         if token_truncated && full_output_path.is_none() {
             full_output_path = activate_spill(id, &buf, &mut spill_guard);
@@ -480,6 +489,9 @@ impl ShellRuntime {
         let state = self.process_state(id)?;
         let deadline = timeout.map(|value| tokio::time::Instant::now() + value);
         loop {
+            if state.reader_died.load(Ordering::SeqCst) {
+                return Err(shell_reader_died_failure());
+            }
             if let Some(token) = cancel.as_ref()
                 && token.is_cancelled()
             {
@@ -488,12 +500,12 @@ impl ShellRuntime {
                 return Ok(PollOutcome::Cancelled);
             }
 
-            let exited = state.exit_code.lock().unwrap().is_some();
+            let exited = state.exit_code.lock_recover().is_some();
             if exited {
                 wait_for_buffer_settle(&state, Duration::from_millis(OUTPUT_QUIET_PERIOD_MS)).await;
                 let (output, original_token_count, full_output_path) =
                     self.take_incremental_output(id, max_output_tokens)?;
-                let exit_code = state.exit_code.lock().unwrap().unwrap_or(-1);
+                let exit_code = state.exit_code.lock_recover().unwrap_or(-1);
                 return Ok(PollOutcome::Exited {
                     output,
                     original_token_count,
@@ -505,7 +517,7 @@ impl ShellRuntime {
             if let Some(dl) = deadline
                 && tokio::time::Instant::now() >= dl
             {
-                let exit_code = *state.exit_code.lock().unwrap();
+                let exit_code = *state.exit_code.lock_recover();
                 if let Some(exit_code) = exit_code {
                     wait_for_buffer_settle(&state, Duration::from_millis(OUTPUT_QUIET_PERIOD_MS))
                         .await;
@@ -550,8 +562,8 @@ impl ShellRuntime {
     }
 
     pub(crate) fn remove_process(&self, id: &str) {
-        if let Some(proc) = self.table.processes.lock().unwrap().remove(id)
-            && let Some(mut spill) = proc.spill.lock().unwrap().take()
+        if let Some(proc) = self.table.processes.lock_recover().remove(id)
+            && let Some(mut spill) = proc.spill.lock_recover().take()
         {
             // Flush but deliberately do NOT delete the spill here: this hook
             // fires as the same tool call hands `full_output_path` back to the
@@ -564,7 +576,7 @@ impl ShellRuntime {
 
     pub(crate) async fn write_stdin(&self, id: &str, input: &str) -> ShellResult<()> {
         let writer = {
-            let procs = self.table.processes.lock().unwrap();
+            let procs = self.table.processes.lock_recover();
             let proc = procs.get(id).ok_or_else(|| {
                 shell_invalid_request("unknown_shell_process", format!("Unknown session id {id}"))
             })?;
@@ -572,7 +584,7 @@ impl ShellRuntime {
         };
         let input = input.to_string();
         tokio::task::spawn_blocking(move || {
-            let mut writer = writer.lock().unwrap();
+            let mut writer = writer.lock_recover();
             let writer = writer.as_mut().ok_or_else(|| {
                 shell_execution_failure("shell_stdin_unavailable", "Process stdin not available")
             })?;
@@ -594,14 +606,14 @@ impl ShellRuntime {
 
     pub(crate) async fn close_stdin(&self, id: &str) -> ShellResult<()> {
         let writer = {
-            let procs = self.table.processes.lock().unwrap();
+            let procs = self.table.processes.lock_recover();
             let proc = procs.get(id).ok_or_else(|| {
                 shell_invalid_request("unknown_shell_process", format!("Unknown session id {id}"))
             })?;
             Arc::clone(&proc.writer)
         };
         tokio::task::spawn_blocking(move || {
-            let mut writer = writer.lock().unwrap();
+            let mut writer = writer.lock_recover();
             writer.take();
             Ok(())
         })
@@ -666,6 +678,7 @@ impl ShellRuntime {
         let truncated = Arc::new(AtomicBool::new(false));
         let spill = Arc::new(StdMutex::new(None));
         let output_notify = Arc::new(Notify::new());
+        let reader_died = Arc::new(AtomicBool::new(false));
         let mut reader_handles = Vec::new();
 
         if let Some(stdout) = stdout {
@@ -676,7 +689,7 @@ impl ShellRuntime {
                 Arc::clone(&buffer_start),
                 Arc::clone(&truncated),
                 Arc::clone(&spill),
-                Arc::clone(&output_notify),
+                ReaderSignals::new(Arc::clone(&output_notify), Arc::clone(&reader_died)),
             ));
         }
         if let Some(stderr) = stderr {
@@ -687,7 +700,7 @@ impl ShellRuntime {
                 Arc::clone(&buffer_start),
                 Arc::clone(&truncated),
                 Arc::clone(&spill),
-                Arc::clone(&output_notify),
+                ReaderSignals::new(Arc::clone(&output_notify), Arc::clone(&reader_died)),
             ));
         }
 
@@ -701,6 +714,9 @@ impl ShellRuntime {
                 terminate_pipe_process(child_pid);
                 let _ = tokio::time::timeout(Duration::from_millis(500), &mut wait_handle).await;
                 wait_for_pipe_readers(&mut reader_handles).await;
+                if reader_died.load(Ordering::SeqCst) {
+                    return Err(shell_reader_died_failure());
+                }
                 return Ok(PollOutcome::Cancelled);
             }
 
@@ -745,6 +761,9 @@ impl ShellRuntime {
                             .map(exit_status_code)
                             .unwrap_or(-1);
                         wait_for_pipe_readers(&mut reader_handles).await;
+                        if reader_died.load(Ordering::SeqCst) {
+                            return Err(shell_reader_died_failure());
+                        }
                         let (output, original_token_count, full_output_path) = render_buffer_output(
                             id,
                             &buffer,
@@ -776,6 +795,9 @@ impl ShellRuntime {
                             .map(exit_status_code)
                             .unwrap_or(-1);
                         wait_for_pipe_readers(&mut reader_handles).await;
+                        if reader_died.load(Ordering::SeqCst) {
+                            return Err(shell_reader_died_failure());
+                        }
                         let (output, original_token_count, full_output_path) = render_buffer_output(
                             id,
                             &buffer,

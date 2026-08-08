@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::{Mutex as StdMutex, Weak};
 
+use lash_sansio::sync::MutexExt;
+
 use super::*;
 
 #[derive(Clone)]
@@ -293,9 +295,7 @@ impl PluginHost {
         session_id: &str,
         session: &Arc<PluginSession>,
     ) -> Result<(), PluginError> {
-        let mut sessions = self.sessions.lock().map_err(|_| {
-            PluginError::Session("plugin host session registry poisoned".to_string())
-        })?;
+        let mut sessions = self.sessions.lock_recover();
         if let Some(existing) = sessions.get(session_id).and_then(Weak::upgrade) {
             if !Arc::ptr_eq(&existing, session) {
                 return Err(PluginError::Session(format!(
@@ -309,9 +309,7 @@ impl PluginHost {
     }
 
     pub fn unregister_session(&self, session_id: &str) -> Result<(), PluginError> {
-        let mut sessions = self.sessions.lock().map_err(|_| {
-            PluginError::Session("plugin host session registry poisoned".to_string())
-        })?;
+        let mut sessions = self.sessions.lock_recover();
         sessions.remove(session_id);
         Ok(())
     }
@@ -320,10 +318,7 @@ impl PluginHost {
         &self,
         session_id: &str,
     ) -> Result<Arc<PluginSession>, PluginOperationInvokeError> {
-        let mut sessions = self
-            .sessions
-            .lock()
-            .map_err(|_| PluginOperationInvokeError::SessionRegistryPoisoned)?;
+        let mut sessions = self.sessions.lock_recover();
         let Some(weak) = sessions.get(session_id).cloned() else {
             return Err(PluginOperationInvokeError::UnknownSession(
                 session_id.to_string(),

@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -112,47 +113,35 @@ impl TestLocalProcessRegistry {
     #[doc(hidden)]
     pub fn pause_next_execution_write_after_validation(&self) -> ExecutionWritePauseHandle {
         let pause = ExecutionWritePause::new();
-        *self
-            .execution_write_pause
-            .lock()
-            .expect("execution write pause lock") = Some(pause.clone());
+        *self.execution_write_pause.lock_recover() = Some(pause.clone());
         pause.handle()
     }
 
     #[doc(hidden)]
     pub fn pause_next_wake_mark(&self) -> ExecutionWritePauseHandle {
         let pause = ExecutionWritePause::new();
-        *self.wake_mark_pause.lock().expect("wake mark pause lock") = Some(pause.clone());
+        *self.wake_mark_pause.lock_recover() = Some(pause.clone());
         pause.handle()
     }
 
     #[doc(hidden)]
     pub fn pause_next_append_after_outbox(&self) -> ExecutionWritePauseHandle {
         let pause = ExecutionWritePause::new();
-        *self
-            .append_outbox_pause
-            .lock()
-            .expect("append outbox pause lock") = Some(pause.clone());
+        *self.append_outbox_pause.lock_recover() = Some(pause.clone());
         pause.handle()
     }
 
     #[doc(hidden)]
     pub fn pause_next_append_after_target_snapshot(&self) -> ExecutionWritePauseHandle {
         let pause = ExecutionWritePause::new();
-        *self
-            .append_target_snapshot_pause
-            .lock()
-            .expect("append target snapshot pause lock") = Some(pause.clone());
+        *self.append_target_snapshot_pause.lock_recover() = Some(pause.clone());
         pause.handle()
     }
 
     #[doc(hidden)]
     pub fn pause_next_prune_after_managed_removal(&self) -> ExecutionWritePauseHandle {
         let pause = ExecutionWritePause::new();
-        *self
-            .prune_managed_removal_pause
-            .lock()
-            .expect("prune managed-removal pause lock") = Some(pause.clone());
+        *self.prune_managed_removal_pause.lock_recover() = Some(pause.clone());
         pause.handle()
     }
 
@@ -199,9 +188,9 @@ impl TestLocalProcessRegistry {
 
     async fn wait_for_pause(
         slot: &std::sync::Mutex<Option<ExecutionWritePause>>,
-        lock_label: &str,
+        _lock_label: &str,
     ) {
-        let pause = slot.lock().expect(lock_label).take();
+        let pause = slot.lock_recover().take();
         if let Some(pause) = pause {
             pause.validated.notify_one();
             pause.resume.notified().await;

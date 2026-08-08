@@ -330,6 +330,7 @@ mod tests {
     use lash_core::plugin::{PluginError, SessionHandle};
     use lash_core::runtime::RuntimeSessionState;
     use lash_core::{SessionCreateRequest, SessionSnapshot, ToolCall};
+    use lash_sansio::sync::MutexExt;
 
     fn model_spec(model: &str, variant: Option<&str>) -> lash_core::ModelSpec {
         lash_core::ModelSpec::builder(model)
@@ -395,8 +396,7 @@ mod tests {
             move |request, usage_source| {
                 manager
                     .requests
-                    .lock()
-                    .expect("requests")
+                    .lock_recover()
                     .push((request, usage_source));
                 Ok(lash_core::facade_support::DirectCompletion {
                     text: manager.response_text.clone(),
@@ -479,7 +479,7 @@ mod tests {
         );
         assert_eq!(result.value_for_projection()["confidence"], json!(0.8));
 
-        let requests = manager.requests.lock().expect("requests");
+        let requests = manager.requests.lock_recover();
         assert_eq!(requests.len(), 1);
         let (request, usage_source) = &requests[0];
         assert_eq!(usage_source, "llm_query");
@@ -533,7 +533,7 @@ mod tests {
             .await;
 
         assert!(result.is_success(), "{:?}", result.value_for_projection());
-        let requests = manager.requests.lock().expect("requests");
+        let requests = manager.requests.lock_recover();
         assert_eq!(requests.len(), 1);
         let (request, usage_source) = &requests[0];
         assert_eq!(usage_source, "llm_query");

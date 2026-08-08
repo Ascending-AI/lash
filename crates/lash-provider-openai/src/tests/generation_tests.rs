@@ -1,6 +1,7 @@
 use super::*;
 use crate::CodexProvider;
 use lash_core::NonNegativeFiniteF64;
+use lash_sansio::sync::MutexExt;
 
 #[test]
 fn output_token_cap_maps_to_wire_fields() {
@@ -87,13 +88,11 @@ impl LlmHttpTransport for RecordingScriptedTransport {
         _timeout: Option<std::time::Duration>,
     ) -> Result<lash_llm_transport::LlmHttpResponse, LlmTransportError> {
         self.bodies
-            .lock()
-            .expect("body lock")
+            .lock_recover()
             .push(String::from_utf8(request.body.to_vec()).expect("utf-8 body"));
         let (status, headers, body) = self
             .responses
-            .lock()
-            .expect("script lock")
+            .lock_recover()
             .pop_front()
             .expect("scripted response");
         Ok(lash_llm_transport::LlmHttpResponse {
@@ -209,7 +208,7 @@ async fn every_retry_attempt_reapplies_the_sampling_controls() {
         .expect("retry succeeds");
 
     assert_eq!(completion.call_record.attempts.len(), 2);
-    let bodies = transport.bodies.lock().expect("body lock").clone();
+    let bodies = transport.bodies.lock_recover().clone();
     assert_eq!(bodies.len(), 2);
     for body in bodies {
         let value: Value = serde_json::from_str(&body).expect("request body json");

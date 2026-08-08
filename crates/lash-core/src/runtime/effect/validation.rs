@@ -265,6 +265,7 @@ fn trace_value(value: Option<&Value>) -> TraceEffectEnvelopeDiffValue {
 mod tests {
     use std::sync::Mutex;
 
+    use lash_sansio::sync::MutexExt;
     use lash_trace::{TraceRecord, TraceSink, TraceSinkError};
     use serde_json::json;
 
@@ -278,10 +279,7 @@ mod tests {
 
     impl TraceSink for RecordingSink {
         fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
-            self.records
-                .lock()
-                .expect("trace records")
-                .push(record.clone());
+            self.records.lock_recover().push(record.clone());
             Ok(())
         }
     }
@@ -421,7 +419,7 @@ mod tests {
             ["command.call.args.tool_results[0].value"]
         );
 
-        let records = sink.records.lock().expect("trace records");
+        let records = sink.records.lock_recover();
         let TraceEvent::EffectEnvelopeDiff { event } = &records[0].event else {
             panic!("expected effect-envelope diff trace");
         };
@@ -488,6 +486,6 @@ mod tests {
             .expect_err("mismatch");
             assert_eq!(error.summary.expect("summary").divergent_path_count, 1);
         }
-        assert!(sink.records.lock().expect("trace records").is_empty());
+        assert!(sink.records.lock_recover().is_empty());
     }
 }

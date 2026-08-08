@@ -2,6 +2,7 @@ use crate::{
     PreparedToolCall, ToolCallOutcome, ToolContext, ToolManifest, ToolResult, ToolRetryDisposition,
     ToolRetryPolicy,
 };
+use futures_util::FutureExt as _;
 use lash_sansio::core_support::*;
 
 use super::context::ToolDispatchContext;
@@ -47,10 +48,14 @@ async fn execute_once<'run>(
     tool_context: ToolContext<'run>,
 ) -> ToolResult {
     let args = &prepared.args;
-    let mut result = context
-        .tools
-        .execute_by_id(&prepared.tool_id, args, &tool_context)
-        .await;
+    let mut result = std::panic::AssertUnwindSafe(context.tools.execute_by_id(
+        &prepared.tool_id,
+        args,
+        &tool_context,
+    ))
+    .catch_unwind()
+    .await
+    .unwrap_or_else(tool_panicked);
     normalize_tool_result_attachments(context, &prepared.tool_name, &mut result).await;
     result
 }
@@ -61,12 +66,30 @@ async fn execute_granted_once<'run>(
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
 ) -> ToolResult {
-    let mut result = context
-        .tools
-        .execute_granted(grant, &prepared.args, &tool_context)
-        .await;
+    let mut result = std::panic::AssertUnwindSafe(context.tools.execute_granted(
+        grant,
+        &prepared.args,
+        &tool_context,
+    ))
+    .catch_unwind()
+    .await
+    .unwrap_or_else(tool_panicked);
     normalize_tool_result_attachments(context, &grant.manifest.name, &mut result).await;
     result
+}
+
+fn tool_panicked(payload: Box<dyn std::any::Any + Send>) -> ToolResult {
+    let message = crate::panic_containment::payload_message(payload.as_ref());
+    let failure = ToolResult::failure(crate::ToolFailure {
+        class: crate::ToolFailureClass::Internal,
+        code: "tool_panicked".to_string(),
+        message,
+        source: crate::ToolFailureSource::Runtime,
+        retry: crate::ToolRetryDisposition::Never,
+        raw: None,
+    });
+    crate::panic_containment::enforce_loudness(payload);
+    failure
 }
 
 async fn normalize_tool_result_attachments(
@@ -155,4 +178,17 @@ pub(crate) fn mark_retry_exhausted(result: ToolResult, attempts: u32) -> ToolRes
         failure.retry = ToolRetryDisposition::Exhausted { attempts };
     }
     ToolResult::from_output(output)
+}
+
+#[cfg(test)]
+mod panic_tests {
+    #[test]
+    fn contained_tool_panic_is_loud_in_test_builds() {
+        let previous = crate::panic_containment::set_loud(true);
+        let panic = std::panic::catch_unwind(|| {
+            let _ = super::tool_panicked(Box::new("tool seam remains loud"));
+        });
+        crate::panic_containment::set_loud(previous);
+        assert!(panic.is_err());
+    }
 }

@@ -153,8 +153,7 @@ impl RetiringSubscriptionListTriggerStore {
     fn retire_on_next_list(&self, session_id: &str) {
         *self
             .session_to_retire
-            .lock()
-            .expect("retiring trigger store session lock") = Some(session_id.to_string());
+            .lock_recover() = Some(session_id.to_string());
     }
 }
 
@@ -180,8 +179,7 @@ impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
     > {
         let session_id = self
             .session_to_retire
-            .lock()
-            .expect("retiring trigger store session lock")
+            .lock_recover()
             .take();
         if let Some(session_id) = session_id {
             self.store_factory
@@ -307,8 +305,7 @@ impl RetiringQueuedWorkRunHandle {
     fn retire_on_next_run(&self, session_id: &str) {
         *self
             .session_to_retire
-            .lock()
-            .expect("retiring queued-work session lock") = Some(session_id.to_string());
+            .lock_recover() = Some(session_id.to_string());
     }
 }
 
@@ -320,8 +317,7 @@ impl lash::runtime::QueuedWorkRunHandle for RetiringQueuedWorkRunHandle {
     ) -> std::result::Result<(), lash::runtime::QueuedWorkRunError> {
         let session_id = self
             .session_to_retire
-            .lock()
-            .expect("retiring queued-work session lock")
+            .lock_recover()
             .take();
         if let Some(session_id) = session_id {
             self.store_factory

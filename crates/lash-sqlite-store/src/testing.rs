@@ -3,6 +3,7 @@
 //! This module only exists behind the crate's `testing` feature. Production
 //! factories have no injector, and production builds do not compile the hook.
 
+use lash_sansio::sync::{LockResultExt, MutexExt};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
@@ -66,15 +67,9 @@ impl SqliteTransactionPause {
     pub async fn wait_until_reached(&self) -> u64 {
         let state = Arc::clone(&self.state);
         tokio::task::spawn_blocking(move || {
-            let mut progress = state
-                .state
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner());
+            let mut progress = state.state.lock_recover();
             while progress.reached_ordinal.is_none() {
-                progress = state
-                    .changed
-                    .wait(progress)
-                    .unwrap_or_else(|poison| poison.into_inner());
+                progress = state.changed.wait(progress).recover();
             }
             progress.reached_ordinal.expect("pause reached ordinal")
         })
@@ -84,11 +79,7 @@ impl SqliteTransactionPause {
 
     /// Release the background SQLite transaction to continue to commit.
     pub fn release(&self) {
-        let mut progress = self
-            .state
-            .state
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let mut progress = self.state.state.lock_recover();
         progress.released = true;
         self.state.changed.notify_all();
     }
@@ -167,19 +158,11 @@ impl SqliteFaultInjector {
             }
         };
         if let Some(pause) = pause {
-            let mut progress = pause
-                .state
-                .state
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner());
+            let mut progress = pause.state.state.lock_recover();
             progress.reached_ordinal = Some(write_transaction_ordinal);
             pause.state.changed.notify_all();
             while !progress.released {
-                progress = pause
-                    .state
-                    .changed
-                    .wait(progress)
-                    .unwrap_or_else(|poison| poison.into_inner());
+                progress = pause.state.changed.wait(progress).recover();
             }
         }
         let mut state = self.lock_state();
@@ -211,8 +194,6 @@ impl SqliteFaultInjector {
     }
 
     fn lock_state(&self) -> MutexGuard<'_, InjectorState> {
-        self.state
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
+        self.state.lock_recover()
     }
 }

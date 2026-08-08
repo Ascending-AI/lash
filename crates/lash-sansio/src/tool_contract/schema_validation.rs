@@ -1,3 +1,4 @@
+use crate::sync::MutexExt;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -129,8 +130,7 @@ fn schema_content_fingerprint(schema: &Value) -> Result<([u8; 32], usize), Strin
 fn compiled_schema(schema: &Value) -> Result<Arc<jsonschema::JSONSchema>, String> {
     let (hash, serialized_bytes) = schema_content_fingerprint(schema)?;
     if let Some(cached) = compiled_schema_cache()
-        .lock()
-        .expect("compiled schema cache lock")
+        .lock_recover()
         .find_compiled(&hash, schema)
     {
         return cached;
@@ -142,9 +142,7 @@ fn compiled_schema(schema: &Value) -> Result<Arc<jsonschema::JSONSchema>, String
             .map_err(|error| error.to_string())
     });
 
-    let mut cache = compiled_schema_cache()
-        .lock()
-        .expect("compiled schema cache lock");
+    let mut cache = compiled_schema_cache().lock_recover();
     if let Some(existing) = cache.find_compiled(&hash, schema) {
         return existing;
     }

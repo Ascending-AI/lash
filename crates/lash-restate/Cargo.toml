@@ -14,6 +14,7 @@ description = "Restate durable execution adapter for Lash runtime effects"
 workspace = true
 
 [dependencies]
+lash-sansio = { workspace = true }
 async-trait = { workspace = true }
 lash-core = { workspace = true }
 lash-http-transport = { workspace = true }

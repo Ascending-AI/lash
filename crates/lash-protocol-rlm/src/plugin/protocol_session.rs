@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
 use lash_core::plugin::{
@@ -51,10 +52,7 @@ impl RlmProtocolSession {
         if used == 0 || used < threshold {
             return Ok(Vec::new());
         }
-        let mut warned = self
-            .warned_at_threshold
-            .lock()
-            .map_err(|_| PluginError::Session("rlm soft-warning state poisoned".to_string()))?;
+        let mut warned = self.warned_at_threshold.lock_recover();
         if *warned {
             return Ok(Vec::new());
         }

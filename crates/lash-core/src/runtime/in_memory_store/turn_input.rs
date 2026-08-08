@@ -6,6 +6,7 @@
 //! path changes.
 
 use super::{InMemoryPendingTurnInput, InMemorySessionStore};
+use lash_sansio::sync::MutexExt;
 
 impl InMemoryPendingTurnInput {
     fn claim_diagnostics(&self) -> Option<crate::PendingTurnInputClaimDiagnostics> {
@@ -83,15 +84,10 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         &self,
         draft: crate::PendingTurnInputDraft,
     ) -> Result<crate::PendingTurnInput, crate::store::StoreError> {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
+        let enqueued_at_ms = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(&draft.session_id)?;
-        let mut pending = self
-            .pending_turn_inputs
-            .lock()
-            .expect("lock pending turn input");
+        let mut pending = self.pending_turn_inputs.lock_recover();
         if let Some(source_key) = draft.source_key.as_deref()
             && let Some(existing) = pending.iter().find(|entry| {
                 entry.input.session_id == draft.session_id
@@ -116,10 +112,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             }
             return Ok(existing.input.clone());
         }
-        let mut next_seq = self
-            .pending_turn_input_next_seq
-            .lock()
-            .expect("lock pending turn input seq");
+        let mut next_seq = self.pending_turn_input_next_seq.lock_recover();
         *next_seq = crate::StoreError::checked_monotonic_increment(
             "turn_input_enqueue_sequence",
             *next_seq,
@@ -127,7 +120,6 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         let input_id = draft
             .input_id
             .unwrap_or_else(|| format!("recording-ti-{next_seq}"));
-        let enqueued_at_ms = self.clock.timestamp_ms();
         let state = match draft.ingress {
             crate::TurnInputIngress::ActiveTurn { .. } => crate::TurnInputState::PendingActive,
             crate::TurnInputIngress::NextTurn => crate::TurnInputState::DeferredNextTurn,
@@ -158,16 +150,12 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         &self,
         session_id: &str,
     ) -> Result<Vec<crate::PendingTurnInput>, crate::store::StoreError> {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
         let now = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
         let live_generation = self.live_session_lease_generation(session_id, now);
         let mut inputs = self
             .pending_turn_inputs
-            .lock()
-            .expect("lock pending turn input")
+            .lock_recover()
             .iter()
             .filter(|entry| {
                 entry.input.session_id == session_id
@@ -191,8 +179,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
     ) -> Result<Vec<crate::TurnInputApplication>, crate::store::StoreError> {
         let mut commits = self
             .runtime_turn_commits
-            .lock()
-            .expect("lock runtime turn commits")
+            .lock_recover()
             .iter()
             .filter(|((stored_session_id, _), _)| stored_session_id == session_id)
             .map(|((_, turn_id), record)| {
@@ -215,16 +202,10 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         session_id: &str,
         targets: &[crate::PendingTurnInputCancelTarget],
     ) -> Result<Vec<crate::PendingTurnInputCancelResult>, crate::store::StoreError> {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
         let now = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
         let live_generation = self.live_session_lease_generation(session_id, now);
-        let mut pending = self
-            .pending_turn_inputs
-            .lock()
-            .expect("lock pending turn input");
+        let mut pending = self.pending_turn_inputs.lock_recover();
         let mut results = Vec::with_capacity(targets.len());
         for target in targets {
             let outcome = match find_pending_turn_input_index(&pending, session_id, target) {
@@ -248,16 +229,10 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         session_id: &str,
         anchor: &crate::PendingTurnInputCancelTarget,
     ) -> Result<crate::PendingTurnInputSuffixCancelOutcome, crate::store::StoreError> {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
         let now = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
         let live_generation = self.live_session_lease_generation(session_id, now);
-        let mut pending = self
-            .pending_turn_inputs
-            .lock()
-            .expect("lock pending turn input");
+        let mut pending = self.pending_turn_inputs.lock_recover();
         let Some(anchor_seq) = find_pending_turn_input_index(&pending, session_id, anchor)
             .map(|index| pending[index].input.enqueue_seq)
         else {
@@ -322,10 +297,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         &self,
         claim: &crate::TurnInputClaim,
     ) -> Result<(), crate::store::StoreError> {
-        let mut pending = self
-            .pending_turn_inputs
-            .lock()
-            .expect("lock pending turn input");
+        let mut pending = self.pending_turn_inputs.lock_recover();
         for entry in pending.iter_mut() {
             if entry.input.session_id == claim.session_id
                 && entry.claim_id.as_deref() == Some(claim.claim_id.as_str())

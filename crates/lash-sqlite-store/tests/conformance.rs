@@ -2,6 +2,7 @@
 //! Sqlite implementation. The same suite runs against the in-memory registry
 //! in lash-core, so both backends are held to one contract.
 
+use lash_sansio::sync::MutexExt;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -30,7 +31,7 @@ mod cold_process_turn_parent;
 fn fresh_db_path(dirs: &Arc<Mutex<Vec<TempDir>>>, file_name: &str) -> PathBuf {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join(file_name);
-    dirs.lock().expect("dirs lock").push(dir);
+    dirs.lock_recover().push(dir);
     path
 }
 
@@ -451,7 +452,7 @@ async fn sqlite_process_trigger_retention_satisfies_conformance() {
                     .await
                     .expect("trigger store"),
             ) as Arc<dyn TriggerStore>;
-            dirs.lock().expect("retention dirs lock").push(dir);
+            dirs.lock_recover().push(dir);
             lash_core::testing::conformance::ProcessTriggerRetentionHandles { registry, triggers }
         }
     })
@@ -478,7 +479,7 @@ async fn sqlite_store_contract_state_machine_properties() {
                     .await
                     .expect("open property runtime store"),
             ) as Arc<dyn RuntimePersistence>;
-            dirs.lock().expect("property tempdirs lock").push(dir);
+            dirs.lock_recover().push(dir);
             lash_core::testing::conformance::StoreContractHandles { registry, runtime }
         }
     })
@@ -506,7 +507,7 @@ async fn sqlite_runtime_persistence_state_machine_properties() {
                 )
                 .await
                 .expect("create SQLite runtime-persistence property handles");
-            dirs.lock().expect("property tempdirs lock").push(dir);
+            dirs.lock_recover().push(dir);
             handles
         }
     })
@@ -522,7 +523,7 @@ async fn sqlite_session_graph_state_machine_properties() {
             let dir = tempfile::tempdir().expect("session-graph property tempdir");
             let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()))
                 as Arc<dyn SessionStoreFactory>;
-            dirs.lock().expect("session-graph tempdirs lock").push(dir);
+            dirs.lock_recover().push(dir);
             factory
         }
     })
@@ -598,7 +599,7 @@ async fn sqlite_session_store_factory_satisfies_conformance() {
             let dir = tempfile::tempdir().expect("tempdir");
             let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()))
                 as Arc<dyn SessionStoreFactory>;
-            dirs.lock().expect("dirs lock").push(dir);
+            dirs.lock_recover().push(dir);
             factory
         },
         || {

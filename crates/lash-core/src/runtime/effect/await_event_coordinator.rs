@@ -17,6 +17,7 @@
 //! must still observe a peer's resolution, and every waiter therefore polls
 //! persisted state with bounded backoff regardless of notifications.
 
+use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -320,7 +321,7 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
             .await?;
         let observed = match cas {
             TerminalCas::Stored => {
-                self.notify_key(&key.key_id)?;
+                self.notify_key(&key.key_id);
                 return Ok(ResolveOutcome::Accepted);
             }
             TerminalCas::AlreadyResolved { terminal_json } => {
@@ -372,7 +373,7 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
         deadline: Option<Instant>,
         clock: &dyn crate::Clock,
     ) -> Result<Resolution, RuntimeError> {
-        let notify = self.notifier_for(&key.key_id)?;
+        let notify = self.notifier_for(&key.key_id);
         self.ensure_pending(key).await?;
         let mut backoff = INITIAL_POLL;
         loop {
@@ -438,7 +439,8 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
         self.backend
             .revoke_session(session_id, self.clock.timestamp_ms())
             .await?;
-        self.notify_all()
+        self.notify_all();
+        Ok(())
     }
 
     /// Resolve every *outstanding* ordinary wait of `session_id` with
@@ -451,7 +453,8 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
         self.backend
             .cancel_session_promises(session_id, &terminal_json, self.clock.timestamp_ms())
             .await?;
-        self.notify_all()
+        self.notify_all();
+        Ok(())
     }
 
     /// Durably register the caller as a waiter before it starts polling, so a
@@ -568,48 +571,25 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
         Ok(key_id_matches & signature_matches)
     }
 
-    fn notifier_for(&self, key_id: &str) -> Result<Arc<Notify>, RuntimeError> {
-        let mut notifiers = self.notifiers.lock().map_err(|_| self.notifier_error())?;
-        Ok(Arc::clone(
+    fn notifier_for(&self, key_id: &str) -> Arc<Notify> {
+        let mut notifiers = self.notifiers.lock_recover();
+        Arc::clone(
             notifiers
                 .entry(key_id.to_string())
                 .or_insert_with(|| Arc::new(Notify::new())),
-        ))
-    }
-
-    fn notify_key(&self, key_id: &str) -> Result<(), RuntimeError> {
-        if let Some(notify) = self
-            .notifiers
-            .lock()
-            .map_err(|_| self.notifier_error())?
-            .get(key_id)
-        {
-            notify.notify_waiters();
-        }
-        Ok(())
-    }
-
-    fn notify_all(&self) -> Result<(), RuntimeError> {
-        for notify in self
-            .notifiers
-            .lock()
-            .map_err(|_| self.notifier_error())?
-            .values()
-        {
-            notify.notify_waiters();
-        }
-        Ok(())
-    }
-
-    fn notifier_error(&self) -> RuntimeError {
-        let vocabulary = self.backend.vocabulary();
-        RuntimeError::new(
-            vocabulary.notify,
-            format!(
-                "{} await-event notifier lock poisoned",
-                vocabulary.display_name
-            ),
         )
+    }
+
+    fn notify_key(&self, key_id: &str) {
+        if let Some(notify) = self.notifiers.lock_recover().get(key_id) {
+            notify.notify_waiters();
+        }
+    }
+
+    fn notify_all(&self) {
+        for notify in self.notifiers.lock_recover().values() {
+            notify.notify_waiters();
+        }
     }
 }
 
@@ -661,8 +641,7 @@ mod tests {
         fn revoked_session(&self, session_id: Option<&str>) -> bool {
             session_id.is_some_and(|session_id| {
                 self.revoked
-                    .lock()
-                    .expect("revocation list")
+                    .lock_recover()
                     .iter()
                     .any(|revoked| revoked == session_id)
             })
@@ -694,7 +673,7 @@ mod tests {
             if self.revoked_session(identity.session_id.as_deref()) {
                 return Ok(false);
             }
-            let mut rows = self.rows.lock().expect("rows");
+            let mut rows = self.rows.lock_recover();
             match rows.get(key_id) {
                 Some(row) => Ok(&row.identity == identity),
                 None => {
@@ -720,7 +699,7 @@ mod tests {
             if self.revoked_session(identity.session_id.as_deref()) {
                 return Ok(TerminalCas::UnknownOrRevoked);
             }
-            let mut rows = self.rows.lock().expect("rows");
+            let mut rows = self.rows.lock_recover();
             match rows.get_mut(key_id) {
                 Some(row) if &row.identity != identity => Ok(TerminalCas::UnknownOrRevoked),
                 Some(MemoryRow {
@@ -755,7 +734,7 @@ mod tests {
             if self.revoked_session(identity.session_id.as_deref()) {
                 return Ok(PersistedPromise::UnknownOrRevoked);
             }
-            let rows = self.rows.lock().expect("rows");
+            let rows = self.rows.lock_recover();
             match rows.get(key_id) {
                 None => Ok(PersistedPromise::Missing),
                 Some(row) if &row.identity != identity => Ok(PersistedPromise::UnknownOrRevoked),
@@ -769,13 +748,9 @@ mod tests {
         }
 
         async fn revoke_session(&self, session_id: &str, _now_ms: u64) -> Result<(), RuntimeError> {
-            self.revoked
-                .lock()
-                .expect("revocation list")
-                .push(session_id.to_string());
+            self.revoked.lock_recover().push(session_id.to_string());
             self.rows
-                .lock()
-                .expect("rows")
+                .lock_recover()
                 .retain(|_, row| row.identity.session_id.as_deref() != Some(session_id));
             Ok(())
         }
@@ -786,7 +761,7 @@ mod tests {
             terminal_json: &str,
             _now_ms: u64,
         ) -> Result<(), RuntimeError> {
-            for row in self.rows.lock().expect("rows").values_mut() {
+            for row in self.rows.lock_recover().values_mut() {
                 if row.identity.session_id.as_deref() == Some(session_id)
                     && !row.identity.turn_control
                     && row.terminal_json.is_none()
@@ -1022,7 +997,7 @@ mod tests {
             )
             .await
             .expect("mint key");
-        coordinator.backend.rows.lock().expect("rows").insert(
+        coordinator.backend.rows.lock_recover().insert(
             key.key_id.clone(),
             MemoryRow {
                 identity: coordinator.row_identity(&key).expect("row identity"),

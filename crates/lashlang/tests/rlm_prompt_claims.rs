@@ -6,6 +6,7 @@
 //! lashlang semantics, the failing test tells you which line in the prompt
 //! is now a lie.
 
+use lash_sansio::sync::MutexExt;
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, ParseError,
     ProcessStart, Record, State, Value, parse,
@@ -37,11 +38,11 @@ impl MockHost {
     }
 
     fn record_observation(&self, value: Value) {
-        self.observations.lock().unwrap().push(value);
+        self.observations.lock_recover().push(value);
     }
 
     fn observations(&self) -> Vec<Value> {
-        self.observations.lock().unwrap().clone()
+        self.observations.lock_recover().clone()
     }
 }
 
@@ -290,7 +291,7 @@ impl MockHost {
 
     async fn start_process(&self, start: ProcessStart) -> Result<Value, ExecutionHostError> {
         let handle_id = {
-            let mut counter = self.next_handle.lock().unwrap();
+            let mut counter = self.next_handle.lock_recover();
             *counter += 1;
             format!("p{}", *counter)
         };
@@ -301,8 +302,7 @@ impl MockHost {
                 .await?
         };
         self.pending
-            .lock()
-            .unwrap()
+            .lock_recover()
             .insert(handle_id.clone(), result);
         let mut record = Record::default();
         record.insert("__handle__".into(), Value::String("process".into()));
@@ -322,8 +322,7 @@ impl MockHost {
             })
             .ok_or_else(|| ExecutionHostError::new("handle record missing `id` field"))?;
         self.pending
-            .lock()
-            .unwrap()
+            .lock_recover()
             .remove(&id)
             .ok_or_else(|| ExecutionHostError::new(format!("unknown handle: {id}")))
     }
@@ -332,7 +331,7 @@ impl MockHost {
         if let Some(record) = handle.as_record()
             && let Some(Value::String(id)) = record.get("id")
         {
-            self.pending.lock().unwrap().remove(id.as_str());
+            self.pending.lock_recover().remove(id.as_str());
         }
         Ok(Value::Null)
     }

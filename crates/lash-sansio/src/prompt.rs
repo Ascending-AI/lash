@@ -1,6 +1,8 @@
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
+use crate::sync::MutexExt;
+
 use crate::{PromptContribution, PromptTemplate};
 
 /// Process-local cache identity for prompt inputs.
@@ -110,9 +112,7 @@ impl PromptCache {
     }
 
     pub fn clear(&self) {
-        if let Ok(mut guard) = self.inner.lock() {
-            *guard = None;
-        }
+        *self.inner.lock_recover() = None;
     }
 }
 
@@ -134,12 +134,12 @@ pub fn build_prompt_cached(input: PromptBuildInput, cache: Option<&PromptCache>)
     };
     let key = cache.map(|_| hash_prompt_inputs(&input));
     if let (Some(cache), Some(key)) = (cache, key)
-        && let Some(cached) = cache.inner.lock().ok().and_then(|guard| {
-            guard
-                .as_ref()
-                .filter(|(k, _)| *k == key)
-                .map(|(_, v)| Arc::clone(v))
-        })
+        && let Some(cached) = cache
+            .inner
+            .lock_recover()
+            .as_ref()
+            .filter(|(k, _)| *k == key)
+            .map(|(_, v)| Arc::clone(v))
     {
         return PreparedPrompt {
             context,
@@ -147,9 +147,8 @@ pub fn build_prompt_cached(input: PromptBuildInput, cache: Option<&PromptCache>)
         };
     }
     let system_prompt: Arc<str> = Arc::from(input.template.render(&context));
-    if let (Some(cache), Some(key)) = (cache, key)
-        && let Ok(mut guard) = cache.inner.lock()
-    {
+    if let (Some(cache), Some(key)) = (cache, key) {
+        let mut guard = cache.inner.lock_recover();
         *guard = Some((key, Arc::clone(&system_prompt)));
     }
     PreparedPrompt {

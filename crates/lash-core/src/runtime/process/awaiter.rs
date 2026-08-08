@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -125,7 +126,7 @@ pub fn watch_process_registry_with_sink(
 
 impl WatchedProcessRegistry {
     fn event_path(&self, process_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-        let mut paths = self.event_paths.lock().expect("event path lock poisoned");
+        let mut paths = self.event_paths.lock_recover();
         paths.retain(|_, path| path.strong_count() > 0);
         if let Some(path) = paths.get(process_id).and_then(Weak::upgrade) {
             return path;
@@ -846,7 +847,7 @@ mod tests {
 
     impl CollectingSink {
         fn collected(&self) -> Vec<(String, u64)> {
-            self.events.lock().expect("sink lock").clone()
+            self.events.lock_recover().clone()
         }
     }
 
@@ -854,8 +855,7 @@ mod tests {
     impl ProcessEventSink for CollectingSink {
         async fn emit(&self, event: &ProcessEvent) {
             self.events
-                .lock()
-                .expect("sink lock")
+                .lock_recover()
                 .push((event.event_type.clone(), event.sequence));
         }
     }
@@ -1527,9 +1527,9 @@ mod tests {
     impl ProcessEventSink for LossySink {
         async fn emit(&self, event: &ProcessEvent) {
             if event.sequence.is_multiple_of(2) {
-                self.dropped.lock().expect("sink lock").push(event.sequence);
+                self.dropped.lock_recover().push(event.sequence);
             } else {
-                self.seen.lock().expect("sink lock").push(event.sequence);
+                self.seen.lock_recover().push(event.sequence);
             }
         }
     }
@@ -1571,11 +1571,11 @@ mod tests {
 
         // The push feed genuinely lost some events...
         assert!(
-            !sink.dropped.lock().expect("sink lock").is_empty(),
+            !sink.dropped.lock_recover().is_empty(),
             "the lossy sink must drop at least one emit for the scenario to be meaningful"
         );
         assert!(
-            (sink.seen.lock().expect("sink lock").len() as u64) < EVENTS,
+            (sink.seen.lock_recover().len() as u64) < EVENTS,
             "the sink observed fewer events than were appended"
         );
         // ...but the durable log is the complete, ordered truth.

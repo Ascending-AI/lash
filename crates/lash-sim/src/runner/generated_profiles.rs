@@ -109,6 +109,7 @@ pub async fn run_generated_sim_profile(
     shard: SimShard,
     mode: SimRunMode,
 ) -> Result<GeneratedSimProfileReport, FixedScriptRunnerError> {
+    lash_core::panic_containment::set_loud(true);
     let configured_seeds = seeds.max(1);
     let seed_values = (0..configured_seeds)
         .filter(|seed_index| shard.selects(*seed_index))
@@ -155,6 +156,7 @@ pub async fn run_generated_sim_profile_for_seeds(
     seed_values: &[u64],
     max_boundaries: usize,
 ) -> Result<GeneratedSimProfileReport, FixedScriptRunnerError> {
+    lash_core::panic_containment::set_loud(true);
     let labels = GeneratedRunLabels {
         shard: SimShard::FULL.label(),
         configured_seeds: seed_values.len(),

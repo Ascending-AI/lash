@@ -1,4 +1,5 @@
 use crate::facade_support::RuntimeSessionStateFacadeOps;
+use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -11,6 +12,7 @@ use tokio_util::sync::CancellationToken;
 pub(crate) mod control;
 mod controller_error;
 mod scoped;
+mod task_panic;
 mod trigger;
 
 pub use control::{
@@ -647,18 +649,20 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 if !runner.uses_task_boundary(&envelope.command) {
                     return runner.execute(envelope).await;
                 }
+                let panic_call = match &envelope.command {
+                    RuntimeEffectCommand::ToolAttempt { call, .. } => Some(call.clone()),
+                    _ => None,
+                };
                 let task = crate::task::spawn(
                     crate::runtime::process_worker::inherit_process_execution_permit(
                         runner.execute(envelope),
                     ),
                 );
                 let mut abort = AbortEffectTaskOnDrop::new(task.abort_handle());
-                let result = task.await.map_err(|err| {
-                    RuntimeEffectControllerError::new(
-                        "runtime_effect_task_join",
-                        format!("spawned local effect task failed: {err}"),
-                    )
-                })?;
+                let result = match task.await {
+                    Ok(result) => result,
+                    Err(err) => task_panic::map_effect_task_join(err, panic_call),
+                };
                 abort.disarm();
                 result
             }
@@ -1151,17 +1155,14 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 ),
             )),
         };
-        *runner.update.lock().expect("turn effect state update lock") =
-            Some(TurnEffectStateUpdate {
-                policy: runner.driver.policy,
-                llm_stream_summaries: runner.driver.llm_stream_summaries,
-                next_llm_ordinal: runner.driver.next_llm_ordinal,
-                pending_queue_claims: runner.driver.pending_queue_claims,
-                pending_turn_input_claims: runner.driver.pending_turn_input_claims,
-                pending_checkpoint_turn_input_claim: runner
-                    .driver
-                    .pending_checkpoint_turn_input_claim,
-            });
+        *runner.update.lock_recover() = Some(TurnEffectStateUpdate {
+            policy: runner.driver.policy,
+            llm_stream_summaries: runner.driver.llm_stream_summaries,
+            next_llm_ordinal: runner.driver.next_llm_ordinal,
+            pending_queue_claims: runner.driver.pending_queue_claims,
+            pending_turn_input_claims: runner.driver.pending_turn_input_claims,
+            pending_checkpoint_turn_input_claim: runner.driver.pending_checkpoint_turn_input_claim,
+        });
         result
     }
 }
@@ -1412,18 +1413,14 @@ impl RuntimeEffectController for InlineRuntimeEffectController {
                     let result = execution.execute(*command).await?;
                     return Ok(RuntimeEffectOutcome::Process { result });
                 }
-                let result = crate::task::spawn(
-                    crate::runtime::process_worker::inherit_process_execution_permit(async move {
-                        execution.execute(*command).await
-                    }),
-                )
-                .await
-                .map_err(|err| {
-                    RuntimeEffectControllerError::new(
-                        "runtime_effect_process_task_join",
-                        format!("inline process effect task failed: {err}"),
+                let result = task_panic::map_process_task_join(
+                    crate::task::spawn(
+                        crate::runtime::process_worker::inherit_process_execution_permit(
+                            async move { execution.execute(*command).await },
+                        ),
                     )
-                })??;
+                    .await,
+                )?;
                 Ok(RuntimeEffectOutcome::Process { result })
             }
             RuntimeEffectCommand::Trigger { command } => {

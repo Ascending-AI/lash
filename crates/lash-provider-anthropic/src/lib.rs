@@ -14,6 +14,8 @@ pub use lash_core::llm::transport::{ANTHROPIC_FILE_MIMES, ANTHROPIC_IMAGE_MIMES}
 
 #[cfg(test)]
 mod tests {
+    use lash_sansio::sync::MutexExt;
+
     use crate::stream::StreamState;
     use crate::{AnthropicProvider, DEFAULT_BASE_URL};
     use lash_core::llm::types::{
@@ -190,7 +192,7 @@ mod tests {
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let event_sink = Arc::clone(&events);
         req.stream_events = Some(LlmEventSender::new(move |event| {
-            event_sink.lock().expect("event lock").push(event);
+            event_sink.lock_recover().push(event);
         }));
         let mut provider =
             AnthropicProvider::new("key").with_transport(Arc::new(StaticSseTransport(body)));
@@ -217,14 +219,10 @@ mod tests {
                 .any(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
         );
         assert!(
-            events
-                .lock()
-                .expect("event lock")
-                .iter()
-                .all(|event| !matches!(
-                    event,
-                    LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })
-                ))
+            events.lock_recover().iter().all(|event| !matches!(
+                event,
+                LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })
+            ))
         );
     }
 
@@ -835,7 +833,7 @@ mod tests {
                 .iter()
                 .find(|(name, _)| name.eq_ignore_ascii_case("anthropic-beta"))
                 .map(|(_, value)| value.clone());
-            *self.beta.lock().expect("beta capture") = beta;
+            *self.beta.lock_recover() = beta;
             let stream = [
                 "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n",
                 "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n",
@@ -862,7 +860,7 @@ mod tests {
             .expect("test runtime")
             .block_on(provider.complete(req))
             .expect("stream completes");
-        let value = beta.lock().expect("beta capture").clone();
+        let value = beta.lock_recover().clone();
         value.expect("anthropic-beta header sent")
     }
 

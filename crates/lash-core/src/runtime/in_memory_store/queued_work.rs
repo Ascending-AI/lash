@@ -1,25 +1,21 @@
 use super::{InMemoryQueuedWorkClaimKind, InMemorySessionStore};
+use lash_sansio::sync::MutexExt;
 
 impl InMemorySessionStore {
     pub(super) fn enqueue_queued_work_in_memory(
         &self,
         batch: crate::QueuedWorkBatchDraft,
+        enqueued_at_ms: u64,
     ) -> Result<crate::QueuedWorkEnqueueOutcome, crate::store::StoreError> {
-        let mut queued = self.queued_work.lock().expect("lock queued work");
-        let fences = self
-            .wake_redelivery_fences
-            .lock()
-            .expect("lock wake redelivery fences");
-        let mut next_seq = self
-            .queued_work_next_seq
-            .lock()
-            .expect("lock queued work seq");
+        let mut queued = self.queued_work.lock_recover();
+        let fences = self.wake_redelivery_fences.lock_recover();
+        let mut next_seq = self.queued_work_next_seq.lock_recover();
         Self::enqueue_queued_work_for_state(
             &mut queued,
             &fences,
             &mut next_seq,
             batch,
-            self.clock.timestamp_ms(),
+            enqueued_at_ms,
         )
     }
 
@@ -104,12 +100,10 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         // source lock: floor lookup, live-row lookup, and insertion all run
         // while the single write-transaction mutex is held. Queue completion
         // takes the same mutex before advancing the floor and deleting the row.
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
+        let enqueued_at_ms = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(&batch.session_id)?;
-        self.enqueue_queued_work_in_memory(batch)
+        self.enqueue_queued_work_in_memory(batch, enqueued_at_ms)
             .map(crate::QueuedWorkEnqueueOutcome::into_batch)
     }
 
@@ -120,12 +114,10 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         batch
             .validate_process_wake_source()
             .map_err(crate::store::StoreError::Backend)?;
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
+        let enqueued_at_ms = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(&batch.session_id)?;
-        self.enqueue_queued_work_in_memory(batch)
+        self.enqueue_queued_work_in_memory(batch, enqueued_at_ms)
     }
 
     async fn claim_leading_ready_session_command(
@@ -194,11 +186,9 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         #[cfg(test)]
         self.checkpoint_write_transaction_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
-        self.verify_session_execution_lease(session_id, session_execution_lease)?;
+        let now = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
+        self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
         #[cfg(test)]
         self.run_claim_after_lease_validation_hook();
         let turn_input_claim = self.claim_pending_turn_inputs_after_lease_validation(
@@ -210,6 +200,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                 turn_id: turn_id.clone(),
                 checkpoint,
             },
+            now,
         )?;
         let queued_work_claim = self.claim_ready_queued_work_after_lease_validation(
             session_id,
@@ -219,6 +210,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                 boundary: crate::QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
                 max_batches,
             },
+            now,
         )?;
         Ok((turn_input_claim, queued_work_claim))
     }
@@ -234,11 +226,9 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         if batch_ids.is_empty() {
             return Ok(None);
         }
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
-        self.verify_session_execution_lease(session_id, session_execution_lease)?;
+        let now = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
+        self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
         #[cfg(test)]
         self.run_claim_after_lease_validation_hook();
         #[cfg(test)]
@@ -249,8 +239,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             return Ok(None);
         }
         let generation = session_execution_lease.fencing_token;
-        let now = self.clock.timestamp_ms();
-        let mut queued = self.queued_work.lock().expect("lock queued work");
+        let mut queued = self.queued_work.lock_recover();
         let mut indices = Vec::new();
         for batch_id in batch_ids {
             let Some(index) = queued.iter().position(|entry| {
@@ -336,7 +325,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         &self,
         claim: &crate::QueuedWorkClaim,
     ) -> Result<(), crate::store::StoreError> {
-        let mut queued = self.queued_work.lock().expect("lock queued work");
+        let mut queued = self.queued_work.lock_recover();
         for entry in queued.iter_mut() {
             if entry.batch.session_id == claim.session_id
                 && entry.claim_id.as_deref() == Some(claim.claim_id.as_str())
@@ -359,13 +348,10 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         session_id: &str,
         batch_id: &str,
     ) -> Result<Option<crate::QueuedWorkBatch>, crate::store::StoreError> {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
         let now = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
         let live_generation = self.live_session_lease_generation(session_id, now);
-        let mut queued = self.queued_work.lock().expect("lock queued work");
+        let mut queued = self.queued_work.lock_recover();
         let Some(index) = queued.iter().position(|entry| {
             entry.batch.session_id == session_id && entry.batch.batch_id == batch_id
         }) else {
@@ -388,8 +374,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         self.refuse_injected_counter_defect("queued_work_claim_fencing_token")?;
         let mut batches = self
             .queued_work
-            .lock()
-            .expect("lock queued work")
+            .lock_recover()
             .iter()
             .filter(|entry| entry.batch.session_id == session_id)
             .map(|entry| entry.batch.clone())
@@ -411,16 +396,12 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
     ) -> Result<Vec<crate::QueuedWorkBatch>, crate::store::StoreError> {
         #[cfg(test)]
         self.refuse_injected_counter_defect("queued_work_claim_fencing_token")?;
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
         let now = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
         let live_generation = self.live_session_lease_generation(session_id, now);
         let mut batches = self
             .queued_work
-            .lock()
-            .expect("lock queued work")
+            .lock_recover()
             .iter()
             .filter(|entry| {
                 entry.batch.session_id == session_id

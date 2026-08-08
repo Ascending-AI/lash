@@ -292,10 +292,7 @@ impl RuntimeTurnDriver<'_> {
         checkpoint: CheckpointKind,
         event_tx: &mpsc::Sender<RuntimeStreamEvent>,
     ) -> Result<crate::CheckpointDelivery, RuntimeError> {
-        let mut committed = self
-            .checkpoint_messages
-            .drain()
-            .map_err(|err| RuntimeError::new(RuntimeErrorCode::CheckpointMessages, err))?;
+        let mut committed = self.checkpoint_messages.drain();
         let mut transient_messages = Vec::new();
         let mut committed_user_messages = Vec::new();
         let mut turn_causes = Vec::new();

@@ -40,6 +40,7 @@
 //!
 //! Integrator class: conformance-suite embedders (ADR 0051 class 4).
 
+use lash_sansio::sync::MutexExt;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -288,7 +289,7 @@ struct SeamControl {
 
 impl SeamControl {
     fn record(&self, operation: TurnSeamOperation) {
-        let mut state = self.state.lock().expect("turn seam state");
+        let mut state = self.state.lock_recover();
         let duplicate_renewal = operation
             == TurnSeamOperation::Store(StoreOperation::RenewSessionExecutionLease)
             && state.trace.contains(&operation);
@@ -298,7 +299,7 @@ impl SeamControl {
     }
 
     fn arm(&self, point: TurnCrashPoint) {
-        let mut state = self.state.lock().expect("turn seam state");
+        let mut state = self.state.lock_recover();
         state.trace.clear();
         state.completed.clear();
         state.armed = Some(point);
@@ -306,7 +307,7 @@ impl SeamControl {
     }
 
     fn clear(&self) {
-        let mut state = self.state.lock().expect("turn seam state");
+        let mut state = self.state.lock_recover();
         state.trace.clear();
         state.completed.clear();
         state.armed = None;
@@ -314,11 +315,11 @@ impl SeamControl {
     }
 
     fn trace(&self) -> Vec<TurnSeamOperation> {
-        self.state.lock().expect("turn seam state").trace.clone()
+        self.state.lock_recover().trace.clone()
     }
 
     fn matches(&self, operation: &TurnSeamOperation, placement: CrashPlacement) -> bool {
-        let mut state = self.state.lock().expect("turn seam state");
+        let mut state = self.state.lock_recover();
         if state.hit {
             return false;
         }
@@ -340,18 +341,14 @@ impl SeamControl {
     }
 
     async fn wait_for_hit(&self) {
-        let armed = self.state.lock().expect("turn seam state").armed.clone();
+        let armed = self.state.lock_recover().armed.clone();
         tokio::time::timeout(HIT_TIMEOUT, self.hit.notified())
             .await
             .unwrap_or_else(|_| panic!("armed semantic seam operation was not reached: {armed:?}"));
     }
 
     fn mark_completed(&self, operation: TurnSeamOperation) {
-        self.state
-            .lock()
-            .expect("turn seam state")
-            .completed
-            .push(operation);
+        self.state.lock_recover().completed.push(operation);
         self.completed.notify_one();
     }
 
@@ -359,13 +356,7 @@ impl SeamControl {
         tokio::time::timeout(HIT_TIMEOUT, async {
             loop {
                 let completed = self.completed.notified();
-                if self
-                    .state
-                    .lock()
-                    .expect("turn seam state")
-                    .completed
-                    .contains(operation)
-                {
+                if self.state.lock_recover().completed.contains(operation) {
                     break;
                 }
                 completed.await;

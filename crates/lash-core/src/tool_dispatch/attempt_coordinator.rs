@@ -186,6 +186,12 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                 };
             }
         };
+        if let crate::ToolAttemptLaunch::Done { record } = &outcome.launch
+            && let crate::ToolCallOutcome::Failure(failure) = &record.output.outcome
+            && failure.code == "tool_panicked"
+        {
+            crate::panic_containment::enforce_message("tool_panicked", &failure.message);
+        }
         triggers.extend(outcome.triggers);
         match outcome.launch {
             crate::ToolAttemptLaunch::Pending {

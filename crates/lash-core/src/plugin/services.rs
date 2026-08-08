@@ -14,8 +14,6 @@ pub enum PluginOperationInvokeError {
     UnexpectedSession(String),
     #[error("plugin operation failed: {0}")]
     Failed(String),
-    #[error("plugin session registry is unavailable")]
-    SessionRegistryPoisoned,
 }
 
 #[derive(Clone)]

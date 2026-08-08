@@ -1,3 +1,4 @@
+use lash_sansio::sync::{MutexExt, RwLockExt};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
@@ -220,8 +221,7 @@ async fn peer(pool: &McpConnectionPool) -> Peer<RoleClient> {
 
 fn entry(pool: &McpConnectionPool) -> Arc<McpEntry> {
     pool.entries
-        .read()
-        .expect("entries lock")
+        .read_recover()
         .get("mock")
         .expect("mock entry")
         .clone()
@@ -426,7 +426,7 @@ async fn consecutive_timeout_threshold_resets_only_after_success() {
     .await;
 
     assert_eq!(failure(&call(&pool).await).class, ToolFailureClass::Timeout);
-    *entry(&pool).last_error.write().expect("last-error lock") = Some("stale error".to_string());
+    *entry(&pool).last_error.write_recover() = Some("stale error".to_string());
     assert!(call(&pool).await.is_success());
     assert!(pool.server_statuses()[0].last_error.is_none());
     assert_eq!(failure(&call(&pool).await).class, ToolFailureClass::Timeout);
@@ -542,7 +542,7 @@ struct TraceWriter(Arc<Mutex<Vec<u8>>>);
 
 impl Write for TraceWriter {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().expect("trace lock").extend_from_slice(bytes);
+        self.0.lock_recover().extend_from_slice(bytes);
         Ok(bytes.len())
     }
 
@@ -588,7 +588,7 @@ async fn protocol_2026_degrades_ping_policy_to_counting_and_warns_once() {
         ToolFailureClass::Unavailable
     );
     assert!(!received(root.path()).contains("\"method\":\"ping\""));
-    let trace = String::from_utf8(traces.0.lock().expect("trace lock").clone()).unwrap();
+    let trace = String::from_utf8(traces.0.lock_recover().clone()).unwrap();
     let warning = "degrading timeout policy to consecutive_timeouts";
     assert_eq!(trace.matches(warning).count(), 1, "captured trace: {trace}");
     pool.shutdown_all().await;

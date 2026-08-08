@@ -100,8 +100,7 @@ pub(crate) async fn sync_cron_jobs_after_trigger_mutation(
     }
     state
         .restate_cron_job_keys
-        .lock()
-        .expect("restate cron job key lock")
+        .lock_recover()
         .entry(session_id.to_string())
         .or_default()
         .insert(cron_job_key(session_id, &affected_registration.source_key));
@@ -171,8 +170,7 @@ where
         .map_err(&classify_embed_error)?;
     let known = state
         .restate_cron_job_keys
-        .lock()
-        .expect("restate cron job key lock")
+        .lock_recover()
         .get(session_id)
         .cloned()
         .unwrap_or_default();
@@ -224,8 +222,7 @@ where
     }
     state
         .restate_cron_job_keys
-        .lock()
-        .expect("restate cron job key lock")
+        .lock_recover()
         .insert(session_id.to_string(), active);
     Ok(())
 }

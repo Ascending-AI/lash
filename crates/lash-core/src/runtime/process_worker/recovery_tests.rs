@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -46,7 +47,7 @@ async fn dispatcher_unwind_clears_running_latch_and_notifies() {
     let scheduler = Arc::new(ProcessExecutionScheduler::new(
         ProcessExecutionConcurrency::new(1).expect("valid test concurrency"),
     ));
-    scheduler.state.lock().await.dispatcher_running = true;
+    scheduler.state.lock_recover().dispatcher_running = true;
     let task_scheduler = Arc::clone(&scheduler);
     let task = crate::task::spawn(async move {
         let _guard = ProcessExecutionDispatcherGuard::new(task_scheduler);
@@ -58,7 +59,7 @@ async fn dispatcher_unwind_clears_running_latch_and_notifies() {
         .await
         .expect("unwind cleanup notifies dispatcher waiters");
     assert!(
-        !scheduler.state.lock().await.dispatcher_running,
+        !scheduler.state.lock_recover().dispatcher_running,
         "a later drive pass must be able to start a replacement dispatcher"
     );
 }
@@ -584,10 +585,7 @@ impl crate::ProcessEngine for SnapshotRecordingEngine {
         _context: crate::ProcessEngineRunContext<'_>,
         payload: serde_json::Value,
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
-        self.payloads
-            .lock()
-            .expect("recorded payloads")
-            .push(payload);
+        self.payloads.lock_recover().push(payload);
         Ok(crate::ProcessRunOutcome::Terminal(Box::new(
             ProcessAwaitOutput::Success {
                 value: serde_json::json!({ "recorded": true }),
@@ -1351,7 +1349,7 @@ async fn sweep_recovers_reserved_v1_snapshot_after_v2_update_exactly_once() {
 
     assert_eq!(delivery.subscription.revision, 1);
     assert_eq!(
-        payloads.lock().expect("recorded payloads").as_slice(),
+        payloads.lock_recover().as_slice(),
         [serde_json::json!({ "args": {}, "config": "v1" })]
     );
 }
@@ -1388,7 +1386,7 @@ async fn sweep_recovers_reserved_v1_snapshot_after_tombstone_exactly_once() {
 
     assert_eq!(delivery.subscription.revision, 1);
     assert_eq!(
-        payloads.lock().expect("recorded payloads").as_slice(),
+        payloads.lock_recover().as_slice(),
         [serde_json::json!({ "args": {}, "config": "v1" })]
     );
 }

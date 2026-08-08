@@ -23,6 +23,7 @@ testing = ["lash-llm-transport/testing"]
 workspace = true
 
 [dependencies]
+lash-sansio = { workspace = true }
 lash-core = { workspace = true }
 lash-llm-transport = { workspace = true }
 lash-provider-auth = { workspace = true }

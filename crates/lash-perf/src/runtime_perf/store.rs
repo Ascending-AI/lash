@@ -1,4 +1,5 @@
 use lash_core::facade_support::SessionGraphFacadeOps;
+use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -144,15 +145,11 @@ pub(crate) struct RuntimePerfStore {
 
 impl RuntimePerfStore {
     pub(crate) fn graph_node_count(&self) -> usize {
-        self.session_graph
-            .lock()
-            .expect("lock perf graph")
-            .nodes
-            .len()
+        self.session_graph.lock_recover().nodes.len()
     }
 
     fn enqueue_queued_work_in_memory(&self, batch: QueuedWorkBatchDraft) -> QueuedWorkBatch {
-        let mut queued = self.queued_work.lock().expect("lock perf queued work");
+        let mut queued = self.queued_work.lock_recover();
         if let Some(source_key) = batch.source_key.as_deref()
             && let Some(existing) = queued.iter().find(|entry| {
                 entry.batch.session_id == batch.session_id
@@ -201,10 +198,7 @@ impl RuntimePerfStore {
         fence: &SessionExecutionLeaseAuthority,
     ) -> Result<(), StoreError> {
         let now = current_epoch_ms();
-        let leases = self
-            .session_execution_leases
-            .lock()
-            .expect("lock perf session execution leases");
+        let leases = self.session_execution_leases.lock_recover();
         lash_core::store_backend_support::require_current_session_execution_lease(
             session_id,
             leases.get(session_id).map(|current| {
@@ -224,10 +218,7 @@ impl RuntimePerfStore {
     /// `None` when no live lease holds the session. A queued-work or turn-input
     /// claim is live for lease-less hosts when its generation equals this value (ADR 0029).
     fn live_session_lease_generation(&self, session_id: &str, now: u64) -> Option<u64> {
-        let leases = self
-            .session_execution_leases
-            .lock()
-            .expect("lock perf session execution leases");
+        let leases = self.session_execution_leases.lock_recover();
         leases
             .get(session_id)
             .filter(|lease| lease.lease_token.is_some() && lease.expires_at_epoch_ms > now)
@@ -239,10 +230,7 @@ impl RuntimePerfStore {
         completion: &SessionExecutionLeaseAuthority,
         trace_refusal: bool,
     ) -> bool {
-        let mut leases = self
-            .session_execution_leases
-            .lock()
-            .expect("lock perf session execution leases");
+        let mut leases = self.session_execution_leases.lock_recover();
         if let Some(current) = leases.get_mut(&completion.session_id)
             && current.owner.as_ref() == Some(&completion.owner)
             && current.lease_token.as_deref() == Some(completion.lease_token.as_str())
@@ -302,7 +290,7 @@ impl RuntimePerfStore {
         // therefore unrepresentable (ADR 0029).
         let generation = session_execution_lease.fencing_token;
         let now = current_epoch_ms();
-        let mut queued = self.queued_work.lock().expect("lock perf queued work");
+        let mut queued = self.queued_work.lock_recover();
         queued.sort_by_key(|entry| entry.batch.enqueue_seq);
         let claim_available = |entry: &RuntimePerfQueuedBatch| {
             entry.claim_token.is_none() || entry.claim_session_lease_generation != generation
@@ -401,10 +389,7 @@ impl RuntimePerfStore {
         // (ADR 0029).
         let generation = session_execution_lease.fencing_token;
         let now = current_epoch_ms();
-        let mut pending = self
-            .pending_turn_inputs
-            .lock()
-            .expect("lock perf pending turn inputs");
+        let mut pending = self.pending_turn_inputs.lock_recover();
         pending.sort_by_key(|entry| entry.input.enqueue_seq);
         let selected_indices = pending
             .iter()
@@ -504,10 +489,7 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
         if request.parent_session_id().is_none() {
             return Ok(Arc::clone(&self.store) as Arc<dyn RuntimePersistence>);
         }
-        let mut stores = self
-            .child_stores
-            .lock()
-            .expect("lock runtime perf child stores");
+        let mut stores = self.child_stores.lock_recover();
         let store = stores
             .entry(request.session_id.clone())
             .or_insert_with(|| Arc::new(RuntimePerfStore::default()));
@@ -528,7 +510,7 @@ impl SessionCommitStore for RuntimePerfStore {
         binding: &lash_core::SessionBinding,
     ) -> Result<lash_core::SessionAdmission, store::StoreError> {
         binding.validate()?;
-        let mut meta = self.session_meta.lock().expect("lock perf session meta");
+        let mut meta = self.session_meta.lock_recover();
         if let Some(meta) = meta.as_ref() {
             if meta.session_id != binding.session_id {
                 return Err(StoreError::SessionBindingMismatch {
@@ -550,19 +532,10 @@ impl SessionCommitStore for RuntimePerfStore {
     }
 
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, store::StoreError> {
-        let Some(meta) = self
-            .session_head_meta
-            .lock()
-            .expect("lock perf session head meta")
-            .clone()
-        else {
+        let Some(meta) = self.session_head_meta.lock_recover().clone() else {
             return Ok(None);
         };
-        let graph = self
-            .session_graph
-            .lock()
-            .expect("lock perf graph")
-            .trim_to_active_path();
+        let graph = self.session_graph.lock_recover().trim_to_active_path();
         Ok(Some(PersistedSessionRead {
             session_id: meta.session_id,
             head_revision: meta.head_revision,
@@ -573,8 +546,7 @@ impl SessionCommitStore for RuntimePerfStore {
             checkpoint: None,
             token_ledger: self
                 .usage_deltas
-                .lock()
-                .expect("lock perf usage deltas")
+                .lock_recover()
                 .iter()
                 .map(|delta| delta.entry.clone())
                 .collect(),
@@ -587,8 +559,7 @@ impl SessionCommitStore for RuntimePerfStore {
     ) -> Result<Option<SessionNodeRecord>, store::StoreError> {
         Ok(self
             .session_graph
-            .lock()
-            .expect("lock perf graph")
+            .lock_recover()
             .find_node(node_id)
             .cloned())
     }
@@ -605,21 +576,14 @@ impl SessionCommitStore for RuntimePerfStore {
             // check-then-act fence rather than modeling a production database.
             self.verify_session_execution_lease(session_id, fence)?;
         }
-        let mut meta_guard = self
-            .session_head_meta
-            .lock()
-            .expect("lock perf session head meta");
+        let mut meta_guard = self.session_head_meta.lock_recover();
         planner
             .validate_session_binding(meta_guard.as_ref().map(|meta| meta.session_id.as_str()))?;
         planner.validate_node_derivation()?;
         let actual = meta_guard.as_ref().map_or(0, |meta| meta.head_revision);
         let key = (session_id.clone(), planner.operation_key().to_string());
-        if let Some((stored_hash, result)) = self
-            .runtime_turn_commits
-            .lock()
-            .expect("lock perf runtime turn commits")
-            .get(&key)
-            .cloned()
+        if let Some((stored_hash, result)) =
+            self.runtime_turn_commits.lock_recover().get(&key).cloned()
         {
             let prior = store::RuntimeCommitReceiptRecord {
                 turn_commit_hash: stored_hash,
@@ -638,7 +602,7 @@ impl SessionCommitStore for RuntimePerfStore {
             }
             return Ok(replay.into_result());
         }
-        let graph_snapshot = self.session_graph.lock().expect("lock perf graph").clone();
+        let graph_snapshot = self.session_graph.lock_recover().clone();
         let requested_ancestor_is_active = commit
             .turn_commit
             .requested_ancestor_node_id
@@ -682,10 +646,7 @@ impl SessionCommitStore for RuntimePerfStore {
             derived_frame_node_id,
         })?;
         {
-            let pending = self
-                .pending_turn_inputs
-                .lock()
-                .expect("lock perf pending turn inputs");
+            let pending = self.pending_turn_inputs.lock_recover();
             for completed in &commit.completed_turn_input_claims {
                 let matches = pending
                     .iter()
@@ -707,12 +668,12 @@ impl SessionCommitStore for RuntimePerfStore {
                 }
             }
         }
-        let mut graph = self.session_graph.lock().expect("lock perf graph");
+        let mut graph = self.session_graph.lock_recover();
         graph.extend_node_records(commit.graph.nodes.iter().cloned());
         let leaf_node_id = commit.graph.leaf_node_id.clone();
         graph.set_leaf_node_id(leaf_node_id.clone());
         if !commit.usage_deltas.is_empty() {
-            let mut stored_usage = self.usage_deltas.lock().expect("lock perf usage deltas");
+            let mut stored_usage = self.usage_deltas.lock_recover();
             for delta in &commit.usage_deltas {
                 if !stored_usage
                     .iter()
@@ -723,7 +684,7 @@ impl SessionCommitStore for RuntimePerfStore {
             }
         }
         for completed in &commit.completed_queue_claims {
-            let mut queued = self.queued_work.lock().expect("lock perf queued work");
+            let mut queued = self.queued_work.lock_recover();
             let matches = queued
                 .iter()
                 .filter(|entry| {
@@ -752,10 +713,7 @@ impl SessionCommitStore for RuntimePerfStore {
         if !commit.completed_turn_input_claims.is_empty()
             || commit.interrupted_turn_input_turn_id.is_some()
         {
-            let mut pending = self
-                .pending_turn_inputs
-                .lock()
-                .expect("lock perf pending turn inputs");
+            let mut pending = self.pending_turn_inputs.lock_recover();
             for completed in &commit.completed_turn_input_claims {
                 for entry in pending.iter_mut() {
                     if entry.input.session_id == completed.session_id
@@ -822,13 +780,10 @@ impl SessionCommitStore for RuntimePerfStore {
                 .collect(),
         );
         let receipt = plan.receipt_write(&result);
-        self.runtime_turn_commits
-            .lock()
-            .expect("lock perf runtime turn commits")
-            .insert(
-                (session_id.clone(), receipt.operation_key.to_string()),
-                (receipt.turn_commit_hash.to_string(), result.clone()),
-            );
+        self.runtime_turn_commits.lock_recover().insert(
+            (session_id.clone(), receipt.operation_key.to_string()),
+            (receipt.turn_commit_hash.to_string(), result.clone()),
+        );
         if let Some(completion) = commit.release_session_execution_lease.as_ref() {
             let _release_was_current =
                 self.release_session_execution_lease_in_memory(completion, false);
@@ -838,16 +793,12 @@ impl SessionCommitStore for RuntimePerfStore {
     }
 
     async fn save_session_meta(&self, meta: store::SessionMeta) -> Result<(), store::StoreError> {
-        *self.session_meta.lock().expect("lock perf session meta") = Some(meta);
+        *self.session_meta.lock_recover() = Some(meta);
         Ok(())
     }
 
     async fn load_session_meta(&self) -> Result<Option<store::SessionMeta>, store::StoreError> {
-        Ok(self
-            .session_meta
-            .lock()
-            .expect("lock perf session meta")
-            .clone())
+        Ok(self.session_meta.lock_recover().clone())
     }
 }
 
@@ -862,10 +813,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
         let lease_token = claim_nonce.as_str();
         let now = current_epoch_ms();
-        let mut leases = self
-            .session_execution_leases
-            .lock()
-            .expect("lock perf session execution leases");
+        let mut leases = self.session_execution_leases.lock_recover();
         let current = leases.entry(session_id.to_string()).or_default();
         if current.lease_token.is_some() && current.expires_at_epoch_ms > now {
             if current
@@ -943,10 +891,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLease, StoreError> {
         let now = current_epoch_ms();
-        let mut leases = self
-            .session_execution_leases
-            .lock()
-            .expect("lock perf session execution leases");
+        let mut leases = self.session_execution_leases.lock_recover();
         let Some(current) = leases.get_mut(&fence.session_id) else {
             return Err(StoreError::SessionExecutionLeaseExpired {
                 session_id: fence.session_id.clone(),
@@ -1002,10 +947,7 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
         &self,
         session_id: &str,
     ) -> Result<Option<SessionExecutionLease>, StoreError> {
-        let leases = self
-            .session_execution_leases
-            .lock()
-            .expect("lock perf session execution leases");
+        let leases = self.session_execution_leases.lock_recover();
         Ok(leases.get(session_id).and_then(|current| {
             let owner = current.owner.clone()?;
             let lease_token = current.lease_token.clone()?;
@@ -1027,10 +969,7 @@ impl TurnInputStore for RuntimePerfStore {
         &self,
         draft: lash_core::PendingTurnInputDraft,
     ) -> Result<lash_core::PendingTurnInput, StoreError> {
-        let mut pending = self
-            .pending_turn_inputs
-            .lock()
-            .expect("lock perf pending turn inputs");
+        let mut pending = self.pending_turn_inputs.lock_recover();
         if let Some(source_key) = draft.source_key.as_deref()
             && let Some(existing) = pending.iter().find(|entry| {
                 entry.input.session_id == draft.session_id
@@ -1096,8 +1035,7 @@ impl TurnInputStore for RuntimePerfStore {
         let live_generation = self.live_session_lease_generation(session_id, now);
         let mut inputs = self
             .pending_turn_inputs
-            .lock()
-            .expect("lock perf pending turn inputs")
+            .lock_recover()
             .iter()
             .filter(|entry| {
                 entry.input.session_id == session_id
@@ -1121,8 +1059,7 @@ impl TurnInputStore for RuntimePerfStore {
     ) -> Result<Vec<lash_core::TurnInputApplication>, StoreError> {
         let mut commits = self
             .runtime_turn_commits
-            .lock()
-            .expect("lock perf runtime turn commits")
+            .lock_recover()
             .iter()
             .filter(|((stored_session_id, _), _)| stored_session_id == session_id)
             .map(|((_, turn_id), (_, result))| {
@@ -1147,10 +1084,7 @@ impl TurnInputStore for RuntimePerfStore {
     ) -> Result<Vec<lash_core::PendingTurnInputCancelResult>, StoreError> {
         let now = current_epoch_ms();
         let live_generation = self.live_session_lease_generation(session_id, now);
-        let mut pending = self
-            .pending_turn_inputs
-            .lock()
-            .expect("lock perf pending turn inputs");
+        let mut pending = self.pending_turn_inputs.lock_recover();
         let mut results = Vec::with_capacity(targets.len());
         for target in targets {
             let outcome = match find_pending_turn_input_index(&pending, session_id, target) {
@@ -1176,10 +1110,7 @@ impl TurnInputStore for RuntimePerfStore {
     ) -> Result<lash_core::PendingTurnInputSuffixCancelOutcome, StoreError> {
         let now = current_epoch_ms();
         let live_generation = self.live_session_lease_generation(session_id, now);
-        let mut pending = self
-            .pending_turn_inputs
-            .lock()
-            .expect("lock perf pending turn inputs");
+        let mut pending = self.pending_turn_inputs.lock_recover();
         let Some(anchor_seq) = find_pending_turn_input_index(&pending, session_id, anchor)
             .map(|index| pending[index].input.enqueue_seq)
         else {
@@ -1246,10 +1177,7 @@ impl TurnInputStore for RuntimePerfStore {
         &self,
         claim: &lash_core::TurnInputClaim,
     ) -> Result<(), StoreError> {
-        let mut pending = self
-            .pending_turn_inputs
-            .lock()
-            .expect("lock perf pending turn inputs");
+        let mut pending = self.pending_turn_inputs.lock_recover();
         for entry in pending.iter_mut() {
             if entry.input.session_id == claim.session_id
                 && entry.claim_id.as_deref() == Some(claim.claim_id.as_str())
@@ -1363,7 +1291,7 @@ impl QueuedWorkStore for RuntimePerfStore {
         self.verify_session_execution_lease(session_id, session_execution_lease)?;
         let generation = session_execution_lease.fencing_token;
         let now = current_epoch_ms();
-        let mut queued = self.queued_work.lock().expect("lock perf queued work");
+        let mut queued = self.queued_work.lock_recover();
         let mut indices = Vec::new();
         for batch_id in batch_ids {
             let Some(index) = queued.iter().position(|entry| {
@@ -1437,7 +1365,7 @@ impl QueuedWorkStore for RuntimePerfStore {
     }
 
     async fn abandon_queued_work_claim(&self, claim: &QueuedWorkClaim) -> Result<(), StoreError> {
-        let mut queued = self.queued_work.lock().expect("lock perf queued work");
+        let mut queued = self.queued_work.lock_recover();
         for entry in queued.iter_mut() {
             if entry.batch.session_id == claim.session_id
                 && entry.claim_id.as_deref() == Some(claim.claim_id.as_str())
@@ -1459,7 +1387,7 @@ impl QueuedWorkStore for RuntimePerfStore {
     ) -> Result<Option<QueuedWorkBatch>, StoreError> {
         let now = current_epoch_ms();
         let live_generation = self.live_session_lease_generation(session_id, now);
-        let mut queued = self.queued_work.lock().expect("lock perf queued work");
+        let mut queued = self.queued_work.lock_recover();
         let Some(index) = queued.iter().position(|entry| {
             entry.batch.session_id == session_id && entry.batch.batch_id == batch_id
         }) else {
@@ -1477,8 +1405,7 @@ impl QueuedWorkStore for RuntimePerfStore {
     async fn list_queued_work(&self, session_id: &str) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         let mut batches = self
             .queued_work
-            .lock()
-            .expect("lock perf queued work")
+            .lock_recover()
             .iter()
             .filter(|entry| entry.batch.session_id == session_id)
             .map(|entry| entry.batch.clone())
@@ -1495,8 +1422,7 @@ impl QueuedWorkStore for RuntimePerfStore {
         let live_generation = self.live_session_lease_generation(session_id, now);
         let mut batches = self
             .queued_work
-            .lock()
-            .expect("lock perf queued work")
+            .lock_recover()
             .iter()
             .filter(|entry| {
                 entry.batch.session_id == session_id

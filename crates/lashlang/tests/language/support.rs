@@ -59,7 +59,7 @@ async fn type_is_usable_as_a_tool_call_argument() {
         async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
             match op {
                 AbilityOp::ResourceOperation(operation) => {
-                    *self.captured.lock().unwrap() = operation
+                    *self.captured.lock_recover() = operation
                         .args
                         .first()
                         .and_then(Value::as_record)
@@ -86,7 +86,7 @@ async fn type_is_usable_as_a_tool_call_argument() {
     )
     .await
     .expect("should run");
-    let captured = host.captured.lock().unwrap().clone().expect("captured arg");
+    let captured = host.captured.lock_recover().clone().expect("captured arg");
     let inner = lashlang::unwrap_type_value(&captured).expect("wrapped type");
     let schema = inner.as_record().expect("schema record");
     assert_eq!(schema["type"], Value::String("object".into()));

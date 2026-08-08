@@ -1,3 +1,4 @@
+use lash_sansio::sync::RwLockExt;
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -87,10 +88,7 @@ impl ProjectionRegistry {
     pub fn register_memory(&self, value: Arc<dyn ProjectedHostDescriptor>) -> ProjectionRef {
         let descriptor_type = value.type_name().to_string();
         let key = uuid::Uuid::new_v4().to_string();
-        self.memory
-            .write()
-            .expect("projection registry lock")
-            .insert(key.clone(), value);
+        self.memory.write_recover().insert(key.clone(), value);
         ProjectionRef::new("memory", serde_json::Value::String(key))
             .with_descriptor_type(descriptor_type)
     }
@@ -111,8 +109,7 @@ impl ProjectionResolver for ProjectionRegistry {
             ));
         };
         self.memory
-            .read()
-            .expect("projection registry lock")
+            .read_recover()
             .get(key)
             .cloned()
             .ok_or_else(|| ProjectionResolveError::unavailable(reference))

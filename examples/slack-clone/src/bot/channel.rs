@@ -19,6 +19,7 @@
 //! is idempotent: the admission by its Lash source key, the drain by its
 //! `drain_id`, and the post by the `event_id` its `metadata` carries.
 
+use lash::sync::MutexExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -193,10 +194,7 @@ impl ChannelBot {
 
     #[cfg(test)]
     pub fn session_lock_count(&self) -> usize {
-        self.session_locks
-            .lock()
-            .expect("session lock map is never poisoned")
-            .len()
+        self.session_locks.lock_recover().len()
     }
 
     /// Whether an envelope's `token` is the one this bot expects.
@@ -891,10 +889,7 @@ impl ChannelBot {
             || session_id(&record.channel_id),
             |thread_ts| super::runtime::thread_session_id(&record.channel_id, thread_ts),
         );
-        let mut locks = self
-            .session_locks
-            .lock()
-            .expect("session lock map is never poisoned");
+        let mut locks = self.session_locks.lock_recover();
         let lock = Arc::clone(
             locks
                 .entry(key.clone())
@@ -927,10 +922,7 @@ impl SessionLockLease {
 
 impl Drop for SessionLockLease {
     fn drop(&mut self) {
-        let mut registry = self
-            .registry
-            .lock()
-            .expect("session lock map is never poisoned");
+        let mut registry = self.registry.lock_recover();
         let is_current = registry
             .get(&self.key)
             .is_some_and(|registered| Arc::ptr_eq(registered, &self.lock));

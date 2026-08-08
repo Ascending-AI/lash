@@ -11,6 +11,7 @@
 //! wraps a [`SessionAdmin`](crate::admin::SessionAdmin).
 
 use crate::support::*;
+use lash_sansio::sync::MutexExt;
 
 struct SurveyedTriggerStore<'a> {
     inner: &'a dyn lash_core::TriggerStore,
@@ -30,8 +31,7 @@ impl<'a> SurveyedTriggerStore<'a> {
 
     fn delivery_process_ids(&self) -> Vec<String> {
         self.retention_candidates
-            .lock()
-            .expect("lock compaction delivery survey")
+            .lock_recover()
             .iter()
             .map(|candidate| candidate.process_id.clone())
             .collect::<std::collections::BTreeSet<_>>()
@@ -130,11 +130,7 @@ impl lash_core::TriggerStore for SurveyedTriggerStore<'_> {
         Vec<lash_core::TriggerDeliveryRetentionCandidate>,
         lash_core::PluginError,
     > {
-        Ok(self
-            .retention_candidates
-            .lock()
-            .expect("lock compaction delivery survey")
-            .clone())
+        Ok(self.retention_candidates.lock_recover().clone())
     }
 
     async fn delete_delivery_retention_candidates(
@@ -151,8 +147,7 @@ impl lash_core::TriggerStore for SurveyedTriggerStore<'_> {
                 .cloned()
                 .collect::<std::collections::HashSet<_>>();
             self.retention_candidates
-                .lock()
-                .expect("lock compaction delivery survey")
+                .lock_recover()
                 .retain(|candidate| !deleted_candidates.contains(candidate));
         }
         Ok(deleted)

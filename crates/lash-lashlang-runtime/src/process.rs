@@ -7,6 +7,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use lash_core::facade_support::ToolChildExecutionTraceHook;
+use lash_sansio::sync::MutexExt;
 use lash_trace::{
     TraceBranchSelection, TraceContext, TraceEvent, TraceLabelMetadata,
     TraceLashlangChildExecution, TraceLashlangExecutionEvent, TraceLashlangExecutionIdentity,
@@ -202,12 +203,11 @@ pub async fn run_lashlang_process(
     };
     let compiled = {
         let _phase = context.named_phase("rlm_process.compile");
-        let compiled = match engine.process_cache.lock() {
-            Ok(mut cache) => {
-                cache.get_or_compile(&artifact, &input.process_ref, &input.host_requirements_ref)
-            }
-            Err(_) => Err(lashlang::RuntimeError::CompiledProcessCacheUnavailable),
-        };
+        let compiled = engine.process_cache.lock_recover().get_or_compile(
+            &artifact,
+            &input.process_ref,
+            &input.host_requirements_ref,
+        );
         match compiled {
             Ok(compiled) => compiled,
             Err(err) => {

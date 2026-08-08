@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::sync::MutexExt;
 
 pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, FixedScriptRunnerError>
 {
@@ -652,7 +653,7 @@ impl lash_core::ToolProvider for PendingToolProvider {
             Ok(key) => key,
             Err(err) => return lash_core::ToolResult::err_fmt(err),
         };
-        if let Some(tx) = self.key_tx.lock().expect("pending tool key sender").take() {
+        if let Some(tx) = self.key_tx.lock_recover().take() {
             let _ = tx.send(key);
         }
         lash_core::ToolResult::pending(lash_core::PendingCompletion::new())

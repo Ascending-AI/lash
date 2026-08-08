@@ -21,6 +21,7 @@ lashlang = ["lash-tool-support/lashlang"]
 workspace = true
 
 [dependencies]
+lash-sansio = { workspace = true }
 lash-core = { workspace = true }
 lash-lashlang-runtime = { workspace = true }
 lash-tool-support = { workspace = true }

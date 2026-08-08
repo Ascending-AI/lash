@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -70,7 +71,7 @@ impl Default for RecordingProcessEffectController {
 
 impl RecordingProcessEffectController {
     fn commands(&self) -> Vec<RecordedProcessCommand> {
-        self.commands.lock().expect("recorded commands").clone()
+        self.commands.lock_recover().clone()
     }
 }
 
@@ -92,8 +93,7 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
         match *command {
             crate::ProcessCommand::Await { process_id } => {
                 self.commands
-                    .lock()
-                    .expect("record await")
+                    .lock_recover()
                     .push(RecordedProcessCommand::Await);
                 let execution = local_executor.into_process()?;
                 if self.await_count.fetch_add(1, Ordering::SeqCst) == 0 {
@@ -122,8 +122,7 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
             }
             crate::ProcessCommand::Cancel { process_id, .. } => {
                 self.commands
-                    .lock()
-                    .expect("record cancel")
+                    .lock_recover()
                     .push(RecordedProcessCommand::Cancel);
                 let record =
                     crate::ProcessRecord::from_registration(crate::ProcessRegistration::new(

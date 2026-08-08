@@ -109,8 +109,7 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
                 let responses = Arc::clone(&provider_responses);
                 async move {
                     responses
-                        .lock()
-                        .expect("workbench tool control responses lock")
+                        .lock_recover()
                         .pop_front()
                         .ok_or_else(|| {
                             lash::provider::LlmTransportError::new(

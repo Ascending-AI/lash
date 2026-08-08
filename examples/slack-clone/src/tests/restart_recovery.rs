@@ -4,6 +4,7 @@
 //! it does not forget the room, it does not answer twice, and it finishes work it
 //! accepted before it died.
 
+use lash::sync::MutexExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -309,8 +310,7 @@ async fn the_platform_retries_a_failed_delivery_with_slacks_retry_headers() {
                         return axum::Json(serde_json::json!({ "challenge": challenge }))
                             .into_response();
                     }
-                    seen.lock()
-                        .expect("seen mutex")
+                    seen.lock_recover()
                         .push((header(RETRY_NUM_HEADER), header(RETRY_REASON_HEADER)));
                     if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
                         axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -350,7 +350,7 @@ async fn the_platform_retries_a_failed_delivery_with_slacks_retry_headers() {
         .await
         .expect("retry pass");
 
-    let seen = seen.lock().expect("seen mutex").clone();
+    let seen = seen.lock_recover().clone();
     assert_eq!(seen.len(), 2, "one failed attempt and one retry: {seen:?}");
     assert_eq!(
         seen[0],
@@ -616,8 +616,7 @@ async fn the_api_client_form_encodes_read_methods_and_uses_json_only_for_posting
                             .and_then(|value| value.to_str().ok())
                             .unwrap_or_default()
                             .to_string();
-                        seen.lock()
-                            .expect("seen mutex")
+                        seen.lock_recover()
                             .push((method.clone(), content_type, body));
                         // Enough of each response for the client's `ok` gate and
                         // its typed decode to succeed.
@@ -660,7 +659,7 @@ async fn the_api_client_form_encodes_read_methods_and_uses_json_only_for_posting
     .await
     .expect("post call");
 
-    let seen = seen.lock().expect("seen mutex").clone();
+    let seen = seen.lock_recover().clone();
     let by_method = |name: &str| {
         seen.iter()
             .find(|(method, _, _)| method == name)

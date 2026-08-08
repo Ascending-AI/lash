@@ -6,6 +6,7 @@ use crate::{
     ToolRetryPolicy,
 };
 use lash_sansio::core_support::*;
+use lash_sansio::sync::MutexExt;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -418,7 +419,7 @@ fn projection_policy_dispatch_context(
     let hook: crate::plugin::BeforeToolCallHook = Arc::new(move |ctx| {
         let hook_captured = Arc::clone(&hook_captured);
         Box::pin(async move {
-            *hook_captured.lock().expect("captured policy") = Some(ctx.argument_projection.clone());
+            *hook_captured.lock_recover() = Some(ctx.argument_projection.clone());
             Ok(Vec::new())
         })
     });
@@ -535,8 +536,7 @@ impl ToolProvider for ExactDispatchTools {
         self.executed.fetch_add(1, Ordering::SeqCst);
         if let Some(bindings) = &self.observed_execution_bindings {
             bindings
-                .lock()
-                .expect("execution bindings")
+                .lock_recover()
                 .push(call.context.tool_execution_binding().clone());
         }
         ToolResult::ok(json!("host"))
@@ -591,7 +591,7 @@ impl ToolProvider for RetryProbeTools {
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
-        self.observed_attempts.lock().expect("attempts").push((
+        self.observed_attempts.lock_recover().push((
             call.context.attempt_number(),
             call.context.max_attempts(),
             call.context.replay_key().map(str::to_string),
@@ -802,10 +802,7 @@ fn retry_dispatch_context_with_after_observations(
             if let Some(output) = ctx.result.as_done_output()
                 && let ToolCallOutcome::Failure(failure) = &output.outcome
             {
-                observed_retries
-                    .lock()
-                    .expect("observed retries")
-                    .push(failure.retry.clone());
+                observed_retries.lock_recover().push(failure.retry.clone());
             }
             Ok(Vec::new())
         })
@@ -1104,7 +1101,7 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
 
     assert!(outcome.record.output.is_success());
     assert_eq!(
-        captured.lock().expect("captured policy").clone(),
+        captured.lock_recover().clone(),
         Some(crate::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"))
     );
 }
@@ -1215,9 +1212,7 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
     assert_eq!(contracts_resolved.load(Ordering::SeqCst), 0);
     assert_eq!(executed.load(Ordering::SeqCst), 1);
     assert_eq!(
-        *observed_execution_bindings
-            .lock()
-            .expect("execution bindings"),
+        *observed_execution_bindings.lock_recover(),
         vec![json!({ "kind": "test", "route": "deferred" })]
     );
 }
@@ -1282,7 +1277,7 @@ async fn default_retry_policy_never_retries_safe_failures() {
 
     assert!(!outcome.record.output.is_success());
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
-    assert_eq!(observed.lock().expect("observed")[0].0, 1);
+    assert_eq!(observed.lock_recover()[0].0, 1);
 }
 
 #[tokio::test]
@@ -1306,8 +1301,7 @@ async fn safe_retry_policy_retries_safe_failure_and_stops_on_success() {
     assert_eq!(attempts.load(Ordering::SeqCst), 2);
     assert_eq!(
         observed
-            .lock()
-            .expect("observed")
+            .lock_recover()
             .iter()
             .map(|(attempt, max, _)| (*attempt, *max))
             .collect::<Vec<_>>(),
@@ -1333,7 +1327,7 @@ async fn scalar_after_tool_hook_runs_once_per_retry_attempt_before_exhaustion() 
 
     assert_eq!(attempts.load(Ordering::SeqCst), 2);
     assert_eq!(
-        *observed_retries.lock().expect("observed retries"),
+        *observed_retries.lock_recover(),
         vec![
             ToolRetryDisposition::Safe { after_ms: Some(0) },
             ToolRetryDisposition::Safe { after_ms: Some(0) },
@@ -1364,10 +1358,7 @@ impl crate::RuntimeEffectController for SleepRecordingEffectController {
         local_executor: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         if matches!(&envelope.command, crate::RuntimeEffectCommand::Sleep { .. }) {
-            self.sleeps
-                .lock()
-                .expect("sleep records")
-                .push(envelope.invocation);
+            self.sleeps.lock_recover().push(envelope.invocation);
             Ok(crate::RuntimeEffectOutcome::Sleep)
         } else {
             local_executor.execute(envelope).await
@@ -1424,7 +1415,7 @@ async fn retry_delay_crosses_effect_controller_as_sleep_effect() {
     .await;
 
     assert!(outcome.record.output.is_success());
-    let sleeps = recorder.sleeps.lock().expect("sleep records");
+    let sleeps = recorder.sleeps.lock_recover();
     assert_eq!(sleeps.len(), 1);
     assert_eq!(
         sleeps[0].effect_kind(),
@@ -1545,7 +1536,7 @@ async fn retry_context_has_stable_replay_key_across_attempts() {
     .await;
 
     assert!(outcome.record.output.is_success());
-    let observed = observed.lock().expect("observed");
+    let observed = observed.lock_recover();
     assert_eq!(observed.len(), 3);
     assert_eq!(
         observed
@@ -1584,7 +1575,7 @@ async fn idempotent_retry_policy_uses_journaled_attempts_without_provider_replay
 
     assert!(!outcome.record.output.is_success());
     assert_eq!(attempts.load(Ordering::SeqCst), 3);
-    let observed = observed.lock().expect("observed");
+    let observed = observed.lock_recover();
     assert!(
         observed
             .iter()

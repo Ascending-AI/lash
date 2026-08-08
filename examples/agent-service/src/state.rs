@@ -4,6 +4,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use lash::persistence::LeaseOwnerIdentity;
+use lash::sync::MutexExt;
 use lash::{LashCore, LashSession, ModelSpec, TurnWorkDriver};
 use serde_json::json;
 
@@ -136,9 +137,7 @@ impl AppStateData {
     {
         let db = Arc::clone(&self.db);
         tokio::task::spawn_blocking(move || {
-            let mut db = db
-                .lock()
-                .map_err(|_| AppError::internal("database lock poisoned"))?;
+            let mut db = db.lock_recover();
             f(&mut db)
         })
         .await

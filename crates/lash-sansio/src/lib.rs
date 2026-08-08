@@ -9,6 +9,7 @@ pub mod sansio;
 pub mod schema_contract;
 pub mod session;
 pub mod session_model;
+pub mod sync;
 pub mod tool_catalog;
 pub mod tool_contract;
 pub mod tool_output;

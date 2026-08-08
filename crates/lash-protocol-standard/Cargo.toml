@@ -17,6 +17,7 @@ categories = ["asynchronous", "api-bindings"]
 workspace = true
 
 [dependencies]
+lash-sansio = { workspace = true }
 lash-core = { workspace = true }
 lash-tool-support = { workspace = true }
 async-trait = { workspace = true }

@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 pub(crate) mod replay;
 
 use crate::facade_support::ToolStateFacadeOps;
@@ -229,10 +230,7 @@ fn export_observation_state(
     // recapture live plugin/tool state before the async reload gate runs.
     let mut state = runtime.export_persistence_state();
     let read_view = runtime.read_view();
-    let shared_ledger = runtime
-        .shared_token_ledger
-        .lock()
-        .expect("token ledger lock");
+    let shared_ledger = runtime.shared_token_ledger.lock_recover();
     let mut saturated = false;
     for entry in shared_ledger.iter().cloned() {
         saturated |= super::merge_ledger_entry_saturating(&mut state.token_ledger, entry.entry);

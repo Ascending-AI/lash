@@ -4,6 +4,7 @@
 //! providing a configurable mock implementation plus a couple of small
 //! builders for common policy / turn fixtures.
 
+use lash_sansio::sync::MutexExt;
 // Each submodule documents itself in its own file. Adding an outer doc comment
 // here as well would merge two fragments written in different scopes, and
 // rustdoc then resolves the whole merged doc — including the submodule's own
@@ -605,7 +606,7 @@ impl MockSessionManager {
     /// Snapshot of the requests captured by `create_session`. Panics if
     /// the lock is poisoned (a panic from another test thread).
     pub fn created_snapshot(&self) -> Vec<SessionCreateRequest> {
-        self.created.lock().expect("created lock").clone()
+        self.created.lock_recover().clone()
     }
 }
 
@@ -660,10 +661,7 @@ impl crate::plugin::SessionLifecycleService for MockSessionManager {
         &self,
         request: SessionCreateRequest,
     ) -> Result<SessionHandle, PluginError> {
-        self.created
-            .lock()
-            .expect("created lock")
-            .push(request.clone());
+        self.created.lock_recover().push(request.clone());
         Ok(SessionHandle {
             session_id: request
                 .session_id
@@ -676,10 +674,7 @@ impl crate::plugin::SessionLifecycleService for MockSessionManager {
     }
 
     async fn close_session(&self, session_id: &str) -> Result<(), PluginError> {
-        self.closed
-            .lock()
-            .expect("closed lock")
-            .push(session_id.to_string());
+        self.closed.lock_recover().push(session_id.to_string());
         Ok(())
     }
     async fn start_turn(
@@ -687,7 +682,7 @@ impl crate::plugin::SessionLifecycleService for MockSessionManager {
         request: crate::SessionTurnRequest<'_>,
     ) -> Result<AssembledTurn, PluginError> {
         let (turn, scoped_effect_controller) = request.into_parts();
-        self.turns.lock().expect("turns lock").push((
+        self.turns.lock_recover().push((
             turn.session_id,
             turn.turn_id.to_string(),
             turn.input.trace_turn_id,

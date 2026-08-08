@@ -120,6 +120,7 @@ pub(super) struct TranscriptErrorEnvelope {
 pub async fn run_fixed_script_profile(
     artifact_root: impl AsRef<Path>,
 ) -> Result<FixedScriptManifest, FixedScriptRunnerError> {
+    lash_core::panic_containment::set_loud(true);
     let artifact_root = artifact_root.as_ref();
     std::fs::create_dir_all(artifact_root)?;
 

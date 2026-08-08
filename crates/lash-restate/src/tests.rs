@@ -35,6 +35,7 @@ use lash_core::{ProcessInput, ProcessRegistration, RuntimeScope, TriggerStore};
 use lash_http_transport::HttpRequest;
 use lash_http_transport::{HttpResponse, HttpResponseBody, HttpTransport, HttpTransportError};
 use lash_lashlang_runtime::{LashlangToolBinding, ToolDefinitionLashlangExt};
+use lash_sansio::sync::{MutexExt, RwLockExt};
 use restate_sdk::context::{ContextClient, RequestTarget, RunRetryPolicy, WorkflowContext};
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::prelude::Endpoint;
@@ -3115,7 +3116,7 @@ async fn restate_handler_controller_journals_typed_trigger_execution() {
         Ok(lash_core::TriggerCommandOutcome::List { records }) if records.is_empty()
     ));
     assert_eq!(
-        context.runs.lock().expect("runs lock").as_slice(),
+        context.runs.lock_recover().as_slice(),
         ["lash:restate-trigger-list"]
     );
 }
@@ -3948,15 +3949,13 @@ impl RecordingContext {
         let resolution =
             restate_process_terminal_resolution(output).expect("terminal await resolution");
         self.awaited_events
-            .lock()
-            .expect("awaited events lock")
+            .lock_recover()
             .insert(key.promise_key(), resolution);
     }
 
     fn durable_event_notify(&self, workflow_key: &str) -> Arc<tokio::sync::Notify> {
         self.durable_event_notifies
-            .lock()
-            .expect("durable event notifies lock")
+            .lock_recover()
             .entry(workflow_key.to_string())
             .or_insert_with(|| Arc::new(tokio::sync::Notify::new()))
             .clone()
@@ -3968,19 +3967,15 @@ impl RecordingContext {
         // process-terminal resolutions while retaining external input.
         let preserved = self
             .durable_events
-            .lock()
-            .expect("durable events lock")
+            .lock_recover()
             .get(workflow_key)
             .cloned()
             .expect("durable event to preserve during replay");
-        let mut events = self.durable_events.lock().expect("durable events lock");
+        let mut events = self.durable_events.lock_recover();
         events.clear();
         events.insert(workflow_key.to_string(), preserved);
         drop(events);
-        self.awaited_events
-            .lock()
-            .expect("awaited events lock")
-            .clear();
+        self.awaited_events.lock_recover().clear();
     }
 
     fn resolve_durable_event(&self, request: RestateDurableWaitResolveRequest) -> ResolveOutcome {
@@ -3988,12 +3983,7 @@ impl RecordingContext {
             .address
             .session_id
             .as_deref()
-            .is_some_and(|session_id| {
-                self.revoked_sessions
-                    .lock()
-                    .expect("revoked sessions lock")
-                    .contains(session_id)
-            })
+            .is_some_and(|session_id| self.revoked_sessions.lock_recover().contains(session_id))
         {
             return ResolveOutcome::UnknownOrRevoked;
         }
@@ -4004,11 +3994,8 @@ impl RecordingContext {
         &self,
         request: RestateDurableWaitResolveRequest,
     ) -> ResolveOutcome {
-        self.resolved_events
-            .lock()
-            .expect("resolved events lock")
-            .push(request.clone());
-        let mut events = self.durable_events.lock().expect("durable events lock");
+        self.resolved_events.lock_recover().push(request.clone());
+        let mut events = self.durable_events.lock_recover();
         if let Some(terminal) = events.get(&request.address.workflow_key) {
             return ResolveOutcome::AlreadyResolved {
                 terminal: terminal.clone(),
@@ -4028,12 +4015,7 @@ impl RecordingContext {
         let Some(session_id) = address.session_id.as_deref() else {
             return;
         };
-        if let Some(waits) = self
-            .session_waits
-            .lock()
-            .expect("session waits lock")
-            .get_mut(session_id)
-        {
+        if let Some(waits) = self.session_waits.lock_recover().get_mut(session_id) {
             waits.retain(|wait| wait != address);
         }
     }
@@ -4047,10 +4029,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     where
         'ctx: 'run,
     {
-        self.sleeps
-            .lock()
-            .expect("sleeps lock")
-            .push(duration.as_millis() as u64);
+        self.sleeps.lock_recover().push(duration.as_millis() as u64);
         let block = self.block_sleeps.load(Ordering::SeqCst);
         Box::pin(async move {
             if block {
@@ -4071,7 +4050,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         T: Serialize + DeserializeOwned + Send + 'static,
         Fut: Future<Output = T> + Send + 'run,
     {
-        self.runs.lock().expect("runs lock").push(_effect_name);
+        self.runs.lock_recover().push(_effect_name);
         Box::pin(async move { Ok(Json(future.await)) })
     }
 
@@ -4086,16 +4065,11 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         let process_id = registration.id.clone();
         let endpoint = self.endpoint.clone();
         self.process_command_log
-            .lock()
-            .expect("process command log lock")
+            .lock_recover()
             .push(format!("send:{process_id}"));
-        self.started
-            .lock()
-            .expect("started lock")
-            .push(registration.clone());
+        self.started.lock_recover().push(registration.clone());
         self.started_execution_contexts
-            .lock()
-            .expect("started execution contexts lock")
+            .lock_recover()
             .push(execution_context.clone());
         Box::pin(async move {
             if let Some(endpoint) = endpoint {
@@ -4129,8 +4103,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         let endpoint = self.endpoint.clone();
         let process_id = request.process_id.clone();
         self.cancelled
-            .lock()
-            .expect("cancelled lock")
+            .lock_recover()
             .push((request.process_id.clone(), request.reason.clone()));
         Box::pin(async move {
             if let Some(endpoint) = endpoint {
@@ -4152,12 +4125,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         let context = Arc::clone(self);
         Box::pin(async move {
             if let Some(session_id) = request.address.session_id.as_deref() {
-                if context
-                    .revoked_sessions
-                    .lock()
-                    .expect("revoked sessions lock")
-                    .contains(session_id)
-                {
+                if context.revoked_sessions.lock_recover().contains(session_id) {
                     context.terminalize_durable_event(RestateDurableWaitResolveRequest {
                         address: request.address,
                         resolution: Resolution::Cancelled,
@@ -4166,8 +4134,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                 }
                 context
                     .session_waits
-                    .lock()
-                    .expect("session waits lock")
+                    .lock_recover()
                     .entry(session_id.to_string())
                     .or_default()
                     .push(request.address.clone());
@@ -4176,8 +4143,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
             loop {
                 if let Some(resolution) = context
                     .durable_events
-                    .lock()
-                    .expect("durable events lock")
+                    .lock_recover()
                     .get(&request.address.workflow_key)
                     .cloned()
                 {
@@ -4233,15 +4199,13 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         'ctx: 'run,
     {
         self.process_command_log
-            .lock()
-            .expect("process command log lock")
+            .lock_recover()
             .push(format!("call:{process_id}"));
         let result = restate_process_terminal_await_key(&process_id)
             .map_err(TerminalError::from_error)
             .and_then(|key| {
                 self.awaited_events
-                    .lock()
-                    .expect("awaited events lock")
+                    .lock_recover()
                     .get(&key.promise_key())
                     .cloned()
                     .ok_or_else(|| {
@@ -4278,14 +4242,12 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     {
         if revoke {
             self.revoked_sessions
-                .lock()
-                .expect("revoked sessions lock")
+                .lock_recover()
                 .insert(session_id.clone());
         }
         let waits = self
             .session_waits
-            .lock()
-            .expect("session waits lock")
+            .lock_recover()
             .remove(&session_id)
             .unwrap_or_default();
         let (resolve, retain): (Vec<_>, Vec<_>) = if revoke {
@@ -4294,10 +4256,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
             split_cancellable_waits(waits)
         };
         if !retain.is_empty() {
-            self.session_waits
-                .lock()
-                .expect("session waits lock")
-                .insert(session_id, retain);
+            self.session_waits.lock_recover().insert(session_id, retain);
         }
         for address in resolve {
             self.terminalize_durable_event(RestateDurableWaitResolveRequest {
@@ -4315,11 +4274,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     where
         'ctx: 'run,
     {
-        let revoked = self
-            .revoked_sessions
-            .lock()
-            .expect("revoked sessions lock")
-            .contains(&session_id);
+        let revoked = self.revoked_sessions.lock_recover().contains(&session_id);
         Box::pin(async move { Ok(revoked) })
     }
 }
@@ -4343,14 +4298,13 @@ impl ReplayableRecordingContext {
     }
 
     fn runs(&self) -> Vec<String> {
-        self.runs.lock().expect("runs lock").clone()
+        self.runs.lock_recover().clone()
     }
 
     fn recorded_runtime_effect_envelopes(&self) -> Vec<(String, RuntimeEffectEnvelope)> {
         let mut envelopes = self
             .records
-            .lock()
-            .expect("records lock")
+            .lock_recover()
             .iter()
             .map(|(effect_name, bytes)| {
                 let recorded: RecordedRuntimeEffect =
@@ -4371,7 +4325,7 @@ impl ReplayableRecordingContext {
     }
 
     fn install_process_worker(&self, worker: DurableProcessWorker) {
-        *self.process_worker.lock().expect("process worker lock") = Some(worker);
+        *self.process_worker.lock_recover() = Some(worker);
     }
 }
 
@@ -4391,11 +4345,11 @@ impl PositionalReplayContext {
     }
 
     fn runs(&self) -> Vec<String> {
-        self.runs.lock().expect("runs lock").clone()
+        self.runs.lock_recover().clone()
     }
 
     fn record_count(&self) -> usize {
-        self.records.lock().expect("records lock").len()
+        self.records.lock_recover().len()
     }
 }
 
@@ -4407,10 +4361,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
     where
         'ctx: 'run,
     {
-        self.sleeps
-            .lock()
-            .expect("sleeps lock")
-            .push(duration.as_millis() as u64);
+        self.sleeps.lock_recover().push(duration.as_millis() as u64);
         Box::pin(async { Ok(()) })
     }
 
@@ -4425,18 +4376,10 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
         T: Serialize + DeserializeOwned + Send + 'static,
         Fut: Future<Output = T> + Send + 'run,
     {
-        self.runs
-            .lock()
-            .expect("runs lock")
-            .push(effect_name.clone());
+        self.runs.lock_recover().push(effect_name.clone());
         if self.replaying.load(Ordering::SeqCst) {
             let position = self.replay_cursor.fetch_add(1, Ordering::SeqCst);
-            let recorded = self
-                .records
-                .lock()
-                .expect("records lock")
-                .get(position)
-                .cloned();
+            let recorded = self.records.lock_recover().get(position).cloned();
             return Box::pin(async move {
                 let (recorded_effect_name, bytes) = recorded.ok_or_else(|| {
                     TerminalError::new(format!("missing recorded effect at position {position}"))
@@ -4456,11 +4399,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
         Box::pin(async move {
             let value = future.await;
             let bytes = serde_json::to_vec(&value).map_err(TerminalError::from_error)?;
-            context
-                .records
-                .lock()
-                .expect("records lock")
-                .push((effect_name, bytes));
+            context.records.lock_recover().push((effect_name, bytes));
             Ok(Json(value))
         })
     }
@@ -4547,10 +4486,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     where
         'ctx: 'run,
     {
-        self.sleeps
-            .lock()
-            .expect("sleeps lock")
-            .push(duration.as_millis() as u64);
+        self.sleeps.lock_recover().push(duration.as_millis() as u64);
         Box::pin(async { Ok(()) })
     }
 
@@ -4565,18 +4501,10 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         T: Serialize + DeserializeOwned + Send + 'static,
         Fut: Future<Output = T> + Send + 'run,
     {
-        self.runs
-            .lock()
-            .expect("runs lock")
-            .push(effect_name.clone());
+        self.runs.lock_recover().push(effect_name.clone());
         let replaying = self.replaying.load(Ordering::SeqCst);
         if replaying {
-            let recorded = self
-                .records
-                .lock()
-                .expect("records lock")
-                .get(&effect_name)
-                .cloned();
+            let recorded = self.records.lock_recover().get(&effect_name).cloned();
             return Box::pin(async move {
                 let bytes = recorded.ok_or_else(|| {
                     TerminalError::new(format!("missing recorded effect `{effect_name}`"))
@@ -4591,11 +4519,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         Box::pin(async move {
             let value = future.await;
             let bytes = serde_json::to_vec(&value).map_err(TerminalError::from_error)?;
-            context
-                .records
-                .lock()
-                .expect("records lock")
-                .insert(effect_name, bytes);
+            context.records.lock_recover().insert(effect_name, bytes);
             Ok(Json(value))
         })
     }
@@ -4608,11 +4532,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     where
         'ctx: 'run,
     {
-        let worker = self
-            .process_worker
-            .lock()
-            .expect("process worker lock")
-            .clone();
+        let worker = self.process_worker.lock_recover().clone();
         let context = Arc::clone(self);
         Box::pin(async move {
             let Some(worker) = worker else {
@@ -4684,8 +4604,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         let resolution = if self.replaying.load(Ordering::SeqCst) {
             let position = self.peek_cursor.fetch_add(1, Ordering::SeqCst);
             self.peek_records
-                .lock()
-                .expect("peek records lock")
+                .lock_recover()
                 .get(position)
                 .cloned()
                 .ok_or_else(|| {
@@ -4697,14 +4616,10 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             let resolution = self
                 .events
                 .durable_events
-                .lock()
-                .expect("durable events lock")
+                .lock_recover()
                 .get(&address.workflow_key)
                 .cloned();
-            self.peek_records
-                .lock()
-                .expect("peek records lock")
-                .push(resolution.clone());
+            self.peek_records.lock_recover().push(resolution.clone());
             Ok(resolution)
         };
         Box::pin(async move { resolution })
@@ -4833,10 +4748,10 @@ async fn restate_controller_executes_atomic_effect_inside_run() {
 
     assert_eq!(err.code, "runtime_effect_local_executor_unavailable");
     assert_eq!(
-        context.runs.lock().expect("runs lock").as_slice(),
+        context.runs.lock_recover().as_slice(),
         &["lash:session:turn:1:0:tool_attempt:step".to_string()]
     );
-    assert!(context.sleeps.lock().expect("sleeps lock").is_empty());
+    assert!(context.sleeps.lock_recover().is_empty());
 }
 
 #[tokio::test]
@@ -4924,11 +4839,8 @@ async fn restate_controller_routes_sleep_only_through_timer() {
         .expect("sleep");
 
     assert!(matches!(outcome, RuntimeEffectOutcome::Sleep));
-    assert_eq!(
-        context.sleeps.lock().expect("sleeps lock").as_slice(),
-        &[42]
-    );
-    assert!(context.runs.lock().expect("runs lock").is_empty());
+    assert_eq!(context.sleeps.lock_recover().as_slice(), &[42]);
+    assert!(context.runs.lock_recover().is_empty());
 }
 
 #[tokio::test]
@@ -4971,10 +4883,7 @@ async fn restate_timer_stops_when_its_fresh_attempt_is_cancelled() {
         .expect_err("cancelled Restate timer must stop the interpreter attempt");
 
     assert_eq!(error.code, "runtime_effect_sleep_cancelled");
-    assert_eq!(
-        context.sleeps.lock().expect("sleeps lock").as_slice(),
-        &[60_000]
-    );
+    assert_eq!(context.sleeps.lock_recover().as_slice(), &[60_000]);
 }
 
 #[tokio::test]
@@ -5945,12 +5854,7 @@ impl lash_core::ToolProvider for ReplayScalarPendingTools {
                     Ok(key) => key,
                     Err(err) => return lash_core::ToolResult::err_fmt(err),
                 };
-                if let Some(tx) = self
-                    .completion_key_tx
-                    .lock()
-                    .expect("completion key sender")
-                    .take()
-                {
+                if let Some(tx) = self.completion_key_tx.lock_recover().take() {
                     let _ = tx.send(Ok(key));
                 }
                 lash_core::ToolResult::pending(lash_core::PendingCompletion::new())
@@ -6269,15 +6173,14 @@ async fn restate_controller_schedules_process_workflow_without_running_executor(
     assert_eq!(
         context
             .started
-            .lock()
-            .expect("started lock")
+            .lock_recover()
             .iter()
             .map(|registration| registration.id.as_str())
             .collect::<Vec<_>>(),
         vec!["task-1"]
     );
     assert!(
-        context.runs.lock().expect("runs lock").is_empty(),
+        context.runs.lock_recover().is_empty(),
         "process workflow scheduling must not call Restate context from inside ctx.run"
     );
 }
@@ -6353,11 +6256,7 @@ async fn restate_controller_replays_process_start_await_command_sequence() {
     .expect("replay await");
 
     assert_eq!(
-        context
-            .process_command_log
-            .lock()
-            .expect("process command log lock")
-            .as_slice(),
+        context.process_command_log.lock_recover().as_slice(),
         &[
             format!("send:{process_id}"),
             format!("call:{process_id}"),
@@ -6408,11 +6307,7 @@ async fn restate_controller_start_emits_send_when_external_ref_already_exists() 
     .expect("start with existing external ref");
 
     assert_eq!(
-        context
-            .process_command_log
-            .lock()
-            .expect("process command log lock")
-            .as_slice(),
+        context.process_command_log.lock_recover().as_slice(),
         &[format!("send:{process_id}")],
         "pre-existing external_ref must not suppress the journaled Restate send"
     );
@@ -6495,11 +6390,7 @@ async fn restate_controller_replays_parent_shaped_start_await_suspend_flow() {
     run_parent_shaped_start_await_suspend_flow(&host, registry, process_id, suspend_key).await;
 
     assert_eq!(
-        context
-            .process_command_log
-            .lock()
-            .expect("process command log lock")
-            .as_slice(),
+        context.process_command_log.lock_recover().as_slice(),
         &[
             format!("send:{process_id}"),
             format!("call:{process_id}"),
@@ -6587,7 +6478,7 @@ async fn restate_controller_schedules_lashlang_process_with_serializable_input()
             .map(|external| external.backend.as_str()),
         Some("restate")
     );
-    let started = context.started.lock().expect("started lock").clone();
+    let started = context.started.lock_recover().clone();
     assert_eq!(started.len(), 1);
     let ProcessInput::Engine { kind, payload } = started[0].input.as_ref() else {
         panic!("expected engine process input");
@@ -6606,8 +6497,7 @@ async fn restate_controller_schedules_lashlang_process_with_serializable_input()
     assert_eq!(
         context
             .started
-            .lock()
-            .expect("started lock")
+            .lock_recover()
             .iter()
             .map(|registration| { registration.wake_session_id.as_deref() })
             .collect::<Vec<_>>(),
@@ -6691,7 +6581,7 @@ async fn restate_controller_lists_and_transfers_observers_through_process_effect
             .expect("s1")
             .is_empty()
     );
-    assert!(context.started.lock().expect("started lock").is_empty());
+    assert!(context.started.lock_recover().is_empty());
 }
 
 #[tokio::test]
@@ -6781,13 +6671,13 @@ async fn restate_controller_awaits_and_signals_through_process_effects() {
         panic!("wrong signal outcome");
     };
     assert_eq!(event.event_type, "signal.notify");
-    assert!(context.started.lock().expect("started lock").is_empty());
+    assert!(context.started.lock_recover().is_empty());
 
     // Append-before-resolve discipline: the durable event is the record, the
     // promise resolution is only the wake-up, keyed by the Nth occurrence of
     // this signal name so repeated signals map onto one-shot engine promises.
     {
-        let resolved = context.resolved_events.lock().expect("resolved lock");
+        let resolved = context.resolved_events.lock_recover();
         assert_eq!(resolved.len(), 1);
         let expected_key = restate_await_event_key(
             &ExecutionScope::process("task-signal"),
@@ -6829,7 +6719,7 @@ async fn restate_controller_awaits_and_signals_through_process_effects() {
     else {
         panic!("wrong second signal outcome");
     };
-    let resolved = context.resolved_events.lock().expect("resolved lock");
+    let resolved = context.resolved_events.lock_recover();
     assert_eq!(resolved.len(), 2);
     let expected_key = restate_await_event_key(
         &ExecutionScope::process("task-signal"),
@@ -6876,7 +6766,7 @@ async fn restate_controller_cancel_requests_call_workflow_cancel() {
 
     assert!(!record.is_terminal());
     assert_eq!(
-        context.cancelled.lock().expect("cancelled lock").as_slice(),
+        context.cancelled.lock_recover().as_slice(),
         &[(
             "task-cancel".to_string(),
             Some("user requested".to_string())
@@ -6909,20 +6799,15 @@ impl RestateProcessRunner for RecordingRunner {
         _handover: Option<lash_core::SegmentHandover>,
         _cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
-        self.ran
-            .lock()
-            .expect("runner ran lock")
-            .push(RecordedProcessRun {
-                process_id: registration.id.clone(),
-                wake_target_session_id: registration.wake_session_id.clone(),
-                tool_effect_id: execution_context
-                    .causal_invocation
-                    .and_then(|invocation| invocation.effect_id().map(str::to_string)),
-                execution_scope_id: scoped_effect_controller.scope_id().to_string(),
-                controller_replay_ownership: scoped_effect_controller
-                    .controller()
-                    .replay_ownership(),
-            });
+        self.ran.lock_recover().push(RecordedProcessRun {
+            process_id: registration.id.clone(),
+            wake_target_session_id: registration.wake_session_id.clone(),
+            tool_effect_id: execution_context
+                .causal_invocation
+                .and_then(|invocation| invocation.effect_id().map(str::to_string)),
+            execution_scope_id: scoped_effect_controller.scope_id().to_string(),
+            controller_replay_ownership: scoped_effect_controller.controller().replay_ownership(),
+        });
         Ok(ProcessAwaitOutput::Success {
             value: serde_json::json!({"ok": true}),
             control: None,
@@ -6934,10 +6819,7 @@ impl RestateProcessRunner for RecordingRunner {
         &self,
         request: RestateProcessCancelRequest,
     ) -> Result<(), PluginError> {
-        self.cancelled
-            .lock()
-            .expect("runner cancelled lock")
-            .push(request);
+        self.cancelled.lock_recover().push(request);
         Ok(())
     }
 }
@@ -6957,7 +6839,7 @@ impl RestateProcessRunner for AlreadyStartedRunner {
         _handover: Option<lash_core::SegmentHandover>,
         _cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
-        *self.calls.lock().expect("runner calls lock") += 1;
+        *self.calls.lock_recover() += 1;
         Err(PluginError::ProcessAlreadyStarted {
             process_id: registration.id,
             by: Box::new(self.winner.clone()),
@@ -7035,7 +6917,7 @@ impl HttpTransport for BlockingCancelSignalTransport {
         request: HttpRequest,
         _timeout: Option<Duration>,
     ) -> Result<HttpResponse, HttpTransportError> {
-        self.requests.lock().expect("requests lock").push(request);
+        self.requests.lock_recover().push(request);
         self.started.notify_one();
         self.release.notified().await;
         Ok(HttpResponse {
@@ -7091,13 +6973,9 @@ impl RestateProcessRunner for SegmentedRecordingRunner {
         _cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
         self.runs.fetch_add(1, Ordering::SeqCst);
-        self.handovers
-            .lock()
-            .expect("segment handovers lock")
-            .push(handover);
+        self.handovers.lock_recover().push(handover);
         self.outcomes
-            .lock()
-            .expect("segment outcomes lock")
+            .lock_recover()
             .pop_front()
             .ok_or_else(|| PluginError::Session("unexpected duplicate segment run".to_string()))
     }
@@ -7183,7 +7061,7 @@ async fn running_process_cancel_uses_native_signal_without_poll_delay() {
         lash_core::ProcessRunOutcome::Terminal(output)
             if matches!(*output, ProcessAwaitOutput::Cancelled { .. })
     ));
-    let requests = signal_transport.requests.lock().expect("requests lock");
+    let requests = signal_transport.requests.lock_recover();
     assert_eq!(requests.len(), 1);
     assert_eq!(
         requests[0].url,
@@ -7484,11 +7362,7 @@ async fn durable_segment_handover_resumes_once_and_terminalizes_once() {
     assert!(matches!(second, lash_core::ProcessRunOutcome::Terminal(_)));
     assert_eq!(runner.runs.load(Ordering::SeqCst), 2);
     assert_eq!(
-        runner
-            .handovers
-            .lock()
-            .expect("segment handovers lock")
-            .as_slice(),
+        runner.handovers.lock_recover().as_slice(),
         &[None, Some(continuation)]
     );
     let events = registry
@@ -8001,15 +7875,14 @@ async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_process() {
     assert_eq!(
         context
             .started
-            .lock()
-            .expect("started lock")
+            .lock_recover()
             .iter()
             .map(|registration| registration.id.as_str())
             .collect::<Vec<_>>(),
         vec!["task-smoke"]
     );
     assert_eq!(
-        runner.ran.lock().expect("runner ran lock").as_slice(),
+        runner.ran.lock_recover().as_slice(),
         &[RecordedProcessRun {
             process_id: "task-smoke".to_string(),
             wake_target_session_id: Some("wake-smoke".to_string()),
@@ -8039,15 +7912,11 @@ async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_process() {
         }
     ));
     assert_eq!(
-        context.cancelled.lock().expect("cancelled lock").as_slice(),
+        context.cancelled.lock_recover().as_slice(),
         &[("task-smoke".to_string(), Some("stop-smoke".to_string()))]
     );
     assert_eq!(
-        runner
-            .cancelled
-            .lock()
-            .expect("runner cancelled lock")
-            .as_slice(),
+        runner.cancelled.lock_recover().as_slice(),
         &[RestateProcessCancelRequest {
             process_id: "task-smoke".to_string(),
             reason: Some("stop-smoke".to_string()),
@@ -9167,7 +9036,7 @@ async fn process_workflow_impl_runs_and_cancels_through_runner() {
             if matches!(*output, ProcessAwaitOutput::Success { .. })
     ));
     assert_eq!(
-        runner.ran.lock().expect("runner ran lock").as_slice(),
+        runner.ran.lock_recover().as_slice(),
         &[RecordedProcessRun {
             process_id: "task-workflow".to_string(),
             wake_target_session_id: Some("wake-session".to_string()),
@@ -9177,11 +9046,7 @@ async fn process_workflow_impl_runs_and_cancels_through_runner() {
         }]
     );
     assert_eq!(
-        runner
-            .cancelled
-            .lock()
-            .expect("runner cancelled lock")
-            .as_slice(),
+        runner.cancelled.lock_recover().as_slice(),
         &[RestateProcessCancelRequest {
             process_id: "task-workflow".to_string(),
             reason: Some("stop".to_string()),
@@ -9603,7 +9468,7 @@ async fn run_registration_abandons_restarted_owner_bound_without_running() {
 
     // The real runner rejects this before user-code execution when its atomic
     // start write observes the prior OwnerBound attempt.
-    assert_eq!(*runner.calls.lock().expect("runner calls lock"), 1);
+    assert_eq!(*runner.calls.lock_recover(), 1);
     let lash_core::ProcessRunOutcome::Terminal(output) = &output else {
         panic!("expected terminal output, got {output:?}");
     };
@@ -9666,8 +9531,7 @@ async fn run_registration_runs_fresh_owner_bound() {
     assert_eq!(
         runner
             .ran
-            .lock()
-            .expect("runner ran lock")
+            .lock_recover()
             .iter()
             .map(|run| run.process_id.clone())
             .collect::<Vec<_>>(),
@@ -9703,8 +9567,7 @@ async fn ingress_runner_submits_non_terminal_process_by_workflow_key() {
             let mut buf = vec![0u8; 8192];
             let n = socket.read(&mut buf).await.expect("read request");
             captured_server
-                .lock()
-                .expect("captured lock")
+                .lock_recover()
                 .push(String::from_utf8_lossy(&buf[..n]).into_owned());
             socket
                 .write_all(
@@ -9728,7 +9591,7 @@ async fn ingress_runner_submits_non_terminal_process_by_workflow_key() {
         .expect("drive pending again");
     server.await.expect("mock ingress server task");
 
-    let requests = captured.lock().expect("captured lock").clone();
+    let requests = captured.lock_recover().clone();
     assert_eq!(
         requests.len(),
         2,
@@ -9802,7 +9665,7 @@ async fn ingress_sweep_resumes_latest_segment_without_duplicate_segment_zero() {
     runner.claim_and_run_pending().await.expect("drive pending");
     server.await.expect("capture server");
 
-    let requests = captured.lock().expect("captured lock");
+    let requests = captured.lock_recover();
     assert_eq!(requests.len(), 1);
     assert!(
         requests[0].starts_with("POST /LashProcessWorkflow/mid-chain%233/run/send "),
@@ -9871,7 +9734,7 @@ async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_request() {
         .expect("sweep skips externally-owned rows and submits the rerunnable one");
     server.await.expect("mock ingress server task");
 
-    let requests = captured.lock().expect("captured lock").clone();
+    let requests = captured.lock_recover().clone();
     assert_eq!(
         requests.len(),
         1,
@@ -9966,7 +9829,7 @@ async fn spawn_restate_http_capture(
         for response in responses {
             let (mut socket, _) = listener.accept().await.expect("accept");
             let request = read_http_request(&mut socket).await;
-            captured_server.lock().expect("captured lock").push(request);
+            captured_server.lock_recover().push(request);
             let body = response.body.as_bytes();
             let header = format!(
                 "HTTP/1.1 {}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
@@ -10248,7 +10111,7 @@ async fn restate_ingress_client_parses_send_invocation_id() {
     server.await.expect("capture server");
 
     assert_eq!(invocation_id.as_str(), "inv_123");
-    let requests = captured.lock().expect("captured lock");
+    let requests = captured.lock_recover();
     assert!(
         requests[0].starts_with("POST /WorkbenchTurnWorkflow/turn-1/run/send "),
         "unexpected request: {}",
@@ -10272,7 +10135,7 @@ impl ScriptedHttpTransport {
     }
 
     fn requests(&self) -> Vec<HttpRequest> {
-        self.requests.lock().expect("requests lock").clone()
+        self.requests.lock_recover().clone()
     }
 }
 
@@ -10283,10 +10146,9 @@ impl HttpTransport for ScriptedHttpTransport {
         request: HttpRequest,
         _timeout: Option<Duration>,
     ) -> Result<HttpResponse, HttpTransportError> {
-        self.requests.lock().expect("requests lock").push(request);
+        self.requests.lock_recover().push(request);
         self.responses
-            .lock()
-            .expect("responses lock")
+            .lock_recover()
             .pop_front()
             .ok_or_else(|| HttpTransportError::new("scripted transport exhausted"))
     }
@@ -10305,7 +10167,7 @@ impl HttpTransport for AuthorizationTransport {
         mut request: HttpRequest,
         timeout: Option<Duration>,
     ) -> Result<HttpResponse, HttpTransportError> {
-        let token = self.token.read().expect("token lock").clone();
+        let token = self.token.read_recover().clone();
         request
             .headers
             .push(("authorization".to_string(), format!("Bearer {token}")));
@@ -10390,7 +10252,7 @@ async fn authorization_decorator_reads_rotated_credentials_per_request() {
         .send_service_json("LashService", "run", &serde_json::json!({"attempt": 1}))
         .await
         .expect("first submit");
-    *token.write().expect("token lock") = "second-token".to_string();
+    *token.write_recover() = "second-token".to_string();
     client
         .send_service_json("LashService", "run", &serde_json::json!({"attempt": 2}))
         .await
@@ -10463,7 +10325,7 @@ async fn restate_ingress_client_calls_workflow_and_decodes_output() {
             control: None,
         }
     );
-    let requests = captured.lock().expect("captured lock");
+    let requests = captured.lock_recover();
     assert!(
         requests[0].starts_with("POST /LashProcessWorkflow/process-1/await_terminal "),
         "unexpected request: {}",
@@ -10494,7 +10356,7 @@ async fn restate_ingress_client_pins_effect_replay_with_idempotency_key() {
     server.await.expect("capture server");
 
     assert_eq!(output, Resolution::Cancelled);
-    let requests = captured.lock().expect("captured lock");
+    let requests = captured.lock_recover();
     assert!(
         requests[0].contains("idempotency-key: stable-envelope-hash"),
         "explicit effect replay identity must reach Restate: {}",
@@ -10650,7 +10512,7 @@ async fn spawn_restate_http_capture_delayed(
         for response in responses {
             let (mut socket, _) = listener.accept().await.expect("accept");
             let request = read_http_request(&mut socket).await;
-            captured_server.lock().expect("captured lock").push(request);
+            captured_server.lock_recover().push(request);
             tokio::time::sleep(delay).await;
             let body = response.body.as_bytes();
             let header = format!(
@@ -10715,7 +10577,7 @@ async fn restate_attach_before_run_resolves_with_delayed_workflow_output() {
         elapsed >= delay,
         "the attach must block on the durable promise until run resolves (waited {elapsed:?})"
     );
-    let requests = captured.lock().expect("captured lock");
+    let requests = captured.lock_recover();
     assert_eq!(
         requests.len(),
         1,
@@ -10765,7 +10627,7 @@ async fn restate_driver_short_circuits_terminal_without_ingress_call() {
 
     assert_eq!(resolved, output);
     assert!(
-        captured.lock().expect("captured lock").is_empty(),
+        captured.lock_recover().is_empty(),
         "a terminal short-circuit must not issue any ingress call"
     );
 }
@@ -10805,8 +10667,7 @@ struct RecordingProcessEventSink {
 impl lash_core::facade_support::ProcessEventSink for RecordingProcessEventSink {
     async fn emit(&self, event: &lash_core::ProcessEvent) {
         self.events
-            .lock()
-            .expect("sink lock")
+            .lock_recover()
             .push((event.event_type.clone(), event.sequence));
     }
 }
@@ -10855,7 +10716,7 @@ async fn restate_deployment_sink_funnel_feeds_appended_events() {
         .await
         .expect("complete");
 
-    let events = sink.events.lock().expect("sink lock").clone();
+    let events = sink.events.lock_recover().clone();
     assert_eq!(
         events
             .iter()
@@ -10913,7 +10774,7 @@ async fn restate_process_attach_is_reentrant_across_sequential_awaits() {
         }
     );
     assert_eq!(
-        captured.lock().expect("captured lock").len(),
+        captured.lock_recover().len(),
         2,
         "each await issues an independent ingress call"
     );
@@ -10966,7 +10827,7 @@ async fn restate_admin_client_cancels_kills_and_queries_invocation_status() {
     assert!(status.completed_successfully());
     assert_eq!(status.target_service_name, "WorkbenchTurnWorkflow");
     assert!(workflow_status.is_still_active());
-    let requests = captured.lock().expect("captured lock");
+    let requests = captured.lock_recover();
     assert!(
         requests[0].starts_with("PATCH /invocations/inv_123/cancel "),
         "unexpected cancel request: {}",

@@ -210,6 +210,14 @@ finish_current_step() {
   fi
 }
 
+assert_no_panics_in_artifacts() {
+  if [ -d "$out_dir" ] && grep -RFn --include='*.log' 'panicked at' "$out_dir" >&2; then
+    echo "panic gate: FAILED ('panicked at' found in confidence artifacts)" >&2
+    return 1
+  fi
+  echo "panic gate: clean (no 'panicked at' lines in confidence artifacts)"
+}
+
 cleanup_mutation_postgres() {
   if [ -n "$mutation_postgres_container" ]; then
     docker rm -f "$mutation_postgres_container" >/dev/null 2>&1 || true
@@ -2638,6 +2646,7 @@ bootstrap_tools
 
 if [ -n "$sim_search_shard" ]; then
   LASH_SIM_SHARD="$sim_search_shard" run_sim_search_lane
+  assert_no_panics_in_artifacts
   step "Confidence gate 'sim-search:${sim_search_shard}' passed"
   printf 'Artifacts: %s\n' "$out_dir"
   exit 0
@@ -2651,6 +2660,7 @@ if [ "$lane" = "fast" ]; then
       run_sim_provider_scripts
     fi
     write_confidence_summary "passed"
+    assert_no_panics_in_artifacts
     step "Confidence gate '${requested_selector}' passed"
     printf 'Artifacts: %s\n' "$out_dir"
     exit 0
@@ -2666,6 +2676,7 @@ if [ "$lane" = "fast" ]; then
       run_fast_shard
       ;;
   esac
+  assert_no_panics_in_artifacts
   if [ "$fast_shard" = "summary" ] || [ "$fast_shard" = "all" ]; then
     step "Confidence gate 'fast' passed"
     printf 'Artifacts: %s\n' "${out_root}/fast"
@@ -2741,6 +2752,7 @@ if [ "$lane" = "default" ] || [ "$lane" = "broad" ] || [ "$lane" = "full" ]; the
   fi
 fi
 
+assert_no_panics_in_artifacts
 write_confidence_summary "passed"
 
 step "Confidence gate '${requested_selector}' passed"

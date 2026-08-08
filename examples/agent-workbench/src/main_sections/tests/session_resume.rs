@@ -189,8 +189,7 @@
                 let resumed_requests = Arc::clone(&resumed_requests_for_provider);
                 async move {
                     resumed_requests
-                        .lock()
-                        .expect("resumed provider request lock")
+                        .lock_recover()
                         .push(serde_json::to_string(&request).expect("serialize resumed request"));
                     Ok(text_response(
                         "<lashlang>\nfinish \"resume answer three\"\n</lashlang>",
@@ -300,8 +299,7 @@
 
         {
             let requests = resumed_requests
-                .lock()
-                .expect("resumed provider request lock");
+                .lock_recover();
             assert_eq!(requests.len(), 1);
             for marker in [
                 "resume question one",

@@ -6,6 +6,7 @@ use lash_core::provider::{
     CacheControlDialect, CacheRetention, ModelCapability, ProviderHandle, ProviderReliability,
     ReasoningCapability, ReasoningEncoding,
 };
+use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
@@ -31,8 +32,7 @@ impl LlmHttpTransport for ScriptedHttpTransport {
     ) -> Result<lash_llm_transport::LlmHttpResponse, LlmTransportError> {
         let (status, headers, body) = self
             .responses
-            .lock()
-            .expect("script lock")
+            .lock_recover()
             .pop_front()
             .expect("scripted response");
         Ok(lash_llm_transport::LlmHttpResponse {
@@ -126,7 +126,7 @@ impl LlmHttpTransport for RecordingHttpTransport {
         request: LlmHttpRequest,
         _timeout: Option<std::time::Duration>,
     ) -> Result<lash_llm_transport::LlmHttpResponse, LlmTransportError> {
-        self.requests.lock().expect("request lock").push(request);
+        self.requests.lock_recover().push(request);
         Ok(lash_llm_transport::LlmHttpResponse {
             status: 200,
             headers: self.response_headers.clone(),
@@ -233,7 +233,7 @@ async fn host_enabled_session_affinity_works_through_a_custom_proxy_url() {
 
     provider.complete(req).await.expect("request succeeds");
 
-    let requests = transport.requests.lock().expect("request lock");
+    let requests = transport.requests.lock_recover();
     let wire_request = requests.first().expect("captured request");
     let body: Value = serde_json::from_slice(&wire_request.body).expect("request body");
     let expected = session_id.chars().take(256).collect::<String>();
@@ -266,7 +266,7 @@ async fn session_affinity_is_disabled_without_endpoint_capability() {
 
     provider.complete(req).await.expect("request succeeds");
 
-    let requests = transport.requests.lock().expect("request lock");
+    let requests = transport.requests.lock_recover();
     let wire_request = requests.first().expect("captured request");
     let body: Value = serde_json::from_slice(&wire_request.body).expect("request body");
     assert!(body.get("session_id").is_none());
@@ -280,7 +280,7 @@ async fn direct_openai_prompt_cache_key_does_not_enable_body_session_affinity() 
 
     provider.complete(req).await.expect("request succeeds");
 
-    let requests = transport.requests.lock().expect("request lock");
+    let requests = transport.requests.lock_recover();
     let wire_request = requests.first().expect("captured request");
     let body: Value = serde_json::from_slice(&wire_request.body).expect("request body");
     assert_eq!(body["prompt_cache_key"], "session-1::session-1:frame:test");
@@ -2086,7 +2086,7 @@ fn openrouter_stream_wire_captures_first_stable_identity_and_terminal_facts() {
 fn streamed_request(events: Arc<std::sync::Mutex<Vec<LlmStreamEvent>>>) -> LlmRequest {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.stream_events = Some(LlmEventSender::new(move |event| {
-        events.lock().expect("event lock").push(event);
+        events.lock_recover().push(event);
     }));
     req
 }
@@ -2229,8 +2229,7 @@ async fn chat_stream_ending_without_finish_reason_is_retryable_truncation_with_p
     );
     assert!(
         events
-            .lock()
-            .expect("event lock")
+            .lock_recover()
             .iter()
             .all(|event| !matches!(event, LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })))
     );

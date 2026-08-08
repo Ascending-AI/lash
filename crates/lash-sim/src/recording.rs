@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::fs::{self, OpenOptions};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -92,10 +93,7 @@ impl RecordingLlmHttpTransport {
     }
 
     pub fn recorded_paths(&self) -> Result<Vec<PathBuf>, LlmTransportError> {
-        self.recorded_paths
-            .lock()
-            .map(|paths| paths.clone())
-            .map_err(|_| recording_error("provider recording path lock poisoned"))
+        Ok(self.recorded_paths.lock_recover().clone())
     }
 }
 
@@ -300,10 +298,7 @@ impl RecordingExchange {
         })?;
         encoded.push(b'\n');
         write_new_file(&path, &encoded)?;
-        self.recorded_paths
-            .lock()
-            .map_err(|_| recording_error("provider recording path lock poisoned"))?
-            .push(path);
+        self.recorded_paths.lock_recover().push(path);
         Ok(())
     }
 }
@@ -650,12 +645,7 @@ mod tests {
             _request: LlmHttpRequest,
             _timeout: Option<Duration>,
         ) -> Result<LlmHttpResponse, LlmTransportError> {
-            let chunks = self
-                .chunks
-                .lock()
-                .expect("static transport chunk lock")
-                .drain(..)
-                .collect();
+            let chunks = self.chunks.lock_recover().drain(..).collect();
             Ok(LlmHttpResponse {
                 status: self.status,
                 headers: self.headers.clone(),

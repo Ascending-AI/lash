@@ -348,7 +348,7 @@ impl ExecutionHost for SegmentRecordingHost {
         match op {
             AbilityOp::ResourceOperation(operation) => {
                 let value = Host::perform_resource_operation(operation)?;
-                self.effects.lock().expect("effects lock").push(value.clone());
+                self.effects.lock_recover().push(value.clone());
                 Ok(AbilityResult::Value(value))
             }
             other => Host.perform(other).await,
@@ -374,7 +374,7 @@ async fn run_with_segment_budget(
             VmRunOutcome::Complete(output) => {
                 return (
                     output,
-                    host.effects.lock().expect("effects lock").clone(),
+                    host.effects.lock_recover().clone(),
                     boundaries,
                 );
             }

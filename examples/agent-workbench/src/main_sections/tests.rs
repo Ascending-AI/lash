@@ -1968,8 +1968,7 @@ finish initial
         loop {
             let known_jobs = state
                 .restate_cron_job_keys
-                .lock()
-                .expect("cron job key lock")
+                .lock_recover()
                 .clone();
             let trace_text = std::fs::read_to_string(trace_path).unwrap_or_default();
             if !known_jobs.is_empty()

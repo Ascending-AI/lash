@@ -6,8 +6,8 @@ Convention: a commit that should contribute release notes carries one or more
 following line. It ends at the next `Release-Notes:` line, the next squash
 subject line (`* `), or the end of the message.
 
-Notes may start with `Breaking:`, `Added:`, `Fixed:`, `Changed:`, or
-`Internal:` (case-insensitive). The legacy `Fixed - ` and `Changed - ` forms
+Notes may start with `Breaking:`, `Added:`, `Fixed:`, `Changed:`, `Removed:`,
+or `Internal:` (case-insensitive). The legacy `Fixed - ` and `Changed - ` forms
 remain accepted. Publication groups categorized notes in that order, followed
 by uncategorized historical notes under `Other`.
 
@@ -45,14 +45,14 @@ SQUASH_SUBJECT_RE = re.compile(r"^\*\s")
 RECORD_SEPARATOR = "\x1e"
 FIELD_SEPARATOR = "\x1f"
 AUTOMATED_DOCS_STAMP_SUBJECT_RE = re.compile(r"^docs: stamp release \S+$")
-CATEGORIES = ("Breaking", "Added", "Fixed", "Changed", "Internal")
+CATEGORIES = ("Breaking", "Added", "Fixed", "Changed", "Removed", "Internal")
 CATEGORY_COLON_RE = re.compile(
-    r"^(Breaking|Added|Fixed|Changed|Internal):\s*(.*)$", re.IGNORECASE
+    r"^(Breaking|Added|Fixed|Changed|Removed|Internal):\s*(.*)$", re.IGNORECASE
 )
 LEGACY_CATEGORY_RE = re.compile(r"^(Fixed|Changed)\s+-\s+(.*)$", re.IGNORECASE)
 MALFORMED_CATEGORY_ERROR = (
     "every release note must start with one of: "
-    "Breaking:, Added:, Fixed:, Changed:, Internal:"
+    "Breaking:, Added:, Fixed:, Changed:, Removed:, Internal:"
 )
 
 

@@ -48,12 +48,9 @@ pub enum RuntimeErrorCode {
     DurableEffectLivePluginInput,
     AwaitEventCancelUnsupported,
     AwaitEventKeySign,
-    /// Process-local; repaired by restart, not by same-process retry.
-    AwaitEventRegistryPoisoned,
     AwaitEventUnknownOrRevoked,
     AwaitEventUnsupported,
     CancelStartGateUnavailable,
-    CheckpointMessages,
     EffectJournalRetirementUnsupported,
     InvalidAwaitEventSessionId,
     InvalidAwaitEventWaitIdentity,
@@ -111,8 +108,6 @@ pub enum RuntimeErrorCode {
     SqliteEffectJournalRetirement,
     ToolCompletionKeyMissingCallId,
     ToolCompletionKeyProcessLifetime,
-    /// Process-local; repaired by restart, not by same-process retry.
-    ToolCompletionStatePoisoned,
     TransientCancelWatch,
     TransientTerminalPublication,
     TurnCancelGateDecode,
@@ -169,11 +164,9 @@ impl RuntimeErrorCode {
             Self::DurableEffectLivePluginInput => "durable_effect_live_plugin_input",
             Self::AwaitEventCancelUnsupported => "await_event_cancel_unsupported",
             Self::AwaitEventKeySign => "await_event_key_sign",
-            Self::AwaitEventRegistryPoisoned => "await_event_registry_poisoned",
             Self::AwaitEventUnknownOrRevoked => "await_event_unknown_or_revoked",
             Self::AwaitEventUnsupported => "await_event_unsupported",
             Self::CancelStartGateUnavailable => "cancel_start_gate_unavailable",
-            Self::CheckpointMessages => "checkpoint_messages",
             Self::EffectJournalRetirementUnsupported => "effect_journal_retirement_unsupported",
             Self::InvalidAwaitEventSessionId => "invalid_await_event_session_id",
             Self::InvalidAwaitEventWaitIdentity => "invalid_await_event_wait_identity",
@@ -226,7 +219,6 @@ impl RuntimeErrorCode {
             Self::SqliteEffectJournalRetirement => "sqlite_effect_journal_retirement",
             Self::ToolCompletionKeyMissingCallId => "tool_completion_key_missing_call_id",
             Self::ToolCompletionKeyProcessLifetime => "tool_completion_key_process_lifetime",
-            Self::ToolCompletionStatePoisoned => "tool_completion_state_poisoned",
             Self::TransientCancelWatch => "transient_cancel_watch",
             Self::TransientTerminalPublication => "transient_terminal_publication",
             Self::TurnCancelGateDecode => "turn_cancel_gate_decode",
@@ -294,7 +286,6 @@ impl RuntimeErrorCode {
                 | Self::AwaitEventKeySign
                 | Self::AwaitEventUnknownOrRevoked
                 | Self::AwaitEventUnsupported
-                | Self::CheckpointMessages
                 | Self::EffectJournalRetirementUnsupported
                 | Self::InvalidAwaitEventSessionId
                 | Self::InvalidAwaitEventWaitIdentity
@@ -362,11 +353,9 @@ impl RuntimeErrorCode {
             "durable_effect_live_plugin_input" => Self::DurableEffectLivePluginInput,
             "await_event_cancel_unsupported" => Self::AwaitEventCancelUnsupported,
             "await_event_key_sign" => Self::AwaitEventKeySign,
-            "await_event_registry_poisoned" => Self::AwaitEventRegistryPoisoned,
             "await_event_unknown_or_revoked" => Self::AwaitEventUnknownOrRevoked,
             "await_event_unsupported" => Self::AwaitEventUnsupported,
             "cancel_start_gate_unavailable" => Self::CancelStartGateUnavailable,
-            "checkpoint_messages" => Self::CheckpointMessages,
             "effect_journal_retirement_unsupported" => Self::EffectJournalRetirementUnsupported,
             "invalid_await_event_session_id" => Self::InvalidAwaitEventSessionId,
             "invalid_await_event_wait_identity" => Self::InvalidAwaitEventWaitIdentity,
@@ -419,7 +408,6 @@ impl RuntimeErrorCode {
             "sqlite_effect_journal_retirement" => Self::SqliteEffectJournalRetirement,
             "tool_completion_key_missing_call_id" => Self::ToolCompletionKeyMissingCallId,
             "tool_completion_key_process_lifetime" => Self::ToolCompletionKeyProcessLifetime,
-            "tool_completion_state_poisoned" => Self::ToolCompletionStatePoisoned,
             "transient_cancel_watch" => Self::TransientCancelWatch,
             "transient_terminal_publication" => Self::TransientTerminalPublication,
             "turn_cancel_gate_decode" => Self::TurnCancelGateDecode,
@@ -623,7 +611,6 @@ mod tests {
             | RuntimeErrorCode::AwaitEventKeySign
             | RuntimeErrorCode::AwaitEventUnknownOrRevoked
             | RuntimeErrorCode::AwaitEventUnsupported
-            | RuntimeErrorCode::CheckpointMessages
             | RuntimeErrorCode::EffectJournalRetirementUnsupported
             | RuntimeErrorCode::InvalidAwaitEventSessionId
             | RuntimeErrorCode::InvalidAwaitEventWaitIdentity
@@ -670,7 +657,6 @@ mod tests {
             | RuntimeErrorCode::ProtocolBeforeLlmCall
             | RuntimeErrorCode::TurnStreamJoin
             | RuntimeErrorCode::EmptyAgentFrameRun
-            | RuntimeErrorCode::AwaitEventRegistryPoisoned
             | RuntimeErrorCode::LiveReplay
             | RuntimeErrorCode::PostgresAwaitEventNotify
             | RuntimeErrorCode::QueuedWork
@@ -678,7 +664,6 @@ mod tests {
             | RuntimeErrorCode::RuntimeEffectControllerTaskClosed
             | RuntimeErrorCode::SessionHeadRefresh
             | RuntimeErrorCode::SqliteAwaitEventNotify
-            | RuntimeErrorCode::ToolCompletionStatePoisoned
             | RuntimeErrorCode::TurnControlWaitCancelled
             | RuntimeErrorCode::ForeignCode(_) => ExpectedClassification::Unknown,
         }
@@ -711,11 +696,9 @@ mod tests {
             RuntimeErrorCode::DurableEffectLivePluginInput,
             RuntimeErrorCode::AwaitEventCancelUnsupported,
             RuntimeErrorCode::AwaitEventKeySign,
-            RuntimeErrorCode::AwaitEventRegistryPoisoned,
             RuntimeErrorCode::AwaitEventUnknownOrRevoked,
             RuntimeErrorCode::AwaitEventUnsupported,
             RuntimeErrorCode::CancelStartGateUnavailable,
-            RuntimeErrorCode::CheckpointMessages,
             RuntimeErrorCode::EffectJournalRetirementUnsupported,
             RuntimeErrorCode::InvalidAwaitEventSessionId,
             RuntimeErrorCode::InvalidAwaitEventWaitIdentity,
@@ -764,7 +747,6 @@ mod tests {
             RuntimeErrorCode::SqliteEffectJournalRetirement,
             RuntimeErrorCode::ToolCompletionKeyMissingCallId,
             RuntimeErrorCode::ToolCompletionKeyProcessLifetime,
-            RuntimeErrorCode::ToolCompletionStatePoisoned,
             RuntimeErrorCode::TransientCancelWatch,
             RuntimeErrorCode::TransientTerminalPublication,
             RuntimeErrorCode::TurnCancelGateDecode,

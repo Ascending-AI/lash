@@ -2,6 +2,7 @@ use super::*;
 #[cfg(feature = "rlm")]
 use crate::rlm::RlmTurnBuilderExt as _;
 use futures_util::StreamExt as _;
+use lash_sansio::sync::{LockResultExt, MutexExt};
 use std::collections::BTreeSet;
 
 struct QueuedWorkHydrationProbeFactory {
@@ -176,10 +177,7 @@ struct RecordingDurableEffectController {
 
 impl RecordingDurableEffectController {
     fn invocations(&self) -> Vec<DurableEffectInvocation> {
-        self.invocations
-            .lock()
-            .expect("durable effect invocations")
-            .clone()
+        self.invocations.lock_recover().clone()
     }
 }
 
@@ -198,8 +196,7 @@ impl lash_core::RuntimeEffectController for RecordingDurableEffectController {
     ) -> std::result::Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
     {
         self.invocations
-            .lock()
-            .expect("durable effect invocations")
+            .lock_recover()
             .push(DurableEffectInvocation {
                 kind: envelope.invocation.effect_kind().expect("effect kind"),
                 turn_id: envelope.invocation.scope.turn_id.clone(),
@@ -223,10 +220,7 @@ struct RecordingInlineEffectController {
 
 impl RecordingInlineEffectController {
     fn invocations(&self) -> Vec<DurableEffectInvocation> {
-        self.invocations
-            .lock()
-            .expect("inline effect invocations")
-            .clone()
+        self.invocations.lock_recover().clone()
     }
 }
 
@@ -292,8 +286,7 @@ impl lash_core::RuntimeEffectController for RecordingInlineEffectController {
     ) -> std::result::Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
     {
         self.invocations
-            .lock()
-            .expect("inline effect invocations")
+            .lock_recover()
             .push(DurableEffectInvocation {
                 kind: envelope.invocation.effect_kind().expect("effect kind"),
                 turn_id: envelope.invocation.scope.turn_id.clone(),
@@ -379,7 +372,7 @@ struct ContractRecordingTools {
 
 impl ContractRecordingTools {
     fn take_resolved(&self) -> Vec<serde_json::Value> {
-        std::mem::take(&mut *self.resolved.lock().expect("resolved contracts"))
+        std::mem::take(&mut *self.resolved.lock_recover())
     }
 }
 
@@ -395,8 +388,7 @@ impl ToolProvider for ContractRecordingTools {
         }
         let contract = Arc::new(app_tool_definition().contract());
         self.resolved
-            .lock()
-            .expect("resolved contracts")
+            .lock_recover()
             .push(serde_json::to_value(contract.as_ref()).expect("serialize tool contract"));
         Some(contract)
     }
@@ -429,7 +421,7 @@ impl ToolProvider for BlockingAppTools {
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
         assert_eq!(call.name, "app_lookup");
-        if let Some(tx) = self.entered_tx.lock().expect("entered tx").take() {
+        if let Some(tx) = self.entered_tx.lock_recover().take() {
             let _ = tx.send(());
         }
         if let Some(rx) = self.release_rx.lock().await.take() {
@@ -453,7 +445,7 @@ impl RuntimeBatchTools {
     }
 
     fn windows(&self) -> Vec<(String, std::time::Instant, std::time::Instant)> {
-        self.windows.lock().expect("execution windows").clone()
+        self.windows.lock_recover().clone()
     }
 }
 
@@ -491,11 +483,9 @@ impl ToolProvider for RuntimeBatchTools {
                 )
                 .await;
                 let end = std::time::Instant::now();
-                self.windows.lock().expect("execution windows").push((
-                    call.name.to_string(),
-                    start,
-                    end,
-                ));
+                self.windows
+                    .lock_recover()
+                    .push((call.name.to_string(), start, end));
                 match waited {
                     Ok(_) => lash_core::ToolResult::ok(serde_json::json!(call.name)),
                     Err(_) => lash_core::ToolResult::err_fmt(format!(
@@ -777,8 +767,7 @@ async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle() -> Resul
             let captured_requests = Arc::clone(&captured_requests);
             async move {
                 captured_requests
-                    .lock()
-                    .expect("request capture")
+                    .lock_recover()
                     .push(request.messages.clone());
                 Ok(text_response("echo: queued work"))
             }
@@ -808,7 +797,7 @@ async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle() -> Resul
 
     assert_eq!(output.assistant_message(), Some("echo: queued work"));
     {
-        let requests = requests.lock().expect("request capture");
+        let requests = requests.lock_recover();
         assert_eq!(requests.len(), 1);
         assert_eq!(
             serde_json::to_string(&requests[0][1..])
@@ -1115,8 +1104,7 @@ fn retrying_rlm_prose_provider(
             let requests = Arc::clone(&requests);
             async move {
                 requests
-                    .lock()
-                    .expect("retrying RLM requests")
+                    .lock_recover()
                     .push(request.clone());
                 let call = transport_calls.fetch_add(1, Ordering::SeqCst);
                 let stream = request.stream_events.expect("stream events");
@@ -1164,7 +1152,7 @@ fn natural_prose_reasoning_provider(
             let requests = Arc::clone(&requests);
             let calls = Arc::clone(&calls);
             async move {
-                requests.lock().expect("natural RLM requests").push(request);
+                requests.lock_recover().push(request);
                 let call = calls.fetch_add(1, Ordering::SeqCst);
                 let text = match call {
                     0 => "natural completion single-copy marker",
@@ -1280,7 +1268,7 @@ fn rlm_provider_retry_commits_only_surviving_prose() -> Result<()> {
             "RLM semantic history retained aborted-attempt prose"
         );
         {
-            let requests = requests.lock().expect("retrying RLM requests");
+            let requests = requests.lock_recover();
             assert_eq!(requests.len(), 3, "RLM scheduled a spurious iteration");
             let continuation_request = requests.last().expect("post-error continuation request");
             let continuation = provider_request_text(continuation_request);
@@ -1360,7 +1348,7 @@ fn rlm_provider_retry_commits_only_surviving_prose() -> Result<()> {
             .turn(TurnInput::text("check retry history"))
             .run()
             .await?;
-        let requests = requests.lock().expect("retrying RLM requests");
+        let requests = requests.lock_recover();
         assert_eq!(requests.len(), 4);
         let subsequent_history = requests.last().expect("subsequent request");
         let subsequent_history_json = serde_json::to_string(subsequent_history)?;
@@ -1414,7 +1402,7 @@ fn rlm_natural_prose_completion_is_single_copy_in_next_request() -> Result<()> {
             .run()
             .await?;
 
-        let requests = requests.lock().expect("natural RLM requests");
+        let requests = requests.lock_recover();
         assert_eq!(requests.len(), 2);
         let next_request = provider_request_text(&requests[1]);
         assert_eq!(
@@ -1939,15 +1927,12 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
                 .commit_appended
                 .swap(true, std::sync::atomic::Ordering::AcqRel)
         {
-            let mut guard = self.pause_lock.lock().expect("commit pause lock");
+            let mut guard = self.pause_lock.lock_recover();
             while !self
                 .release_commit
                 .load(std::sync::atomic::Ordering::Acquire)
             {
-                guard = self
-                    .pause_changed
-                    .wait(guard)
-                    .expect("commit pause condition");
+                guard = self.pause_changed.wait(guard).recover();
             }
         }
         Ok(event)
@@ -2278,7 +2263,7 @@ async fn recoverable_chat_conformance_disconnect_does_not_cancel_server_work() -
                 let entered_tx = Arc::clone(&entered_tx);
                 let release = Arc::clone(&release);
                 async move {
-                    if let Some(tx) = entered_tx.lock().expect("entered sender").take() {
+                    if let Some(tx) = entered_tx.lock_recover().take() {
                         let _ = tx.send(());
                     }
                     release.notified().await;
@@ -2565,7 +2550,7 @@ async fn cancel_running_turns_stops_inflight_turn() -> Result<()> {
         .complete(move |_request| {
             let started_tx = Arc::clone(&started_tx);
             async move {
-                if let Some(tx) = started_tx.lock().expect("started signal").take() {
+                if let Some(tx) = started_tx.lock_recover().take() {
                     let _ = tx.send(());
                 }
                 // Hang until the turn is cancelled out from under us.
@@ -2615,7 +2600,7 @@ fn hang_on_signal_provider(started_tx: Arc<StdMutex<Vec<oneshot::Sender<()>>>>) 
             async move {
                 let user_text = last_user_text(&request);
                 if user_text.contains("hang") {
-                    if let Some(tx) = started_tx.lock().expect("started signal").pop() {
+                    if let Some(tx) = started_tx.lock_recover().pop() {
                         let _ = tx.send(());
                     }
                     // Hang until the turn is cancelled out from under us.
@@ -2848,10 +2833,7 @@ async fn inline_queued_work_burst_reuses_one_hydrated_runtime() -> Result<()> {
                 let first_entered = Arc::clone(&first_entered);
                 let release_first = Arc::clone(&release_first);
                 async move {
-                    seen_inputs
-                        .lock()
-                        .expect("queued-work input observations")
-                        .push(last_user_text(&request));
+                    seen_inputs.lock_recover().push(last_user_text(&request));
                     if provider_calls.fetch_add(1, Ordering::SeqCst) == 0 {
                         first_entered.notify_one();
                         release_first
@@ -2906,10 +2888,7 @@ async fn inline_queued_work_burst_reuses_one_hydrated_runtime() -> Result<()> {
     release_first.add_permits(1);
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
-            let observed = seen_inputs
-                .lock()
-                .expect("queued-work input observations")
-                .join("\n");
+            let observed = seen_inputs.lock_recover().join("\n");
             if (0..INPUTS).all(|index| observed.contains(&format!("queued input {index}"))) {
                 break;
             }
@@ -2948,10 +2927,7 @@ async fn inline_queued_work_burst_reuses_one_hydrated_runtime() -> Result<()> {
     .await
     .expect("the hydrated runtime durably commits the full burst");
 
-    let observed = seen_inputs
-        .lock()
-        .expect("queued-work input observations")
-        .join("\n");
+    let observed = seen_inputs.lock_recover().join("\n");
     let mut previous = 0;
     for index in 0..INPUTS {
         let position = observed
@@ -3104,11 +3080,10 @@ async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result
             async move {
                 let user_text = last_user_text(&request);
                 captured_requests
-                    .lock()
-                    .expect("request log")
+                    .lock_recover()
                     .push((user_text.clone(), request.messages.clone()));
                 if user_text == "primary hangs" {
-                    if let Some(tx) = started_tx.lock().expect("started signal").take() {
+                    if let Some(tx) = started_tx.lock_recover().take() {
                         let _ = tx.send(());
                     }
                     std::future::pending::<()>().await;
@@ -3195,7 +3170,7 @@ async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result
         Some("echo: deferred active steer")
     );
     assert!(session.pending_turn_inputs().await?.is_empty());
-    let requests = requests.lock().expect("request log").clone();
+    let requests = requests.lock_recover().clone();
     assert_eq!(
         requests
             .iter()
@@ -3242,12 +3217,9 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
             let captured_requests = Arc::clone(&captured_requests);
             async move {
                 let user_text = last_user_text(&request);
-                captured_requests
-                    .lock()
-                    .expect("request log")
-                    .push(user_text.clone());
+                captured_requests.lock_recover().push(user_text.clone());
                 if user_text == "primary waits for active steer" {
-                    if let Some(tx) = first_started_tx.lock().expect("first signal").take() {
+                    if let Some(tx) = first_started_tx.lock_recover().take() {
                         let _ = tx.send(());
                     }
                     if let Some(rx) = release_first_rx.lock().await.take() {
@@ -3256,7 +3228,7 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
                     return Ok(text_response("first response"));
                 }
                 if user_text == "accepted active steer" {
-                    if let Some(tx) = second_started_tx.lock().expect("second signal").take() {
+                    if let Some(tx) = second_started_tx.lock_recover().take() {
                         let _ = tx.send(());
                     }
                     std::future::pending::<()>().await;
@@ -3325,7 +3297,7 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
         session.queued_turn().run().await?.is_none(),
         "accepted active steer must not replay as a later queued turn"
     );
-    let requests = requests.lock().expect("request log").clone();
+    let requests = requests.lock_recover().clone();
     assert_eq!(
         requests
             .iter()
@@ -3359,13 +3331,11 @@ fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<()> {
                 let call_index = Arc::clone(&call_index);
                 async move {
                     captured_requests
-                        .lock()
-                        .expect("request capture")
+                        .lock_recover()
                         .push(request.messages.clone());
                     match call_index.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
                         0 => {
-                            if let Some(tx) = first_started_tx.lock().expect("first signal").take()
-                            {
+                            if let Some(tx) = first_started_tx.lock_recover().take() {
                                 let _ = tx.send(());
                             }
                             if let Some(rx) = release_first_rx.lock().await.take() {
@@ -3438,7 +3408,7 @@ fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<()> {
             .run()
             .await?;
 
-        let requests = requests.lock().expect("request capture").clone();
+        let requests = requests.lock_recover().clone();
         assert_eq!(requests.len(), 3, "two turns must execute three calls");
         let first_messages = serde_json::to_string(&requests[0]).expect("serialize first request");
         let second_messages =
@@ -5185,8 +5155,7 @@ finish { established: control.total }"#,
                         }
                         1 => {
                             if let Some(tx) = first_provider_call_tx
-                                .lock()
-                                .expect("first provider call sender")
+                                .lock_recover()
                                 .take()
                             {
                                 let _ = tx.send(());
@@ -5200,8 +5169,7 @@ finish { established: control.total }"#,
                             r#"finish { seed_visible: baton, session_projection_chars: session_chars }"#,
                         ),
                         _ => {
-                            *repair_request.lock().expect("repair request") =
-                                Some(format!("{request:?}"));
+                            *repair_request.lock_recover() = Some(format!("{request:?}"));
                             lashlang_block(r#"finish { unexpected_repair: true }"#)
                         }
                     };
@@ -5270,7 +5238,7 @@ finish { established: control.total }"#,
             "session_projection_chars": 15
         })),
         "the committed frame seed must be installed before the follow turn links: {output:?}; repair_request={:?}",
-        repair_request.lock().expect("repair request")
+        repair_request.lock_recover()
     );
     assert_eq!(provider_call_count.load(Ordering::SeqCst), 3);
     Ok(())

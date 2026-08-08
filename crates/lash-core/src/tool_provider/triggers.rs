@@ -34,8 +34,7 @@ impl<'run> ToolTriggerClient<'run> {
                 idempotency_key: outcome.idempotency_key,
                 source: outcome.source,
                 deliveries: report.deliveries.clone(),
-            })
-            .map_err(PluginError::Session)?;
+            });
         Ok(report)
     }
 }

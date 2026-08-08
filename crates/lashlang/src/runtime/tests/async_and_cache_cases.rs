@@ -129,7 +129,7 @@ async fn start_process_returns_raw_handle_and_passes_explicit_input() {
     assert_eq!(handle["__handle__"], Value::String("process".into()));
     assert_eq!(handle["id"], Value::String("proc-1".into()));
 
-    let starts = host.starts.lock().expect("starts lock");
+    let starts = host.starts.lock_recover();
     assert_eq!(starts.len(), 1);
     let start = &starts[0];
     assert_eq!(start.process_name, "scan");
@@ -234,7 +234,7 @@ async fn processes_emit_events_and_terminal_outcomes() {
         outcome,
         ExecutionOutcome::Finished(Value::String("done".into()))
     );
-    let events = host.events.lock().expect("events lock");
+    let events = host.events.lock_recover();
     assert_eq!(events.len(), 2);
     assert_eq!(events[0].kind, ProcessEventKind::Yield);
     assert_eq!(events[0].value, Value::String("checkpoint".into()));
@@ -318,11 +318,11 @@ async fn process_lifecycle_controls_sleep_wait_and_signal() {
         outcome,
         ExecutionOutcome::Finished(Value::String("signal-payload".into()))
     );
-    let sleeps = host.sleeps.lock().expect("sleeps lock");
+    let sleeps = host.sleeps.lock_recover();
     assert_eq!(sleeps.len(), 1);
     assert_eq!(sleeps[0].kind, SleepKind::For);
     assert_eq!(sleeps[0].value, Value::Number(5.0));
-    let signals = host.signals.lock().expect("signals lock");
+    let signals = host.signals.lock_recover();
     assert_eq!(signals.len(), 1);
     assert_eq!(signals[0].payload, Value::String("signal-payload".into()));
 }
@@ -404,7 +404,7 @@ async fn foreground_allows_signal_run() {
     execute_program(&program, &mut state, &host)
         .await
         .expect("foreground signal_run should be allowed");
-    let signals = host.signals.lock().expect("signals lock");
+    let signals = host.signals.lock_recover();
     assert_eq!(signals.len(), 1);
     assert_eq!(signals[0].name, "ready");
     assert_eq!(signals[0].payload, Value::String("ping".into()));
@@ -421,7 +421,7 @@ async fn foreground_sleep_runs_as_regular_effect() {
         .expect("foreground sleep should run");
 
     assert_eq!(outcome, ExecutionOutcome::Continued);
-    let sleeps = host.sleeps.lock().expect("sleeps lock");
+    let sleeps = host.sleeps.lock_recover();
     assert_eq!(sleeps.len(), 1);
     assert_eq!(sleeps[0].kind, SleepKind::For);
 }
@@ -1014,7 +1014,7 @@ async fn type_literal_inside_resource_operation_args_passes_through_as_record() 
                             .and_then(|record| record.get("output"))
                             .cloned()
                             .expect("output arg must be present");
-                        *self.captured.lock().unwrap() = Some(schema);
+                        *self.captured.lock_recover() = Some(schema);
                         return Ok(AbilityResult::Value(Value::Null));
                     }
                     Err(ExecutionHostError::new(format!(
@@ -1045,7 +1045,7 @@ async fn type_literal_inside_resource_operation_args_passes_through_as_record() 
         .await
         .expect("should run");
 
-    let captured = host.captured.lock().unwrap().clone().expect("captured");
+    let captured = host.captured.lock_recover().clone().expect("captured");
     let inner = crate::runtime::unwrap_type_value(&captured).expect("has $lash_type");
     let schema = inner.as_record().expect("schema record");
     assert_eq!(schema["type"], Value::String("object".into()));
@@ -1229,7 +1229,7 @@ impl ExecutionHost for TerminatorHost {
                     Value::Number(n) => AbilityOp::Finish(Value::Number(*n)),
                     other => AbilityOp::Finish(other.clone()),
                 };
-                self.observed.lock().expect("observed").push(observed);
+                self.observed.lock_recover().push(observed);
                 match self.mode {
                     TerminatorMode::Identity => Ok(AbilityResult::Value(value)),
                     TerminatorMode::Transform => match value {
@@ -1253,7 +1253,7 @@ async fn run_with_terminator_host(
     let program = crate::parse(source).expect("program should parse");
     let mut state = State::new();
     let outcome = execute_program(&program, &mut state, &host).await;
-    let observed = host.observed.lock().expect("observed").clone();
+    let observed = host.observed.lock_recover().clone();
     (outcome, observed)
 }
 
@@ -1265,7 +1265,7 @@ async fn run_process_with_terminator_host(
     let compiled = compile_program(&program);
     let mut state = State::new();
     let outcome = execute_compiled_process(&compiled, &mut state, &host).await;
-    let observed = host.observed.lock().expect("observed").clone();
+    let observed = host.observed.lock_recover().clone();
     (outcome, observed)
 }
 

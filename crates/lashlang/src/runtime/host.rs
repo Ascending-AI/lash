@@ -2,6 +2,7 @@ use crate::{HostRequirementsRef, LashlangExecutionCallSite, ModuleRef, ProcessRe
 
 use super::{ExecutionScratch, ProfileReport, ProjectedBindings, Record, RuntimeFailure, Value};
 use crate::LashlangExecutionObservation;
+use lash_sansio::sync::MutexExt;
 use std::future::Future;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -359,15 +360,15 @@ impl<'host, H: ExecutionHost> ExecutionEnvironment<'host, H> {
     }
 
     pub fn take_runtime_failure(&self) -> Option<RuntimeFailure> {
-        self.runtime_failure.lock().ok()?.take()
+        self.runtime_failure.lock_recover().take()
     }
 
     pub fn take_profile(&self) -> Option<ProfileReport> {
-        self.profile.lock().ok()?.take()
+        self.profile.lock_recover().take()
     }
 
     pub fn take_recycled_scratch(&self) -> Option<ExecutionScratch> {
-        self.scratch.lock().ok()?.take()
+        self.scratch.lock_recover().take()
     }
 }
 
@@ -401,27 +402,21 @@ impl<H: ExecutionHost> ExecutionHost for ExecutionEnvironment<'_, H> {
     }
 
     fn take_scratch(&self) -> Option<ExecutionScratch> {
-        self.scratch.lock().ok()?.take()
+        self.scratch.lock_recover().take()
     }
 
     fn store_scratch(&self, scratch: ExecutionScratch) {
-        if let Ok(mut guard) = self.scratch.lock() {
-            *guard = Some(scratch);
-        }
+        *self.scratch.lock_recover() = Some(scratch);
     }
 
     fn observe_runtime_failure(&self, failure: RuntimeFailure) {
         self.host.observe_runtime_failure(failure.clone());
-        if let Ok(mut guard) = self.runtime_failure.lock() {
-            *guard = Some(failure);
-        }
+        *self.runtime_failure.lock_recover() = Some(failure);
     }
 
     fn observe_profile(&self, profile: ProfileReport) {
         self.host.observe_profile(profile.clone());
-        if let Ok(mut guard) = self.profile.lock() {
-            *guard = Some(profile);
-        }
+        *self.profile.lock_recover() = Some(profile);
     }
 
     fn observe_lashlang_execution(&self, observation: LashlangExecutionObservation) {

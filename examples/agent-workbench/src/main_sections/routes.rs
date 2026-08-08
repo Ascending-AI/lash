@@ -859,7 +859,7 @@ async fn reset_chat(
         .await
         // Audited: session configuration updates only resident state and its current implementation is infallible.
         .map_err(AppError::internal)?;
-    state.messages.lock().expect("messages lock").clear();
+    state.messages.lock_recover().clear();
     state.lashlang_execution.clear();
     state.mail_world.clear();
     Ok(Json(StateSnapshot {
@@ -1308,7 +1308,7 @@ struct ChannelTurnEvents {
 #[async_trait]
 impl TurnActivitySink for ChannelTurnEvents {
     async fn emit(&self, activity: TurnActivity) {
-        let mut turn_state = self.turn_state.lock().expect("turn state lock");
+        let mut turn_state = self.turn_state.lock_recover();
         match activity.event {
             TurnEvent::AssistantProseDelta { text } => {
                 turn_state.assistant_prose.push(TurnStreamProseChunk {
@@ -1370,8 +1370,7 @@ mod turn_stream_state_tests {
 
         assert_eq!(
             turn_state
-                .lock()
-                .expect("turn state lock")
+                .lock_recover()
                 .assistant_prose(),
             "kept answer"
         );
@@ -1391,7 +1390,7 @@ mod turn_stream_state_tests {
         ))
         .await;
         {
-            let mut projection = turn_state.lock().expect("turn state lock");
+            let mut projection = turn_state.lock_recover();
             assert_eq!(projection.assistant_prose(), "provisional text");
             projection.settle_terminal();
             assert!(projection.assistant_prose().is_empty());

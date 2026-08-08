@@ -1,3 +1,4 @@
+use lash::sync::MutexExt;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
@@ -365,10 +366,7 @@ pub(crate) async fn send_message(
             Ok(output) => {
                 let assistant_text = assistant_text_for_persistence(
                     &output,
-                    turn_state
-                        .lock()
-                        .expect("turn state lock")
-                        .assistant_prose(),
+                    turn_state.lock_recover().assistant_prose(),
                 );
                 let inserted = run_state
                     .with_db({
@@ -528,8 +526,7 @@ impl ChannelTurnEvents {
         let event = &activity.event;
         if let TurnEvent::AssistantProseDelta { text } = &event {
             self.turn_state
-                .lock()
-                .expect("turn state lock")
+                .lock_recover()
                 .assistant_prose
                 .push_str(text);
             return;
@@ -539,7 +536,7 @@ impl ChannelTurnEvents {
         // reconstruct "thinking -> lashlang -> tools -> assistant".
         if let TurnEvent::ReasoningDelta { text } = &event {
             let update = {
-                let mut state = self.turn_state.lock().expect("turn state lock");
+                let mut state = self.turn_state.lock_recover();
                 match state.reasoning.as_mut() {
                     Some((id, existing)) => {
                         existing.push_str(text);
@@ -558,7 +555,7 @@ impl ChannelTurnEvents {
                         })
                         .await
                         .map(|message| {
-                            self.turn_state.lock().expect("turn state lock").reasoning =
+                            self.turn_state.lock_recover().reasoning =
                                 Some((message.id, reasoning));
                         })
                 } else {
@@ -577,7 +574,7 @@ impl ChannelTurnEvents {
             return;
         }
         if let TurnEvent::CodeBlockStarted { code, .. } = &event {
-            self.turn_state.lock().expect("turn state lock").code = Some(code.clone());
+            self.turn_state.lock_recover().code = Some(code.clone());
             match self
                 .state
                 .with_db({
@@ -589,10 +586,7 @@ impl ChannelTurnEvents {
                 .await
             {
                 Ok(message) => {
-                    self.turn_state
-                        .lock()
-                        .expect("turn state lock")
-                        .code_message = Some(message.id);
+                    self.turn_state.lock_recover().code_message = Some(message.id);
                 }
                 Err(err) => {
                     self.emit_error(err.message).await;
@@ -612,8 +606,7 @@ impl ChannelTurnEvents {
             {
                 Ok(message) => {
                     self.turn_state
-                        .lock()
-                        .expect("turn state lock")
+                        .lock_recover()
                         .tools
                         .insert(activity.correlation_id.0.to_string(), message.id);
                 }
@@ -626,8 +619,7 @@ impl ChannelTurnEvents {
         if matches!(&event, TurnEvent::ToolCallCompleted { .. }) {
             let existing = self
                 .turn_state
-                .lock()
-                .expect("turn state lock")
+                .lock_recover()
                 .tools
                 .remove(activity.correlation_id.0.as_ref());
             let result = self
@@ -651,7 +643,7 @@ impl ChannelTurnEvents {
         }
         if matches!(&event, TurnEvent::CodeBlockCompleted { .. }) {
             let (code, existing) = {
-                let mut state = self.turn_state.lock().expect("turn state lock");
+                let mut state = self.turn_state.lock_recover();
                 (state.code.take(), state.code_message.take())
             };
             let result = self

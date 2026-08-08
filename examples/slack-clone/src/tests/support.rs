@@ -6,6 +6,7 @@
 //! text, or a native tool call followed by text — so the tool loop is exercised
 //! deterministically.
 
+use lash::sync::MutexExt;
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -107,7 +108,7 @@ impl Script {
 
     /// The serialized requests the model received.
     pub fn requests(&self) -> Vec<String> {
-        self.requests.lock().expect("script mutex").clone()
+        self.requests.lock_recover().clone()
     }
 
     /// Whether any request carried `needle` — used to prove that ambient channel
@@ -136,7 +137,7 @@ impl Script {
                 async move {
                     calls.fetch_add(1, Ordering::SeqCst);
                     if let Ok(encoded) = serde_json::to_string(&request) {
-                        requests.lock().expect("script mutex").push(encoded);
+                        requests.lock_recover().push(encoded);
                     }
                     let mut queue = steps.lock().await;
                     // The last step repeats so a test that runs an extra turn

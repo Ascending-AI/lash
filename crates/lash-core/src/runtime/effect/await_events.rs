@@ -1,6 +1,7 @@
 //! In-process await-event (Durable Wait) registry backing the inline effect
 //! host and controller.
 
+use lash_sansio::sync::{MutexExt, RwLockExt};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
@@ -98,57 +99,33 @@ impl AwaitEventRegistry {
         }
     }
 
-    fn shard_for_session(&self, session_id: &str) -> Result<AwaitEventRegistryShard, RuntimeError> {
-        if let Some(shard) = self
-            .session_shards
-            .read()
-            .map_err(|_| Self::poisoned())?
-            .get(session_id)
-            .cloned()
-        {
-            return Ok(shard);
+    fn shard_for_session(&self, session_id: &str) -> AwaitEventRegistryShard {
+        if let Some(shard) = self.session_shards.read_recover().get(session_id).cloned() {
+            return shard;
         }
-        let mut shards = self.session_shards.write().map_err(|_| Self::poisoned())?;
-        Ok(Arc::clone(
+        let mut shards = self.session_shards.write_recover();
+        Arc::clone(
             shards
                 .entry(session_id.to_string())
                 .or_insert_with(|| Arc::new(std::sync::Mutex::new(AwaitEventRegistryState::new()))),
-        ))
+        )
     }
 
-    fn existing_session_shard(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<AwaitEventRegistryShard>, RuntimeError> {
-        Ok(self
-            .session_shards
-            .read()
-            .map_err(|_| Self::poisoned())?
-            .get(session_id)
-            .cloned())
+    fn existing_session_shard(&self, session_id: &str) -> Option<AwaitEventRegistryShard> {
+        self.session_shards.read_recover().get(session_id).cloned()
     }
 
-    fn shard_for_scope(
-        &self,
-        scope: &ExecutionScope,
-    ) -> Result<AwaitEventRegistryShard, RuntimeError> {
+    fn shard_for_scope(&self, scope: &ExecutionScope) -> AwaitEventRegistryShard {
         match scope.session_id() {
             Some(session_id) => self.shard_for_session(session_id),
-            None => Ok(Arc::clone(&self.unscoped_shard)),
+            None => Arc::clone(&self.unscoped_shard),
         }
     }
 
     fn locked_state(
         shard: &AwaitEventRegistryShard,
-    ) -> Result<std::sync::MutexGuard<'_, AwaitEventRegistryState>, RuntimeError> {
-        shard.lock().map_err(|_| Self::poisoned())
-    }
-
-    fn poisoned() -> RuntimeError {
-        RuntimeError::new(
-            crate::RuntimeErrorCode::AwaitEventRegistryPoisoned,
-            "await-event registry lock poisoned",
-        )
+    ) -> std::sync::MutexGuard<'_, AwaitEventRegistryState> {
+        shard.lock_recover()
     }
 
     pub(super) fn key_for(
@@ -160,15 +137,15 @@ impl AwaitEventRegistry {
         wait.validate()?;
         match scope.session_id() {
             Some(session_id) => {
-                if let Some(shard) = self.existing_session_shard(session_id)? {
-                    let state = Self::locked_state(&shard)?;
+                if let Some(shard) = self.existing_session_shard(session_id) {
+                    let state = Self::locked_state(&shard);
                     if !session_allows_access(state.revoked) {
                         return Err(Self::unknown_or_revoked());
                     }
                 }
             }
             None => {
-                let state = Self::locked_state(&self.unscoped_shard)?;
+                let state = Self::locked_state(&self.unscoped_shard);
                 if !session_allows_access(state.revoked) {
                     return Err(Self::unknown_or_revoked());
                 }
@@ -241,8 +218,8 @@ impl AwaitEventRegistry {
         if !self.verify_uncached(key)? {
             return Ok(ResolveOutcome::UnknownOrRevoked);
         }
-        let shard = self.shard_for_scope(&key.scope)?;
-        let mut state = Self::locked_state(&shard)?;
+        let shard = self.shard_for_scope(&key.scope);
+        let mut state = Self::locked_state(&shard);
         let session_state = state.revoked.then_some(PromiseState::Revoked);
         if let Some(transition) = session_state.map(|state| resolve(state, resolution.clone())) {
             return Ok(transition
@@ -299,8 +276,8 @@ impl AwaitEventRegistry {
         &self,
         key: &AwaitEventKey,
     ) -> Result<Option<Resolution>, RuntimeError> {
-        let shard = self.shard_for_scope(&key.scope)?;
-        let state = Self::locked_state(&shard)?;
+        let shard = self.shard_for_scope(&key.scope);
+        let state = Self::locked_state(&shard);
         if state.revoked {
             return Err(Self::unknown_or_revoked());
         }
@@ -382,10 +359,10 @@ impl AwaitEventRegistry {
         deadline: Option<Instant>,
         clock: &dyn crate::Clock,
     ) -> Result<Resolution, RuntimeError> {
-        let shard = self.shard_for_scope(&key.scope)?;
+        let shard = self.shard_for_scope(&key.scope);
         loop {
             let notify = {
-                let mut state = Self::locked_state(&shard)?;
+                let mut state = Self::locked_state(&shard);
                 if state.revoked {
                     return Err(Self::unknown_or_revoked());
                 }
@@ -458,9 +435,9 @@ impl AwaitEventRegistry {
     /// bounded recent-session tombstone cache rejects keys created after
     /// deletion without growing for the lifetime of the process.
     pub(super) fn revoke_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        let shard = self.shard_for_session(session_id)?;
+        let shard = self.shard_for_session(session_id);
         let newly_revoked = {
-            let mut state = Self::locked_state(&shard)?;
+            let mut state = Self::locked_state(&shard);
             let transition = revoke_session(state.revoked);
             let newly_revoked = transition == SessionRevocationTransition::MarkRevoked;
             state.revoked = true;
@@ -476,10 +453,7 @@ impl AwaitEventRegistry {
             return Ok(());
         }
         let expired = {
-            let mut order = self
-                .revoked_session_order
-                .lock()
-                .map_err(|_| Self::poisoned())?;
+            let mut order = self.revoked_session_order.lock_recover();
             order.push_back(session_id.to_string());
             let mut expired = Vec::new();
             while order.len() > self.revoked_session_limit {
@@ -490,7 +464,7 @@ impl AwaitEventRegistry {
             expired
         };
         if !expired.is_empty() {
-            let mut shards = self.session_shards.write().map_err(|_| Self::poisoned())?;
+            let mut shards = self.session_shards.write_recover();
             for session_id in expired {
                 shards.remove(&session_id);
             }
@@ -499,37 +473,36 @@ impl AwaitEventRegistry {
     }
 
     #[cfg(test)]
-    fn counts(&self) -> Result<(usize, usize, usize), RuntimeError> {
+    fn counts(&self) -> (usize, usize, usize) {
         let mut shards = self
             .session_shards
-            .read()
-            .map_err(|_| Self::poisoned())?
+            .read_recover()
             .values()
             .cloned()
             .collect::<Vec<_>>();
         shards.push(Arc::clone(&self.unscoped_shard));
         let mut counts = (0, 0, 0);
         for shard in shards {
-            let state = Self::locked_state(&shard)?;
+            let state = Self::locked_state(&shard);
             counts.0 += state.entries.len();
             counts.1 += state.completed_turn_control.len();
             counts.2 += usize::from(state.revoked);
         }
-        Ok(counts)
+        counts
     }
 
     #[cfg(test)]
-    fn has_entry(&self, key: &AwaitEventKey) -> Result<bool, RuntimeError> {
-        let shard = self.shard_for_scope(&key.scope)?;
-        let state = Self::locked_state(&shard)?;
-        Ok(state.entries.contains_key(&key.key_id))
+    fn has_entry(&self, key: &AwaitEventKey) -> bool {
+        let shard = self.shard_for_scope(&key.scope);
+        let state = Self::locked_state(&shard);
+        state.entries.contains_key(&key.key_id)
     }
 
     #[cfg(test)]
-    fn is_completed_turn_control(&self, key: &AwaitEventKey) -> Result<bool, RuntimeError> {
-        let shard = self.shard_for_scope(&key.scope)?;
-        let state = Self::locked_state(&shard)?;
-        Ok(state.completed_turn_control.contains_key(&key.key_id))
+    fn is_completed_turn_control(&self, key: &AwaitEventKey) -> bool {
+        let shard = self.shard_for_scope(&key.scope);
+        let state = Self::locked_state(&shard);
+        state.completed_turn_control.contains_key(&key.key_id)
     }
 
     /// Resolve every *outstanding* wait for `session_id` with
@@ -538,10 +511,10 @@ impl AwaitEventRegistry {
     /// normally. This is the standalone host lever, in contrast to the
     /// tombstoning [`revoke_session`](Self::revoke_session).
     pub(super) fn cancel_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        let Some(shard) = self.existing_session_shard(session_id)? else {
+        let Some(shard) = self.existing_session_shard(session_id) else {
             return Ok(());
         };
-        let mut state = Self::locked_state(&shard)?;
+        let mut state = Self::locked_state(&shard);
         for entry in state.entries.values_mut() {
             let observed = entry
                 .terminal
@@ -578,10 +551,7 @@ mod tests {
             .expect("derive key");
 
         assert!(
-            registry
-                .existing_session_shard("pure-key")
-                .expect("read registry")
-                .is_none(),
+            registry.existing_session_shard("pure-key").is_none(),
             "key derivation must remain a pure read with no registration write"
         );
     }
@@ -610,22 +580,10 @@ mod tests {
             )
             .expect("resolve terminal");
 
-        assert!(!registry.has_entry(&gate).expect("gate entry lookup"));
-        assert!(
-            !registry
-                .has_entry(&terminal)
-                .expect("terminal entry lookup")
-        );
-        assert!(
-            registry
-                .is_completed_turn_control(&gate)
-                .expect("completed gate lookup")
-        );
-        assert!(
-            registry
-                .is_completed_turn_control(&terminal)
-                .expect("completed terminal lookup")
-        );
+        assert!(!registry.has_entry(&gate));
+        assert!(!registry.has_entry(&terminal));
+        assert!(registry.is_completed_turn_control(&gate));
+        assert!(registry.is_completed_turn_control(&terminal));
         assert!(matches!(
             registry
                 .await_resolution(
@@ -654,7 +612,7 @@ mod tests {
                 .resolve(&terminal, Resolution::Ok(serde_json::json!("done")))
                 .expect("resolve next terminal");
         }
-        assert_eq!(registry.counts().expect("registry counts"), (0, 2, 0));
+        assert_eq!(registry.counts(), (0, 2, 0));
     }
 
     #[tokio::test]
@@ -699,11 +657,11 @@ mod tests {
         }
         registry.revoke_session("revoke-1").expect("revoke session");
         assert!(wait.await.is_err());
-        assert_eq!(registry.counts().expect("drained counts").0, 0);
+        assert_eq!(registry.counts().0, 0);
 
         registry.revoke_session("revoke-2").expect("second revoke");
         registry.revoke_session("revoke-3").expect("third revoke");
-        assert_eq!(registry.counts().expect("bounded revokes").2, 2);
+        assert_eq!(registry.counts().2, 2);
     }
 
     #[test]
@@ -768,10 +726,8 @@ mod tests {
                 AwaitEventWaitIdentity::tool_completion("tool"),
             )
             .expect("session B key");
-        let shard_a = registry
-            .shard_for_scope(&key_a.scope)
-            .expect("session A shard");
-        let _held_a = AwaitEventRegistry::locked_state(&shard_a).expect("lock session A");
+        let shard_a = registry.shard_for_scope(&key_a.scope);
+        let _held_a = AwaitEventRegistry::locked_state(&shard_a);
         let (tx, rx) = std::sync::mpsc::channel();
         let registry_b = Arc::clone(&registry);
         std::thread::spawn(move || {

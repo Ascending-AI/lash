@@ -5,11 +5,7 @@ use crate::runtime::tests::trace_capture::{CapturedFieldKind, capturing};
 const TEST_SESSION_ID: &str = "renewal-install-validation";
 
 fn resident_lease(guard: &SessionExecutionLeaseGuard) -> SessionExecutionLease {
-    guard
-        .lease
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone()
+    guard.lease.lock_recover().clone()
 }
 
 async fn wait_until(predicate: impl Fn() -> bool) {

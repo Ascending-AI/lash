@@ -1,5 +1,6 @@
 use super::*;
 use crate::facade_support::ScopedEffectControllerFacadeOps;
+use lash_sansio::sync::MutexExt;
 
 impl<'run> RuntimeTurnDriver<'run> {
     pub(super) fn turn_effect_invocation(
@@ -73,7 +74,7 @@ impl<'run> RuntimeTurnDriver<'run> {
         &mut self,
         update: &std::sync::Mutex<Option<crate::runtime::effect::TurnEffectStateUpdate>>,
     ) {
-        let update = update.lock().expect("turn effect state update lock").take();
+        let update = update.lock_recover().take();
         if let Some(update) = update {
             self.policy = update.policy;
             self.llm_stream_summaries = update.llm_stream_summaries;

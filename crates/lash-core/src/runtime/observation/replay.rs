@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::pin::Pin;
@@ -544,10 +545,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         payload: SessionObservationEventPayload,
     ) -> Result<Arc<SessionObservationEvent>, LiveReplayStoreError> {
         let now = self.clock.now();
-        let mut sessions = self
-            .sessions
-            .lock()
-            .map_err(|_| LiveReplayStoreError::Store("live replay mutex poisoned".to_string()))?;
+        let mut sessions = self.sessions.lock_recover();
         let buffer = sessions
             .entry(session_id.to_string())
             .or_insert_with(LiveReplaySessionBuffer::new);
@@ -580,10 +578,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         let parsed = cursor.parse()?;
         let _cursor_revision = parsed.revision;
         let now = self.clock.now();
-        let mut sessions = self
-            .sessions
-            .lock()
-            .map_err(|_| LiveReplayStoreError::Store("live replay mutex poisoned".to_string()))?;
+        let mut sessions = self.sessions.lock_recover();
         if let Some(buffer) = sessions.get_mut(&parsed.session_id) {
             Self::trim_locked(&self.config, buffer, now);
         }
@@ -611,10 +606,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         let parsed = cursor.parse()?;
         let _cursor_revision = parsed.revision;
         let now = self.clock.now();
-        let mut sessions = self
-            .sessions
-            .lock()
-            .map_err(|_| LiveReplayStoreError::Store("live replay mutex poisoned".to_string()))?;
+        let mut sessions = self.sessions.lock_recover();
         let buffer = sessions
             .entry(parsed.session_id.clone())
             .or_insert_with(LiveReplaySessionBuffer::new);
@@ -637,18 +629,16 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
     fn current_cursor(&self, session_id: &str, revision: SessionRevision) -> SessionCursor {
         let live_position = self
             .sessions
-            .lock()
-            .ok()
-            .and_then(|sessions| {
-                sessions.get(session_id).map(|buffer| {
-                    buffer
-                        .events
-                        .iter()
-                        .find(|stored| stored.event.revision > revision)
-                        .map_or(buffer.tail_position, |stored| {
-                            stored.position.saturating_sub(1)
-                        })
-                })
+            .lock_recover()
+            .get(session_id)
+            .map(|buffer| {
+                buffer
+                    .events
+                    .iter()
+                    .find(|stored| stored.event.revision > revision)
+                    .map_or(buffer.tail_position, |stored| {
+                        stored.position.saturating_sub(1)
+                    })
             })
             .unwrap_or(0);
         SessionCursor::new(session_id, revision, live_position)
@@ -656,10 +646,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
 
     fn trim_session(&self, session_id: &str) -> Result<(), LiveReplayStoreError> {
         let now = self.clock.now();
-        let mut sessions = self
-            .sessions
-            .lock()
-            .map_err(|_| LiveReplayStoreError::Store("live replay mutex poisoned".to_string()))?;
+        let mut sessions = self.sessions.lock_recover();
         if let Some(buffer) = sessions.get_mut(session_id) {
             Self::trim_locked(&self.config, buffer, now);
         }
@@ -905,7 +892,7 @@ mod tests {
             .append("s", SessionRevision(0), None, activity("a"))
             .expect("append a");
         {
-            let sessions = store.sessions.lock().expect("sessions");
+            let sessions = store.sessions.lock_recover();
             assert!(sessions.get("s").expect("buffer").sender.is_none());
         }
         let LiveReplaySubscribeResult::Subscribed(subscription) =
@@ -914,14 +901,14 @@ mod tests {
             panic!("expected subscription");
         };
         {
-            let sessions = store.sessions.lock().expect("sessions");
+            let sessions = store.sessions.lock_recover();
             assert!(sessions.get("s").expect("buffer").sender.is_some());
         }
         drop(subscription);
         store
             .append("s", SessionRevision(0), None, activity("b"))
             .expect("append b");
-        let sessions = store.sessions.lock().expect("sessions");
+        let sessions = store.sessions.lock_recover();
         assert!(sessions.get("s").expect("buffer").sender.is_none());
     }
 

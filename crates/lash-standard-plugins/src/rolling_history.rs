@@ -564,6 +564,7 @@ impl ContextCompactor for RollingContextCompactor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_sansio::sync::MutexExt;
     use std::sync::Mutex;
 
     use lash_core::plugin::{SessionGraphService, SessionLifecycleService, SessionStateService};
@@ -638,7 +639,7 @@ mod tests {
 
     impl RecordingSessionGraph {
         fn events(&self) -> Vec<(lash_core::TraceContext, lash_core::TraceEvent)> {
-            self.events.lock().expect("trace events lock").clone()
+            self.events.lock_recover().clone()
         }
     }
 
@@ -649,10 +650,7 @@ mod tests {
             context: lash_core::TraceContext,
             event: lash_core::TraceEvent,
         ) -> Result<(), PluginError> {
-            self.events
-                .lock()
-                .expect("trace events lock")
-                .push((context, event));
+            self.events.lock_recover().push((context, event));
             Ok(())
         }
     }
@@ -853,7 +851,7 @@ mod tests {
 
         let created = manager.created_snapshot();
         assert!(created.is_empty());
-        let turns = manager.turns.lock().expect("turns lock").clone();
+        let turns = manager.turns.lock_recover().clone();
         assert!(turns.is_empty());
     }
 
@@ -1022,7 +1020,7 @@ mod tests {
 
         let created = manager.created_snapshot();
         assert_eq!(created.len(), 1);
-        let turns = manager.turns.lock().expect("turns lock").clone();
+        let turns = manager.turns.lock_recover().clone();
         assert_eq!(turns.len(), 1);
         assert_eq!(
             turns[0].1,

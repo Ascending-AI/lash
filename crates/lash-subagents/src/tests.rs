@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
@@ -742,7 +743,7 @@ async fn complete_seed_probe_request(
     let is_child = prompt.contains("Subagent capability: default. Depth: 1/5.")
         || prompt_advertises_bound_variable(&prompt, "chunk");
     if is_child {
-        *state.captured_child_prompt.lock().expect("captured prompt") = Some(prompt);
+        *state.captured_child_prompt.lock_recover() = Some(prompt);
         Ok(LlmResponse {
             full_text: lashlang_block("finish { len: len(chunk) }"),
             parts: vec![LlmOutputPart::Text {
@@ -953,8 +954,7 @@ async fn run_seed_probe_inner(
     .expect("turn");
 
     let prompt = captured_child_prompt
-        .lock()
-        .expect("captured prompt")
+        .lock_recover()
         .clone()
         .unwrap_or_else(|| panic!("child prompt was not captured; outcome={:?}", turn.outcome));
     (turn.outcome, prompt)

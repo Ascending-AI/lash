@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -393,10 +394,7 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
         &self,
         artifact: &ModuleArtifact,
     ) -> Result<(), ArtifactStoreError> {
-        let mut modules = self
-            .modules
-            .lock()
-            .map_err(|_| ArtifactStoreError::Backend("artifact store lock poisoned".to_string()))?;
+        let mut modules = self.modules.lock_recover();
         modules.insert(artifact.module_ref.clone(), Arc::new(artifact.clone()));
         Ok(())
     }
@@ -405,10 +403,7 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
         &self,
         module_ref: &ModuleRef,
     ) -> Result<Option<Arc<ModuleArtifact>>, ArtifactStoreError> {
-        let modules = self
-            .modules
-            .lock()
-            .map_err(|_| ArtifactStoreError::Backend("artifact store lock poisoned".to_string()))?;
+        let modules = self.modules.lock_recover();
         Ok(modules.get(module_ref).cloned())
     }
 
@@ -417,9 +412,7 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
         owner_namespace: &str,
         artifact: &ModuleArtifact,
     ) -> Result<TriggerManifestReplacement, ArtifactStoreError> {
-        let mut manifests = self.current_trigger_manifests.lock().map_err(|_| {
-            ArtifactStoreError::Backend("current trigger manifest lock poisoned".to_string())
-        })?;
+        let mut manifests = self.current_trigger_manifests.lock_recover();
         let previous = manifests.insert(
             owner_namespace.to_string(),
             CurrentTriggerKeyManifest {
@@ -442,10 +435,7 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
     ) -> Result<Option<CurrentTriggerKeyManifest>, ArtifactStoreError> {
         Ok(self
             .current_trigger_manifests
-            .lock()
-            .map_err(|_| {
-                ArtifactStoreError::Backend("current trigger manifest lock poisoned".to_string())
-            })?
+            .lock_recover()
             .get(owner_namespace)
             .cloned())
     }
@@ -457,8 +447,7 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
         bytes: &[u8],
     ) -> Result<(), ArtifactStoreError> {
         self.artifacts
-            .lock()
-            .map_err(|_| ArtifactStoreError::Backend("artifact store lock poisoned".to_string()))?
+            .lock_recover()
             .insert(artifact_ref.to_string(), bytes.to_vec());
         Ok(())
     }
@@ -467,12 +456,7 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
         &self,
         artifact_ref: &str,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
-        Ok(self
-            .artifacts
-            .lock()
-            .map_err(|_| ArtifactStoreError::Backend("artifact store lock poisoned".to_string()))?
-            .get(artifact_ref)
-            .cloned())
+        Ok(self.artifacts.lock_recover().get(artifact_ref).cloned())
     }
 }
 

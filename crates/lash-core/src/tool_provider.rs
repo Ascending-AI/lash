@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::facade_support::ScopedEffectControllerFacadeOps;
 use lash_sansio::llm::types::ProviderReplayMeta;
+use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 
 use crate::plugin::{
@@ -35,12 +36,7 @@ impl ToolCompletionState {
         &self,
         key: crate::AwaitEventKey,
     ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
-        let mut guard = self.key.lock().map_err(|_| {
-            crate::RuntimeError::new(
-                crate::RuntimeErrorCode::ToolCompletionStatePoisoned,
-                "tool completion key state lock poisoned",
-            )
-        })?;
+        let mut guard = self.key.lock_recover();
         if let Some(existing) = guard.as_ref() {
             return Ok(existing.clone());
         }
@@ -48,13 +44,8 @@ impl ToolCompletionState {
         Ok(key)
     }
 
-    pub(crate) fn take(&self) -> Result<Option<crate::AwaitEventKey>, crate::RuntimeError> {
-        self.key.lock().map(|mut guard| guard.take()).map_err(|_| {
-            crate::RuntimeError::new(
-                crate::RuntimeErrorCode::ToolCompletionStatePoisoned,
-                "tool completion key state lock poisoned",
-            )
-        })
+    pub(crate) fn take(&self) -> Option<crate::AwaitEventKey> {
+        self.key.lock_recover().take()
     }
 }
 
@@ -608,9 +599,7 @@ impl<'run> ToolContext<'run> {
         self.completion.store(key)
     }
 
-    pub(crate) fn take_completion_key(
-        &self,
-    ) -> Result<Option<crate::AwaitEventKey>, crate::RuntimeError> {
+    pub(crate) fn take_completion_key(&self) -> Option<crate::AwaitEventKey> {
         self.completion.take()
     }
 
@@ -994,6 +983,10 @@ pub struct ToolCall<'a> {
 /// [`ToolContract`]s, and a single
 /// [`execute`](Self::execute) method that handles every call. Tools that
 /// need session state read it from `call.context`.
+///
+/// Lash contains an `execute` panic as a typed call failure. Containment does
+/// not establish that the host object's own interior-mutability state still
+/// satisfies its invariants; hosts own replacement or repair before reuse.
 #[async_trait::async_trait]
 pub trait ToolProvider: Send + Sync + 'static {
     fn tool_manifests(&self) -> Vec<ToolManifest>;

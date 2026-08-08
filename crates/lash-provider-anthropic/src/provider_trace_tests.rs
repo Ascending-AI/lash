@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
 use crate::AnthropicProvider;
@@ -34,7 +35,7 @@ impl LlmHttpTransport for RecordingTransport {
         request: LlmHttpRequest,
         _timeout: Option<std::time::Duration>,
     ) -> Result<LlmHttpResponse, LlmTransportError> {
-        self.requests.lock().expect("request lock").push(request);
+        self.requests.lock_recover().push(request);
         let body = if self.status == 200 {
             concat!(
                 "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n",
@@ -103,13 +104,12 @@ async fn extended_provider_trace_captures_exact_serialized_anthropic_body_withou
     let events = Arc::new(Mutex::new(Vec::<LlmProviderTraceEvent>::new()));
     let event_sink = Arc::clone(&events);
     req.provider_trace = Some(LlmProviderTraceSender::new(move |event| {
-        event_sink.lock().expect("event lock").push(event);
+        event_sink.lock_recover().push(event);
     }));
 
     let response = provider.complete(req).await.expect("completion succeeds");
     let request_event = events
-        .lock()
-        .expect("event lock")
+        .lock_recover()
         .iter()
         .find(|event| event.request_endpoint().is_some())
         .cloned()
@@ -119,7 +119,7 @@ async fn extended_provider_trace_captures_exact_serialized_anthropic_body_withou
     assert_auth_material_absent(&request_event);
 
     let traced_body = {
-        let requests = transport.requests.lock().expect("request lock");
+        let requests = transport.requests.lock_recover();
         assert_eq!(requests.len(), 1);
         requests[0].body.clone()
     };
@@ -136,7 +136,7 @@ async fn extended_provider_trace_captures_exact_serialized_anthropic_body_withou
     let error_events = Arc::new(Mutex::new(Vec::<LlmProviderTraceEvent>::new()));
     let error_event_sink = Arc::clone(&error_events);
     error_req.provider_trace = Some(LlmProviderTraceSender::new(move |event| {
-        error_event_sink.lock().expect("event lock").push(event);
+        error_event_sink.lock_recover().push(event);
     }));
 
     let error = error_provider
@@ -144,8 +144,7 @@ async fn extended_provider_trace_captures_exact_serialized_anthropic_body_withou
         .await
         .expect_err("provider error is returned");
     let error_event = error_events
-        .lock()
-        .expect("event lock")
+        .lock_recover()
         .iter()
         .find(|event| event.request_endpoint().is_some())
         .cloned()

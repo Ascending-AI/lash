@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::sync::MutexExt;
 
 pub struct InMemoryTriggerStore {
     clock: Arc<dyn crate::Clock>,
@@ -30,7 +31,7 @@ impl InMemoryTriggerStore {
     #[doc(hidden)]
     #[cfg(any(test, feature = "testing"))]
     pub fn raw_state_for_testing(&self) -> RawTriggerStateForTesting {
-        let state = self.state.lock().expect("trigger store lock");
+        let state = self.state.lock_recover();
         let subscriptions = state.subscriptions.values().cloned().collect();
         let mutation_receipts = state
             .mutation_receipts
@@ -72,8 +73,7 @@ impl InMemoryTriggerStore {
     pub(crate) fn inject_revision_for_testing(&self, subscription_id: &str, value: i64) {
         assert!(value >= 0, "in-memory trigger revisions cannot be negative");
         self.state
-            .lock()
-            .expect("trigger store lock")
+            .lock_recover()
             .subscriptions
             .get_mut(subscription_id)
             .expect("trigger revision injection row")
@@ -82,7 +82,7 @@ impl InMemoryTriggerStore {
 
     #[cfg(test)]
     pub(crate) fn revision_snapshot_for_testing(&self, subscription_id: &str) -> String {
-        let state = self.state.lock().expect("trigger store lock");
+        let state = self.state.lock_recover();
         let record = state
             .subscriptions
             .get(subscription_id)
@@ -94,10 +94,7 @@ impl InMemoryTriggerStore {
         &self,
         matches: impl Fn(&InMemoryTriggerDeliveryRecord) -> bool,
     ) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
-        let state = self
-            .state
-            .lock()
-            .map_err(|_| PluginError::Session("trigger store lock poisoned".to_string()))?;
+        let state = self.state.lock_recover();
         let mut deliveries = state
             .deliveries
             .values()
@@ -189,10 +186,7 @@ impl TriggerStore for InMemoryTriggerStore {
                 message: "trigger operation id must be non-empty".to_string(),
             }));
         }
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| PluginError::Session("trigger store lock poisoned".to_string()))?;
+        let mut state = self.state.lock_recover();
         execute_in_memory_trigger_command(
             &mut state,
             operation_id,
@@ -205,10 +199,7 @@ impl TriggerStore for InMemoryTriggerStore {
         &self,
         filter: TriggerSubscriptionFilter,
     ) -> Result<Vec<TriggerSubscriptionRecord>, PluginError> {
-        let state = self
-            .state
-            .lock()
-            .map_err(|_| PluginError::Session("trigger store lock poisoned".to_string()))?;
+        let state = self.state.lock_recover();
         let mut records = state
             .subscriptions
             .values()
@@ -224,10 +215,7 @@ impl TriggerStore for InMemoryTriggerStore {
     }
 
     async fn delete_session_subscriptions(&self, session_id: &str) -> Result<usize, PluginError> {
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| PluginError::Session("trigger store lock poisoned".to_string()))?;
+        let mut state = self.state.lock_recover();
         let mut changed = 0usize;
         let now = self.clock.timestamp_ms();
         for record in state.subscriptions.values_mut().filter(|record| {
@@ -249,10 +237,7 @@ impl TriggerStore for InMemoryTriggerStore {
         request: TriggerOccurrenceRequest,
     ) -> Result<TriggerIngressResult, PluginError> {
         validate_trigger_occurrence_request(&request)?;
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| PluginError::Session("trigger store lock poisoned".to_string()))?;
+        let mut state = self.state.lock_recover();
         if let Some(existing_id) = state
             .occurrence_id_by_idempotency_key
             .get(&request.idempotency_key)
@@ -315,10 +300,7 @@ impl TriggerStore for InMemoryTriggerStore {
         &self,
         filter: TriggerOccurrenceFilter,
     ) -> Result<Vec<TriggerOccurrenceRecord>, PluginError> {
-        let state = self
-            .state
-            .lock()
-            .map_err(|_| PluginError::Session("trigger store lock poisoned".to_string()))?;
+        let state = self.state.lock_recover();
         let mut records = state
             .occurrences
             .values()
@@ -359,10 +341,7 @@ impl TriggerStore for InMemoryTriggerStore {
     }
 
     async fn list_delivery_process_ids(&self) -> Result<Vec<String>, PluginError> {
-        let state = self
-            .state
-            .lock()
-            .map_err(|_| PluginError::Session("trigger store lock poisoned".to_string()))?;
+        let state = self.state.lock_recover();
         Ok(state
             .deliveries
             .values()
@@ -375,10 +354,7 @@ impl TriggerStore for InMemoryTriggerStore {
     async fn list_delivery_retention_candidates(
         &self,
     ) -> Result<Vec<TriggerDeliveryRetentionCandidate>, PluginError> {
-        let state = self
-            .state
-            .lock()
-            .map_err(|_| PluginError::Session("trigger store lock poisoned".to_string()))?;
+        let state = self.state.lock_recover();
         Ok(state
             .deliveries
             .values()
@@ -407,10 +383,7 @@ impl TriggerStore for InMemoryTriggerStore {
                 )
             })
             .collect::<std::collections::HashSet<_>>();
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| PluginError::Session("trigger store lock poisoned".to_string()))?;
+        let mut state = self.state.lock_recover();
         let before = state.deliveries.len();
         state.deliveries.retain(|_, delivery| {
             !candidates.contains(&(
@@ -423,10 +396,7 @@ impl TriggerStore for InMemoryTriggerStore {
     }
 
     async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| PluginError::Session("trigger store lock poisoned".to_string()))?;
+        let mut state = self.state.lock_recover();
         let before = state.mutation_receipts.len();
         state
             .mutation_receipts

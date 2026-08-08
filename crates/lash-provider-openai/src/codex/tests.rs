@@ -12,6 +12,7 @@ use lash_core::provider::{
     ModelCapability, Provider, ReasoningCapability, RequestTimeout, StreamTermination,
 };
 use lash_llm_transport::openai_terminal_reason_from_response_value;
+use lash_sansio::sync::MutexExt;
 use shared::ResponsesStreamState as CodexStreamState;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
@@ -79,10 +80,7 @@ fn traced_request(messages: Vec<LlmMessage>, trace: Arc<Mutex<Vec<Value>>>) -> L
     let mut req = request(messages);
     req.provider_trace = Some(LlmProviderTraceSender::new(move |event| {
         if let Ok(value) = serde_json::from_str::<Value>(&event.raw) {
-            trace
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(value);
+            trace.lock_recover().push(value);
         }
     }));
     req
@@ -90,8 +88,7 @@ fn traced_request(messages: Vec<LlmMessage>, trace: Arc<Mutex<Vec<Value>>>) -> L
 
 fn websocket_diagnostics(trace: &Arc<Mutex<Vec<Value>>>) -> Vec<Value> {
     trace
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .lock_recover()
         .iter()
         .filter(|value| {
             value
@@ -143,17 +140,11 @@ struct HttpSseServer {
 
 impl HttpSseServer {
     fn captured(&self) -> Vec<String> {
-        self.captured
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+        self.captured.lock_recover().clone()
     }
 
     fn captured_len(&self) -> usize {
-        self.captured
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .len()
+        self.captured.lock_recover().len()
     }
 }
 
@@ -200,8 +191,7 @@ async fn spawn_http_sse_sequence(
                 }
             }
             task_captured
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .lock_recover()
                 .push(String::from_utf8_lossy(&request).into_owned());
             let item = assistant_item(message_id, text);
             let body = format!(
@@ -878,8 +868,7 @@ async fn codex_provider_close_sends_websocket_close_frame_for_cached_session() {
         provider
             .websocket_sessions
             .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lock_recover()
             .by_scope
             .is_empty(),
         "close() drains the session cache"
@@ -916,8 +905,7 @@ async fn codex_provider_close_drains_a_dead_cached_socket_within_bound() {
         provider
             .websocket_sessions
             .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lock_recover()
             .by_scope
             .len(),
         1,
@@ -941,8 +929,7 @@ async fn codex_provider_close_drains_a_dead_cached_socket_within_bound() {
         provider
             .websocket_sessions
             .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lock_recover()
             .by_scope
             .is_empty(),
         "close() drains the cache even when a cached socket is dead"

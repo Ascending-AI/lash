@@ -1,5 +1,6 @@
 #![cfg(any(test, feature = "testing"))]
 
+use lash_sansio::sync::MutexExt;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -1222,11 +1223,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         delivery_id: &str,
         claim_token: &str,
     ) -> Result<super::WakeDeliveryClaimOutcome, PluginError> {
-        let pause = self
-            .wake_mark_pause
-            .lock()
-            .expect("wake mark pause lock")
-            .take();
+        let pause = self.wake_mark_pause.lock_recover().take();
         if let Some(pause) = pause {
             pause.validated.notify_one();
             pause.resume.notified().await;

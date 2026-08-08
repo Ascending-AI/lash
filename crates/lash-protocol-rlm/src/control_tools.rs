@@ -145,6 +145,7 @@ fn finalise_tool_result(result: Result<ContinueAsResult, String>) -> ToolResult 
 mod tests {
     use super::*;
     use crate::projection::{decode_rlm_protocol_event, rlm_protocol_event};
+    use lash_sansio::sync::MutexExt;
     use std::sync::{Arc, Mutex};
 
     use lash_core::plugin::runtime_host::{
@@ -220,7 +221,7 @@ mod tests {
             &self,
             request: SessionCreateRequest,
         ) -> Result<SessionHandle, PluginError> {
-            self.created.lock().expect("created").push(request.clone());
+            self.created.lock_recover().push(request.clone());
             Ok(SessionHandle {
                 session_id: request.session_id.unwrap_or_else(|| "child".to_string()),
                 parent_session_id: request.relation.parent_session_id().map(ToOwned::to_owned),
@@ -230,10 +231,7 @@ mod tests {
         }
 
         async fn close_session(&self, session_id: &str) -> Result<(), PluginError> {
-            self.closed
-                .lock()
-                .expect("closed")
-                .push(session_id.to_string());
+            self.closed.lock_recover().push(session_id.to_string());
             Ok(())
         }
     }
@@ -439,7 +437,7 @@ mod tests {
         assert_eq!(seed.globals["x"], json!(1));
         assert_eq!(seed.globals["query"], json!("original"));
         assert!(seed.projected.is_empty());
-        assert!(manager.created.lock().expect("created").is_empty());
+        assert!(manager.created.lock_recover().is_empty());
     }
 
     #[tokio::test]
@@ -498,7 +496,7 @@ mod tests {
         assert_eq!(seed.projected.entries.len(), 1);
         assert_eq!(seed.projected.entries[0].0, "proj");
         assert_eq!(seed.projected.entries[0].1, json!("carry-over"));
-        assert!(manager.created.lock().expect("created").is_empty());
+        assert!(manager.created.lock_recover().is_empty());
     }
 
     #[tokio::test]
@@ -574,6 +572,6 @@ mod tests {
         let result = run_continue_as(&provider, manager.clone(), &args).await;
 
         assert!(result.is_success(), "{:?}", result.value_for_projection());
-        assert!(manager.created.lock().expect("created").is_empty());
+        assert!(manager.created.lock_recover().is_empty());
     }
 }

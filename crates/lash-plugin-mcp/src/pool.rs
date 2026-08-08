@@ -12,6 +12,7 @@
 //!
 //! The wire-level transport is provided by the official [`rmcp`] SDK.
 
+use lash_sansio::sync::{LockResultExt, RwLockExt};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -179,10 +180,7 @@ impl McpConnectionPool {
     /// Remove and shut down one server.
     pub async fn detach(self: &Arc<Self>, server_name: &str) -> Result<(), McpError> {
         let removed = {
-            let mut entries = self
-                .entries
-                .write()
-                .expect("MCP pool entries lock poisoned");
+            let mut entries = self.entries.write_recover();
             entries.remove(server_name)
         };
         if let Some(entry) = removed {
@@ -195,10 +193,7 @@ impl McpConnectionPool {
     /// Register an entry, shutting down any previous entry under the name.
     fn install(&self, server_name: String, entry: Arc<McpEntry>) -> Result<(), Arc<McpEntry>> {
         let previous = {
-            let mut entries = self
-                .entries
-                .write()
-                .expect("MCP pool entries lock poisoned");
+            let mut entries = self.entries.write_recover();
             if self.shut_down.load(Ordering::SeqCst) {
                 return Err(entry);
             }
@@ -213,22 +208,14 @@ impl McpConnectionPool {
 
     /// Connection status of every configured server.
     pub fn server_statuses(&self) -> Vec<McpServerStatus> {
-        let guard = self.entries.read().expect("MCP pool entries lock poisoned");
+        let guard = self.entries.read_recover();
         guard
             .values()
             .map(|entry| McpServerStatus {
                 server_name: entry.server_name.clone(),
                 connected: entry.connected.load(Ordering::SeqCst),
-                last_error: entry
-                    .last_error
-                    .read()
-                    .expect("MCP entry error lock poisoned")
-                    .clone(),
-                tool_count: entry
-                    .imported_tools
-                    .read()
-                    .expect("MCP entry tools lock poisoned")
-                    .len(),
+                last_error: entry.last_error.read_recover().clone(),
+                tool_count: entry.imported_tools.read_recover().len(),
             })
             .collect()
     }
@@ -238,14 +225,13 @@ impl McpConnectionPool {
     /// Includes tools of currently disconnected servers (last successful
     /// discovery) so the tool catalog stays stable across an outage.
     pub fn advertised_tools(&self) -> Vec<ToolDefinition> {
-        let guard = self.entries.read().expect("MCP pool entries lock poisoned");
+        let guard = self.entries.read_recover();
         guard
             .values()
             .flat_map(|entry| {
                 entry
                     .imported_tools
-                    .read()
-                    .expect("MCP entry tools lock poisoned")
+                    .read_recover()
                     .values()
                     .map(|tool| tool.definition.clone())
                     .collect::<Vec<_>>()
@@ -310,11 +296,7 @@ impl McpConnectionPool {
                             raw: None,
                         });
                     }
-                    let last_error = entry
-                        .last_error
-                        .read()
-                        .expect("MCP entry error lock poisoned")
-                        .clone();
+                    let last_error = entry.last_error.read_recover().clone();
                     let message = McpError::Protocol(match last_error {
                         Some(last_error) => format!(
                             "MCP server `{server_name}` is not connected \
@@ -421,12 +403,11 @@ impl McpConnectionPool {
     }
 
     async fn lookup(&self, prefixed_name: &str) -> Option<(Arc<McpEntry>, String)> {
-        let guard = self.entries.read().expect("MCP pool entries lock poisoned");
+        let guard = self.entries.read_recover();
         for entry in guard.values() {
             let original_name = entry
                 .imported_tools
-                .read()
-                .expect("MCP entry tools lock poisoned")
+                .read_recover()
                 .get(prefixed_name)
                 .map(|tool| tool.original_name.clone());
             if let Some(original_name) = original_name {
@@ -449,10 +430,7 @@ impl McpConnectionPool {
             return;
         }
         let entries: Vec<Arc<McpEntry>> = {
-            let mut guard = self
-                .entries
-                .write()
-                .expect("MCP pool entries lock poisoned");
+            let mut guard = self.entries.write_recover();
             std::mem::take(&mut *guard).into_values().collect()
         };
         for entry in &entries {
@@ -515,10 +493,7 @@ impl McpEntry {
         match self.try_connect().await {
             Ok(()) => Ok(()),
             Err(err) => {
-                *self
-                    .last_error
-                    .write()
-                    .expect("MCP entry error lock poisoned") = Some(err.to_string());
+                *self.last_error.write_recover() = Some(err.to_string());
                 Err(err)
             }
         }
@@ -597,20 +572,14 @@ impl McpEntry {
             )));
         }
 
-        *self
-            .imported_tools
-            .write()
-            .expect("MCP entry tools lock poisoned") = import_tools(&self.server_name, tools);
+        *self.imported_tools.write_recover() = import_tools(&self.server_name, tools);
         let mut service_guard = self.service.lock().await;
         *service_guard = Some(service);
         self.service_generation.fetch_add(1, Ordering::SeqCst);
         self.connected.store(true, Ordering::SeqCst);
         // A fresh connection starts with a fresh timeout budget.
         self.consecutive_timeouts.store(0, Ordering::SeqCst);
-        *self
-            .last_error
-            .write()
-            .expect("MCP entry error lock poisoned") = None;
+        *self.last_error.write_recover() = None;
         Ok(())
     }
 
@@ -681,10 +650,7 @@ impl McpEntry {
                 return false;
             }
             self.connected.store(false, Ordering::SeqCst);
-            *self
-                .last_error
-                .write()
-                .expect("MCP entry error lock poisoned") = Some(cause);
+            *self.last_error.write_recover() = Some(cause);
             guard.take()
         };
         if let Some(service) = service {
@@ -908,10 +874,7 @@ impl McpEntry {
             return;
         }
         self.consecutive_timeouts.store(0, Ordering::SeqCst);
-        *self
-            .last_error
-            .write()
-            .expect("MCP entry error lock poisoned") = None;
+        *self.last_error.write_recover() = None;
     }
 
     async fn shutdown(&self) {
@@ -1213,12 +1176,7 @@ async fn store_mcp_attachment(
 
 impl Drop for McpConnectionPool {
     fn drop(&mut self) {
-        for entry in self
-            .entries
-            .get_mut()
-            .expect("MCP pool entries lock poisoned")
-            .values()
-        {
+        for entry in self.entries.get_mut().recover().values() {
             entry.cancel();
         }
         // We can't .await in Drop. The RunningService values inside each

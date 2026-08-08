@@ -17,6 +17,7 @@ categories = ["api-bindings", "data-structures"]
 workspace = true
 
 [dependencies]
+lash-sansio = { workspace = true }
 base64 = { workspace = true }
 lash-core = { workspace = true, optional = true }
 schemars = { workspace = true, features = ["derive"] }

@@ -614,6 +614,7 @@ impl TurnBoundary {
 #[cfg(test)]
 mod tests {
     use lash_sansio::core_support::MessageSequenceCoreSupport;
+    use lash_sansio::sync::MutexExt;
 
     use super::*;
     use crate::runtime::tests::helpers::RecordingStore;
@@ -765,12 +766,11 @@ mod tests {
     }
 
     fn stored_graph_with_head_leaf(store: &RecordingStore) -> SessionGraph {
-        let mut graph = store.session_graph.lock().expect("lock graph").clone();
+        let mut graph = store.session_graph.lock_recover().clone();
         graph.set_leaf_node_id(
             store
                 .session_head_meta
-                .lock()
-                .expect("lock head meta")
+                .lock_recover()
                 .as_ref()
                 .and_then(|meta| meta.leaf_node_id.clone()),
         );
@@ -1105,13 +1105,7 @@ mod tests {
             })
             .await
             .expect("progress boundary");
-        assert_eq!(
-            *store
-                .runtime_commit_count
-                .lock()
-                .expect("lock runtime commit count"),
-            0
-        );
+        assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
 
         let returned_state = pipeline.export_state_for_assembly();
         pipeline
@@ -1137,13 +1131,7 @@ mod tests {
             .await
             .expect("final commit");
 
-        assert_eq!(
-            *store
-                .runtime_commit_count
-                .lock()
-                .expect("lock runtime commit count"),
-            1
-        );
+        assert_eq!(*store.runtime_commit_count.lock_recover(), 1);
         let stored_graph = stored_graph_with_head_leaf(&store);
         let expected = vec!["message:u0", "message:a0", "protocol:trajectory"];
         assert_eq!(persisted_event_order(&stored_graph), expected);
@@ -1208,13 +1196,7 @@ mod tests {
             } if node_count == crate::RuntimeCommit::MAX_COMMIT_NODE_COUNT + 1
                 && max_nodes == crate::RuntimeCommit::MAX_COMMIT_NODE_COUNT
         ));
-        assert_eq!(
-            *store
-                .runtime_commit_count
-                .lock()
-                .expect("lock runtime commit count"),
-            0
-        );
+        assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
         assert!(store.raw_graph_nodes_for_testing().is_empty());
     }
     #[test]
@@ -1340,10 +1322,7 @@ mod tests {
             .await
             .expect("commit");
 
-        assert_eq!(
-            store.usage_deltas.lock().expect("lock usage deltas").len(),
-            2
-        );
+        assert_eq!(store.usage_deltas.lock_recover().len(), 2);
         assert_eq!(pipeline.state_mut().token_ledger.len(), 2);
         assert!(pipeline.state_mut().execution_state_snapshot().is_none());
         assert!(pipeline.state_mut().head_revision > 0);
@@ -1545,10 +1524,7 @@ mod tests {
                 if claim_id == "turn-input-claim"
         ));
         assert_eq!(
-            *store
-                .runtime_commit_count
-                .lock()
-                .expect("lock runtime commit count"),
+            *store.runtime_commit_count.lock_recover(),
             0,
             "invalid commits must be rejected before reaching persistence"
         );

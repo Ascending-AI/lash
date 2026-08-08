@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::sync::MutexExt;
 
 pub(super) async fn append_contract_execution_boundaries(
     events: &mut Vec<crate::scheduler::DeliveredBoundary>,
@@ -453,15 +454,15 @@ impl ContractDurableInputTools {
     }
 
     pub(super) fn attempt_count(&self) -> usize {
-        *self.attempt_count.lock().expect("atomic attempt count")
+        *self.attempt_count.lock_recover()
     }
 
     fn increment_attempt_count(&self) {
-        *self.attempt_count.lock().expect("atomic attempt count") += 1;
+        *self.attempt_count.lock_recover() += 1;
     }
 
     fn send_key_result(&self, result: Result<lash_core::AwaitEventKey, String>) {
-        if let Some(tx) = self.key_tx.lock().expect("durable input key sender").take() {
+        if let Some(tx) = self.key_tx.lock_recover().take() {
             let _ = tx.send(result);
         }
     }

@@ -268,6 +268,7 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
 
+    use lash_sansio::sync::MutexExt;
     use serde_json::json;
 
     use super::*;
@@ -313,11 +314,11 @@ mod tests {
         }
 
         fn validate_calls(&self) -> Vec<Vec<String>> {
-            self.validate_calls.lock().expect("validate calls").clone()
+            self.validate_calls.lock_recover().clone()
         }
 
         fn cancel_calls(&self) -> Vec<String> {
-            self.cancel_calls.lock().expect("cancel calls").clone()
+            self.cancel_calls.lock_recover().clone()
         }
     }
 
@@ -357,8 +358,7 @@ mod tests {
             _scope: ProcessOpScope<'_>,
         ) -> Result<(), PluginError> {
             self.validate_calls
-                .lock()
-                .expect("validate calls")
+                .lock_recover()
                 .push(process_ids.to_vec());
             if let Some(missing) = process_ids
                 .iter()
@@ -378,8 +378,7 @@ mod tests {
             _scope: ProcessOpScope<'_>,
         ) -> Result<ProcessRecord, PluginError> {
             self.cancel_calls
-                .lock()
-                .expect("cancel calls")
+                .lock_recover()
                 .push(process_id.to_string());
             let mut record = self.record.clone();
             record.id = process_id.to_string();

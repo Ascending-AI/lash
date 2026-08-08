@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::sync::MutexExt;
 
 // The public in-memory store is the single in-memory `RuntimePersistence` impl;
 // tests use it under the historical `RecordingStore` name (its `pub(crate)`
@@ -190,13 +191,13 @@ pub(crate) struct RecordingSink {
 #[async_trait::async_trait]
 impl EventSink for RecordingSink {
     async fn emit(&self, event: SessionStreamEvent) {
-        self.events.lock().expect("lock sink").push(event);
+        self.events.lock_recover().push(event);
     }
 }
 
 impl RecordingSink {
     pub(crate) fn snapshot(&self) -> Vec<SessionStreamEvent> {
-        self.events.lock().expect("lock sink").clone()
+        self.events.lock_recover().clone()
     }
 }
 
@@ -208,13 +209,13 @@ pub(crate) struct RecordingTurnEvents {
 #[async_trait::async_trait]
 impl TurnActivitySink for RecordingTurnEvents {
     async fn emit(&self, activity: TurnActivity) {
-        self.events.lock().expect("lock turn events").push(activity);
+        self.events.lock_recover().push(activity);
     }
 }
 
 impl RecordingTurnEvents {
     pub(crate) fn snapshot(&self) -> Vec<TurnActivity> {
-        self.events.lock().expect("lock turn events").clone()
+        self.events.lock_recover().clone()
     }
 }
 
@@ -240,7 +241,7 @@ fn mock_provider_with_kind(kind: &'static str, calls: Vec<MockCall>) -> TestProv
         .complete(move |req| {
             let calls = Arc::clone(&calls);
             async move {
-                let call = calls.lock().expect("lock calls").remove(0);
+                let call = calls.lock_recover().remove(0);
                 if let Some(tx) = req.stream_events.as_ref() {
                     for event in &call.stream_events {
                         tx.send(event.clone());
@@ -301,7 +302,7 @@ pub(crate) struct RecordingSessionStoreFactory {
 
 impl RecordingSessionStoreFactory {
     pub(crate) fn stores(&self) -> Vec<Arc<RecordingStore>> {
-        self.stores.lock().expect("store factory").clone()
+        self.stores.lock_recover().clone()
     }
 
     pub(crate) fn deferring_metadata_to_admission(mut self) -> Self {
@@ -318,7 +319,7 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
     ) -> Result<Arc<dyn crate::store::RuntimePersistence>, crate::StoreError> {
         let store = Arc::new(RecordingStore::default());
         if !self.defer_metadata_to_admission {
-            *store.session_meta.lock().expect("lock session meta") = Some(crate::SessionMeta {
+            *store.session_meta.lock_recover() = Some(crate::SessionMeta {
                 session_id: request.session_id.clone(),
                 session_name: request.session_id.clone(),
                 created_at: "2026-04-06T00:00:00Z".to_string(),
@@ -327,10 +328,7 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
                 relation: request.relation.clone(),
             });
         }
-        self.stores
-            .lock()
-            .expect("store factory")
-            .push(Arc::clone(&store));
+        self.stores.lock_recover().push(Arc::clone(&store));
         Ok(store as Arc<dyn crate::store::RuntimePersistence>)
     }
 
@@ -340,14 +338,12 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
     ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, String> {
         Ok(self
             .stores
-            .lock()
-            .expect("store factory")
+            .lock_recover()
             .iter()
             .find(|store| {
                 store
                     .session_meta
-                    .lock()
-                    .expect("lock session meta")
+                    .lock_recover()
                     .as_ref()
                     .is_some_and(|meta| meta.session_id == request.session_id)
             })

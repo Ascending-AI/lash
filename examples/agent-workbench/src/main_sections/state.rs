@@ -1,3 +1,4 @@
+use lash::sync::MutexExt;
 #[derive(Clone)]
 struct AppState {
     core: LashCore,
@@ -546,7 +547,7 @@ impl SessionEventRegistry {
     }
 
     fn sender(&self, session_id: &str) -> broadcast::Sender<ProductEvent> {
-        let mut senders = self.senders.lock().expect("session event registry lock");
+        let mut senders = self.senders.lock_recover();
         senders
             .entry(session_id.to_string())
             .or_insert_with(|| broadcast::channel(self.channel_capacity).0)
@@ -566,8 +567,7 @@ impl SessionEventRegistry {
         let receiver = self.sender(session_id).subscribe();
         let replay = self
             .histories
-            .lock()
-            .expect("product event history lock")
+            .lock_recover()
             .get(session_id)
             .into_iter()
             .flat_map(|history| history.events.iter())
@@ -596,8 +596,7 @@ impl SessionEventRegistry {
         let event = {
             let mut histories = self
                 .histories
-                .lock()
-                .expect("product event history lock");
+                .lock_recover();
             let history = histories.entry(session_id.to_string()).or_default();
             if !history.event_ids.insert(event_id.clone()) {
                 return false;
@@ -619,8 +618,7 @@ impl SessionEventRegistry {
     fn snapshot(&self, session_id: &str) -> ProductEventSnapshot {
         let history = self
             .histories
-            .lock()
-            .expect("product event history lock")
+            .lock_recover()
             .get(session_id)
             .cloned()
             .unwrap_or_default();
@@ -639,8 +637,7 @@ impl SessionEventRegistry {
     ) {
         let mut histories = self
             .histories
-            .lock()
-            .expect("product event history lock");
+            .lock_recover();
         let Some(history) = histories.get_mut(session_id) else {
             return;
         };
@@ -700,8 +697,7 @@ impl SessionEventRegistry {
         let mut retired = BTreeSet::new();
         let mut histories = self
             .histories
-            .lock()
-            .expect("product event history lock");
+            .lock_recover();
         let Some(history) = histories.get_mut(session_id) else {
             return retired;
         };
@@ -726,14 +722,12 @@ impl SessionEventRegistry {
     fn remove(&self, session_id: &str) {
         let mut histories = self
             .histories
-            .lock()
-            .expect("product event history lock");
+            .lock_recover();
         histories.remove(session_id);
         self.persist_snapshot(&histories);
         drop(histories);
         self.senders
-            .lock()
-            .expect("session event registry lock")
+            .lock_recover()
             .remove(session_id);
     }
 
@@ -761,8 +755,7 @@ impl SessionEventRegistry {
     #[cfg(test)]
     fn contains(&self, session_id: &str) -> bool {
         self.senders
-            .lock()
-            .expect("session event registry lock")
+            .lock_recover()
             .contains_key(session_id)
     }
 }
@@ -898,8 +891,8 @@ impl ActiveTurns {
         attachment_id: Option<String>,
     ) {
         let key = (session_id.into(), turn_id.into());
-        let mut active = self.inner.lock().expect("active turn lock");
-        let mut prompts = self.prompts.lock().expect("active turn prompt lock");
+        let mut active = self.inner.lock_recover();
+        let mut prompts = self.prompts.lock_recover();
         active.insert(key.clone());
         if let Some(prompt) = prompt {
             prompts.insert(
@@ -915,8 +908,8 @@ impl ActiveTurns {
 
     fn remove(&self, session_id: &str, turn_id: &str) {
         let key = (session_id.to_string(), turn_id.to_string());
-        let mut active = self.inner.lock().expect("active turn lock");
-        let mut prompts = self.prompts.lock().expect("active turn prompt lock");
+        let mut active = self.inner.lock_recover();
+        let mut prompts = self.prompts.lock_recover();
         active.remove(&key);
         prompts.remove(&key);
         self.persist_snapshot(&active, &prompts);
@@ -924,15 +917,13 @@ impl ActiveTurns {
 
     fn contains(&self, session_id: &str, turn_id: &str) -> bool {
         self.inner
-            .lock()
-            .expect("active turn lock")
+            .lock_recover()
             .contains(&(session_id.to_string(), turn_id.to_string()))
     }
 
     fn for_session(&self, session_id: &str) -> Vec<lash::TurnAddress> {
         self.inner
-            .lock()
-            .expect("active turn lock")
+            .lock_recover()
             .iter()
             .filter(|(active_session_id, _)| active_session_id == session_id)
             .map(|(session_id, turn_id)| lash::TurnAddress::new(session_id, turn_id))
@@ -941,15 +932,14 @@ impl ActiveTurns {
 
     fn prompt_for(&self, session_id: &str, turn_id: &str) -> Option<ActiveTurnPrompt> {
         self.prompts
-            .lock()
-            .expect("active turn prompt lock")
+            .lock_recover()
             .get(&(session_id.to_string(), turn_id.to_string()))
             .cloned()
     }
 
     fn persist(&self) {
-        let active = self.inner.lock().expect("active turn lock");
-        let prompts = self.prompts.lock().expect("active turn prompt lock");
+        let active = self.inner.lock_recover();
+        let prompts = self.prompts.lock_recover();
         self.persist_snapshot(&active, &prompts);
     }
 

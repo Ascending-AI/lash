@@ -6,6 +6,7 @@
 //! path changes.
 
 use super::InMemorySessionStore;
+use lash_sansio::sync::MutexExt;
 
 #[async_trait::async_trait]
 impl crate::store::StoreMaintenance for InMemorySessionStore {
@@ -26,21 +27,15 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
     async fn vacuum(&self) -> Result<crate::store::VacuumReport, crate::store::StoreError> {
         // `deleted_session_ids` is deliberately exempt: it is permanent
         // identity evidence that prevents reuse after all other state is gone.
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
+        let _transaction = self.write_transaction.lock_recover();
         let ids = {
-            let mut tombstoned = self
-                .tombstoned_node_ids
-                .lock()
-                .expect("lock tombstoned nodes");
+            let mut tombstoned = self.tombstoned_node_ids.lock_recover();
             std::mem::take(&mut *tombstoned)
         };
         let removed_node_count = if ids.is_empty() {
             0
         } else {
-            let mut graph = self.global_session_graph.lock().expect("lock global graph");
+            let mut graph = self.global_session_graph.lock_recover();
             let before = graph.nodes.len();
             let leaf_node_id = graph
                 .leaf_node_id
@@ -55,15 +50,11 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
             let removed_node_count = before.saturating_sub(nodes.len());
             *graph = crate::SessionGraph::from_nodes(nodes, leaf_node_id);
             self.global_node_owners
-                .lock()
-                .expect("lock global in-memory node ids")
+                .lock_recover()
                 .retain(|node_id, _| !ids.contains(node_id));
             removed_node_count
         };
-        let mut pending = self
-            .pending_turn_inputs
-            .lock()
-            .expect("lock pending turn input");
+        let mut pending = self.pending_turn_inputs.lock_recover();
         let before = pending.len();
         pending.retain(|entry| {
             !matches!(

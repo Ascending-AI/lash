@@ -1,5 +1,6 @@
 #![cfg(feature = "restate")]
 
+use lash::sync::MutexExt;
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 
@@ -281,10 +282,7 @@ async fn run_restate_chat_turn_and_persist(
                     result: output,
                     activities: Vec::new(),
                 },
-                turn_state
-                    .lock()
-                    .expect("turn state lock")
-                    .assistant_prose(),
+                turn_state.lock_recover().assistant_prose(),
             );
             let message = state
                 .with_db({

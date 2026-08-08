@@ -117,6 +117,7 @@ def test_render_notes_groups_categories_in_publication_order() -> None:
         "BREAKING: Replace the old API.",
         "Internal: Exercise the release-note gate.",
         "Changed: Adjust the behavior.",
+        "Removed: Delete the obsolete surface.",
         "Fixed: Repair the second issue.",
     ]
     assert release_notes.render_notes(notes) == """\
@@ -137,6 +138,10 @@ Repair the second issue.
 ## Changed
 
 Adjust the behavior.
+
+## Removed
+
+Delete the obsolete surface.
 
 ## Internal
 
@@ -180,7 +185,7 @@ def test_pr_rule_rejects_uncategorized_notes_even_when_exempt() -> None:
     )
     assert errors == [
         "every release note must start with one of: Breaking:, Added:, Fixed:, "
-        "Changed:, Internal:"
+        "Changed:, Removed:, Internal:"
     ]
 
 

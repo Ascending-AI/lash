@@ -3,6 +3,7 @@ use crate::SessionCommitStore as _;
 use crate::ToolProvider as _;
 use crate::facade_support::{RuntimeSessionStateFacadeOps, ToolStateFacadeOps};
 use crate::plugin::{SessionAuthorityContext, StaticPluginFactory};
+use lash_sansio::sync::MutexExt;
 
 #[derive(Clone, Debug)]
 struct DynamicToolSpec {
@@ -51,13 +52,12 @@ impl DynamicToolSurface {
     }
 
     fn replace(&self, tools: Vec<DynamicToolSpec>) {
-        *self.tools.lock().expect("dynamic tool surface") = tools;
+        *self.tools.lock_recover() = tools;
     }
 
     fn tool(&self, name: &str) -> Option<DynamicToolSpec> {
         self.tools
-            .lock()
-            .expect("dynamic tool surface")
+            .lock_recover()
             .iter()
             .find(|tool| tool.name == name)
             .cloned()
@@ -68,8 +68,7 @@ impl DynamicToolSurface {
 impl crate::ToolProvider for DynamicToolSurface {
     fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
         self.tools
-            .lock()
-            .expect("dynamic tool surface")
+            .lock_recover()
             .iter()
             .map(|tool| tool.definition().manifest())
             .collect()
@@ -189,7 +188,7 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
     let plugin_host = dynamic_plugin_host(Arc::new(DynamicToolSurface::default()));
     let env = runtime_environment(plugin_host);
     let store = Arc::new(RecordingStore::default());
-    *store.session_meta.lock().expect("lock parked session meta") = Some(crate::SessionMeta {
+    *store.session_meta.lock_recover() = Some(crate::SessionMeta {
         session_id: "parked-session".to_string(),
         session_name: "parked-session".to_string(),
         created_at: "2026-07-29T00:00:00Z".to_string(),

@@ -47,16 +47,14 @@ impl ToolRegistry {
 
     pub(crate) fn generation(&self) -> u64 {
         self.state
-            .read()
-            .expect("tool registry state lock poisoned")
+            .read_recover()
             .generation
     }
 
     pub(crate) fn export_state(&self) -> ToolState {
         let state = self
             .state
-            .read()
-            .expect("tool registry state lock poisoned");
+            .read_recover();
         ToolState::new(state.generation, export_tool_state_entries(&state.tools))
     }
 
@@ -70,7 +68,7 @@ impl ToolRegistry {
         }
 
         let rebound = {
-            let sources = self.sources.read().expect("tool source lock poisoned");
+            let sources = self.sources.read_recover();
             reconcile_tool_state_entries(
                 next.entries(),
                 &sources,
@@ -82,8 +80,7 @@ impl ToolRegistry {
 
         let mut state = self
             .state
-            .write()
-            .expect("tool registry state lock poisoned");
+            .write_recover();
         if state.generation != next.generation {
             return Err(ReconfigureError::GenerationMismatch {
                 expected: next.generation,
@@ -122,7 +119,7 @@ impl ToolRegistry {
         snapshot: ToolState,
     ) -> Result<ToolRestoreReport, ReconfigureError> {
         let rebound = {
-            let sources = self.sources.read().expect("tool source lock poisoned");
+            let sources = self.sources.read_recover();
             reconcile_tool_state_entries(
                 snapshot.entries(),
                 &sources,
@@ -134,8 +131,7 @@ impl ToolRegistry {
 
         let mut state = self
             .state
-            .write()
-            .expect("tool registry state lock poisoned");
+            .write_recover();
         state.tools = rebound.tools;
         state.generation = reconciled_generation(snapshot.generation(), rebound.changed)?;
         Ok(ToolRestoreReport {
@@ -171,15 +167,14 @@ impl ToolRegistry {
 
     pub(crate) fn remove_source_id(&self, source_id: &str) -> Result<u64, ReconfigureError> {
         {
-            let mut sources = self.sources.write().expect("tool source lock poisoned");
+            let mut sources = self.sources.write_recover();
             if sources.remove(source_id).is_none() {
                 return Err(ReconfigureError::UnknownSource(source_id.to_string()));
             }
         }
         let mut state = self
             .state
-            .write()
-            .expect("tool registry state lock poisoned");
+            .write_recover();
         state
             .tools
             .retain(|_, entry| entry.binding.source_id() != Some(source_id));
@@ -202,8 +197,7 @@ impl ToolRegistry {
         let source_id = source.id().to_string();
         let mut sources = self
             .sources
-            .read()
-            .expect("tool source lock poisoned")
+            .read_recover()
             .iter()
             .map(|(id, source)| (id.clone(), Arc::clone(source)))
             .collect::<BTreeMap<_, _>>();
@@ -220,13 +214,11 @@ impl ToolRegistry {
         )?;
 
         self.sources
-            .write()
-            .expect("tool source lock poisoned")
+            .write_recover()
             .insert(source_id, source);
         let mut state = self
             .state
-            .write()
-            .expect("tool registry state lock poisoned");
+            .write_recover();
         state.tools = reconciled.tools;
         if reconciled.changed {
             state.generation = reconciled_generation(state.generation, true)?;
@@ -237,8 +229,7 @@ impl ToolRegistry {
     pub(crate) fn refresh_sources(&self) -> Result<u64, ReconfigureError> {
         let sources = self
             .sources
-            .read()
-            .expect("tool source lock poisoned")
+            .read_recover()
             .iter()
             .map(|(id, source)| (id.clone(), Arc::clone(source)))
             .collect::<BTreeMap<_, _>>();
@@ -252,8 +243,7 @@ impl ToolRegistry {
         )?;
         let mut state = self
             .state
-            .write()
-            .expect("tool registry state lock poisoned");
+            .write_recover();
         state.tools = reconciled.tools;
         if reconciled.changed {
             state.generation = reconciled_generation(state.generation, true)?;
@@ -264,8 +254,7 @@ impl ToolRegistry {
     pub(crate) fn fork_with_state(&self, snapshot: ToolState) -> Result<Self, ReconfigureError> {
         let sources = self
             .sources
-            .read()
-            .expect("tool source lock poisoned")
+            .read_recover()
             .iter()
             .map(|(k, v)| (k.clone(), Arc::clone(v)))
             .collect::<BTreeMap<_, _>>();

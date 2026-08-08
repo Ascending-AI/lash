@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 mod assembly;
 mod builder;
 pub(crate) mod causal;
@@ -371,17 +372,14 @@ impl RuntimeTurnPhaseProbeSlot {
         scope: &crate::SessionScope,
         probe: Arc<dyn RuntimeTurnPhaseProbe>,
     ) {
-        self.probes
-            .lock()
-            .expect("runtime phase probe slot")
-            .insert(scope.id(), probe);
+        self.probes.lock_recover().insert(scope.id(), probe);
     }
 
     pub fn get_for_scope(
         &self,
         scope: &crate::SessionScope,
     ) -> Option<Arc<dyn RuntimeTurnPhaseProbe>> {
-        let probes = self.probes.lock().expect("runtime phase probe slot");
+        let probes = self.probes.lock_recover();
         probes.get(&scope.id()).cloned().or_else(|| {
             probes
                 .get(&crate::SessionScope::new(&scope.session_id).id())

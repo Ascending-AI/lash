@@ -10,6 +10,7 @@
 //! Compiled for unit tests and, behind the default-on `testing` feature, for
 //! integration tests and downstream harnesses.
 
+use lash_sansio::sync::MutexExt;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -126,34 +127,22 @@ pub struct ScriptedWsServer {
 impl ScriptedWsServer {
     /// Every JSON request the server received, in order.
     pub fn captured(&self) -> Vec<Value> {
-        self.captured
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+        self.captured.lock_recover().clone()
     }
 
     /// Every request payload exactly as received from the WebSocket frame.
     pub fn captured_raw(&self) -> Vec<Vec<u8>> {
-        self.captured_raw
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+        self.captured_raw.lock_recover().clone()
     }
 
     /// Request headers per accepted WebSocket handshake, in order.
     pub fn handshakes(&self) -> Vec<Vec<(String, String)>> {
-        self.handshakes
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+        self.handshakes.lock_recover().clone()
     }
 
     /// Number of WebSocket Close frames the server has received.
     pub fn close_frame_count(&self) -> u32 {
-        *self
-            .close_frames
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        *self.close_frames.lock_recover()
     }
 }
 
@@ -205,10 +194,7 @@ pub async fn spawn_scripted_websocket(actions: Vec<ScriptedWsAction>) -> Scripte
                                 .map(|value| (name.as_str().to_string(), value.to_string()))
                         })
                         .collect::<Vec<_>>();
-                    handshakes
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .push(headers);
+                    handshakes.lock_recover().push(headers);
                     Ok(response)
                 };
                 let Ok(mut ws) = accept_hdr_async(stream, callback).await else {
@@ -221,27 +207,18 @@ pub async fn spawn_scripted_websocket(actions: Vec<ScriptedWsAction>) -> Scripte
                             String::from_utf8(bytes.to_vec()).unwrap_or_default()
                         }
                         WsMessage::Close(_) => {
-                            *close_frames
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
+                            *close_frames.lock_recover() += 1;
                             break;
                         }
                         WsMessage::Ping(_) | WsMessage::Pong(_) | WsMessage::Frame(_) => {
                             continue;
                         }
                     };
-                    captured_raw
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .push(text.as_bytes().to_vec());
+                    captured_raw.lock_recover().push(text.as_bytes().to_vec());
                     let request: Value = serde_json::from_str(&text).expect("ws request json");
-                    captured
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .push(request);
+                    captured.lock_recover().push(request);
                     let action = actions
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .lock_recover()
                         .pop_front()
                         .expect("scripted ws action");
                     match action {

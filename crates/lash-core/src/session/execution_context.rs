@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 
 use crate::facade_support::ScopedEffectControllerFacadeOps;
@@ -121,8 +122,7 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub(super) fn record_started_process(&self, process_id: &str) {
         self.started_process_ids
-            .lock()
-            .expect("started process ids lock")
+            .lock_recover()
             .insert(process_id.to_string());
     }
 
@@ -212,10 +212,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     pub(crate) fn take_nested_effect_error(&self) -> Option<crate::RuntimeEffectControllerError> {
-        self.nested_effect_error
-            .lock()
-            .expect("nested runtime effect error lock poisoned")
-            .take()
+        self.nested_effect_error.lock_recover().take()
     }
 
     /// Exposes execution scope id to protocol and process-engine implementors while executing code
@@ -423,10 +420,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     pub(crate) fn record_nested_effect_error(&self, error: crate::RuntimeEffectControllerError) {
-        let mut pending = self
-            .nested_effect_error
-            .lock()
-            .expect("nested runtime effect error lock poisoned");
+        let mut pending = self.nested_effect_error.lock_recover();
         pending.get_or_insert(error);
     }
 
@@ -437,10 +431,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     pub(crate) fn is_run_local_process(&self, process_id: &str) -> bool {
-        self.started_process_ids
-            .lock()
-            .expect("started process ids lock")
-            .contains(process_id)
+        self.started_process_ids.lock_recover().contains(process_id)
     }
 
     pub(crate) fn process_spawn_provenance(&self) -> Option<crate::ProcessSpawnProvenance> {

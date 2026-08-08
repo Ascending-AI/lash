@@ -45,6 +45,7 @@
 //! takeover order is an ordinary production question; requiring debug logging to
 //! answer it would make the timeline unavailable exactly when it is needed.
 
+use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
@@ -140,17 +141,11 @@ pub(super) struct BorrowedLaneAuthority {
 
 impl BorrowedLaneAuthority {
     pub(super) fn fence(&self) -> SessionExecutionLeaseAuthority {
-        self.lease
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .fence()
+        self.lease.lock_recover().fence()
     }
 
     fn commit_evidence(&self) -> Box<SessionExecutionLeaseCommitEvidence> {
-        let lease = self
-            .lease
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let lease = self.lease.lock_recover();
         Box::new(SessionExecutionLeaseCommitEvidence {
             owner: lease.owner.clone(),
             fencing_token: lease.fencing_token,
@@ -245,10 +240,7 @@ impl SessionExecutionLeaseGuard {
     }
 
     pub(super) fn fence(&self) -> SessionExecutionLeaseAuthority {
-        self.lease
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .fence()
+        self.lease.lock_recover().fence()
     }
 
     /// Poison-tolerant on purpose: this is read on the `Drop` path, where a
@@ -256,10 +248,7 @@ impl SessionExecutionLeaseGuard {
     /// is only ever replaced wholesale, so a poisoned lock still holds a
     /// complete lease.
     pub(super) fn completion(&self) -> SessionExecutionLeaseAuthority {
-        self.lease
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .completion()
+        self.lease.lock_recover().completion()
     }
 
     /// Snapshot the holder facts a commit-rejection trace event reports.
@@ -268,10 +257,7 @@ impl SessionExecutionLeaseGuard {
     /// unboxed temporary inside that async body is enough to push the turn futures
     /// past the workspace's large-future budget.
     pub(super) fn commit_evidence(&self) -> Box<SessionExecutionLeaseCommitEvidence> {
-        let lease = self
-            .lease
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let lease = self.lease.lock_recover();
         Box::new(SessionExecutionLeaseCommitEvidence {
             owner: lease.owner.clone(),
             fencing_token: lease.fencing_token,
@@ -306,10 +292,7 @@ impl SessionExecutionLeaseGuard {
     }
 
     pub(super) fn continuity(&self) -> Option<SessionExecutionLeaseContinuity> {
-        let lease = self
-            .lease
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let lease = self.lease.lock_recover();
         if self.is_lost() || lease.expires_at_epoch_ms <= self.clock.timestamp_ms() {
             return None;
         }
@@ -466,11 +449,7 @@ impl Drop for SessionExecutionLeaseGuard {
         {
             return;
         }
-        let lease = self
-            .lease
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let lease = self.lease.lock_recover().clone();
         let completion = lease.completion();
         let observed_at_epoch_ms = self.clock.timestamp_ms();
         let store = Arc::clone(&self.store);
@@ -543,10 +522,7 @@ fn spawn_renewal_task(
             if release_state.load(Ordering::Acquire) != release_state::LIVE {
                 break;
             }
-            let presented = lease
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clone();
+            let presented = lease.lock_recover().clone();
             let fence = presented.fence();
             let renewal = match store
                 .renew_session_execution_lease(&fence, timings.ttl_ms())
@@ -563,9 +539,7 @@ fn spawn_renewal_task(
                                 event = "session_execution_lease.renewed",
                                 "renewed session execution lease"
                             );
-                            *lease
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner) = renewed;
+                            *lease.lock_recover() = renewed;
                             Ok(())
                         }
                         Err(mismatch) => {
@@ -1235,11 +1209,7 @@ mod tests {
         .await
         .expect("claim lease")
         .expect("lease acquired");
-        let mut malformed = guard
-            .lease
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let mut malformed = guard.lease.lock_recover().clone();
         malformed.lease_token.push_str("-malformed");
         store.respond_to_next_session_execution_lease_renewal_with(malformed);
 

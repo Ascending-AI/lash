@@ -1,3 +1,5 @@
+#[cfg(feature = "otel")]
+use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
@@ -96,20 +98,15 @@ where
         let mut span = self.build_span(record, name, parent, record_time(record), None);
         span.set_attributes(self.attributes_for(record));
         let context = span.span_context().clone();
-        if let Ok(mut active) = self.active.lock() {
-            if let Some(mut existing) = active.remove(&key) {
-                existing.span.end_with_timestamp(record_time(record));
-            }
-            active.insert(key, ActiveSpan { span, context });
-        } else {
-            span.end_with_timestamp(record_time(record));
+        let mut active = self.active.lock_recover();
+        if let Some(mut existing) = active.remove(&key) {
+            existing.span.end_with_timestamp(record_time(record));
         }
+        active.insert(key, ActiveSpan { span, context });
     }
 
     fn end_active(&self, key: &str, record: &TraceRecord, success: bool) -> bool {
-        let Ok(mut active) = self.active.lock() else {
-            return false;
-        };
+        let mut active = self.active.lock_recover();
         let Some(mut active_span) = active.remove(key) else {
             return false;
         };
@@ -176,9 +173,7 @@ where
         let Some(key) = llm_key(&record.context) else {
             return false;
         };
-        let Ok(mut active) = self.active.lock() else {
-            return false;
-        };
+        let mut active = self.active.lock_recover();
         let Some(active_span) = active.get_mut(&key) else {
             return false;
         };
@@ -1039,7 +1034,7 @@ where
     T: Span,
 {
     let key = turn_key(&record.context)?;
-    let active = active.lock().ok()?;
+    let active = active.lock_recover();
     active.get(&key).map(|span| span.context.clone())
 }
 
@@ -1250,6 +1245,6 @@ mod tests {
         ))
         .unwrap();
 
-        assert!(sink.active.lock().unwrap().is_empty());
+        assert!(sink.active.lock_recover().is_empty());
     }
 }

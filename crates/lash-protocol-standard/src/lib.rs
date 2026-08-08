@@ -724,6 +724,7 @@ mod tests {
         AttachmentId, AttachmentSource, AttachmentTypeMetadata, MediaType, ToolCallOutput,
         ToolValue, facade_support::AttachmentMeta, facade_support::ModelToolReturn,
     };
+    use lash_sansio::sync::MutexExt;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tokio::sync::Barrier;
     use tokio::time::{Duration, timeout};
@@ -888,8 +889,7 @@ mod tests {
     impl CountingEffectController {
         fn count(&self, kind: lash_core::RuntimeEffectKind) -> usize {
             self.kinds
-                .lock()
-                .expect("effect kinds")
+                .lock_recover()
                 .iter()
                 .filter(|candidate| **candidate == kind)
                 .count()
@@ -973,10 +973,7 @@ mod tests {
             local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
         ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
         {
-            self.kinds
-                .lock()
-                .expect("effect kinds")
-                .push(envelope.command.kind());
+            self.kinds.lock_recover().push(envelope.command.kind());
             if matches!(
                 &envelope.command,
                 lash_core::RuntimeEffectCommand::PeekAwaitEvent { .. }

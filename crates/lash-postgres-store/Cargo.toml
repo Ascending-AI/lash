@@ -22,6 +22,7 @@ default = []
 testing = []
 
 [dependencies]
+lash-sansio = { workspace = true }
 async-trait = { workspace = true }
 hmac = { workspace = true }
 lash-core = { workspace = true }

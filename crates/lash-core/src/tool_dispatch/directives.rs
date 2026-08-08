@@ -101,10 +101,7 @@ pub(super) async fn apply_after_tool_directives(
                 }
             }
             PluginDirective::EnqueueMessages { messages } => {
-                if let Err(err) = context.checkpoint_messages.enqueue(messages) {
-                    result = ToolResult::err_fmt(err);
-                    break;
-                }
+                context.checkpoint_messages.enqueue(messages);
             }
             PluginDirective::ReplaceToolArgs { .. } => {
                 result = ToolResult::err_fmt(

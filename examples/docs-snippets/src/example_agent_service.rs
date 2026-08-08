@@ -1,5 +1,6 @@
 //! Compiled sources for the Rust snippets on `docs/example-agent-service.html`.
 
+use lash::sync::MutexExt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -133,10 +134,8 @@ async fn service_turn(
     let turn = session.turn(TurnInput::text(text)).require_finish()?;
 
     let output = turn.stream_to(&ui_events).await?;
-    let assistant_text = assistant_text_for_persistence(
-        &output,
-        &turn_state.lock().expect("turn state lock").assistant_prose,
-    );
+    let assistant_text =
+        assistant_text_for_persistence(&output, &turn_state.lock_recover().assistant_prose);
     // docs:end:service-turn
     let _ = replay_cursor;
     Ok(())

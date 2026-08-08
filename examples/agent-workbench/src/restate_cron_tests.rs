@@ -1,3 +1,4 @@
+use lash::sync::MutexExt;
 async fn register_cron_test_subscription(
     trigger_store: &lash::triggers::InMemoryTriggerStore,
     session_id: &str,
@@ -38,7 +39,7 @@ struct ScriptedCronObjectSurface {
 
 impl ScriptedCronObjectSurface {
     fn arm(&self, job_key: &str) {
-        self.infos.lock().expect("scripted cron infos lock").insert(
+        self.infos.lock_recover().insert(
             job_key.to_string(),
             Some(serde_json::json!({
                 "source_key": "cron-source:fig1067",
@@ -52,15 +53,14 @@ impl ScriptedCronObjectSurface {
 
     fn info(&self, job_key: &str) -> Option<serde_json::Value> {
         self.infos
-            .lock()
-            .expect("scripted cron infos lock")
+            .lock_recover()
             .get(job_key)
             .cloned()
             .flatten()
     }
 
     fn calls(&self) -> Vec<String> {
-        self.calls.lock().expect("scripted cron calls lock").clone()
+        self.calls.lock_recover().clone()
     }
 }
 
@@ -72,8 +72,7 @@ async fn spawn_scripted_cron_object_surface(surface: ScriptedCronObjectSurface) 
     ) -> axum::Json<serde_json::Value> {
         surface
             .calls
-            .lock()
-            .expect("scripted cron calls lock")
+            .lock_recover()
             .push(path.clone());
         let mut parts = path.split('/');
         let object = parts.next();
@@ -95,16 +94,14 @@ async fn spawn_scripted_cron_object_surface(surface: ScriptedCronObjectSurface) 
                 });
                 surface
                     .infos
-                    .lock()
-                    .expect("scripted cron infos lock")
+                    .lock_recover()
                     .insert(job_key.to_string(), Some(info.clone()));
                 axum::Json(info)
             }
             Some("cancel") => {
                 surface
                     .infos
-                    .lock()
-                    .expect("scripted cron infos lock")
+                    .lock_recover()
                     .insert(job_key.to_string(), None);
                 axum::Json(serde_json::Value::Null)
             }
@@ -532,8 +529,7 @@ async fn syncing_session_a_leaves_session_bs_armed_cron_untouched() {
     let key_b = super::cron_job_key(session_b, "cron-source:b");
     state
         .restate_cron_job_keys
-        .lock()
-        .expect("cron job key lock")
+        .lock_recover()
         .insert(
             session_b.to_string(),
             std::collections::BTreeSet::from([key_b.clone()]),
@@ -588,8 +584,7 @@ async fn syncing_session_a_leaves_session_bs_armed_cron_untouched() {
     assert_eq!(
         state
             .restate_cron_job_keys
-            .lock()
-            .expect("cron job key lock")
+            .lock_recover()
             .get(session_b),
         Some(&std::collections::BTreeSet::from([key_b]))
     );
@@ -631,8 +626,7 @@ async fn disabling_a_button_trigger_makes_zero_cron_ingress_calls() {
     assert!(
         state
             .restate_cron_job_keys
-            .lock()
-            .expect("cron job key lock")
+            .lock_recover()
             .is_empty()
     );
 }
@@ -805,8 +799,7 @@ impl MetaLossSessionStoreFactory {
 
     fn remove_session_meta(&self, session_id: &str) {
         self.absent_session_ids
-            .lock()
-            .expect("absent session ids lock")
+            .lock_recover()
             .insert(session_id.to_string());
     }
 }
@@ -826,8 +819,7 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
     ) -> Result<Option<Arc<dyn lash::persistence::RuntimePersistence>>, String> {
         if self
             .absent_session_ids
-            .lock()
-            .expect("absent session ids lock")
+            .lock_recover()
             .contains(&request.session_id)
         {
             return Ok(None);

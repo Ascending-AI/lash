@@ -1,5 +1,6 @@
 use super::*;
 use crate::ast::{Expr, Program};
+use lash_sansio::sync::{LockResultExt, MutexExt};
 use std::fmt::Write as _;
 use std::sync::{
     Arc, Mutex,
@@ -102,18 +103,18 @@ impl ExecutionHost for RecordingProcessHost {
                 ExecutionHostError::new("module operations are not supported by this host"),
             ),
             AbilityOp::StartProcess(start) => {
-                self.starts.lock().expect("starts lock").push(*start);
+                self.starts.lock_recover().push(*start);
                 let mut handle = Record::new();
                 handle.insert("__handle__".to_string(), Value::String("process".into()));
                 handle.insert("id".to_string(), Value::String("proc-1".into()));
                 Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
             }
             AbilityOp::ProcessEvent(event) => {
-                self.events.lock().expect("events lock").push(event);
+                self.events.lock_recover().push(event);
                 Ok(AbilityResult::Unit)
             }
             AbilityOp::Sleep(sleep) => {
-                self.sleeps.lock().expect("sleeps lock").push(sleep);
+                self.sleeps.lock_recover().push(sleep);
                 Ok(AbilityResult::Value(Value::Null))
             }
             AbilityOp::WaitSignal { name } => {
@@ -121,7 +122,7 @@ impl ExecutionHost for RecordingProcessHost {
                 Ok(AbilityResult::Value(Value::String("signal-payload".into())))
             }
             AbilityOp::SignalRun(signal) => {
-                self.signals.lock().expect("signals lock").push(signal);
+                self.signals.lock_recover().push(signal);
                 Ok(AbilityResult::Value(Value::Null))
             }
             AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),

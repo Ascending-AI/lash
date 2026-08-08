@@ -38,8 +38,7 @@ fn rotate_cron_session_out_of_current(state: &AppState) -> String {
 fn cron_job_key_for_session(state: &AppState, session_id: &str) -> String {
     let guard = state
         .restate_cron_job_keys
-        .lock()
-        .expect("cron job key lock");
+        .lock_recover();
     let matching = guard
         .get(session_id)
         .unwrap_or_else(|| panic!("missing cron job keys for session `{session_id}`"));

@@ -1,3 +1,4 @@
+use lash::sync::MutexExt;
 use std::convert::Infallible;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
@@ -103,10 +104,7 @@ pub(crate) async fn stream_raw_activities(
                 };
                 let assistant_text = assistant_text_for_persistence(
                     &output,
-                    turn_state
-                        .lock()
-                        .expect("turn state lock")
-                        .assistant_prose(),
+                    turn_state.lock_recover().assistant_prose(),
                 );
                 if let Err(error) = state
                     .with_db(move |db| db.insert_message(&chat_id, "assistant", &assistant_text))

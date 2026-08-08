@@ -627,6 +627,7 @@ mod tests {
     };
     use lash_lashlang_runtime::ToolDefinitionLashlangExt;
     use lash_rlm_types::PROJECTED_JSON_TAG;
+    use lash_sansio::sync::MutexExt;
     use lashlang::{
         AbilityOp, AbilityResult, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
         ExecutionOutcome, ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor,
@@ -951,8 +952,7 @@ mod tests {
         ) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             self.batches
-                .lock()
-                .expect("resolver batches")
+                .lock_recover()
                 .push(paths.iter().map(|path| (*path).to_string()).collect());
             paths
                 .iter()
@@ -1012,8 +1012,7 @@ mod tests {
         async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
             self.executions.fetch_add(1, Ordering::SeqCst);
             self.observed_bindings
-                .lock()
-                .expect("observed bindings")
+                .lock_recover()
                 .push(call.context.tool_execution_binding().clone());
             lash_core::ToolResult::ok(serde_json::json!("deferred ok"))
         }
@@ -1206,7 +1205,7 @@ mod tests {
             assert!(next_turn_ctx.tool_catalog().tools.is_empty());
             assert_eq!(restored.deferred_resolutions.resolutions.len(), 2);
             assert_eq!(
-                *batches.lock().expect("resolver batches"),
+                *batches.lock_recover(),
                 vec![
                     vec!["mystery.x".to_string(), "web.fetch".to_string()],
                     vec!["mystery.x".to_string(), "web.fetch".to_string()],
@@ -1275,7 +1274,7 @@ mod tests {
                 "the ledger must retain the source module.operation, not the host tool id"
             );
             assert_eq!(
-                *observed_bindings.lock().expect("observed bindings"),
+                *observed_bindings.lock_recover(),
                 vec![serde_json::json!({ "kind": "test", "route": "deferred" })]
             );
             assert!(ctx.tool_catalog().tools.is_empty());
@@ -1389,10 +1388,7 @@ mod tests {
             local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
         ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
         {
-            self.envelopes
-                .lock()
-                .expect("trigger effect envelopes")
-                .push(envelope.clone());
+            self.envelopes.lock_recover().push(envelope.clone());
             match envelope.command {
                 lash_core::RuntimeEffectCommand::Trigger { command } => {
                     let operation_id = envelope
@@ -1416,8 +1412,7 @@ mod tests {
     impl CapturingTriggerEffectController {
         fn trigger_effects(&self) -> Vec<(String, &'static str)> {
             self.envelopes
-                .lock()
-                .expect("trigger effect envelopes")
+                .lock_recover()
                 .iter()
                 .filter_map(|envelope| {
                     let lash_core::RuntimeEffectCommand::Trigger { command } = &envelope.command
@@ -1612,10 +1607,7 @@ mod tests {
             let expected_key =
                 "derived/v2/b53772ec2996e72a7fc77c087803dc0dd3e127ccb946d6a9ab585c0a09fb7149";
             let (effect_owner_scope, effect_subscription_key) = {
-                let envelopes = controller
-                    .envelopes
-                    .lock()
-                    .expect("trigger effect envelopes");
+                let envelopes = controller.envelopes.lock_recover();
                 let lash_core::RuntimeEffectCommand::Trigger { command } = &envelopes[0].command
                 else {
                     panic!("expected trigger effect")
@@ -1659,8 +1651,7 @@ mod tests {
                 assert!(response.error.is_none(), "{:?}", response.error);
                 controller
                     .envelopes
-                    .lock()
-                    .expect("trigger effect envelopes")
+                    .lock_recover()
                     .iter()
                     .filter_map(|envelope| {
                         let lash_core::RuntimeEffectCommand::Trigger { command } =

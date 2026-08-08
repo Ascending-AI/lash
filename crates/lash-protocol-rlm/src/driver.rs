@@ -1,3 +1,4 @@
+use lash_sansio::sync::RwLockExt;
 mod history;
 
 use std::path::PathBuf;
@@ -268,18 +269,13 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         let finalization = rlm_finalization_prompt(&options.termination);
         let required_output = required_output_block(&options.termination);
         let final_answer_format = final_answer_format_prompt(&options);
-        let budget_suffix = self.last_prompt_usage.read().ok().and_then(|guard| {
-            crate::rlm_support::format_budget_suffix(
-                ctx.protocol_iteration + 1,
-                guard.as_ref(),
-                self.max_budget_tokens,
-            )
-        });
-        let bound_variables_prompt = self
-            .bound_variables_prompt
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let guard = self.last_prompt_usage.read_recover();
+        let budget_suffix = crate::rlm_support::format_budget_suffix(
+            ctx.protocol_iteration + 1,
+            guard.as_ref(),
+            self.max_budget_tokens,
+        );
+        let bound_variables_prompt = self.bound_variables_prompt.read_recover().clone();
 
         let mut messages = Vec::new();
         if !ctx.config.system_prompt.trim().is_empty() {
@@ -1376,15 +1372,9 @@ mod tests {
             rendered_bound_variables(&mut cache, serde_json::json!({ "scratch_note": "saved" }));
         let projector = projector(1000);
 
-        *projector
-            .bound_variables_prompt
-            .write()
-            .expect("bound variables write") = previous_bound;
+        *projector.bound_variables_prompt.write_recover() = previous_bound;
         let previous = project_iteration_request(&projector, &previous_events, 0, "test-model");
-        *projector
-            .bound_variables_prompt
-            .write()
-            .expect("bound variables write") = next_bound;
+        *projector.bound_variables_prompt.write_recover() = next_bound;
         let next = project_iteration_request(&projector, &next_events, 1, "test-model");
 
         assert_eq!(
@@ -1412,10 +1402,7 @@ mod tests {
             }),
         );
         let projector = projector(1000);
-        *projector
-            .bound_variables_prompt
-            .write()
-            .expect("bound variables write") = bound_variables;
+        *projector.bound_variables_prompt.write_recover() = bound_variables;
         let request = project_iteration_request(&projector, &events, 1, "test-model");
         let tail = message_text(request.messages.last().expect("volatile tail"));
 

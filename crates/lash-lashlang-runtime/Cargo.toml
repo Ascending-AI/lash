@@ -25,6 +25,7 @@ testing = ["lash-core/testing", "lashlang/testing"]
 workspace = true
 
 [dependencies]
+lash-sansio = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
 lash-core = { workspace = true }

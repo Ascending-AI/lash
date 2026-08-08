@@ -16,6 +16,7 @@ pub mod direct;
 mod identity_json;
 pub mod llm;
 mod model;
+pub mod panic_containment;
 pub mod plugin;
 mod plugin_stack;
 mod protocol_build;
@@ -28,6 +29,10 @@ mod stable_hash;
 mod stable_identity;
 pub mod store;
 pub mod task;
+/// Standard-lock poison recovery traits used across Lash hosts and runtimes.
+pub mod sync {
+    pub use lash_sansio::sync::*;
+}
 #[cfg(test)]
 mod test_watchdog;
 #[cfg(any(test, feature = "testing"))]

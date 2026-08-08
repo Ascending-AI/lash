@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -85,10 +86,7 @@ impl SessionPlugin for TestSessionPlugin {
                     .turn_context
                     .plugin_input::<TestTurnInput>(TestPlugin::ID)
                 {
-                    prompt_seen
-                        .lock()
-                        .expect("prompt seen lock")
-                        .push(input.label.clone());
+                    prompt_seen.lock_recover().push(input.label.clone());
                 }
                 Ok(Vec::new())
             })
@@ -144,10 +142,7 @@ impl ToolProvider for TestTools {
             Ok(input) => input,
             Err(err) => return ToolResult::err_fmt(format!("missing prepared typed input: {err}")),
         };
-        self.seen
-            .lock()
-            .expect("seen lock")
-            .push(input.label.clone());
+        self.seen.lock_recover().push(input.label.clone());
         ToolResult::ok(json!({ "label": input.label }))
     }
 }
@@ -198,8 +193,7 @@ fn core_with_responses(responses: Vec<LlmResponse>) -> LashCore {
             let responses = Arc::clone(&responses);
             async move {
                 Ok(responses
-                    .lock()
-                    .expect("responses lock")
+                    .lock_recover()
                     .next()
                     .unwrap_or_else(|| response_text("fallback")))
             }
@@ -281,14 +275,8 @@ async fn prompt_hook_and_tool_provider_read_typed_turn_input() {
         .expect("turn");
 
     assert_eq!(assistant_prose(&result), "done");
-    assert_eq!(
-        prompt_seen.lock().expect("prompt seen lock").as_slice(),
-        ["page-a", "page-a"]
-    );
-    assert_eq!(
-        tool_seen.lock().expect("tool seen lock").as_slice(),
-        ["page-a"]
-    );
+    assert_eq!(prompt_seen.lock_recover().as_slice(), ["page-a", "page-a"]);
+    assert_eq!(tool_seen.lock_recover().as_slice(), ["page-a"]);
 }
 
 #[tokio::test]

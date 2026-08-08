@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
@@ -305,10 +306,7 @@ impl ProcessExecutionEnvStore for InMemoryProcessExecutionEnvStore {
         bytes: &[u8],
     ) -> Result<(), crate::PluginError> {
         self.envs
-            .lock()
-            .map_err(|_| {
-                crate::PluginError::Session("process execution env store lock poisoned".to_string())
-            })?
+            .lock_recover()
             .insert(env_ref.as_str().to_string(), bytes.to_vec());
         Ok(())
     }
@@ -317,14 +315,7 @@ impl ProcessExecutionEnvStore for InMemoryProcessExecutionEnvStore {
         &self,
         env_ref: &ProcessExecutionEnvRef,
     ) -> Result<Option<Vec<u8>>, crate::PluginError> {
-        Ok(self
-            .envs
-            .lock()
-            .map_err(|_| {
-                crate::PluginError::Session("process execution env store lock poisoned".to_string())
-            })?
-            .get(env_ref.as_str())
-            .cloned())
+        Ok(self.envs.lock_recover().get(env_ref.as_str()).cloned())
     }
 }
 

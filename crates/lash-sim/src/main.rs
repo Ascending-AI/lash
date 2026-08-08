@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    lash_core::panic_containment::set_loud(true);
     if let Err(err) = run().await {
         eprintln!("{err}");
         std::process::exit(1);

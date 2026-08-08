@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::runtime::{DeliveryPolicy, QueuedWorkPayload, RuntimeSessionState, SlotPolicy};
+use lash_sansio::sync::MutexExt;
 
 #[tokio::test]
 async fn runtime_commit_rejects_cross_session_queue_batches_atomically() {
@@ -137,16 +138,11 @@ async fn perf_store_pins_durable_claim_id_dialects() {
         format!("perf-tic:{}:1", pending.enqueue_seq)
     );
     assert_eq!(
-        store.queued_work.lock().expect("perf queued work")[0]
-            .claim_id
-            .as_deref(),
+        store.queued_work.lock_recover()[0].claim_id.as_deref(),
         Some(queued_claim.claim_id.as_str())
     );
     assert_eq!(
-        store
-            .pending_turn_inputs
-            .lock()
-            .expect("perf pending inputs")[0]
+        store.pending_turn_inputs.lock_recover()[0]
             .claim_id
             .as_deref(),
         Some(input_claim.claim_id.as_str())

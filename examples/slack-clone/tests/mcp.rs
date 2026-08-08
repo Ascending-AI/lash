@@ -1,3 +1,4 @@
+use lash::sync::MutexExt;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -160,8 +161,7 @@ impl Script {
                 let requests = Arc::clone(&requests);
                 async move {
                     requests
-                        .lock()
-                        .expect("request lock")
+                        .lock_recover()
                         .push(serde_json::to_string(&request).expect("serialize request"));
                     let step = steps.lock().await.pop_front().unwrap_or(Step::Text("done"));
                     Ok(match step {
@@ -190,7 +190,7 @@ impl Script {
     }
 
     fn requests(&self) -> Vec<String> {
-        self.requests.lock().expect("request lock").clone()
+        self.requests.lock_recover().clone()
     }
 }
 

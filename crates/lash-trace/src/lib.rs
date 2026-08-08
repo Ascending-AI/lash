@@ -26,6 +26,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -768,8 +769,6 @@ pub struct TraceError {
 pub enum TraceSinkError {
     #[error("failed to serialize trace record: {0}")]
     Serialize(#[from] serde_json::Error),
-    #[error("trace sink lock poisoned")]
-    LockPoisoned,
     #[error("failed to create trace directory {path}: {source}")]
     CreateDir { path: PathBuf, source: io::Error },
     #[error("failed to open trace file {path}: {source}")]
@@ -814,7 +813,7 @@ impl JsonlTraceSink {
 impl TraceSink for JsonlTraceSink {
     fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
         let line = serde_json::to_string(record)?;
-        let _guard = self.lock.lock().map_err(|_| TraceSinkError::LockPoisoned)?;
+        let _guard = self.lock.lock_recover();
         if let Some(parent) = self.path.parent()
             && !parent.as_os_str().is_empty()
         {
@@ -847,7 +846,7 @@ impl TraceSink for JsonlTraceSink {
     /// exist; that is a no-op rather than an error (nothing to sync), and we do
     /// not create an empty file just to sync it.
     fn flush(&self) -> Result<(), TraceSinkError> {
-        let _guard = self.lock.lock().map_err(|_| TraceSinkError::LockPoisoned)?;
+        let _guard = self.lock.lock_recover();
         match OpenOptions::new().append(true).open(&self.path) {
             Ok(file) => file.sync_all().map_err(|source| TraceSinkError::Write {
                 path: self.path.clone(),
@@ -872,7 +871,7 @@ pub struct StderrTraceSink {
 impl TraceSink for StderrTraceSink {
     fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
         let line = serde_json::to_string(record)?;
-        let _guard = self.lock.lock().map_err(|_| TraceSinkError::LockPoisoned)?;
+        let _guard = self.lock.lock_recover();
         eprintln!("{line}");
         Ok(())
     }

@@ -6,13 +6,12 @@ impl AppState {
 
     fn selected_model(&self) -> ModelSelection {
         self.selected_model
-            .lock()
-            .expect("selected model lock")
+            .lock_recover()
             .clone()
     }
 
     fn set_selected_model(&self, model: ModelSelection) {
-        *self.selected_model.lock().expect("selected model lock") = model;
+        *self.selected_model.lock_recover() = model;
     }
 
     fn settings_for_session(&self, session_id: String) -> Settings {
@@ -28,7 +27,7 @@ impl AppState {
 
     #[cfg(test)]
     fn messages_snapshot(&self) -> Vec<ChatMessage> {
-        self.messages.lock().expect("messages lock").clone()
+        self.messages.lock_recover().clone()
     }
 
     fn trace(&self, name: &str, payload: Value) {
@@ -106,8 +105,7 @@ impl AppState {
         let retired = self.event_tx.retire_turn_rows(session_id, turn_id);
         if !retired.is_empty() {
             self.messages
-                .lock()
-                .expect("messages lock")
+                .lock_recover()
                 .retain(|message| !retired.contains(&message.id));
         }
         self.push_message_with_id_for_session(
@@ -439,8 +437,7 @@ impl AppState {
         );
         if inserted {
             self.messages
-                .lock()
-                .expect("messages lock")
+                .lock_recover()
                 .push(message.clone());
         }
         message
@@ -527,11 +524,11 @@ impl WorkbenchSessionIds {
     }
 
     fn current(&self) -> String {
-        self.current.lock().expect("session id lock").clone()
+        self.current.lock_recover().clone()
     }
 
     fn rotate(&self) -> (String, String) {
-        let mut current = self.current.lock().expect("session id lock");
+        let mut current = self.current.lock_recover();
         let old = current.clone();
         let new = new_session_id();
         *current = new.clone();

@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex as StdMutex};
 
 #[derive(Default)]
@@ -8,14 +9,11 @@ struct RecordingPhaseProbe {
 
 impl RecordingPhaseProbe {
     fn events(&self) -> Vec<String> {
-        self.events.lock().expect("recording phase probe").clone()
+        self.events.lock_recover().clone()
     }
 
     fn record(&self, event: impl Into<String>) {
-        self.events
-            .lock()
-            .expect("recording phase probe")
-            .push(event.into());
+        self.events.lock_recover().push(event.into());
     }
 }
 

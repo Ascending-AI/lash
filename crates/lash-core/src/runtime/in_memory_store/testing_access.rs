@@ -1,6 +1,7 @@
 //! Raw diagnostics exposed only to tests and the explicit `testing` feature.
 
 use super::InMemorySessionStore;
+use lash_sansio::sync::MutexExt;
 
 impl InMemorySessionStore {
     /// This diagnostic accessor deliberately does not take `write_transaction`.
@@ -8,13 +9,9 @@ impl InMemorySessionStore {
     /// callers must not use it concurrently with writes or introduce the
     /// inverse lock order.
     pub fn raw_graph_nodes_for_testing(&self) -> Vec<crate::SessionNodeRecord> {
-        let tombstoned = self
-            .tombstoned_node_ids
-            .lock()
-            .expect("lock tombstoned nodes");
+        let tombstoned = self.tombstoned_node_ids.lock_recover();
         self.global_session_graph
-            .lock()
-            .expect("lock global graph")
+            .lock_recover()
             .nodes
             .iter()
             .filter(|node| !tombstoned.contains(&node.node_id))
@@ -25,8 +22,7 @@ impl InMemorySessionStore {
     /// Return the durable leaf-node id without loading a session read model.
     pub fn raw_leaf_node_id_for_testing(&self) -> Option<String> {
         self.session_head_meta
-            .lock()
-            .expect("lock store")
+            .lock_recover()
             .as_ref()
             .and_then(|meta| meta.leaf_node_id.clone())
     }
@@ -34,8 +30,7 @@ impl InMemorySessionStore {
     /// Return the durable head revision without loading a session read model.
     pub fn raw_head_revision_for_testing(&self) -> Option<u64> {
         self.session_head_meta
-            .lock()
-            .expect("lock store")
+            .lock_recover()
             .as_ref()
             .map(|meta| meta.head_revision)
     }
@@ -43,8 +38,7 @@ impl InMemorySessionStore {
     /// Return the durable checkpoint ref without constructing a session read model.
     pub fn raw_checkpoint_ref_for_testing(&self) -> Option<crate::BlobRef> {
         self.session_head_meta
-            .lock()
-            .expect("lock store")
+            .lock_recover()
             .as_ref()
             .and_then(|meta| meta.checkpoint_ref.clone())
     }
@@ -52,8 +46,7 @@ impl InMemorySessionStore {
     /// Return raw pending-input lifecycle state for differential tests.
     pub fn raw_pending_turn_inputs_for_testing(&self) -> Vec<super::RawPendingTurnInputForTesting> {
         self.pending_turn_inputs
-            .lock()
-            .expect("lock pending turn inputs")
+            .lock_recover()
             .iter()
             .map(|entry| {
                 (
@@ -76,13 +69,11 @@ impl InMemorySessionStore {
     pub fn raw_queued_work_for_testing(&self) -> Vec<super::RawQueuedWorkForTesting> {
         let session_id = self
             .session_meta
-            .lock()
-            .expect("lock session meta")
+            .lock_recover()
             .as_ref()
             .map(|meta| meta.session_id.clone());
         self.queued_work
-            .lock()
-            .expect("lock queued work")
+            .lock_recover()
             .iter()
             .filter(|entry| {
                 session_id
@@ -110,8 +101,7 @@ impl InMemorySessionStore {
     pub fn raw_wake_redelivery_fences_for_testing(&self) -> Vec<(String, String, u64)> {
         let mut rows = self
             .wake_redelivery_fences
-            .lock()
-            .expect("lock wake redelivery fences")
+            .lock_recover()
             .iter()
             .map(|((session_id, process_id), sequence)| {
                 (session_id.clone(), process_id.clone(), *sequence)
@@ -124,7 +114,7 @@ impl InMemorySessionStore {
     /// Return the current checkpoint exactly as held by the in-memory durable
     /// implementation, including both content refs and resolved bodies.
     pub fn raw_checkpoint_for_testing(&self) -> Option<crate::HydratedSessionCheckpoint> {
-        self.checkpoint.lock().expect("lock checkpoint").clone()
+        self.checkpoint.lock_recover().clone()
     }
 
     /// Return turn-commit receipt identity, intent hash, and replay payload.
@@ -133,8 +123,7 @@ impl InMemorySessionStore {
     ) -> Vec<(String, String, crate::RuntimeCommitResult)> {
         let mut rows = self
             .runtime_turn_commits
-            .lock()
-            .expect("lock runtime turn commits")
+            .lock_recover()
             .iter()
             .map(|((_session_id, operation), record)| {
                 (
@@ -152,14 +141,12 @@ impl InMemorySessionStore {
     pub fn raw_attachment_manifest_for_testing(&self) -> Vec<crate::AttachmentManifestEntry> {
         let session_id = self
             .session_meta
-            .lock()
-            .expect("lock session meta")
+            .lock_recover()
             .as_ref()
             .map(|meta| meta.session_id.clone());
         let mut rows = self
             .attachment_manifest
-            .lock()
-            .expect("lock attachment manifest")
+            .lock_recover()
             .values()
             .filter(|entry| Some(entry.session_id.as_str()) == session_id.as_deref())
             .cloned()
@@ -170,24 +157,20 @@ impl InMemorySessionStore {
 
     pub fn raw_usage_deltas_for_testing(&self) -> Vec<crate::TokenLedgerEntry> {
         self.usage_deltas
-            .lock()
-            .expect("lock usage deltas")
+            .lock_recover()
             .iter()
             .map(|delta| delta.entry.clone())
             .collect()
     }
 
     pub fn raw_session_meta_for_testing(&self) -> Option<crate::SessionMeta> {
-        self.session_meta.lock().expect("lock session meta").clone()
+        self.session_meta.lock_recover().clone()
     }
 
     /// Install deterministic metadata before a cross-backend differential run.
     pub fn replace_session_meta_for_testing(&self, meta: crate::SessionMeta) {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
-        *self.session_meta.lock().expect("lock session meta") = Some(meta);
+        let _transaction = self.write_transaction.lock_recover();
+        *self.session_meta.lock_recover() = Some(meta);
     }
 
     pub fn raw_session_execution_leases_for_testing(
@@ -202,8 +185,7 @@ impl InMemorySessionStore {
     )> {
         let mut rows = self
             .session_execution_leases
-            .lock()
-            .expect("lock session execution leases")
+            .lock_recover()
             .iter()
             .map(|(session_id, lease)| {
                 (
@@ -227,19 +209,14 @@ impl super::InMemorySessionStoreFactory {
         &self,
         session_id: &str,
     ) -> Option<std::sync::Arc<InMemorySessionStore>> {
-        self.stores
-            .lock()
-            .expect("lock in-memory stores")
-            .get(session_id)
-            .cloned()
+        self.stores.lock_recover().get(session_id).cloned()
     }
 
     /// Return explicit node-anchor rows without mixing in implicit live tips.
     pub fn raw_node_anchors_for_testing(&self) -> Vec<(String, crate::BlobRef, String)> {
         let mut rows = self
             .node_anchors
-            .lock()
-            .expect("lock node anchors")
+            .lock_recover()
             .iter()
             .map(
                 |(node_id, (checkpoint_ref, _checkpoint, source_session_id))| {

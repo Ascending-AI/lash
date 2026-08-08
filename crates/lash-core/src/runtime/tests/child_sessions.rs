@@ -2,6 +2,7 @@ use super::*;
 use crate::AttachmentStore as _;
 use crate::ToolProvider as _;
 use crate::facade_support::ToolStateFacadeOps;
+use lash_sansio::sync::MutexExt;
 
 struct AttachmentWritingTool;
 
@@ -64,10 +65,7 @@ impl crate::ToolProvider for NestedChildSessionTool {
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
         let context = call.context;
         let parent_id = context.session_id().to_string();
-        self.parents
-            .lock()
-            .expect("nested child parents lock")
-            .push(parent_id.clone());
+        self.parents.lock_recover().push(parent_id.clone());
         let (child_id, turn_id) = match parent_id.as_str() {
             "root" => ("nested-child", "nested-child-turn"),
             "nested-child" => ("nested-grandchild", "nested-grandchild-turn"),
@@ -282,10 +280,7 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
     ]);
     let child_factory = RecordingSessionStoreFactory::default().deferring_metadata_to_admission();
     let root_store = Arc::new(RecordingStore::default());
-    *root_store
-        .session_meta
-        .lock()
-        .expect("lock root session meta") = Some(crate::SessionMeta {
+    *root_store.session_meta.lock_recover() = Some(crate::SessionMeta {
         session_id: "root".to_string(),
         session_name: "root".to_string(),
         created_at: "2026-07-29T00:00:00Z".to_string(),
@@ -361,8 +356,7 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
         .find(|store| {
             store
                 .session_meta
-                .lock()
-                .expect("lock session meta")
+                .lock_recover()
                 .as_ref()
                 .is_some_and(|meta| meta.session_id == "attachment-child")
         })
@@ -444,8 +438,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
     let child_is_bound = child_factory.stores().into_iter().any(|store| {
         store
             .session_meta
-            .lock()
-            .expect("lock child metadata")
+            .lock_recover()
             .as_ref()
             .is_some_and(|meta| meta.session_id == child.session_id)
     });
@@ -877,7 +870,7 @@ async fn nested_child_turns_use_independent_default_task_stacks() {
 
     assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
     assert_eq!(
-        *parents.lock().expect("nested child parents lock"),
+        *parents.lock_recover(),
         vec!["root".to_string(), "nested-child".to_string()]
     );
 }
@@ -1029,8 +1022,7 @@ fn child_turn_usage_event() -> LlmStreamEvent {
 fn child_source_input_tokens(runtime: &LashRuntime) -> i64 {
     runtime
         .shared_token_ledger
-        .lock()
-        .expect("shared token ledger")
+        .lock_recover()
         .iter()
         .map(|entry| entry.usage.input_tokens)
         .sum()
@@ -1122,11 +1114,7 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
         outcome = turn.as_mut() => panic!("parked child turn must not complete: {outcome:?}"),
     }
     assert!(
-        runtime
-            .managed_turns
-            .lock()
-            .expect("managed turns")
-            .contains_key(turn_id),
+        runtime.managed_turns.lock_recover().contains_key(turn_id),
         "the parked child turn must be registered while it runs"
     );
     assert_eq!(
@@ -1139,11 +1127,7 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
     drop(turn);
 
     assert!(
-        runtime
-            .managed_turns
-            .lock()
-            .expect("managed turns")
-            .is_empty(),
+        runtime.managed_turns.lock_recover().is_empty(),
         "a cancelled child turn must not leave a ghost registration behind"
     );
     // The live-usage entry is keyed by turn id, so a stranded entry would

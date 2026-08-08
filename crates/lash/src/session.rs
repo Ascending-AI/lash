@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -247,8 +248,7 @@ impl SessionBuilder {
             && !self
                 .core
                 .ephemeral_session_ids
-                .lock()
-                .expect("ephemeral session id registry")
+                .lock_recover()
                 .insert(session_id.clone())
         {
             return Err(EmbedError::EphemeralSessionIdReused { session_id });

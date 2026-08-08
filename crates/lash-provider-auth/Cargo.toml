@@ -17,6 +17,7 @@ categories = ["api-bindings", "authentication"]
 workspace = true
 
 [dependencies]
+lash-sansio = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
 form_urlencoded = { workspace = true }

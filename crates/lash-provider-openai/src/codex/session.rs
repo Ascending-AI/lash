@@ -9,6 +9,7 @@
 //! it. `CodexWebSocketAttemptError` lives here because connecting is the first
 //! place an attempt can fail.
 
+use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -101,11 +102,7 @@ pub(super) struct CodexWebSocketAttemptError {
 
 impl CodexProvider {
     fn remove_websocket_scope(&self, scope_key: &str) {
-        let mut sessions = self
-            .websocket_sessions
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut sessions = self.websocket_sessions.inner.lock_recover();
         sessions.by_scope.remove(scope_key);
     }
 
@@ -168,11 +165,7 @@ impl CodexProvider {
     /// it is released.
     pub(super) async fn close_websocket_sessions(&self) {
         let connections: Vec<CodexWsStream> = {
-            let mut sessions = self
-                .websocket_sessions
-                .inner
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut sessions = self.websocket_sessions.inner.lock_recover();
             let drained = sessions
                 .by_scope
                 .drain()
@@ -193,11 +186,7 @@ impl CodexProvider {
 
     pub(super) fn clear_continuation(&self, req: &LlmRequest) {
         let scope_key = req.continuation_key();
-        let mut sessions = self
-            .websocket_sessions
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut sessions = self.websocket_sessions.inner.lock_recover();
         if let Some(entry) = sessions.by_scope.get_mut(&scope_key) {
             entry.continuation = None;
         }
@@ -205,11 +194,7 @@ impl CodexProvider {
 
     pub(super) fn websocket_fallback_reason(&self, req: &LlmRequest) -> Option<String> {
         let scope_key = req.continuation_key();
-        let mut sessions = self
-            .websocket_sessions
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut sessions = self.websocket_sessions.inner.lock_recover();
         Self::prune_expired_websocket_fallbacks(&mut sessions, Instant::now());
         sessions
             .fallback_by_scope
@@ -219,11 +204,7 @@ impl CodexProvider {
 
     pub(super) fn record_websocket_fallback(&self, req: &LlmRequest, error: &LlmTransportError) {
         let scope_key = req.continuation_key();
-        let mut sessions = self
-            .websocket_sessions
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut sessions = self.websocket_sessions.inner.lock_recover();
         let now = Instant::now();
         Self::prune_expired_websocket_fallbacks(&mut sessions, now);
         let reason = error
@@ -242,11 +223,7 @@ impl CodexProvider {
 
     pub(super) fn clear_websocket_fallback(&self, req: &LlmRequest) {
         let scope_key = req.continuation_key();
-        let mut sessions = self
-            .websocket_sessions
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut sessions = self.websocket_sessions.inner.lock_recover();
         sessions.fallback_by_scope.remove(&scope_key);
     }
 
@@ -389,11 +366,7 @@ impl CodexProvider {
         }
 
         let decision = {
-            let mut sessions = self
-                .websocket_sessions
-                .inner
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut sessions = self.websocket_sessions.inner.lock_recover();
             Self::prune_idle_websocket_sessions(&mut sessions);
             Self::enforce_websocket_session_cache_cap(&mut sessions);
             Self::evict_websocket_sessions_for_generation(&mut sessions, credential_generation);
@@ -475,11 +448,7 @@ impl CodexProvider {
             self.remove_websocket_scope(&scope_key);
             return;
         }
-        let mut sessions = self
-            .websocket_sessions
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut sessions = self.websocket_sessions.inner.lock_recover();
         sessions.by_scope.insert(
             scope_key,
             CodexWebsocketSessionEntry {

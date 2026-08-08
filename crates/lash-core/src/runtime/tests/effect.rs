@@ -2,6 +2,7 @@ use super::*;
 use crate::facade_support::SessionGraphFacadeOps;
 use crate::llm::types::{AttachmentSource, LlmContentBlock, LlmMessage, LlmRole, LlmToolChoice};
 use crate::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
+use lash_sansio::sync::MutexExt;
 
 #[derive(Clone, Debug)]
 struct EffectControllerRecord {
@@ -58,11 +59,11 @@ impl RecordingEffectController {
     }
 
     fn records(&self) -> Vec<EffectControllerRecord> {
-        self.records.lock().expect("effect records").clone()
+        self.records.lock_recover().clone()
     }
 
     fn envelopes(&self) -> Vec<String> {
-        self.envelopes.lock().expect("effect envelopes").clone()
+        self.envelopes.lock_recover().clone()
     }
 
     fn count_kind(&self, kind: RuntimeEffectKind) -> usize {
@@ -73,14 +74,11 @@ impl RecordingEffectController {
     }
 
     fn record(&self, invocation: &RuntimeInvocation) {
-        self.records
-            .lock()
-            .expect("effect records")
-            .push(EffectControllerRecord {
-                kind: invocation.effect_kind().expect("effect kind"),
-                turn_id: invocation.scope.turn_id.clone(),
-                replay_key: invocation.replay_key().expect("replay key").to_string(),
-            });
+        self.records.lock_recover().push(EffectControllerRecord {
+            kind: invocation.effect_kind().expect("effect kind"),
+            turn_id: invocation.scope.turn_id.clone(),
+            replay_key: invocation.replay_key().expect("replay key").to_string(),
+        });
     }
 }
 
@@ -179,21 +177,19 @@ impl RuntimeEffectController for RecordingEffectController {
         if self.replay_by_key
             && let Some(outcome) = self
                 .replay_outcomes
-                .lock()
-                .expect("replay outcomes")
+                .lock_recover()
                 .get(&replay_key)
                 .cloned()
         {
             return Ok(outcome);
         }
         self.envelopes
-            .lock()
-            .expect("effect envelopes")
+            .lock_recover()
             .push(serde_json::to_string(&envelope).expect("serialize effect envelope"));
         self.record(&envelope.invocation);
         let outcome = match envelope.command {
             RuntimeEffectCommand::LlmCall { request } => {
-                let mut llm_calls = self.llm_calls.lock().expect("llm calls");
+                let mut llm_calls = self.llm_calls.lock_recover();
                 *llm_calls += 1;
                 let first_call = *llm_calls == 1;
                 let prompt = format!("{:?}", request.messages);
@@ -320,7 +316,7 @@ impl RuntimeEffectController for RecordingEffectController {
                 resolution: crate::Resolution::Ok(serde_json::json!(null)),
             }),
             RuntimeEffectCommand::PeekAwaitEvent { .. }
-                if self.cancel_after_llm && *self.llm_calls.lock().expect("llm calls") > 0 =>
+                if self.cancel_after_llm && *self.llm_calls.lock_recover() > 0 =>
             {
                 Ok(RuntimeEffectOutcome::PeekAwaitEvent {
                     resolution: Some(Resolution::Ok(serde_json::json!({
@@ -397,8 +393,7 @@ impl RuntimeEffectController for RecordingEffectController {
             && let Ok(outcome) = &outcome
         {
             self.replay_outcomes
-                .lock()
-                .expect("replay outcomes")
+                .lock_recover()
                 .insert(replay_key, outcome.clone());
         }
         outcome
@@ -1079,7 +1074,7 @@ async fn tool_emitted_trigger_redrive_reemits_reserved_start_without_appending_s
 
     impl CapturingToolReplayController {
         fn tool_outcomes(&self) -> Vec<serde_json::Value> {
-            self.tool_outcomes.lock().expect("tool outcomes").clone()
+            self.tool_outcomes.lock_recover().clone()
         }
 
         fn process_starts(&self) -> usize {
@@ -1154,8 +1149,7 @@ async fn tool_emitted_trigger_redrive_reemits_reserved_start_without_appending_s
             if matches!(&envelope.command, RuntimeEffectCommand::ToolBatch { .. }) {
                 let outcome = local_executor.execute(envelope).await?;
                 self.tool_outcomes
-                    .lock()
-                    .expect("tool outcomes")
+                    .lock_recover()
                     .push(serde_json::to_value(&outcome).expect("serialize tool outcome"));
                 return Ok(outcome);
             }
@@ -1183,7 +1177,7 @@ async fn tool_emitted_trigger_redrive_reemits_reserved_start_without_appending_s
                         .await
                 }
                 RuntimeEffectCommand::LlmCall { .. } => {
-                    let mut llm_calls = self.llm_calls.lock().expect("llm calls");
+                    let mut llm_calls = self.llm_calls.lock_recover();
                     *llm_calls += 1;
                     let parts = if *llm_calls == 1 {
                         vec![LlmOutputPart::ToolCall {
@@ -1893,7 +1887,7 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
     assert!(recorder.records().iter().any(|record| {
         record.kind == RuntimeEffectKind::Direct && record.replay_key == expected_replay_key
     }));
-    let ledger = runtime.shared_token_ledger.lock().expect("token ledger");
+    let ledger = runtime.shared_token_ledger.lock_recover();
     assert_eq!(ledger.len(), 1);
     assert_eq!(ledger[0].source, "direct-test");
     assert_eq!(ledger[0].model, "mock-model");
@@ -1958,14 +1952,11 @@ async fn in_turn_direct_completion_uses_effect_controller_without_out_of_band_co
     // `commit_runtime_state` mid-turn: doing so races the owning turn's
     // head-revision CAS.
     assert_eq!(
-        *store
-            .runtime_commit_count
-            .lock()
-            .expect("runtime commit count"),
+        *store.runtime_commit_count.lock_recover(),
         0,
         "in-turn direct completion must not commit runtime state out-of-band"
     );
-    let ledger = runtime.shared_token_ledger.lock().expect("token ledger");
+    let ledger = runtime.shared_token_ledger.lock_recover();
     assert_eq!(ledger.len(), 1);
     assert_eq!(ledger[0].usage.input_tokens, 7);
 }

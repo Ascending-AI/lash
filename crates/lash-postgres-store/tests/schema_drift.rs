@@ -12,6 +12,7 @@ use lash_postgres_store::{
     ColumnValueSource, ForeignKeyAction, PostgresStorage, PostgresStoreConfig, SchemaCheck,
     SchemaFinding, SchemaProvisioning,
 };
+use lash_sansio::sync::MutexExt;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::{Connection, Executor, PgConnection};
 
@@ -1386,8 +1387,7 @@ impl EventCapture {
     /// schema and so isolates one test's decisions from every other test's.
     fn events_for(&self, schema: &str) -> Vec<String> {
         self.0
-            .lock()
-            .expect("capture lock")
+            .lock_recover()
             .iter()
             .filter(|event| event.contains(&format!("schema={schema} ")))
             .cloned()
@@ -1421,7 +1421,7 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for EventCapture {
         }
         let mut visitor = Visitor(format!("level={} ", event.metadata().level()));
         event.record(&mut visitor);
-        self.0.lock().expect("capture lock").push(visitor.0);
+        self.0.lock_recover().push(visitor.0);
     }
 }
 

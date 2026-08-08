@@ -520,6 +520,7 @@ impl Default for RuntimeSessionState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_sansio::sync::MutexExt;
 
     #[test]
     fn commit_operation_identity_depends_on_caller_boundary_not_head_revision() {
@@ -540,8 +541,7 @@ mod tests {
     impl crate::ToolProvider for DynamicSnapshotTools {
         fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
             self.names
-                .lock()
-                .expect("dynamic snapshot names")
+                .lock_recover()
                 .iter()
                 .map(|name| {
                     crate::ToolDefinition::raw(
@@ -558,8 +558,7 @@ mod tests {
 
         fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
             self.names
-                .lock()
-                .expect("dynamic snapshot names")
+                .lock_recover()
                 .iter()
                 .any(|candidate| candidate == name)
                 .then(|| {
@@ -640,10 +639,7 @@ mod tests {
             ..RuntimeSessionState::default()
         };
 
-        names
-            .lock()
-            .expect("dynamic snapshot names")
-            .push("dynamic_two".to_string());
+        names.lock_recover().push("dynamic_two".to_string());
         let report = plugins
             .tool_registry()
             .restore_state(snapshot)

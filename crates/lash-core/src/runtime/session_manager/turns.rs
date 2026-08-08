@@ -1,5 +1,6 @@
 use super::*;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
+use lash_sansio::sync::MutexExt;
 
 impl ManagedSessionCapability {
     pub(in crate::runtime::session_manager) async fn start_turn(
@@ -76,7 +77,7 @@ impl ManagedSessionCapability {
                 abort_on_drop.disarm();
                 match joined {
                     Ok(turn) => turn,
-                    Err(err) if err.is_panic() => std::panic::resume_unwind(err.into_panic()),
+                    Err(err) if err.is_panic() => child_turn_panicked(err.into_panic()),
                     Err(err) => Err(crate::PluginError::Session(format!(
                         "child session turn task was cancelled: {err}"
                     ))),
@@ -121,11 +122,34 @@ impl ManagedSessionCapability {
     fn child_usage_source(&self, usage: &UsageCapability, session_id: &str) -> String {
         usage
             .child_sources
-            .lock()
-            .expect("child usage sources lock")
+            .lock_recover()
             .get(session_id)
             .cloned()
             .unwrap_or_else(|| "child".to_string())
+    }
+}
+
+fn child_turn_panicked(
+    payload: Box<dyn std::any::Any + Send>,
+) -> Result<AssembledTurn, crate::PluginError> {
+    let message = crate::panic_containment::payload_message(payload.as_ref());
+    let failure = Err(crate::PluginError::Session(format!(
+        "child_turn_panicked: {message}"
+    )));
+    crate::panic_containment::enforce_loudness(payload);
+    failure
+}
+
+#[cfg(test)]
+mod panic_tests {
+    #[test]
+    fn contained_child_turn_panic_is_loud_in_test_builds() {
+        let previous = crate::panic_containment::set_loud(true);
+        let panic = std::panic::catch_unwind(|| {
+            let _ = super::child_turn_panicked(Box::new("child turn remains loud"));
+        });
+        crate::panic_containment::set_loud(previous);
+        assert!(panic.is_err());
     }
 }
 
@@ -334,8 +358,7 @@ impl ManagedTurnLease {
         }
         let live_usage = self
             .live_usage
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lock_recover()
             .remove(&self.turn_id)
             .unwrap_or_default();
         tracing::debug!(
@@ -363,17 +386,13 @@ impl Drop for ManagedTurnLease {
     }
 }
 
-/// Poison-tolerant lock for the active-turn registry. `Drop` runs this on the
-/// unwind path of a panicking child turn (`turns.rs` resumes that panic), so a
-/// poisoned mutex must not turn one panic into a double-panic abort. Nothing is
+/// Workspace-policy lock acquisition for the active-turn registry. Nothing is
 /// ever left half-written under this lock: every critical section is a single
 /// map operation.
 pub(in crate::runtime::session_manager) fn lock_turns(
     turns: &ManagedTurnRegistry,
 ) -> std::sync::MutexGuard<'_, HashMap<String, ManagedSessionTurn>> {
-    turns
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    turns.lock_recover()
 }
 
 async fn run_managed_session_turn(
@@ -454,7 +473,7 @@ mod tests {
         let (turns, live_usage) = shared_maps();
         let lease =
             ManagedTurnLease::register(&turns, &live_usage, "session", "turn").expect("register");
-        live_usage.lock().expect("live usage").insert(
+        live_usage.lock_recover().insert(
             "turn".to_string(),
             TokenUsage {
                 input_tokens: 3,
@@ -464,8 +483,8 @@ mod tests {
 
         drop(lease);
 
-        assert!(turns.lock().expect("turns").is_empty());
-        assert!(live_usage.lock().expect("live usage").is_empty());
+        assert!(turns.lock_recover().is_empty());
+        assert!(live_usage.lock_recover().is_empty());
     }
 
     #[test]
@@ -473,7 +492,7 @@ mod tests {
         let (turns, live_usage) = shared_maps();
         let lease =
             ManagedTurnLease::register(&turns, &live_usage, "session", "turn").expect("register");
-        live_usage.lock().expect("live usage").insert(
+        live_usage.lock_recover().insert(
             "turn".to_string(),
             TokenUsage {
                 input_tokens: 3,
@@ -486,8 +505,8 @@ mod tests {
         let reported = lease.complete();
 
         assert_eq!(reported.input_tokens, 3);
-        assert!(turns.lock().expect("turns").is_empty());
-        assert!(live_usage.lock().expect("live usage").is_empty());
+        assert!(turns.lock_recover().is_empty());
+        assert!(live_usage.lock_recover().is_empty());
     }
 
     /// The ABA a `(session_id, turn_id)` check cannot see: the stale lease's own
@@ -535,7 +554,7 @@ mod tests {
         // Step 4.
         let successor = ManagedTurnLease::register(&turns, &live_usage, "session", "turn")
             .expect("re-register");
-        live_usage.lock().expect("live usage").insert(
+        live_usage.lock_recover().insert(
             "turn".to_string(),
             TokenUsage {
                 input_tokens: 7,
@@ -553,8 +572,7 @@ mod tests {
         );
         assert_eq!(
             live_usage
-                .lock()
-                .expect("live usage")
+                .lock_recover()
                 .get("turn")
                 .map(|usage| usage.input_tokens),
             Some(7),
@@ -564,7 +582,7 @@ mod tests {
         // The successor still owns both entries and releases them itself.
         assert_eq!(successor.complete().input_tokens, 7);
         assert!(lock_turns(&turns).is_empty());
-        assert!(live_usage.lock().expect("live usage").is_empty());
+        assert!(live_usage.lock_recover().is_empty());
     }
 
     #[test]
@@ -638,7 +656,7 @@ mod tests {
             "an emit after release must not re-record the cumulative usage"
         );
         assert!(
-            live_usage.lock().expect("live usage").is_empty(),
+            live_usage.lock_recover().is_empty(),
             "an emit after release must not resurrect the live-usage entry"
         );
     }
@@ -683,7 +701,7 @@ mod tests {
             .expect("emit reaches post-accounting gate");
         drop(lease);
         assert!(
-            live_usage.lock().expect("live usage").is_empty(),
+            live_usage.lock_recover().is_empty(),
             "release must remove the accounted live-map entry"
         );
 
@@ -701,7 +719,7 @@ mod tests {
         emit.await.expect("gated emit task");
 
         assert!(
-            live_usage.lock().expect("live usage").is_empty(),
+            live_usage.lock_recover().is_empty(),
             "the resumed emit must not resurrect released live usage"
         );
         assert_eq!(
@@ -724,8 +742,7 @@ mod tests {
 
     fn ledger_input_tokens(ledger: &Arc<StdMutex<Vec<PendingTokenLedgerEntry>>>) -> i64 {
         ledger
-            .lock()
-            .expect("ledger")
+            .lock_recover()
             .iter()
             .map(|entry| entry.usage.input_tokens)
             .sum()

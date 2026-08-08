@@ -7,6 +7,7 @@
 //! This explicit opt-in has no silent in-memory default and holds the same `RuntimePersistence` contract as the
 //! durable backend (verified by the `runtime_persistence` conformance suite).
 use crate::facade_support::SessionGraphFacadeOps;
+use lash_sansio::sync::MutexExt;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -105,6 +106,9 @@ pub struct InMemorySessionStore {
     /// session lease and mutating fenced runtime state atomically. Component
     /// mutexes still guard their data; this mutex supplies the transaction
     /// boundary and lock ordering that SQLite/Postgres provide natively.
+    /// Poison recovery is deliberate under ADR 0054. These critical sections
+    /// must remain host-code-free: read clocks and invoke any other dynamic
+    /// host surface before acquiring this lock, then carry inert values in.
     write_transaction: Arc<Mutex<()>>,
     pub(crate) session_head_meta: Mutex<Option<crate::SessionHeadMeta>>,
     pub(crate) session_meta: Mutex<Option<crate::SessionMeta>>,
@@ -286,12 +290,9 @@ impl InMemorySessionStore {
         &self,
         session_id: &str,
         fence: &crate::SessionExecutionLeaseAuthority,
+        now: u64,
     ) -> Result<(), crate::store::StoreError> {
-        let now = self.clock.timestamp_ms();
-        let leases = self
-            .session_execution_leases
-            .lock()
-            .expect("lock session execution leases");
+        let leases = self.session_execution_leases.lock_recover();
         crate::store::session_execution_lease::require_current_session_execution_lease(
             session_id,
             leases.get(session_id).map(|current| {
@@ -312,10 +313,7 @@ impl InMemorySessionStore {
     /// claim is live for lease-less host callers exactly when the generation it
     /// pins equals this value (ADR 0029).
     fn live_session_lease_generation(&self, session_id: &str, now: u64) -> Option<u64> {
-        let leases = self
-            .session_execution_leases
-            .lock()
-            .expect("lock session execution leases");
+        let leases = self.session_execution_leases.lock_recover();
         leases
             .get(session_id)
             .filter(|lease| lease.is_live(now))
@@ -327,10 +325,7 @@ impl InMemorySessionStore {
         completion: &crate::SessionExecutionLeaseAuthority,
         trace_refusal: bool,
     ) -> bool {
-        let mut leases = self
-            .session_execution_leases
-            .lock()
-            .expect("lock session execution leases");
+        let mut leases = self.session_execution_leases.lock_recover();
         if let Some(current) = leases.get_mut(&completion.session_id)
             && current
                 .owner
@@ -412,11 +407,9 @@ impl InMemorySessionStore {
         owner: &crate::LeaseOwnerIdentity,
         kind: InMemoryQueuedWorkClaimKind,
     ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
-        self.verify_session_execution_lease(session_id, session_execution_lease)?;
+        let now = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
+        self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
         #[cfg(test)]
         self.run_claim_after_lease_validation_hook();
         self.claim_ready_queued_work_after_lease_validation(
@@ -424,6 +417,7 @@ impl InMemorySessionStore {
             session_execution_lease,
             owner,
             kind,
+            now,
         )
     }
 
@@ -433,6 +427,7 @@ impl InMemorySessionStore {
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         kind: InMemoryQueuedWorkClaimKind,
+        now: u64,
     ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
         let max_batches = match kind {
             InMemoryQueuedWorkClaimKind::LeadingSessionCommand => 1,
@@ -446,8 +441,7 @@ impl InMemorySessionStore {
         // pinned generation differs from ours; same-generation self-steal is
         // therefore unrepresentable (ADR 0029).
         let generation = session_execution_lease.fencing_token;
-        let now = self.clock.timestamp_ms();
-        let mut queued = self.queued_work.lock().expect("lock queued work");
+        let mut queued = self.queued_work.lock_recover();
         queued.sort_by_key(|entry| entry.batch.enqueue_seq);
         let claim_available = |entry: &InMemoryQueuedBatch| {
             entry.claim_token.is_none() || entry.claim_session_lease_generation != generation
@@ -549,11 +543,9 @@ impl InMemorySessionStore {
         max_inputs: usize,
         mode: crate::TurnInputClaimMode,
     ) -> Result<Option<crate::TurnInputClaim>, crate::store::StoreError> {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
-        self.verify_session_execution_lease(session_id, session_execution_lease)?;
+        let now = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
+        self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
         #[cfg(test)]
         self.run_claim_after_lease_validation_hook();
         self.claim_pending_turn_inputs_after_lease_validation(
@@ -562,6 +554,7 @@ impl InMemorySessionStore {
             owner,
             max_inputs,
             mode,
+            now,
         )
     }
 
@@ -572,6 +565,7 @@ impl InMemorySessionStore {
         owner: &crate::LeaseOwnerIdentity,
         max_inputs: usize,
         mode: crate::TurnInputClaimMode,
+        now: u64,
     ) -> Result<Option<crate::TurnInputClaim>, crate::store::StoreError> {
         if max_inputs == 0 {
             return Ok(None);
@@ -581,11 +575,7 @@ impl InMemorySessionStore {
         // rows pinned to any other generation (or unheld) are claimable
         // (ADR 0029).
         let generation = session_execution_lease.fencing_token;
-        let now = self.clock.timestamp_ms();
-        let mut pending = self
-            .pending_turn_inputs
-            .lock()
-            .expect("lock pending turn input");
+        let mut pending = self.pending_turn_inputs.lock_recover();
         pending.sort_by_key(|entry| entry.input.enqueue_seq);
         let claim_available = |entry: &InMemoryPendingTurnInput| {
             entry.claim_token.is_none() || entry.claim_session_lease_generation != generation
@@ -680,32 +670,27 @@ impl InMemorySessionStore {
         max_batches: usize,
     ) -> Result<bool, crate::store::StoreError> {
         let has_turn_input = max_inputs > 0
-            && self
-                .pending_turn_inputs
-                .lock()
-                .expect("lock pending turn input")
-                .iter()
-                .any(|entry| {
-                    entry.input.session_id == session_id
-                        && matches!(
-                            entry.input.state,
-                            crate::TurnInputState::PendingActive | crate::TurnInputState::Accepted
-                        )
-                        && (entry.claim_token.is_none()
-                            || entry.claim_session_lease_generation != generation)
-                        && entry
-                            .input
-                            .ingress
-                            .active_turn_id()
-                            .is_some_and(|active| active == turn_id)
-                        && entry.input.ingress.admits_checkpoint(checkpoint)
-                });
+            && self.pending_turn_inputs.lock_recover().iter().any(|entry| {
+                entry.input.session_id == session_id
+                    && matches!(
+                        entry.input.state,
+                        crate::TurnInputState::PendingActive | crate::TurnInputState::Accepted
+                    )
+                    && (entry.claim_token.is_none()
+                        || entry.claim_session_lease_generation != generation)
+                    && entry
+                        .input
+                        .ingress
+                        .active_turn_id()
+                        .is_some_and(|active| active == turn_id)
+                    && entry.input.ingress.admits_checkpoint(checkpoint)
+            });
         if has_turn_input || max_batches == 0 {
             return Ok(has_turn_input);
         }
 
         let now = self.clock.timestamp_ms();
-        let queued = self.queued_work.lock().expect("lock queued work");
+        let queued = self.queued_work.lock_recover();
         let first_ready = queued
             .iter()
             .filter(|entry| {
@@ -749,35 +734,20 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         #[cfg(test)]
         if self
             .fail_load_session_on_call
-            .lock()
-            .expect("lock load-session failure injection")
+            .lock_recover()
             .is_some_and(|call| call == load_call)
         {
-            self.fail_load_session_on_call
-                .lock()
-                .expect("lock load-session failure injection")
-                .take();
+            self.fail_load_session_on_call.lock_recover().take();
             return Err(crate::StoreError::Backend(
                 "injected load-session failure".to_string(),
             ));
         }
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory read snapshot");
-        let Some(meta) = self.session_head_meta.lock().expect("lock store").clone() else {
+        let _transaction = self.write_transaction.lock_recover();
+        let Some(meta) = self.session_head_meta.lock_recover().clone() else {
             return Ok(None);
         };
-        let tombstoned = self
-            .tombstoned_node_ids
-            .lock()
-            .expect("lock tombstoned nodes")
-            .clone();
-        let global_graph = self
-            .global_session_graph
-            .lock()
-            .expect("lock global graph")
-            .clone();
+        let tombstoned = self.tombstoned_node_ids.lock_recover().clone();
+        let global_graph = self.global_session_graph.lock_recover().clone();
         let mut graph = global_graph;
         graph.set_leaf_node_id(meta.leaf_node_id.clone());
         let mut graph = graph.trim_to_active_path();
@@ -803,11 +773,10 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             current_frame_node_id: meta.current_frame_node_id,
             graph,
             checkpoint_ref: meta.checkpoint_ref,
-            checkpoint: self.checkpoint.lock().expect("lock checkpoint").clone(),
+            checkpoint: self.checkpoint.lock_recover().clone(),
             token_ledger: crate::store::merge_token_ledger_entries_checked(
                 self.usage_deltas
-                    .lock()
-                    .expect("lock usage deltas")
+                    .lock_recover()
                     .iter()
                     .map(|delta| delta.entry.clone())
                     .collect(),
@@ -819,18 +788,13 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         &self,
         node_id: &str,
     ) -> Result<Option<crate::SessionNodeRecord>, crate::store::StoreError> {
-        if self
-            .tombstoned_node_ids
-            .lock()
-            .expect("lock tombstoned nodes")
-            .contains(node_id)
-        {
+        if self.tombstoned_node_ids.lock_recover().contains(node_id) {
             return Ok(None);
         }
         if !self.node_visible_to_bound_session(node_id) {
             return Ok(None);
         }
-        let graph = self.global_session_graph.lock().expect("lock global graph");
+        let graph = self.global_session_graph.lock_recover();
         Ok(graph.find_node(node_id).cloned())
     }
 
@@ -841,10 +805,9 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         let planner = crate::store::RuntimeCommitPlanner::prepare(commit)?;
         let commit = planner.commit();
         let session_id = commit.session_id.clone();
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
+        let transaction_now = self.clock.timestamp_ms();
+        let transaction_created_at = self.clock.timestamp_rfc3339();
+        let _transaction = self.write_transaction.lock_recover();
         #[cfg(test)]
         self.commit_write_transaction_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -852,35 +815,23 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         if let Some(fence) = commit.session_execution_lease_fence.as_ref() {
             // This check-then-act read is atomic under the coarse write lock;
             // that serialization is intentional for the development backend.
-            self.verify_session_execution_lease(&session_id, fence)?;
+            self.verify_session_execution_lease(&session_id, fence, transaction_now)?;
         }
         #[cfg(test)]
-        if let Some(error) = self
-            .fail_next_runtime_commit
-            .lock()
-            .expect("lock next runtime commit failure")
-            .take()
-        {
+        if let Some(error) = self.fail_next_runtime_commit.lock_recover().take() {
             return Err(error);
         }
-        let mut meta = self.session_head_meta.lock().expect("lock store");
+        let mut meta = self.session_head_meta.lock_recover();
         let actual = meta.as_ref().map_or(0, |meta| meta.head_revision);
         planner.validate_session_binding(meta.as_ref().map(|meta| meta.session_id.as_str()))?;
         #[cfg(test)]
-        let session_meta_before_commit =
-            self.session_meta.lock().expect("lock session meta").clone();
-        self.ensure_session_metadata_for_commit(commit)?;
+        let session_meta_before_commit = self.session_meta.lock_recover().clone();
+        self.ensure_session_metadata_for_commit(commit, &transaction_created_at)?;
         #[cfg(test)]
         self.fail_after_first_runtime_commit_mutation_if_requested(session_meta_before_commit)?;
         planner.validate_node_derivation()?;
         let key = (session_id.clone(), planner.operation_key().to_string());
-        if let Some(stored) = self
-            .runtime_turn_commits
-            .lock()
-            .expect("lock runtime turn commits")
-            .get(&key)
-            .cloned()
-        {
+        if let Some(stored) = self.runtime_turn_commits.lock_recover().get(&key).cloned() {
             let stored_count = stored
                 .requested_node_count
                 .map(u64::try_from)
@@ -936,15 +887,9 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             execution_state,
         };
         let incoming_nodes = commit.graph.nodes.as_slice();
-        let mut global_node_owners = self
-            .global_node_owners
-            .lock()
-            .expect("lock global in-memory node ids");
-        let graph = self.global_session_graph.lock().expect("lock global graph");
-        let tombstoned = self
-            .tombstoned_node_ids
-            .lock()
-            .expect("lock tombstoned nodes");
+        let mut global_node_owners = self.global_node_owners.lock_recover();
+        let graph = self.global_session_graph.lock_recover();
+        let tombstoned = self.tombstoned_node_ids.lock_recover();
         let occupied_node_ids = incoming_nodes
             .iter()
             .filter(|node| {
@@ -957,11 +902,8 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         drop(graph);
         drop(tombstoned);
         let (has_existing_live_nodes, selected_leaf_is_live, old_leaf_is_live) = {
-            let graph = self.global_session_graph.lock().expect("lock global graph");
-            let tombstoned = self
-                .tombstoned_node_ids
-                .lock()
-                .expect("lock tombstoned nodes");
+            let graph = self.global_session_graph.lock_recover();
+            let tombstoned = self.tombstoned_node_ids.lock_recover();
             let has_existing_live_nodes = global_node_owners.iter().any(|(node_id, owner)| {
                 owner == &commit.session_id && !tombstoned.contains(node_id)
             });
@@ -987,15 +929,10 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .as_deref()
             .is_none_or(|required| {
                 self.session_graph
-                    .lock()
-                    .expect("lock graph for append ancestor fence")
+                    .lock_recover()
                     .active_path_contains(required)
             });
-        let mut proposed = self
-            .global_session_graph
-            .lock()
-            .expect("lock global graph")
-            .clone();
+        let mut proposed = self.global_session_graph.lock_recover().clone();
         proposed.extend_node_records(commit.graph.nodes.iter().cloned());
         proposed.set_leaf_node_id(commit.graph.leaf_node_id().cloned());
         let derived_frame_node_id = match proposed.leaf_node_id.as_deref() {
@@ -1016,21 +953,12 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         })?;
         let (staged_tombstoned_node_ids, staged_session_heads) = {
             let new_leaf_node_id = commit.graph.leaf_node_id().cloned();
-            let mut tombstoned = self
-                .tombstoned_node_ids
-                .lock()
-                .expect("lock tombstoned nodes")
-                .clone();
-            let mut session_heads = self
-                .global_session_heads
-                .lock()
-                .expect("lock global session heads")
-                .clone();
+            let mut tombstoned = self.tombstoned_node_ids.lock_recover().clone();
+            let mut session_heads = self.global_session_heads.lock_recover().clone();
             session_heads.insert(commit.session_id.clone(), new_leaf_node_id.clone());
             let anchored_node_ids = self
                 .node_anchors
-                .lock()
-                .expect("lock node anchors")
+                .lock_recover()
                 .keys()
                 .cloned()
                 .collect::<HashSet<_>>();
@@ -1050,7 +978,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             (tombstoned, session_heads)
         };
         {
-            let queued = self.queued_work.lock().expect("lock queued work");
+            let queued = self.queued_work.lock_recover();
             for completed in &commit.completed_queue_claims {
                 let matches = queued
                     .iter()
@@ -1095,10 +1023,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             }
         }
         {
-            let pending = self
-                .pending_turn_inputs
-                .lock()
-                .expect("lock pending turn input");
+            let pending = self.pending_turn_inputs.lock_recover();
             for completed in &commit.completed_turn_input_claims {
                 let matches = pending
                     .iter()
@@ -1161,16 +1086,9 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             staged_queued_work_next_seq,
             staged_enqueued_queue_batches,
         ) = {
-            let mut queued = self.queued_work.lock().expect("lock queued work").clone();
-            let mut fences = self
-                .wake_redelivery_fences
-                .lock()
-                .expect("lock wake redelivery fences")
-                .clone();
-            let mut next_seq = *self
-                .queued_work_next_seq
-                .lock()
-                .expect("lock queued work seq");
+            let mut queued = self.queued_work.lock_recover().clone();
+            let mut fences = self.wake_redelivery_fences.lock_recover().clone();
+            let mut next_seq = *self.queued_work_next_seq.lock_recover();
             for completed in &commit.completed_queue_claims {
                 for entry in queued.iter().filter(|entry| {
                     entry.batch.session_id == completed.session_id
@@ -1205,7 +1123,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                         && completed.batch_ids.contains(&entry.batch.batch_id))
                 });
             }
-            let enqueued_at_ms = self.clock.timestamp_ms();
             let enqueued = commit
                 .enqueued_queue_batches
                 .iter()
@@ -1216,7 +1133,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                         &fences,
                         &mut next_seq,
                         batch,
-                        enqueued_at_ms,
+                        transaction_now,
                     )
                     .map(crate::QueuedWorkEnqueueOutcome::into_batch)
                 })
@@ -1224,11 +1141,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             (queued, fences, next_seq, enqueued)
         };
         let staged_pending_turn_inputs = {
-            let mut pending = self
-                .pending_turn_inputs
-                .lock()
-                .expect("lock pending turn input")
-                .clone();
+            let mut pending = self.pending_turn_inputs.lock_recover().clone();
             for completed in &commit.completed_turn_input_claims {
                 for entry in pending.iter_mut() {
                     if entry.input.session_id == completed.session_id
@@ -1263,41 +1176,26 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             pending
         };
 
-        *self.queued_work.lock().expect("lock queued work") = staged_queued_work;
-        *self
-            .wake_redelivery_fences
-            .lock()
-            .expect("lock wake redelivery fences") = staged_wake_redelivery_fences;
-        *self
-            .queued_work_next_seq
-            .lock()
-            .expect("lock queued work seq") = staged_queued_work_next_seq;
-        *self
-            .pending_turn_inputs
-            .lock()
-            .expect("lock pending turn input") = staged_pending_turn_inputs;
-        let mut global_graph = self.global_session_graph.lock().expect("lock global graph");
+        *self.queued_work.lock_recover() = staged_queued_work;
+        *self.wake_redelivery_fences.lock_recover() = staged_wake_redelivery_fences;
+        *self.queued_work_next_seq.lock_recover() = staged_queued_work_next_seq;
+        *self.pending_turn_inputs.lock_recover() = staged_pending_turn_inputs;
+        let mut global_graph = self.global_session_graph.lock_recover();
         global_graph.extend_node_records(commit.graph.nodes.iter().cloned());
         let leaf_node_id = commit.graph.leaf_node_id.clone();
         let mut resident_graph = global_graph.clone();
         resident_graph.set_leaf_node_id(leaf_node_id.clone());
         resident_graph = resident_graph.trim_to_active_path();
-        *self.session_graph.lock().expect("lock graph") = resident_graph;
+        *self.session_graph.lock_recover() = resident_graph;
         drop(global_graph);
-        *self
-            .tombstoned_node_ids
-            .lock()
-            .expect("lock tombstoned nodes") = staged_tombstoned_node_ids;
-        *self
-            .global_session_heads
-            .lock()
-            .expect("lock global session heads") = staged_session_heads;
+        *self.tombstoned_node_ids.lock_recover() = staged_tombstoned_node_ids;
+        *self.global_session_heads.lock_recover() = staged_session_heads;
         for node in incoming_nodes {
             global_node_owners.insert(node.node_id.clone(), commit.session_id.clone());
         }
         drop(global_node_owners);
         {
-            let mut usage_deltas = self.usage_deltas.lock().expect("lock usage deltas");
+            let mut usage_deltas = self.usage_deltas.lock_recover();
             for delta in &commit.usage_deltas {
                 if !usage_deltas
                     .iter()
@@ -1311,18 +1209,14 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             hydrated_checkpoint.tool_state_ref.clone(),
             hydrated_checkpoint.tool_state.clone(),
         ) {
-            self.tool_state_blobs
-                .lock()
-                .expect("lock in-memory tool-state blobs")
-                .insert(blob_ref, body);
+            self.tool_state_blobs.lock_recover().insert(blob_ref, body);
         }
         if let (Some(blob_ref), Some(body)) = (
             hydrated_checkpoint.plugin_snapshot_ref.clone(),
             hydrated_checkpoint.plugin_snapshot.clone(),
         ) {
             self.plugin_snapshot_blobs
-                .lock()
-                .expect("lock in-memory plugin-snapshot blobs")
+                .lock_recover()
                 .insert(blob_ref, body);
         }
         if let (Some(blob_ref), Some(body)) = (
@@ -1330,37 +1224,36 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             hydrated_checkpoint.execution_state.clone(),
         ) {
             self.execution_state_blobs
-                .lock()
-                .expect("lock in-memory execution-state blobs")
+                .lock_recover()
                 .insert(blob_ref, body);
         }
-        *self.checkpoint.lock().expect("lock checkpoint") = Some(hydrated_checkpoint);
-        self.commit_attachment_refs_in_memory(&commit.session_id, &commit.committed_attachment_ids);
-        self.commit_turn_attachment_intents(&commit.session_id, &commit.turn_commit);
+        *self.checkpoint.lock_recover() = Some(hydrated_checkpoint);
+        self.commit_attachment_refs_in_memory(
+            &commit.session_id,
+            &commit.committed_attachment_ids,
+            transaction_now,
+        );
+        self.commit_turn_attachment_intents(
+            &commit.session_id,
+            &commit.turn_commit,
+            transaction_now,
+        );
         *meta = Some(plan.head_meta(checkpoint_ref.clone()));
-        *self
-            .runtime_commit_count
-            .lock()
-            .expect("lock runtime commit count") += 1;
+        *self.runtime_commit_count.lock_recover() += 1;
         let result = plan.result(checkpoint_ref, manifest, staged_enqueued_queue_batches);
         let receipt = plan.receipt_write(&result);
-        self.runtime_turn_commits
-            .lock()
-            .expect("lock runtime turn commits")
-            .insert(
-                (session_id, receipt.operation_key.to_string()),
-                RuntimeTurnCommitRecord {
-                    turn_commit_hash: receipt.turn_commit_hash.to_string(),
-                    result: result.clone(),
-                    committed_at_ms: self.clock.timestamp_ms(),
-                    request_identity_hash: receipt.request_identity_hash.map(str::to_string),
-                    requested_node_count: receipt.requested_node_count,
-                    _requested_ancestor_node_id: receipt
-                        .requested_ancestor_node_id
-                        .map(str::to_string),
-                    identity_encoding_version: receipt.identity_encoding_version,
-                },
-            );
+        self.runtime_turn_commits.lock_recover().insert(
+            (session_id, receipt.operation_key.to_string()),
+            RuntimeTurnCommitRecord {
+                turn_commit_hash: receipt.turn_commit_hash.to_string(),
+                result: result.clone(),
+                committed_at_ms: transaction_now,
+                request_identity_hash: receipt.request_identity_hash.map(str::to_string),
+                requested_node_count: receipt.requested_node_count,
+                _requested_ancestor_node_id: receipt.requested_ancestor_node_id.map(str::to_string),
+                identity_encoding_version: receipt.identity_encoding_version,
+            },
+        );
         if let Some(completion) = commit.release_session_execution_lease.as_ref() {
             let _release_was_current =
                 self.release_session_execution_lease_in_memory(completion, false);
@@ -1377,21 +1270,18 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         self.session_admission_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         binding.validate()?;
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
+        let created_at = self.clock.timestamp_rfc3339();
+        let _transaction = self.write_transaction.lock_recover();
         if self
             .deleted_session_ids
-            .lock()
-            .expect("lock deleted session ids")
+            .lock_recover()
             .contains(&binding.session_id)
         {
             return Err(crate::StoreError::SessionDeleted {
                 session_id: binding.session_id.clone(),
             });
         }
-        let mut durable = self.session_meta.lock().expect("lock session meta");
+        let mut durable = self.session_meta.lock_recover();
         if let Some(meta) = durable.as_ref() {
             if meta.session_id != binding.session_id {
                 return Err(crate::StoreError::SessionBindingMismatch {
@@ -1404,7 +1294,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         *durable = Some(crate::SessionMeta {
             session_id: binding.session_id.clone(),
             session_name: binding.session_id.clone(),
-            created_at: self.clock.timestamp_rfc3339(),
+            created_at,
             model: binding.model_id.clone(),
             cwd: binding.cwd.clone(),
             relation: binding.relation.clone(),
@@ -1416,16 +1306,13 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         &self,
         meta: crate::store::SessionMeta,
     ) -> Result<(), crate::store::StoreError> {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
+        let _transaction = self.write_transaction.lock_recover();
         self.replace_session_meta(meta)
     }
 
     async fn load_session_meta(
         &self,
     ) -> Result<Option<crate::store::SessionMeta>, crate::store::StoreError> {
-        Ok(self.session_meta.lock().expect("lock session meta").clone())
+        Ok(self.session_meta.lock_recover().clone())
     }
 }
