@@ -213,6 +213,11 @@ impl TriggerSourceBinding {
 pub struct LashlangHostEnvironment {
     #[serde(default)]
     pub resources: LashlangHostCatalog,
+    /// Names already present in the live execution namespace. The linker uses
+    /// this set to distinguish persisted or host-projected bindings from
+    /// misspelled top-level names before execution starts.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub globals: BTreeSet<String>,
     #[serde(default)]
     pub abilities: LashlangAbilities,
     #[serde(default)]
@@ -223,9 +228,18 @@ impl LashlangHostEnvironment {
     pub fn new(resources: LashlangHostCatalog, abilities: LashlangAbilities) -> Self {
         Self {
             resources,
+            globals: BTreeSet::new(),
             abilities,
             language_features: LashlangLanguageFeatures::default(),
         }
+    }
+
+    pub fn with_globals(
+        mut self,
+        globals: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.globals.extend(globals.into_iter().map(Into::into));
+        self
     }
 
     pub fn with_language_features(mut self, language_features: LashlangLanguageFeatures) -> Self {
@@ -235,6 +249,7 @@ impl LashlangHostEnvironment {
 
     pub fn satisfies(&self, requirements: &HostRequirements) -> bool {
         self.abilities.satisfies(requirements.abilities)
+            && requirements.globals.is_subset(&self.globals)
             && self
                 .language_features
                 .satisfies(requirements.language_features)

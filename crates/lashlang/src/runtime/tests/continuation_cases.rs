@@ -416,13 +416,16 @@ async fn segmented_multi_effect_run_preserves_result_and_observable_effects() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn requested_boundary_at_non_capturable_point_is_safely_skipped() {
-    let program = compile_source(
-        r#"
+    let source = r#"
         value = await tools.echo({ value: 7 })?
         finish input
-        "#,
+        "#;
+    let linked = crate::LinkedModule::link(
+        crate::parse(source).expect("program should parse"),
+        runtime_test_environment().with_globals(["input"]),
     )
-    .expect("program should compile");
+    .expect("program should link");
+    let program = crate::compile_linked(&linked);
     let mut projected = ProjectedBindings::new();
     projected.insert("input", ProjectedValue::scalar("input", Value::Number(3.0)));
     let slots = SlotState::from_globals(Record::new(), &program.chunk.slot_names, &projected);

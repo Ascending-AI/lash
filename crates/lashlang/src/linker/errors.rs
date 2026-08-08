@@ -120,12 +120,14 @@ pub enum LinkError {
     #[error("receiver for operation `{operation}` is not a module authority")]
     UnresolvedReceiver {
         operation: String,
+        suggestions: Vec<String>,
         span: Option<Span>,
     },
     #[error("resource type `{resource_type}` does not expose operation `{operation}`")]
     UnknownResourceOperation {
         resource_type: String,
         operation: String,
+        suggestions: Vec<String>,
         span: Option<Span>,
     },
     #[error("module `{module_path}` does not expose operation `{operation}`; available identity-qualified paths: {}", suggestions.join(", "))]

@@ -8,9 +8,11 @@ fn label_on_await_assignment_attaches_to_await_instruction() {
         "#,
     )
     .expect("program should parse");
-    let surface = runtime_test_environment().with_language_features(
-        crate::LashlangLanguageFeatures::default().with_label_annotations(),
-    );
+    let surface = runtime_test_environment()
+        .with_language_features(
+            crate::LashlangLanguageFeatures::default().with_label_annotations(),
+        )
+        .with_globals(["handle"]);
     let linked = crate::LinkedModule::link(program, surface).expect("program should link");
     let compiled = crate::compile_linked(&linked);
     let await_instruction = compiled

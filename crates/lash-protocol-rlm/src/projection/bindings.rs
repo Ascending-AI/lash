@@ -17,6 +17,8 @@ use lashlang::{
 pub struct ProjectionRef {
     pub kind: String,
     pub key: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub descriptor_type: Option<String>,
 }
 
 impl ProjectionRef {
@@ -24,7 +26,13 @@ impl ProjectionRef {
         Self {
             kind: kind.into(),
             key,
+            descriptor_type: None,
         }
+    }
+
+    pub fn with_descriptor_type(mut self, descriptor_type: impl Into<String>) -> Self {
+        self.descriptor_type = Some(descriptor_type.into());
+        self
     }
 }
 
@@ -77,12 +85,14 @@ impl ProjectionRegistry {
     }
 
     pub fn register_memory(&self, value: Arc<dyn ProjectedHostDescriptor>) -> ProjectionRef {
+        let descriptor_type = value.type_name().to_string();
         let key = uuid::Uuid::new_v4().to_string();
         self.memory
             .write()
             .expect("projection registry lock")
             .insert(key.clone(), value);
         ProjectionRef::new("memory", serde_json::Value::String(key))
+            .with_descriptor_type(descriptor_type)
     }
 }
 
@@ -205,6 +215,26 @@ impl RlmProjectedBindings {
         self.bindings.keys().cloned()
     }
 
+    fn prompt_docs(&self) -> Vec<crate::rlm_support::ReadOnlyVariableDoc> {
+        self.bindings
+            .iter()
+            .map(|(name, binding)| match binding {
+                RlmProjectedBinding::Value(value) => {
+                    crate::rlm_support::ReadOnlyVariableDoc::from_flow_value(name.clone(), value)
+                }
+                RlmProjectedBinding::Lazy(reference) => {
+                    crate::rlm_support::ReadOnlyVariableDoc::descriptor_only(
+                        name.clone(),
+                        reference
+                            .descriptor_type
+                            .clone()
+                            .unwrap_or_else(|| "any".to_string()),
+                    )
+                }
+            })
+            .collect()
+    }
+
     pub(crate) async fn into_projected_bindings(
         self,
         resolver: Arc<dyn ProjectionResolver>,
@@ -291,22 +321,13 @@ impl RlmProjectionExtension {
     pub(crate) fn prompt_contributions_for(
         bindings: &RlmProjectedBindings,
     ) -> Vec<PromptContribution> {
-        let mut names = bindings.names().collect::<Vec<_>>();
-        if names.is_empty() {
+        let docs = bindings.prompt_docs();
+        if docs.is_empty() {
             return Vec::new();
-        }
-        names.sort();
-        let mut lines = vec![
-            "These read-only values are already in scope. Access them directly in `<lashlang>` blocks; do not recreate them manually.".to_string(),
-            String::new(),
-            "Read-only variables:".to_string(),
-        ];
-        for name in names {
-            lines.push(format!("- `{name}`: read-only value"));
         }
         vec![PromptContribution::environment(
             "Read-Only Variables",
-            lines.join("\n"),
+            crate::rlm_support::render_read_only_variables(docs),
         )]
     }
 }
@@ -552,7 +573,44 @@ mod tests {
             .pop()
             .expect("prompt contribution");
         assert!(contribution.content.contains("`current_file`"));
-        assert!(contribution.content.contains("read-only value"));
+        assert!(
+            contribution
+                .content
+                .contains("`current_file`: `str`, read-only")
+        );
+    }
+
+    #[test]
+    fn projected_task_payload_advertises_shape_without_discovery_prints() {
+        let bindings = RlmProjectedBindings::new()
+            .bind_json(
+                "input",
+                serde_json::json!({
+                    "prompt": "Implement the requested change",
+                    "constraints": ["no push", "run tests"]
+                }),
+            )
+            .expect("bind task payload");
+        let contribution = RlmProjectionExtension::prompt_contributions_for(&bindings)
+            .pop()
+            .expect("prompt contribution");
+
+        assert!(
+            contribution
+                .content
+                .contains("`input`: `Input`, read-only (descriptor: `record`)"),
+            "{}",
+            contribution.content
+        );
+        assert!(
+            contribution.content.contains("type Input = {")
+                && contribution.content.contains("prompt: str,")
+                && contribution.content.contains("constraints: list[str],"),
+            "{}",
+            contribution.content
+        );
+        assert!(!contribution.content.contains("print input"));
+        assert!(!contribution.content.contains("discover"));
     }
 
     #[test]
