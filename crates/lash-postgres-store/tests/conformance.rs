@@ -362,6 +362,52 @@ async fn postgres_append_receipt_replays_after_ancestor_superseded_when_configur
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_inactive_append_ancestor_precedes_stale_head_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres append-precedence conformance: database is not configured");
+        return;
+    };
+    reset(&storage).await;
+    let pool = storage.pool().clone();
+    lash_core::testing::conformance::inactive_append_ancestor_precedes_stale_head(
+        Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>,
+        move |leaf_node_id| async move {
+            sqlx::query(
+                "UPDATE lash_sessions
+                 SET leaf_node_id = $1, head_revision = head_revision + 1
+                 WHERE session_id = 'root'",
+            )
+            .bind(leaf_node_id)
+            .execute(&pool)
+            .await
+            .expect("switch Postgres active branch");
+        },
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_tombstoned_old_leaf_is_rejected_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres tombstoned-leaf conformance: database is not configured");
+        return;
+    };
+    reset(&storage).await;
+    let pool = storage.pool().clone();
+    lash_core::testing::conformance::tombstoned_old_leaf_is_rejected(
+        Arc::new(storage.unbound_session_store()) as Arc<dyn RuntimePersistence>,
+        move |node_id| async move {
+            sqlx::query("UPDATE lash_graph_nodes SET tombstoned = TRUE WHERE node_id = $1")
+                .bind(node_id)
+                .execute(&pool)
+                .await
+                .expect("tombstone Postgres old leaf");
+        },
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_append_receipt_restores_mixed_usage_envelope_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(

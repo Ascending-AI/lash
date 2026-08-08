@@ -12,6 +12,7 @@ mod load;
 pub mod queued_work;
 mod realization;
 mod runtime_commit;
+mod runtime_commit_plan;
 pub(crate) mod session_execution_lease;
 #[cfg(any(test, feature = "testing"))]
 mod testing;
@@ -35,6 +36,11 @@ pub use realization::commit_runtime_state_verified;
 pub use runtime_commit::{
     RuntimeCommit, RuntimeCommitResult, RuntimeTurnCommitStamp, RuntimeUsageDelta,
     RuntimeUsageDeltaIdentity,
+};
+#[doc(hidden)]
+pub use runtime_commit_plan::{
+    FreshRuntimeCommitFacts, RuntimeCommitPlan, RuntimeCommitPlanner, RuntimeCommitReceiptRecord,
+    RuntimeCommitReceiptWrite, RuntimeCommitReplay,
 };
 pub use session_execution_lease::{
     LeaseClaimNonce, LeaseOwnerIdentity, SessionExecutionLease, SessionExecutionLeaseAcquisition,
@@ -394,6 +400,13 @@ pub struct SessionHeadMeta {
 
 impl SessionHeadMeta {
     /// Combine the JSON payload with all dedicated-column values.
+    ///
+    /// This remains public because external stores assemble rows from their
+    /// own columns. Callers conventionally enforce session binding and node
+    /// derivation before assembly; the constructor cannot validate those facts
+    /// from this projection alone.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
     pub fn assemble(
         payload: SessionHeadPayload,
         head_revision: u64,

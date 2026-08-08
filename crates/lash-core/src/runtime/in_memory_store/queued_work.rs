@@ -30,9 +30,6 @@ impl InMemorySessionStore {
         batch: crate::QueuedWorkBatchDraft,
         enqueued_at_ms: u64,
     ) -> Result<crate::QueuedWorkEnqueueOutcome, crate::store::StoreError> {
-        batch
-            .validate_process_wake_source()
-            .map_err(crate::store::StoreError::Backend)?;
         if let Some(source_key) = batch.source_key.as_deref()
             && let Some(existing) = queued.iter().find(|entry| {
                 entry.batch.session_id == batch.session_id
@@ -97,6 +94,9 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         &self,
         batch: crate::QueuedWorkBatchDraft,
     ) -> Result<crate::QueuedWorkBatch, crate::store::StoreError> {
+        batch
+            .validate_process_wake_source()
+            .map_err(crate::store::StoreError::Backend)?;
         // This is the in-memory counterpart of the SQL transaction/advisory
         // source lock: floor lookup, live-row lookup, and insertion all run
         // while the single write-transaction mutex is held. Queue completion
@@ -114,6 +114,9 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         &self,
         batch: crate::QueuedWorkBatchDraft,
     ) -> Result<crate::QueuedWorkEnqueueOutcome, crate::store::StoreError> {
+        batch
+            .validate_process_wake_source()
+            .map_err(crate::store::StoreError::Backend)?;
         let _transaction = self
             .write_transaction
             .lock()

@@ -196,6 +196,17 @@ impl InMemorySessionStore {
             .expect("lock resident graph")
             .set_leaf_node_id(Some(leaf_node_id));
     }
+
+    pub(crate) fn tombstone_node_for_testing(&self, node_id: String) {
+        let _transaction = self
+            .write_transaction
+            .lock()
+            .expect("lock in-memory test tombstone");
+        self.tombstoned_node_ids
+            .lock()
+            .expect("lock tombstoned nodes")
+            .insert(node_id);
+    }
 }
 
 #[cfg(test)]

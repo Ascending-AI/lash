@@ -147,6 +147,20 @@ pub enum StoreError {
         "session leaf `{leaf_node_id}` has no FrameOpen ancestor; every root graph must begin with a frame"
     )]
     MissingFrameOpenAncestor { leaf_node_id: String },
+    /// A commit's claimed current frame disagrees with its graph-derived frame.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**
+    /// return this typed corruption fence after deriving the nearest live
+    /// `FrameOpen` ancestor from the post-commit graph.
+    #[error(
+        "runtime commit current frame {claimed:?} does not match nearest FrameOpen ancestor {derived:?}"
+    )]
+    CurrentFrameNodeMismatch {
+        /// Frame node id supplied by the runtime commit.
+        claimed: Option<String>,
+        /// Nearest `FrameOpen` node id derived by the store.
+        derived: Option<String>,
+    },
     #[error(
         "queued work claim `{claim_id}` for session `{session_id}` is superseded at row {row_id:?} by claim {superseding_claim_id:?} in session-lease generation {superseding_session_lease_generation:?}"
     )]
@@ -272,6 +286,7 @@ impl StoreError {
             Self::ForkSessionAlreadyExists { .. } => "ForkSessionAlreadyExists",
             Self::InvalidGraphParent { .. } => "InvalidGraphParent",
             Self::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor",
+            Self::CurrentFrameNodeMismatch { .. } => "CurrentFrameNodeMismatch",
             Self::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded",
             Self::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded",
             Self::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim",
