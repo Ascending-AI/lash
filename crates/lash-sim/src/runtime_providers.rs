@@ -414,7 +414,9 @@ pub fn runtime_provider_components(
             )));
         }
     };
-    let model = lash::ModelSpec::from_token_limits(model_name, Default::default(), 200_000, None)
+    let model = lash::ModelSpec::builder(model_name)
+        .context_window_tokens(200_000)
+        .build()
         .map_err(|err| RuntimeProviderError::new(err.to_string()))?;
     Ok((provider, model, provider_kind.to_string()))
 }

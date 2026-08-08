@@ -44,12 +44,9 @@
             })
             .build()
             .into_handle();
-        let model = lash::ModelSpec::from_token_limits(
-            "test-model",
-            Default::default(),
-            4096,
-            None,
-        )
+        let model = lash::ModelSpec::builder("test-model")
+            .context_window_tokens(4096)
+            .build()
         .expect("model spec");
         let first_core = explicit_durable_test_facets(&data_dir)
             .provider(first_provider)

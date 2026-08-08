@@ -206,7 +206,9 @@ mod tests {
                 lash::persistence::InMemoryProcessExecutionEnvStore::default(),
             ))
             .model(
-                ModelSpec::from_token_limits("mock/model", Default::default(), 8_000, None)
+                ModelSpec::builder("mock/model")
+                    .context_window_tokens(8_000)
+                    .build()
                     .expect("valid model metadata"),
             )
             .store_factory(Arc::clone(&factory))

@@ -1504,9 +1504,10 @@ async fn session_config_change_hook_receives_context_window_updates() {
         .kind("alt")
         .complete_error("alt provider not wired")
         .build();
-    let alt_model =
-        crate::ModelSpec::from_token_limits("alt-model", Default::default(), 123_456, None)
-            .expect("valid model spec");
+    let alt_model = crate::ModelSpec::builder("alt-model")
+        .context_window_tokens(123_456)
+        .build()
+        .expect("valid model spec");
     runtime
         .update_session_config(crate::SessionConfigPatch {
             provider: Some(alt_provider.into_handle()),
@@ -6403,14 +6404,12 @@ async fn turn_driver_normalizes_alias_effort_into_outgoing_request() {
         stream_termination: None,
         sampling: crate::SamplingCapability::Configurable,
     };
-    let model = crate::ModelSpec::from_token_limits(
-        "mock-model",
-        crate::ReasoningSelection::Effort("xhigh".to_string()),
-        200_000,
-        None,
-    )
-    .expect("valid model spec")
-    .with_capability(capability);
+    let model = crate::ModelSpec::builder("mock-model")
+        .variant(crate::ReasoningSelection::Effort("xhigh".to_string()))
+        .context_window_tokens(200_000)
+        .build()
+        .expect("valid model spec")
+        .with_capability(capability);
 
     let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
     runtime
@@ -6483,14 +6482,12 @@ async fn turn_driver_rejects_unsupported_effort_before_provider_call() {
         stream_termination: None,
         sampling: crate::SamplingCapability::Configurable,
     };
-    let model = crate::ModelSpec::from_token_limits(
-        "mock-model",
-        crate::ReasoningSelection::Effort("turbo".to_string()),
-        200_000,
-        None,
-    )
-    .expect("valid model spec")
-    .with_capability(capability);
+    let model = crate::ModelSpec::builder("mock-model")
+        .variant(crate::ReasoningSelection::Effort("turbo".to_string()))
+        .context_window_tokens(200_000)
+        .build()
+        .expect("valid model spec")
+        .with_capability(capability);
 
     let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
     runtime
@@ -6756,13 +6753,11 @@ async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
         .update_session_config(crate::SessionConfigPatch {
             provider: Some(provider),
             model: Some(
-                crate::ModelSpec::from_token_limits(
-                    "small-output-model",
-                    Default::default(),
-                    200_000,
-                    Some(2_048),
-                )
-                .expect("valid test model"),
+                crate::ModelSpec::builder("small-output-model")
+                    .context_window_tokens(200_000)
+                    .output_token_capacity(2_048)
+                    .build()
+                    .expect("valid test model"),
             ),
             generation: Some(crate::GenerationOverlay::Replace(
                 crate::GenerationOptions {

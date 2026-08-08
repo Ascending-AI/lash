@@ -12,7 +12,9 @@ use lash_sqlite_store::{
 };
 
 fn model_spec(id: &str) -> ModelSpec {
-    ModelSpec::from_token_limits(id, Default::default(), 200_000, None)
+    ModelSpec::builder(id)
+        .context_window_tokens(200_000)
+        .build()
         .expect("valid test model spec")
 }
 

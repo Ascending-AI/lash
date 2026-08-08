@@ -13,32 +13,31 @@ fn process_execution_env_identity_golden_corpus() {
         .plugins
         .insert("a:b".to_string(), serde_json::json!({"enabled": true}));
     let policy = crate::SessionPolicy {
-        model: crate::ModelSpec::from_token_limits(
-            "model:rich",
-            crate::ReasoningSelection::Effort("high".to_string()),
-            8192,
-            Some(2048),
-        )
-        .expect("valid rich model limits")
-        .with_capability(crate::ModelCapability {
-            reasoning: Some(crate::ReasoningCapability {
-                efforts: vec!["low".to_string(), "high".to_string()],
-                default_effort: Some("low".to_string()),
-                aliases: std::collections::BTreeMap::from([(
-                    "max".to_string(),
-                    "high".to_string(),
-                )]),
-                encoding: crate::ReasoningEncoding::Budget(std::collections::BTreeMap::from([
-                    ("low".to_string(), 256),
-                    ("high".to_string(), 1024),
-                ])),
-                disable: Some(crate::ReasoningDisableEncoding::ToggleFalse),
-                mandatory: true,
+        model: crate::ModelSpec::builder("model:rich")
+            .variant(crate::ReasoningSelection::Effort("high".to_string()))
+            .context_window_tokens(8192)
+            .output_token_capacity(2048)
+            .build()
+            .expect("valid rich model limits")
+            .with_capability(crate::ModelCapability {
+                reasoning: Some(crate::ReasoningCapability {
+                    efforts: vec!["low".to_string(), "high".to_string()],
+                    default_effort: Some("low".to_string()),
+                    aliases: std::collections::BTreeMap::from([(
+                        "max".to_string(),
+                        "high".to_string(),
+                    )]),
+                    encoding: crate::ReasoningEncoding::Budget(std::collections::BTreeMap::from([
+                        ("low".to_string(), 256),
+                        ("high".to_string(), 1024),
+                    ])),
+                    disable: Some(crate::ReasoningDisableEncoding::ToggleFalse),
+                    mandatory: true,
+                }),
+                cache_control: Some(crate::CacheControlDialect::Anthropic),
+                stream_termination: Some(crate::StreamTermination::EofTolerated),
+                sampling: crate::SamplingCapability::Pinned,
             }),
-            cache_control: Some(crate::CacheControlDialect::Anthropic),
-            stream_termination: Some(crate::StreamTermination::EofTolerated),
-            sampling: crate::SamplingCapability::Pinned,
-        }),
         provider_id: "provider".to_string(),
         session_id: Some("session".to_string()),
         autonomous: true,

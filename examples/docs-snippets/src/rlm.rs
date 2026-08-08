@@ -16,7 +16,9 @@ async fn rlm_core(provider: ProviderHandle, model_id: &str) -> anyhow::Result<()
         .plugins(lash::plugins::runtime_plugin_stack())
         .provider(provider)
         .model(
-            lash::ModelSpec::from_token_limits(model_id, Default::default(), 200_000, None)
+            lash::ModelSpec::builder(model_id)
+                .context_window_tokens(200_000)
+                .build()
                 .expect("valid model metadata"),
         )
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))

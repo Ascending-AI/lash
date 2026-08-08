@@ -750,13 +750,10 @@ mod tests {
         let runtime = LashRuntime::builder()
             .with_session_id("session-a")
             .with_policy(crate::SessionPolicy {
-                model: crate::ModelSpec::from_token_limits(
-                    "test-model",
-                    Default::default(),
-                    1024,
-                    None,
-                )
-                .expect("model"),
+                model: crate::ModelSpec::builder("test-model")
+                    .context_window_tokens(1024)
+                    .build()
+                    .expect("model"),
                 ..Default::default()
             })
             .build()
@@ -797,13 +794,10 @@ mod tests {
         let runtime = LashRuntime::builder()
             .with_session_id("revision-equivalence")
             .with_policy(crate::SessionPolicy {
-                model: crate::ModelSpec::from_token_limits(
-                    "test-model",
-                    Default::default(),
-                    1024,
-                    None,
-                )
-                .expect("model"),
+                model: crate::ModelSpec::builder("test-model")
+                    .context_window_tokens(1024)
+                    .build()
+                    .expect("model"),
                 ..Default::default()
             })
             .build()
@@ -829,13 +823,10 @@ mod tests {
         let runtime = LashRuntime::builder()
             .with_session_id("publish-order")
             .with_policy(crate::SessionPolicy {
-                model: crate::ModelSpec::from_token_limits(
-                    "test-model",
-                    Default::default(),
-                    1024,
-                    None,
-                )
-                .expect("model"),
+                model: crate::ModelSpec::builder("test-model")
+                    .context_window_tokens(1024)
+                    .build()
+                    .expect("model"),
                 ..Default::default()
             })
             .build()
@@ -874,13 +865,10 @@ mod tests {
         let runtime = LashRuntime::builder()
             .with_session_id("publish-perf")
             .with_policy(crate::SessionPolicy {
-                model: crate::ModelSpec::from_token_limits(
-                    "test-model",
-                    Default::default(),
-                    1024,
-                    None,
-                )
-                .expect("model"),
+                model: crate::ModelSpec::builder("test-model")
+                    .context_window_tokens(1024)
+                    .build()
+                    .expect("model"),
                 ..Default::default()
             })
             .build()

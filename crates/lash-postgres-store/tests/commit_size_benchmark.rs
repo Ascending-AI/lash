@@ -63,13 +63,10 @@ fn realistic_commit(
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
         policy: SessionPolicy {
-            model: lash_core::ModelSpec::from_token_limits(
-                "benchmark-model",
-                Default::default(),
-                200_000,
-                None,
-            )
-            .expect("benchmark model"),
+            model: lash_core::ModelSpec::builder("benchmark-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("benchmark model"),
             ..SessionPolicy::default()
         },
         ..RuntimeSessionState::default()

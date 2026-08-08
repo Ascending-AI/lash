@@ -25,7 +25,9 @@ async fn sqlite_core(provider: ProviderHandle, model: String) -> anyhow::Result<
     let core = lash::LashCore::rlm_builder(factory)
         .provider(provider)
         .model(
-            lash::ModelSpec::from_token_limits(model.clone(), Default::default(), 200_000, None)
+            lash::ModelSpec::builder(model.clone())
+                .context_window_tokens(200_000)
+                .build()
                 .expect("valid model metadata"),
         )
         .store_factory(store_factory)
@@ -175,14 +177,14 @@ async fn shared_factory(
     let core = lash::LashCore::rlm_builder(factory)
         .provider(provider)
         .model(
-            lash::ModelSpec::from_token_limits(
-                model.clone(),
-                lash::provider::ReasoningSelection::Effort(model_variant.clone()),
-                200_000,
-                None,
-            )
-            .expect("valid model metadata")
-            .with_capability(adaptive_reasoning_capability()),
+            lash::ModelSpec::builder(model.clone())
+                .variant(lash::provider::ReasoningSelection::Effort(
+                    model_variant.clone(),
+                ))
+                .context_window_tokens(200_000)
+                .build()
+                .expect("valid model metadata")
+                .with_capability(adaptive_reasoning_capability()),
         )
         .store_factory(store_factory)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))

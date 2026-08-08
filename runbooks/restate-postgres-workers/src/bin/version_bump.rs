@@ -196,13 +196,10 @@ async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str)
     let core = lash::LashCore::rlm_builder(factory)
         .provider(provider)
         .model(
-            lash::ModelSpec::from_token_limits(
-                "version-bump-mock",
-                Default::default(),
-                200_000,
-                None,
-            )
-            .map_err(anyhow::Error::msg)?,
+            lash::ModelSpec::builder("version-bump-mock")
+                .context_window_tokens(200_000)
+                .build()
+                .map_err(anyhow::Error::msg)?,
         )
         .store_factory(Arc::new(
             storage.session_store_factory_with_shared_process_registry(),

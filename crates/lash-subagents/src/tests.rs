@@ -29,15 +29,15 @@ fn model_spec(
     variant: Option<String>,
     context_window_tokens: usize,
 ) -> lash_core::ModelSpec {
-    lash_core::ModelSpec::from_token_limits(
-        model,
-        variant
-            .map(lash_core::ReasoningSelection::Effort)
-            .unwrap_or_default(),
-        context_window_tokens,
-        None,
-    )
-    .expect("valid model spec")
+    lash_core::ModelSpec::builder(model)
+        .variant(
+            variant
+                .map(lash_core::ReasoningSelection::Effort)
+                .unwrap_or_default(),
+        )
+        .context_window_tokens(context_window_tokens)
+        .build()
+        .expect("valid model spec")
 }
 
 struct SeedProbeState {

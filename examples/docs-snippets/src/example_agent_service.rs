@@ -44,14 +44,14 @@ async fn service_core(
     let core = lash::LashCore::rlm_builder(factory)
         .provider(provider)
         .model(
-            lash::ModelSpec::from_token_limits(
-                model.clone(),
-                lash::provider::ReasoningSelection::Effort(model_variant.clone()),
-                200_000,
-                None,
-            )
-            .expect("valid model metadata")
-            .with_capability(adaptive_reasoning_capability()),
+            lash::ModelSpec::builder(model.clone())
+                .variant(lash::provider::ReasoningSelection::Effort(
+                    model_variant.clone(),
+                ))
+                .context_window_tokens(200_000)
+                .build()
+                .expect("valid model metadata")
+                .with_capability(adaptive_reasoning_capability()),
         )
         .store_factory(store_factory)
         .effect_host(std::sync::Arc::new(
@@ -111,17 +111,17 @@ async fn service_turn(
     turn_state: Arc<Mutex<TurnUiState>>,
 ) -> anyhow::Result<()> {
     // docs:start:service-turn
-    let model = lash::ModelSpec::from_token_limits(
-        model_selection.model,
-        model_selection
-            .model_variant
-            .map(lash::provider::ReasoningSelection::Effort)
-            .unwrap_or_default(),
-        200_000,
-        None,
-    )
-    .expect("valid model metadata")
-    .with_capability(adaptive_reasoning_capability());
+    let model = lash::ModelSpec::builder(model_selection.model)
+        .variant(
+            model_selection
+                .model_variant
+                .map(lash::provider::ReasoningSelection::Effort)
+                .unwrap_or_default(),
+        )
+        .context_window_tokens(200_000)
+        .build()
+        .expect("valid model metadata")
+        .with_capability(adaptive_reasoning_capability());
     let session = state.open_session(&chat_id, model).await?;
     let replay_cursor = session.observe().current_observation().cursor;
 

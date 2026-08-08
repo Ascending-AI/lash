@@ -580,7 +580,9 @@ finish "done via Restate E2E"
         let core = LashCore::rlm_builder(factory)
             .provider(provider)
             .model(
-                lash::ModelSpec::from_token_limits("mock-model", Default::default(), 200_000, None)
+                lash::ModelSpec::builder("mock-model")
+                    .context_window_tokens(200_000)
+                    .build()
                     .expect("valid mock model spec"),
             )
             .store_factory(store_factory)

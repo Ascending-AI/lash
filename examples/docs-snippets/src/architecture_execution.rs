@@ -20,13 +20,10 @@ async fn facade_turn(
     let core = lash::LashCore::standard_builder()
         .provider(provider)
         .model(
-            lash::ModelSpec::from_token_limits(
-                "anthropic/claude-sonnet-4.6",
-                Default::default(),
-                200_000,
-                None,
-            )
-            .expect("valid model metadata"),
+            lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("valid model metadata"),
         )
         .store_factory(store_factory)
         .effect_host(std::sync::Arc::new(

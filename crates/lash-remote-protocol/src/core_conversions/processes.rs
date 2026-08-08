@@ -1015,17 +1015,21 @@ impl TryFrom<RemoteProcessModelSpec> for lash_core::ModelSpec {
             capability,
             limits,
         } = value;
-        Ok(lash_core::ModelSpec::from_token_limits(
-            id,
-            variant.into(),
-            limits.context_window_tokens,
-            limits.output_token_capacity,
-        )
-        .map_err(|err| RemoteProtocolError::InvalidEnvelope {
-            type_name: "RemoteProcessExecutionPolicy",
-            message: err,
-        })?
-        .with_capability(capability.into()))
+        let model = lash_core::ModelSpec::builder(id)
+            .variant(variant.into())
+            .context_window_tokens(limits.context_window_tokens);
+        let model = match limits.output_token_capacity {
+            Some(capacity) => model.output_token_capacity(capacity),
+            None => model,
+        };
+        let model = model
+            .build()
+            .map_err(|err| RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteProcessExecutionPolicy",
+                message: err.to_string(),
+            })?
+            .with_capability(capability.into());
+        Ok(model)
     }
 }
 

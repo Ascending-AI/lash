@@ -341,13 +341,10 @@ fn core(
     lash::LashCore::rlm_builder(protocol)
         .provider(provider)
         .model(
-            lash::ModelSpec::from_token_limits(
-                "process-operator-flow-mock",
-                Default::default(),
-                200_000,
-                None,
-            )
-            .map_err(anyhow::Error::msg)?,
+            lash::ModelSpec::builder("process-operator-flow-mock")
+                .context_window_tokens(200_000)
+                .build()
+                .map_err(anyhow::Error::msg)?,
         )
         .store_factory(Arc::new(
             storage.session_store_factory_with_shared_process_registry(),

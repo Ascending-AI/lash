@@ -359,13 +359,10 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
 ) {
     let policy = crate::SessionPolicy {
         provider_id: "mixed-envelope-provider".to_string(),
-        model: crate::ModelSpec::from_token_limits(
-            "mixed-envelope-model",
-            Default::default(),
-            200_000,
-            None,
-        )
-        .expect("mixed-envelope model spec"),
+        model: crate::ModelSpec::builder("mixed-envelope-model")
+            .context_window_tokens(200_000)
+            .build()
+            .expect("mixed-envelope model spec"),
         ..crate::SessionPolicy::default()
     };
     let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
@@ -675,13 +672,10 @@ pub(crate) async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
 {
     let policy = crate::SessionPolicy {
         provider_id: "cancelled-usage-provider".to_string(),
-        model: crate::ModelSpec::from_token_limits(
-            "cancelled-usage-model",
-            Default::default(),
-            200_000,
-            None,
-        )
-        .expect("cancelled usage model spec"),
+        model: crate::ModelSpec::builder("cancelled-usage-model")
+            .context_window_tokens(200_000)
+            .build()
+            .expect("cancelled usage model spec"),
         ..crate::SessionPolicy::default()
     };
     let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())

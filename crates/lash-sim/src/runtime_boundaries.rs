@@ -858,13 +858,10 @@ impl RuntimeBoundaryHarness {
             .with_engine(Arc::new(LifecycleSuccessEngine));
         let policy = lash_core::SessionPolicy {
             provider_id: "sim-lifecycle".to_string(),
-            model: lash_core::ModelSpec::from_token_limits(
-                "sim-lifecycle-model",
-                Default::default(),
-                16_384,
-                None,
-            )
-            .map_err(|err| RuntimeBoundaryError::new(err.to_string()))?,
+            model: lash_core::ModelSpec::builder("sim-lifecycle-model")
+                .context_window_tokens(16_384)
+                .build()
+                .map_err(|err| RuntimeBoundaryError::new(err.to_string()))?,
             ..lash_core::SessionPolicy::default()
         };
         let env_ref = lash_core::runtime::persist_process_execution_env(

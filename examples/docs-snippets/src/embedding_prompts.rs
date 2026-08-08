@@ -105,7 +105,9 @@ async fn prompt_template(provider: ProviderHandle) -> anyhow::Result<()> {
     let core = lash::LashCore::standard_builder()
         .provider(provider)
         .model(
-            lash::ModelSpec::from_token_limits("gpt-5.4", Default::default(), 200_000, None)
+            lash::ModelSpec::builder("gpt-5.4")
+                .context_window_tokens(200_000)
+                .build()
                 .expect("valid model metadata"),
         )
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
@@ -294,7 +296,9 @@ async fn tone_session(
     let core = lash::LashCore::rlm_builder(factory)
         .provider(provider)
         .model(
-            lash::ModelSpec::from_token_limits(model.clone(), Default::default(), 200_000, None)
+            lash::ModelSpec::builder(model.clone())
+                .context_window_tokens(200_000)
+                .build()
                 .expect("valid model metadata"),
         )
         .effect_host(std::sync::Arc::new(

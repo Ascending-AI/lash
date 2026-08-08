@@ -116,6 +116,7 @@ let input = TurnInput::text("Answer using docs only when needed.")
             <h2>Prompt Templates And Slots</h2>
             <p>One template chooses the layout; slot contributions supply per-layer content. Core, session, and turn layers inherit; lower layers replace or clear single slots without rebuilding the template.</p>
           </div>
+          <p><code>.instructions(text)</code> is shorthand for <code>PromptContribution::project_instructions</code> in the <code>ProjectInstructions</code> slot. With the default template it renders under <code>## Guidance</code> / <code>### Project Instructions</code>; it does not replace the built-in main-agent intro.</p>
           <div class="diagram">
             <div class="diagram-title">Template layout is separate from slot content</div>
             <pre data-lang="rust" data-snippet="embedding_prompts#prompt-template"><code>use std::sync::Arc;
@@ -140,7 +141,9 @@ let template = PromptTemplate::new(vec![
 let core = lash::LashCore::standard_builder()
     .provider(provider)
     .model(
-        lash::ModelSpec::from_token_limits("gpt-5.4", Default::default(), 200_000, None)
+        lash::ModelSpec::builder("gpt-5.4")
+            .context_window_tokens(200_000)
+            .build()
             .expect("valid model metadata"),
     )
     .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
@@ -304,7 +307,9 @@ impl ToneTurnExt for lash::TurnBuilder {
 let core = lash::LashCore::rlm_builder(factory)
     .provider(provider)
     .model(
-        lash::ModelSpec::from_token_limits(model.clone(), Default::default(), 200_000, None)
+        lash::ModelSpec::builder(model.clone())
+            .context_window_tokens(200_000)
+            .build()
             .expect("valid model metadata"),
     )
     .effect_host(std::sync::Arc::new(

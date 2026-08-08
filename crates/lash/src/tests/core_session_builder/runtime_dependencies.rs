@@ -61,12 +61,9 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
     )) as Arc<dyn lash_core::SessionStoreFactory>;
     let core = LashCore::standard_builder()
         .model(
-            lash_core::ModelSpec::from_token_limits(
-                "clock-wiring-model",
-                Default::default(),
-                4_096,
-                None,
-            )
+            lash_core::ModelSpec::builder("clock-wiring-model")
+                .context_window_tokens(4_096)
+                .build()
             .expect("valid test model"),
         )
         .store_factory(store_factory)

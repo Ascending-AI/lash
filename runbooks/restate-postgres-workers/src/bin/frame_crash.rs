@@ -78,7 +78,9 @@ async fn run(mode: &str) -> Result<()> {
     let core = lash::LashCore::rlm_builder(factory)
         .provider(provider)
         .model(
-            lash::ModelSpec::from_token_limits("e2e-mock", Default::default(), 200_000, None)
+            lash::ModelSpec::builder("e2e-mock")
+                .context_window_tokens(200_000)
+                .build()
                 .map_err(anyhow::Error::msg)?,
         )
         .store_factory(Arc::new(storage.session_store_factory()))

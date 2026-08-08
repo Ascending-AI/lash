@@ -37,13 +37,10 @@ async fn plugin_install(provider: ProviderHandle) -> anyhow::Result<()> {
     let core = lash::LashCore::standard_builder()
         .provider(provider)
         .model(
-            lash::ModelSpec::from_token_limits(
-                "anthropic/claude-sonnet-4.6",
-                Default::default(),
-                200_000,
-                None,
-            )
-            .expect("valid model metadata"),
+            lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("valid model metadata"),
         )
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))

@@ -47,7 +47,9 @@ mod process_work_tests {
             .build()
             .into_handle();
         let model =
-            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None).expect("model spec");
+            lash::ModelSpec::builder("test-model")
+                .context_window_tokens(4096)
+                .build().expect("model spec");
         let event_tx = SessionEventRegistry::new(16);
         // The app sink, wired exactly as bootstrap wires it — through the
         // driver's watched decorator, feeding an mpsc channel.
@@ -242,12 +244,9 @@ mod process_work_tests {
             .complete_error("orphaned process API test should not call the provider")
             .build()
             .into_handle();
-        let model = lash::ModelSpec::from_token_limits(
-            "test-model",
-            Default::default(),
-            4096,
-            None,
-        )
+        let model = lash::ModelSpec::builder("test-model")
+            .context_window_tokens(4096)
+            .build()
         .expect("model spec");
         let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
         let core = explicit_durable_test_facets(&data_dir)
@@ -894,7 +893,9 @@ mod process_work_tests {
             .build()
             .into_handle();
         let model =
-            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None)
+            lash::ModelSpec::builder("test-model")
+                .context_window_tokens(4096)
+                .build()
                 .expect("model spec");
         let (restate_ingress_url, _restate_requests) = spawn_restate_ingress_capture().await;
         let core = explicit_durable_test_facets(&data_dir)

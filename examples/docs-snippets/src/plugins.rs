@@ -42,7 +42,9 @@ async fn plugin_core(provider: ProviderHandle, model_id: &str) -> anyhow::Result
     let core = lash::LashCore::rlm_builder(factory)
         .provider(provider)
         .model(
-            lash::ModelSpec::from_token_limits(model_id, Default::default(), 200_000, None)
+            lash::ModelSpec::builder(model_id)
+                .context_window_tokens(200_000)
+                .build()
                 .expect("valid model metadata"),
         )
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))

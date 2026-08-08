@@ -242,7 +242,9 @@ async fn build_core(
     config.trace_to_stderr = false;
     config.mcp_servers.insert("slack_clone".to_string(), server);
     let api = Arc::new(SlackApi::new(api_base_url, TEST_TOKEN).expect("build API client"));
-    let model = ModelSpec::from_token_limits("mock/model", Default::default(), 200_000, None)
+    let model = ModelSpec::builder("mock/model")
+        .context_window_tokens(200_000)
+        .build()
         .expect("valid model");
     runtime::build_core(&config, script.provider(), model, api)
         .await

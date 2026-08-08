@@ -31,7 +31,9 @@
         );
         let provider = trigger_registration_provider();
         let model =
-            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None).expect("model spec");
+            lash::ModelSpec::builder("test-model")
+                .context_window_tokens(4096)
+                .build().expect("model spec");
         let session_ids = WorkbenchSessionIds::fresh();
         let session_id = session_ids.current();
         let core = explicit_durable_test_facets(&data_dir)

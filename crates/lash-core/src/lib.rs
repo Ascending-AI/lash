@@ -752,7 +752,7 @@ pub use lash_trace::{
     TraceSessionExecutionLeaseTransferTrigger, TraceTokenUsage, TraceToolSpec,
 };
 pub use llm::transport::ProviderFailureKind;
-pub use model::{ModelLimits, ModelSpec};
+pub use model::{ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder};
 pub use plugin::{
     AgentFrameAssignment, AgentFrameId, AgentFrameReason, AgentFrameRecord,
     AppendSessionNodesRequest, AppendSessionNodesResult, PluginError, PluginExtensions,

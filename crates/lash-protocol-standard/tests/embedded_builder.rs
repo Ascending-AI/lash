@@ -8,7 +8,9 @@ use lash_core::{
 use lash_sqlite_store::Store;
 
 fn test_model_spec() -> ModelSpec {
-    ModelSpec::from_token_limits("gpt-5.4-mini", Default::default(), 200_000, None)
+    ModelSpec::builder("gpt-5.4-mini")
+        .context_window_tokens(200_000)
+        .build()
         .expect("valid test model spec")
 }
 

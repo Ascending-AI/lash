@@ -135,12 +135,9 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
             .model(
-                lash::ModelSpec::from_token_limits(
-                    "workbench-tool-control-model",
-                    Default::default(),
-                    4_096,
-                    None,
-                )
+                lash::ModelSpec::builder("workbench-tool-control-model")
+                    .context_window_tokens(4_096)
+                    .build()
                 .expect("tool control model"),
             )
             .tools(workbench_control_tools())

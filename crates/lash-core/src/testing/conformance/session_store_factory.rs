@@ -717,7 +717,9 @@ pub(crate) fn session_store_request(
         session_id: session_id.to_string(),
         relation,
         policy: crate::SessionPolicy {
-            model: crate::ModelSpec::from_token_limits(model_id, Default::default(), 200_000, None)
+            model: crate::ModelSpec::builder(model_id)
+                .context_window_tokens(200_000)
+                .build()
                 .expect("valid conformance model"),
             provider_id: "conformance-provider".to_string(),
             session_id: Some(session_id.to_string()),

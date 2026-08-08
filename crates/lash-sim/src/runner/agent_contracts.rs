@@ -654,13 +654,10 @@ async fn facade_final_value_execution_inner(
         )
         .provider(fixed_texts_provider(provider_kind, provider_responses))
         .model(
-            lash_core::ModelSpec::from_token_limits(
-                provider_kind,
-                Default::default(),
-                200_000,
-                None,
-            )
-            .map_err(FixedScriptRunnerError::Assertion)?,
+            lash_core::ModelSpec::builder(provider_kind)
+                .context_window_tokens(200_000)
+                .build()
+                .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
         );
     if let Some(tools) = tools {
         builder = builder.tools(tools);
@@ -978,13 +975,10 @@ fn agent_process_contract_core_with_options_and_effect_host(
         )
         .provider(fixed_texts_provider(provider_kind, provider_responses))
         .model(
-            lash_core::ModelSpec::from_token_limits(
-                provider_kind,
-                Default::default(),
-                200_000,
-                None,
-            )
-            .map_err(FixedScriptRunnerError::Assertion)?,
+            lash_core::ModelSpec::builder(provider_kind)
+                .context_window_tokens(200_000)
+                .build()
+                .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
         );
     if let Some(tools) = tools {
         builder = builder.tools(tools);

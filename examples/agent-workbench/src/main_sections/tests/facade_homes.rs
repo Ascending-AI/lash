@@ -204,12 +204,9 @@
                 .complete_error("config patch test should not call the provider")
                 .build()
                 .into_handle();
-            let initial_model = lash::ModelSpec::from_token_limits(
-                "workbench-model-before",
-                Default::default(),
-                4_096,
-                None,
-            )
+            let initial_model = lash::ModelSpec::builder("workbench-model-before")
+                .context_window_tokens(4_096)
+                .build()
             .expect("initial config change model");
             let core = explicit_durable_test_facets(&data_dir)
                 .provider(provider)
@@ -225,12 +222,9 @@
                 .open()
                 .await
                 .expect("open config change session");
-            let patched_model = lash::ModelSpec::from_token_limits(
-                "workbench-model-after",
-                Default::default(),
-                8_192,
-                None,
-            )
+            let patched_model = lash::ModelSpec::builder("workbench-model-after")
+                .context_window_tokens(8_192)
+                .build()
             .expect("patched config change model");
             session
                 .configure(lash::SessionConfigPatch {
@@ -302,12 +296,9 @@
             let core = explicit_durable_test_facets(&data_dir)
                 .provider(provider)
                 .model(
-                    lash::ModelSpec::from_token_limits(
-                        "workbench-context-transform-model",
-                        Default::default(),
-                        4_096,
-                        None,
-                    )
+                    lash::ModelSpec::builder("workbench-context-transform-model")
+                        .context_window_tokens(4_096)
+                        .build()
                     .expect("context transform model"),
                 )
                 .plugin(plugin)
@@ -425,13 +416,10 @@
                 text_message("u2", lash_core::MessageRole::User, CURRENT_MARKER),
             ];
             let policy = lash_core::SessionPolicy {
-                model: lash_core::ModelSpec::from_token_limits(
-                    "workbench-rolling-history-model",
-                    Default::default(),
-                    41_000,
-                    None,
-                )
-                .expect("rolling history model"),
+                model: lash_core::ModelSpec::builder("workbench-rolling-history-model")
+                    .context_window_tokens(41_000)
+                    .build()
+                    .expect("rolling history model"),
                 ..Default::default()
             };
             let state = lash_core::SessionSnapshot {

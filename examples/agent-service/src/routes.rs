@@ -815,18 +815,18 @@ fn normalize_optional_model_selection(
 pub(crate) fn model_spec_for_chat_selection(
     selection: &ChatModelSelection,
 ) -> AppResult<lash::ModelSpec> {
-    lash::ModelSpec::from_token_limits(
-        selection.model.clone(),
-        selection
-            .model_variant
-            .clone()
-            .map(lash::provider::ReasoningSelection::Effort)
-            .unwrap_or_default(),
-        DEFAULT_CONTEXT_WINDOW_TOKENS,
-        None,
-    )
-    .map(crate::default_openrouter_model_capability_for)
-    .map_err(AppError::bad_request)
+    lash::ModelSpec::builder(selection.model.clone())
+        .variant(
+            selection
+                .model_variant
+                .clone()
+                .map(lash::provider::ReasoningSelection::Effort)
+                .unwrap_or_default(),
+        )
+        .context_window_tokens(DEFAULT_CONTEXT_WINDOW_TOKENS)
+        .build()
+        .map(crate::default_openrouter_model_capability_for)
+        .map_err(|error| AppError::bad_request(error.to_string()))
 }
 
 fn normalize_model_variant(model_variant: Option<&str>) -> Option<String> {
@@ -916,7 +916,9 @@ finish "done through route"
         let core = LashCore::rlm_builder(factory)
             .provider(provider)
             .model(
-                lash::ModelSpec::from_token_limits("mock-model", Default::default(), 200_000, None)
+                lash::ModelSpec::builder("mock-model")
+                    .context_window_tokens(200_000)
+                    .build()
                     .expect("model spec"),
             )
             .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(

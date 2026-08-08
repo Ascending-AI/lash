@@ -272,7 +272,9 @@ pub fn provider_from_env() -> Result<(ProviderHandle, ModelSpec)> {
             })
             .into_components(),
     );
-    let spec = ModelSpec::from_token_limits(model, Default::default(), 200_000, None)
+    let spec = ModelSpec::builder(model)
+        .context_window_tokens(200_000)
+        .build()
         .map_err(|error| anyhow::anyhow!("invalid OPENROUTER_MODEL metadata: {error}"))?
         .with_capability(lash::provider::ModelCapability {
             cache_control: Some(lash::provider::CacheControlDialect::Anthropic),

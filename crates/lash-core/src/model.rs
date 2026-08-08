@@ -17,6 +17,12 @@ pub struct ModelSpec {
 }
 
 impl ModelSpec {
+    /// Start building host-supplied model metadata without positional limit or capability
+    /// arguments.
+    pub fn builder(id: impl Into<String>) -> ModelSpecBuilder {
+        ModelSpecBuilder::new(id)
+    }
+
     /// Constructs provider-default model policy for protocol implementors with a non-zero prompt
     /// budget, no known output ceiling, and no extra capabilities.
     pub fn new(id: impl Into<String>, context_window_tokens: NonZeroUsize) -> Self {
@@ -64,16 +70,21 @@ impl ModelSpec {
     /// maximum input the provider accepts for this model on this route) and the
     /// optional output cap. The budget is what history pruning and the UI
     /// measure against.
+    ///
+    /// This constructor never produces
+    /// [`ModelLimitsError::MissingContextWindowTokens`]; the context-window
+    /// argument is always present.
+    #[deprecated(note = "use ModelSpec::builder")]
     pub fn from_token_limits(
         id: impl Into<String>,
         variant: ReasoningSelection,
         context_window_tokens: usize,
         output_token_capacity: Option<usize>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, ModelLimitsError> {
         Ok(Self::with_limits(
             id,
             variant,
-            ModelLimits::from_token_limits(context_window_tokens, output_token_capacity)?,
+            ModelLimits::validated(context_window_tokens, output_token_capacity)?,
         ))
     }
 
@@ -132,6 +143,69 @@ impl ModelSpec {
     }
 }
 
+/// Builder for host-supplied [`ModelSpec`] metadata.
+///
+/// The context-window token budget is required; variant, output capacity, and
+/// capability metadata retain their provider-default values when omitted.
+/// Setters follow the builder convention and therefore have no `with_` prefix.
+#[derive(Clone, Debug)]
+pub struct ModelSpecBuilder {
+    id: String,
+    variant: ReasoningSelection,
+    context_window_tokens: Option<usize>,
+    output_token_capacity: Option<usize>,
+    capability: ModelCapability,
+}
+
+impl ModelSpecBuilder {
+    fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            variant: ReasoningSelection::ProviderDefault,
+            context_window_tokens: None,
+            output_token_capacity: None,
+            capability: ModelCapability::default(),
+        }
+    }
+
+    /// Select the provider reasoning variant for this model route.
+    pub fn variant(mut self, variant: ReasoningSelection) -> Self {
+        self.variant = variant;
+        self
+    }
+
+    /// Set the maximum input-token budget accepted by this model route.
+    pub fn context_window_tokens(mut self, context_window_tokens: usize) -> Self {
+        self.context_window_tokens = Some(context_window_tokens);
+        self
+    }
+
+    /// Set the known maximum number of output tokens this model route can produce.
+    pub fn output_token_capacity(mut self, output_token_capacity: usize) -> Self {
+        self.output_token_capacity = Some(output_token_capacity);
+        self
+    }
+
+    /// Attach host-supplied reasoning and cache-control capability metadata.
+    pub fn capability(mut self, capability: ModelCapability) -> Self {
+        self.capability = capability;
+        self
+    }
+
+    /// Validate the configured token limits and build the model specification.
+    pub fn build(self) -> Result<ModelSpec, ModelLimitsError> {
+        let context_window_tokens = self
+            .context_window_tokens
+            .ok_or(ModelLimitsError::MissingContextWindowTokens)?;
+        Ok(ModelSpec::with_limits(
+            self.id,
+            self.variant,
+            ModelLimits::validated(context_window_tokens, self.output_token_capacity)?,
+        )
+        .with_capability(self.capability))
+    }
+}
+
 impl Default for ModelSpec {
     fn default() -> Self {
         Self::new(
@@ -153,22 +227,45 @@ pub struct ModelLimits {
     pub output_token_capacity: Option<NonZeroUsize>,
 }
 
+/// Invalid or incomplete token-limit metadata supplied for a model route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ModelLimitsError {
+    #[error("a context-window token budget is required")]
+    MissingContextWindowTokens,
+    #[error("context_window_tokens must be greater than zero")]
+    ZeroContextWindowTokens,
+    #[error("output_token_capacity must be greater than zero")]
+    ZeroOutputTokenCapacity,
+}
+
 impl ModelLimits {
     /// Validates model limits for protocol implementors, rejecting zero prompt budgets and present
     /// zero output capacities while preserving an unknown output ceiling as `None`.
+    ///
+    /// This constructor never produces
+    /// [`ModelLimitsError::MissingContextWindowTokens`]; the context-window
+    /// argument is always present.
+    #[deprecated(note = "use ModelSpec::builder")]
     pub fn from_token_limits(
         context_window_tokens: usize,
         output_token_capacity: Option<usize>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, ModelLimitsError> {
+        Self::validated(context_window_tokens, output_token_capacity)
+    }
+
+    fn validated(
+        context_window_tokens: usize,
+        output_token_capacity: Option<usize>,
+    ) -> Result<Self, ModelLimitsError> {
         Ok(Self {
-            context_window_tokens: nonzero_token_limit(
-                "context_window_tokens",
-                context_window_tokens,
-            )?,
-            output_token_capacity: optional_nonzero_token_limit(
-                "output_token_capacity",
-                output_token_capacity,
-            )?,
+            context_window_tokens: NonZeroUsize::new(context_window_tokens)
+                .ok_or(ModelLimitsError::ZeroContextWindowTokens)?,
+            output_token_capacity: output_token_capacity
+                .map(|value| {
+                    NonZeroUsize::new(value).ok_or(ModelLimitsError::ZeroOutputTokenCapacity)
+                })
+                .transpose()?,
         })
     }
 }
@@ -180,19 +277,6 @@ impl Default for ModelLimits {
             output_token_capacity: None,
         }
     }
-}
-
-fn nonzero_token_limit(name: &str, value: usize) -> Result<NonZeroUsize, String> {
-    NonZeroUsize::new(value).ok_or_else(|| format!("{name} must be greater than zero"))
-}
-
-fn optional_nonzero_token_limit(
-    name: &str,
-    value: Option<usize>,
-) -> Result<Option<NonZeroUsize>, String> {
-    value
-        .map(|value| nonzero_token_limit(name, value))
-        .transpose()
 }
 
 #[cfg(test)]
@@ -224,7 +308,10 @@ mod tests {
 
     #[test]
     fn model_spec_constructors_preserve_identity_variant_and_limits() {
-        let limits = ModelLimits::from_token_limits(8_192, Some(1_024)).expect("valid limits");
+        let limits = ModelLimits {
+            context_window_tokens: NonZeroUsize::new(8_192).expect("non-zero context window"),
+            output_token_capacity: NonZeroUsize::new(1_024),
+        };
 
         let spec = ModelSpec::with_limits(
             "provider/model",
@@ -254,13 +341,12 @@ mod tests {
 
     #[test]
     fn model_token_limit_constructors_reject_zero_and_preserve_output_cap() {
-        let spec = ModelSpec::from_token_limits(
-            "provider/model",
-            ReasoningSelection::Effort("variant-a".to_string()),
-            200_000,
-            Some(4_096),
-        )
-        .expect("valid token limits");
+        let spec = ModelSpec::builder("provider/model")
+            .variant(ReasoningSelection::Effort("variant-a".to_string()))
+            .context_window_tokens(200_000)
+            .output_token_capacity(4_096)
+            .build()
+            .expect("valid token limits");
 
         assert_eq!(spec.id, "provider/model");
         assert_eq!(
@@ -273,18 +359,59 @@ mod tests {
             Some(4_096)
         );
 
-        let context_error =
-            ModelSpec::from_token_limits("bad-context", Default::default(), 0, Some(1))
-                .expect_err("zero context");
-        assert!(
-            context_error.contains("context_window_tokens"),
-            "context error should name the invalid field: {context_error}"
+        let context_error = ModelSpec::builder("bad-context")
+            .context_window_tokens(0)
+            .output_token_capacity(1)
+            .build()
+            .expect_err("zero context");
+        assert_eq!(context_error, ModelLimitsError::ZeroContextWindowTokens);
+        assert_eq!(
+            context_error.to_string(),
+            "context_window_tokens must be greater than zero"
         );
 
-        let output_error = ModelLimits::from_token_limits(1, Some(0)).expect_err("zero output cap");
-        assert!(
-            output_error.contains("output_token_capacity"),
-            "output error should name the invalid field: {output_error}"
+        let output_error = ModelSpec::builder("bad-output")
+            .context_window_tokens(1)
+            .output_token_capacity(0)
+            .build()
+            .expect_err("zero output cap");
+        assert_eq!(output_error, ModelLimitsError::ZeroOutputTokenCapacity);
+        assert_eq!(
+            output_error.to_string(),
+            "output_token_capacity must be greater than zero"
+        );
+    }
+
+    #[test]
+    fn model_spec_builder_covers_model_metadata_and_requires_context_window() {
+        let spec = ModelSpec::builder("provider/model")
+            .variant(ReasoningSelection::Effort("high".to_string()))
+            .context_window_tokens(200_000)
+            .output_token_capacity(8_192)
+            .capability(ModelCapability {
+                reasoning: Some(crate::provider::ReasoningCapability {
+                    efforts: vec!["high".to_string()],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .build()
+            .expect("valid model metadata");
+
+        assert_eq!(spec.id, "provider/model");
+        assert_eq!(spec.variant, ReasoningSelection::Effort("high".to_string()));
+        assert_eq!(spec.context_window_tokens(), 200_000);
+        assert_eq!(
+            spec.limits.output_token_capacity.map(NonZeroUsize::get),
+            Some(8_192)
+        );
+        assert!(!spec.capability.is_empty());
+
+        assert_eq!(
+            ModelSpec::builder("missing-context")
+                .build()
+                .expect_err("context budget is required"),
+            ModelLimitsError::MissingContextWindowTokens
         );
     }
 
@@ -296,21 +423,27 @@ mod tests {
             seed: Some(42),
         };
 
-        let bounded =
-            ModelSpec::from_token_limits("small", Default::default(), 200_000, Some(2_048))
-                .expect("valid model");
+        let bounded = ModelSpec::builder("small")
+            .context_window_tokens(200_000)
+            .output_token_capacity(2_048)
+            .build()
+            .expect("valid model");
         let clamped = bounded.clamped_generation(&requested);
         assert_eq!(clamped.output_token_cap, NonZeroUsize::new(2_048));
         assert_eq!(clamped.temperature, requested.temperature);
         assert_eq!(clamped.seed, requested.seed);
 
-        let roomy =
-            ModelSpec::from_token_limits("roomy", Default::default(), 200_000, Some(64_000))
-                .expect("valid model");
+        let roomy = ModelSpec::builder("roomy")
+            .context_window_tokens(200_000)
+            .output_token_capacity(64_000)
+            .build()
+            .expect("valid model");
         assert_eq!(roomy.clamped_generation(&requested), requested);
 
         // An unknown ceiling is not a ceiling of zero.
-        let unbounded = ModelSpec::from_token_limits("unknown", Default::default(), 200_000, None)
+        let unbounded = ModelSpec::builder("unknown")
+            .context_window_tokens(200_000)
+            .build()
             .expect("valid model");
         assert_eq!(unbounded.clamped_generation(&requested), requested);
     }
