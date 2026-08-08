@@ -427,6 +427,7 @@ impl RuntimeBoundaryHarness {
             observations: vec![output.clone()],
             observation_truncation: Vec::new(),
             tool_calls: Vec::new(),
+            executed_calls: Vec::new(),
             images: Vec::new(),
             printed_images: Vec::new(),
             error: (exit_code != 0).then(|| format!("exit code {exit_code}")),

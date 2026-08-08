@@ -225,6 +225,8 @@ pub(super) fn render_history_messages(
                         .unwrap_or(entry.index),
                     &step.output,
                     &image_refs,
+                    &step.calls,
+                    step.calls_omitted,
                     step.error.as_deref(),
                     step.final_output.as_ref(),
                 );
@@ -425,11 +427,15 @@ fn message_text(
 }
 
 /// The user observation message for a step: printed outputs (with re-fetch
-/// handles), images, error, and final value. Never empty.
+/// handles), images, executed calls, error, and final value. Calls intentionally
+/// render even on success: the model pays the token cost to distinguish work
+/// that ran from work that failed before dispatch. Never empty.
 fn step_output_text(
     index: usize,
     output: &[String],
     images: &[RlmImageRef],
+    calls: &[lash_rlm_types::RlmExecutedCall],
+    calls_omitted: usize,
     error: Option<&str>,
     final_output: Option<&serde_json::Value>,
 ) -> String {
@@ -463,12 +469,25 @@ fn step_output_text(
             );
         }
     }
+    if !calls.is_empty() {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str("Calls:");
+        if calls_omitted > 0 {
+            let _ = write!(out, "\n- … {calls_omitted} earlier executed calls omitted");
+        }
+        for call in calls {
+            let _ = write!(out, "\n- {} → {}", call.operation, call.outcome.as_str());
+        }
+    }
     if let Some(error) = error {
         if !out.is_empty() {
             out.push_str("\n\n");
         }
         out.push_str("Error:\n");
         out.push_str(error);
+        out.push_str("\n\nThis step failed; you may retry with a corrected program.");
     }
     if let Some(final_output) = final_output {
         if !out.is_empty() {

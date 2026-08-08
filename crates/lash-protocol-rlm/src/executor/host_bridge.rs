@@ -35,6 +35,7 @@ pub(super) struct HostBridge<'run> {
     observation_truncation: Mutex<Vec<TextProjectionMetadata>>,
     printed_images: Mutex<Vec<AttachmentRef>>,
     tool_calls: Mutex<Vec<lash_core::ToolCallRecord>>,
+    executed_calls: Mutex<Vec<(usize, lash_core::ExecutedCallRecord)>>,
     next_tool_index: Mutex<usize>,
     sleep_sequence: AtomicU64,
     lashlang_execution_trace: Option<LashlangExecutionTrace>,
@@ -69,6 +70,7 @@ impl<'run> HostBridge<'run> {
             observation_truncation: Mutex::new(Vec::new()),
             printed_images: Mutex::new(Vec::new()),
             tool_calls: Mutex::new(Vec::new()),
+            executed_calls: Mutex::new(Vec::new()),
             next_tool_index: Mutex::new(0),
             sleep_sequence: AtomicU64::new(0),
             lashlang_execution_trace: config.lashlang_execution_trace,
@@ -119,12 +121,34 @@ impl<'run> HostBridge<'run> {
         }
     }
 
+    fn record_executed_call(
+        &self,
+        index: usize,
+        operation: String,
+        outcome: lash_core::ExecutedCallOutcome,
+    ) -> Result<(), ExecutionHostError> {
+        // This ledger records dispatches only. Resolution, argument, and other
+        // pre-dispatch failures deliberately produce no `Calls:` entry because
+        // the source operation did not execute.
+        self.executed_calls
+            .lock()
+            .map_err(|_| ExecutionHostError::new("executed call buffer poisoned"))?
+            .push((index, lash_core::ExecutedCallRecord { operation, outcome }));
+        Ok(())
+    }
+
     pub(super) fn into_collected(self) -> CollectedExecutionOutput {
+        let mut executed_calls = self.executed_calls.into_inner().unwrap_or_default();
+        executed_calls.sort_by_key(|(index, _)| *index);
         CollectedExecutionOutput {
             observations: self.observations.into_inner().unwrap_or_default(),
             observation_truncation: self.observation_truncation.into_inner().unwrap_or_default(),
             printed_images: self.printed_images.into_inner().unwrap_or_default(),
             tool_calls: self.tool_calls.into_inner().unwrap_or_default(),
+            executed_calls: executed_calls
+                .into_iter()
+                .map(|(_, record)| record)
+                .collect(),
         }
     }
 
@@ -260,6 +284,7 @@ impl HostBridge<'_> {
         };
         let host_operation =
             resolve_lashlang_module_operation(&self.host_environment, receiver, &operation)?;
+        let source_operation = format!("{}.{}", receiver.alias, operation);
         let mut payload = if let [FlowValue::Record(record)] = args.as_slice() {
             flow_record_json(record).await
         } else {
@@ -279,9 +304,16 @@ impl HostBridge<'_> {
         if let Some(trigger_operation) =
             lashlang::TriggerHostOperation::from_host_operation(&host_operation)
         {
-            return self
+            let result = self
                 .trigger_operation(trigger_operation, payload, call_id)
                 .await;
+            let outcome = if result.is_ok() {
+                lash_core::ExecutedCallOutcome::Ok
+            } else {
+                lash_core::ExecutedCallOutcome::Err
+            };
+            self.record_executed_call(index, source_operation, outcome)?;
+            return result;
         }
         let tool_id = lash_core::ToolId::from(host_operation.as_str());
         let execution_grant = self
@@ -321,7 +353,17 @@ impl HostBridge<'_> {
                     .await
             }
         };
-        self.consume_reply(&host_operation, reply)
+        // Invocation replies are terminal: pending calls are resolved before
+        // this path. Exhaustiveness keeps a future terminal outcome honest.
+        let outcome = match &reply.output.outcome {
+            lash_core::ToolCallOutcome::Success(_) => lash_core::ExecutedCallOutcome::Ok,
+            lash_core::ToolCallOutcome::Failure(_) | lash_core::ToolCallOutcome::Cancelled(_) => {
+                lash_core::ExecutedCallOutcome::Err
+            }
+        };
+        let result = self.consume_reply(&host_operation, reply);
+        self.record_executed_call(index, source_operation, outcome)?;
+        result
     }
 
     async fn resource_operation_batch(
@@ -331,6 +373,8 @@ impl HostBridge<'_> {
         let mut results = vec![None; batch.operations.len()];
         let mut positions = Vec::new();
         let mut host_operations = Vec::new();
+        let mut source_operations = Vec::new();
+        let mut execution_indices = Vec::new();
         let mut invocations = Vec::new();
 
         for (source_index, operation) in batch.operations.into_iter().enumerate() {
@@ -349,6 +393,7 @@ impl HostBridge<'_> {
                     receiver,
                     &operation.operation,
                 )?;
+                let source_operation = format!("{}.{}", receiver.alias, operation.operation);
                 let mut payload = if let [FlowValue::Record(record)] = operation.args.as_slice() {
                     flow_record_json(record).await
                 } else {
@@ -359,17 +404,23 @@ impl HostBridge<'_> {
                 payload.as_object_mut().ok_or_else(|| {
                     ExecutionHostError::new("module operation payload must be an object")
                 })?;
-                Ok::<_, ExecutionHostError>((host_operation, payload, operation.call_site))
+                Ok::<_, ExecutionHostError>((
+                    host_operation,
+                    source_operation,
+                    payload,
+                    operation.call_site,
+                ))
             }
             .await;
 
-            let (host_operation, payload, call_site) = match result {
+            let (host_operation, source_operation, payload, call_site) = match result {
                 Ok(prepared) => prepared,
                 Err(error) => {
                     results[source_index] = Some(lashlang::ResourceOperationResult::Error(error));
                     continue;
                 }
             };
+            let execution_index = self.next_index();
 
             if let Some(trigger_operation) =
                 lashlang::TriggerHostOperation::from_host_operation(&host_operation)
@@ -379,10 +430,19 @@ impl HostBridge<'_> {
                     call_site.as_ref(),
                     Some(source_index),
                 );
-                results[source_index] = Some(lashlang::ResourceOperationResult::from_result(
-                    self.trigger_operation(trigger_operation, payload, call_id)
-                        .await,
-                ));
+                let result = self
+                    .trigger_operation(trigger_operation, payload, call_id)
+                    .await;
+                let outcome = if result.is_ok() {
+                    lash_core::ExecutedCallOutcome::Ok
+                } else {
+                    lash_core::ExecutedCallOutcome::Err
+                };
+                let result = self
+                    .record_executed_call(execution_index, source_operation, outcome)
+                    .and(result);
+                results[source_index] =
+                    Some(lashlang::ResourceOperationResult::from_result(result));
                 continue;
             }
 
@@ -410,17 +470,30 @@ impl HostBridge<'_> {
             }
             positions.push(source_index);
             host_operations.push(host_operation);
+            source_operations.push(source_operation);
+            execution_indices.push(execution_index);
             invocations.push(invocation);
         }
 
-        for ((source_index, host_operation), reply) in positions
-            .into_iter()
-            .zip(host_operations)
-            .zip(self.ctx.call_tool_batch(invocations).await)
+        for ((((source_index, host_operation), source_operation), execution_index), reply) in
+            positions
+                .into_iter()
+                .zip(host_operations)
+                .zip(source_operations)
+                .zip(execution_indices)
+                .zip(self.ctx.call_tool_batch(invocations).await)
         {
-            results[source_index] = Some(lashlang::ResourceOperationResult::from_result(
-                self.consume_reply(&host_operation, reply),
-            ));
+            // Batch replies are terminal for the same reason as scalar replies.
+            let outcome = match &reply.output.outcome {
+                lash_core::ToolCallOutcome::Success(_) => lash_core::ExecutedCallOutcome::Ok,
+                lash_core::ToolCallOutcome::Failure(_)
+                | lash_core::ToolCallOutcome::Cancelled(_) => lash_core::ExecutedCallOutcome::Err,
+            };
+            let result = self.consume_reply(&host_operation, reply);
+            let result = self
+                .record_executed_call(execution_index, source_operation, outcome)
+                .and(result);
+            results[source_index] = Some(lashlang::ResourceOperationResult::from_result(result));
         }
 
         lashlang::ResourceOperationBatchResult {
@@ -1141,6 +1214,7 @@ pub(super) struct CollectedExecutionOutput {
     pub(super) observation_truncation: Vec<TextProjectionMetadata>,
     pub(super) printed_images: Vec<AttachmentRef>,
     pub(super) tool_calls: Vec<lash_core::ToolCallRecord>,
+    pub(super) executed_calls: Vec<lash_core::ExecutedCallRecord>,
 }
 
 async fn collect_printed_images(

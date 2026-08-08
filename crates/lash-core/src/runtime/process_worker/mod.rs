@@ -1542,7 +1542,7 @@ impl DurableProcessWorker {
         if let Some(driver) = self.config.queued_work_driver.clone() {
             builder = builder.with_queued_work_driver(driver);
         }
-        builder.build().await.map_err(|err| {
+        Box::pin(builder.build()).await.map_err(|err| {
             PluginError::Session(format!(
                 "failed to build process worker runtime for {source_label}: {err}"
             ))

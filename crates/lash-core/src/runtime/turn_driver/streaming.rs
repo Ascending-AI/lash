@@ -370,7 +370,6 @@ impl RuntimeTurnDriver<'_> {
                         {
                             break Err(err);
                         }
-
                         let final_streamed_usage = stream_state.streamed_usage.clone();
                         let mut resp = LlmResponse {
                             full_text: stream_state.stream_accumulator.full_text(),

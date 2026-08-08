@@ -101,6 +101,7 @@ async fn execute_code_inner(
                 observations: Vec::new(),
                 observation_truncation: Vec::new(),
                 tool_calls: Vec::new(),
+                executed_calls: Vec::new(),
                 images: Vec::new(),
                 printed_images: Vec::new(),
                 error: Some(format!("invalid Lashlang host tool surface: {err}")),
@@ -161,6 +162,7 @@ async fn execute_code_inner(
                 observations: Vec::new(),
                 observation_truncation: Vec::new(),
                 tool_calls: Vec::new(),
+                executed_calls: Vec::new(),
                 images: Vec::new(),
                 printed_images: Vec::new(),
                 error: Some(lashlang::format_parse_diagnostic(code, &err)),
@@ -173,6 +175,7 @@ async fn execute_code_inner(
                 observations: Vec::new(),
                 observation_truncation: Vec::new(),
                 tool_calls: Vec::new(),
+                executed_calls: Vec::new(),
                 images: Vec::new(),
                 printed_images: Vec::new(),
                 error: Some(format_rlm_link_diagnostic(code, &err)),
@@ -198,6 +201,7 @@ async fn execute_code_inner(
                 observations: Vec::new(),
                 observation_truncation: Vec::new(),
                 tool_calls: Vec::new(),
+                executed_calls: Vec::new(),
                 images: Vec::new(),
                 printed_images: Vec::new(),
                 error: Some(format!("failed to store lashlang module artifact: {err}")),
@@ -216,6 +220,7 @@ async fn execute_code_inner(
                 observations: Vec::new(),
                 observation_truncation: Vec::new(),
                 tool_calls: Vec::new(),
+                executed_calls: Vec::new(),
                 images: Vec::new(),
                 printed_images: Vec::new(),
                 error: Some(format!("failed to resolve trigger owner namespace: {err}")),
@@ -234,6 +239,7 @@ async fn execute_code_inner(
                 observations: Vec::new(),
                 observation_truncation: Vec::new(),
                 tool_calls: Vec::new(),
+                executed_calls: Vec::new(),
                 images: Vec::new(),
                 printed_images: Vec::new(),
                 error: Some(format!(
@@ -268,6 +274,7 @@ async fn execute_code_inner(
             observations: Vec::new(),
             observation_truncation: Vec::new(),
             tool_calls: Vec::new(),
+            executed_calls: Vec::new(),
             images: Vec::new(),
             printed_images: Vec::new(),
             error: Some(err),
@@ -285,6 +292,7 @@ async fn execute_code_inner(
                     observations: Vec::new(),
                     observation_truncation: Vec::new(),
                     tool_calls: Vec::new(),
+                    executed_calls: Vec::new(),
                     images: Vec::new(),
                     printed_images: Vec::new(),
                     error: Some(err),
@@ -340,6 +348,7 @@ async fn execute_code_inner(
                 observations: collected.observations,
                 observation_truncation: collected.observation_truncation,
                 tool_calls: collected.tool_calls,
+                executed_calls: collected.executed_calls,
                 images: Vec::new(),
                 printed_images: collected.printed_images,
                 error: Some(format!("process failed in foreground execution: {value}")),
@@ -354,6 +363,7 @@ async fn execute_code_inner(
                 observations: collected.observations,
                 observation_truncation: collected.observation_truncation,
                 tool_calls: collected.tool_calls,
+                executed_calls: collected.executed_calls,
                 images: Vec::new(),
                 printed_images: collected.printed_images,
                 error: Some(lashlang::format_runtime_diagnostic(
@@ -371,6 +381,7 @@ async fn execute_code_inner(
         observations: collected.observations,
         observation_truncation: collected.observation_truncation,
         tool_calls: collected.tool_calls,
+        executed_calls: collected.executed_calls,
         images: Vec::new(),
         printed_images: collected.printed_images,
         error: None,
@@ -1141,6 +1152,14 @@ mod tests {
             assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
             assert_eq!(executions.load(Ordering::SeqCst), 1);
             assert_eq!(
+                response.executed_calls,
+                vec![lash_core::ExecutedCallRecord {
+                    operation: "web.fetch".to_string(),
+                    outcome: lash_core::ExecutedCallOutcome::Ok,
+                }],
+                "the ledger must retain the source module.operation, not the host tool id"
+            );
+            assert_eq!(
                 *observed_bindings.lock().expect("observed bindings"),
                 vec![serde_json::json!({ "kind": "test", "route": "deferred" })]
             );
@@ -1411,6 +1430,20 @@ mod tests {
             assert_eq!(
                 finish["registrations"][0]["incarnation"],
                 finish["handle"]["incarnation"]
+            );
+            assert_eq!(
+                response.executed_calls,
+                vec![
+                    lash_core::ExecutedCallRecord {
+                        operation: "triggers.register".to_string(),
+                        outcome: lash_core::ExecutedCallOutcome::Ok,
+                    },
+                    lash_core::ExecutedCallRecord {
+                        operation: "triggers.list".to_string(),
+                        outcome: lash_core::ExecutedCallOutcome::Ok,
+                    },
+                ],
+                "trigger effects must appear in the executed-call ledger"
             );
         });
     }
@@ -1717,6 +1750,24 @@ mod tests {
             )
             .await;
             assert!(response.error.is_none(), "{:?}", response.error);
+            assert_eq!(
+                response
+                    .executed_calls
+                    .iter()
+                    .map(|call| (call.operation.as_str(), call.outcome))
+                    .collect::<Vec<_>>(),
+                [
+                    ("triggers.register", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.list", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.update", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.disable", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.enable", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.delete", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.register", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.prune", lash_core::ExecutedCallOutcome::Ok),
+                ],
+                "ledger order is source dispatch order"
+            );
             let scalar_effects = scalar.trigger_effects();
             assert_eq!(
                 scalar_effects
@@ -1785,6 +1836,27 @@ mod tests {
             )
             .await;
             assert!(response.error.is_none(), "{:?}", response.error);
+            assert_eq!(
+                response
+                    .executed_calls
+                    .iter()
+                    .map(|call| (call.operation.as_str(), call.outcome))
+                    .collect::<Vec<_>>(),
+                [
+                    ("triggers.register", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.register", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.disable", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.register", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.register", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.register", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.list", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.update", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.enable", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.disable", lash_core::ExecutedCallOutcome::Ok),
+                    ("triggers.delete", lash_core::ExecutedCallOutcome::Ok),
+                ],
+                "ledger order is source dispatch order"
+            );
             let batch_effects = batched
                 .trigger_effects()
                 .into_iter()

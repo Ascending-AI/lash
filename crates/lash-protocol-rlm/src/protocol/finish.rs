@@ -107,16 +107,14 @@ pub(super) fn finish_required_reminder_message(id: String, requires_schema: bool
     }
 }
 
-pub(super) fn finish_schema_mismatch_message(id: String, error_text: &str) -> Message {
+pub(super) fn finish_schema_mismatch_message(id: String) -> Message {
     Message {
         id: id.clone(),
         role: MessageRole::System,
         parts: shared_parts(vec![Part {
             id: format!("{id}.p0"),
             kind: PartKind::Text,
-            content: format!(
-                "The `finish` value didn't match the required output schema:\n{error_text}\n\nFix the value and call `finish <corrected>` from another paired `<lashlang>...</lashlang>` block."
-            ),
+            content: "The `finish` value didn't match the required output schema. Fix the value described in the failed-step observation and call `finish <corrected>` from another paired `<lashlang>...</lashlang>` block.".to_string(),
             attachment: None,
             tool_call_id: None,
             tool_name: None,

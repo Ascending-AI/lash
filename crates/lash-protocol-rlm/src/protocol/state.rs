@@ -3,6 +3,8 @@ use lash_core::llm::types::ProviderReasoningReplay;
 use serde::Deserialize;
 use serde_json::Value;
 
+use lash_rlm_types::RlmExecutedCall;
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(super) struct RlmReasoningPart {
     pub(super) text: String,
@@ -15,6 +17,10 @@ pub(super) struct RlmDriverState {
     pub(super) reasoning: Vec<RlmReasoningPart>,
     pub(super) prose: String,
     pub(super) images: Vec<AttachmentRef>,
+    #[serde(default)]
+    pub(super) calls: Vec<RlmExecutedCall>,
+    #[serde(default)]
+    pub(super) calls_omitted: usize,
     /// One entry per `print` from the executed lashlang block (plus any
     /// raw stdout-style emission). Replaces the old split between a
     /// concatenated `combined_output: String` and a sibling

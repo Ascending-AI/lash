@@ -63,10 +63,24 @@ fn step_event(code: &str) -> SessionHistoryRecord {
             code: code.to_string(),
             output: vec!["ok".to_string()],
             images: Vec::new(),
+            calls: Vec::new(),
+            calls_omitted: 0,
             error: None,
             final_output: None,
         }),
     ))
+}
+
+fn observation_text(message: &lash_core::llm::types::LlmMessage) -> String {
+    message
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn render(events: &[SessionHistoryRecord]) -> Vec<lash_core::llm::types::LlmMessage> {
@@ -143,4 +157,98 @@ fn ordered_reasoning_replay_precedes_cell_in_folded_history_message() {
             && cell.as_ref()
                 == crate::cell_scan::render_lashlang_cell_text("Working.", "value = inspect()")
     ));
+}
+
+#[test]
+fn failed_observation_lists_executed_calls_and_frames_retry() {
+    let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
+        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(lash_rlm_types::RlmTrajectoryEntry {
+            id: "lashlang_step_failed".to_string(),
+            protocol_iteration: 0,
+            code: "first = await module.ok({ secret: 1 })\nsecond = await module.fail({})"
+                .to_string(),
+            output: Vec::new(),
+            images: Vec::new(),
+            calls: vec![
+                lash_rlm_types::RlmExecutedCall {
+                    operation: "module.ok".to_string(),
+                    outcome: lash_rlm_types::RlmExecutedCallOutcome::Ok,
+                },
+                lash_rlm_types::RlmExecutedCall {
+                    operation: "module.fail".to_string(),
+                    outcome: lash_rlm_types::RlmExecutedCallOutcome::Err,
+                },
+            ],
+            calls_omitted: 0,
+            error: Some("read failed at secret.txt; cache failed at .cache/lash/state".to_string()),
+            final_output: None,
+        }),
+    ));
+
+    let messages = render(&[event]);
+    let observation = observation_text(&messages[1]);
+
+    insta::assert_snapshot!(observation, @r#"
+    Calls:
+    - module.ok → ok
+    - module.fail → err
+
+    Error:
+    read failed at secret.txt; cache failed at .cache/lash/state
+
+    This step failed; you may retry with a corrected program.
+    "#);
+    assert!(observation.contains("Calls:\n- module.ok → ok\n- module.fail → err"));
+    assert!(!observation.contains("secret: 1"), "arguments stay elided");
+    assert!(observation.contains("This step failed; you may retry with a corrected program."));
+    assert!(observation.contains("secret.txt"));
+    assert!(observation.contains(".cache/lash/state"));
+}
+
+#[test]
+fn successful_observation_keeps_calls_and_exact_earlier_omission_marker() {
+    let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
+        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(lash_rlm_types::RlmTrajectoryEntry {
+            id: "lashlang_step_success".to_string(),
+            protocol_iteration: 0,
+            code: "value = module.ok()".to_string(),
+            output: Vec::new(),
+            images: Vec::new(),
+            calls: vec![lash_rlm_types::RlmExecutedCall {
+                operation: "module.ok".to_string(),
+                outcome: lash_rlm_types::RlmExecutedCallOutcome::Ok,
+            }],
+            calls_omitted: 3,
+            error: None,
+            final_output: None,
+        }),
+    ));
+
+    let messages = render(&[event]);
+    let observation = observation_text(&messages[1]);
+
+    assert_eq!(
+        observation,
+        "Calls:\n- … 3 earlier executed calls omitted\n- module.ok → ok"
+    );
+}
+
+#[test]
+fn legacy_unredacted_trajectory_errors_render_verbatim() {
+    let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
+        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(lash_rlm_types::RlmTrajectoryEntry {
+            id: "lashlang_step_legacy".to_string(),
+            protocol_iteration: 0,
+            code: "value = read()".to_string(),
+            output: Vec::new(),
+            images: Vec::new(),
+            calls: Vec::new(),
+            calls_omitted: 0,
+            error: Some("read failed at /legacy/worker/private.txt".to_string()),
+            final_output: None,
+        }),
+    ));
+
+    let messages = render(&[event]);
+    assert!(observation_text(&messages[1]).contains("/legacy/worker/private.txt"));
 }

@@ -1,5 +1,6 @@
 mod history;
 
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 #[cfg(test)]
@@ -35,6 +36,7 @@ pub struct RlmProjectorConfig {
     pub last_prompt_usage: SharedPromptUsage,
     pub prompt_features: crate::protocol::RlmPromptFeatures,
     pub lashlang_surface: LashlangSurface,
+    pub redaction_roots: Arc<[PathBuf]>,
 }
 
 impl Default for RlmProjectorConfig {
@@ -45,6 +47,7 @@ impl Default for RlmProjectorConfig {
             last_prompt_usage: Arc::new(RwLock::new(None)),
             prompt_features: crate::protocol::RlmPromptFeatures::default(),
             lashlang_surface: LashlangSurface::default(),
+            redaction_roots: Arc::from([]),
         }
     }
 }
@@ -83,7 +86,9 @@ pub(crate) fn build_rlm_preamble_with_bound_variables(
 
     TurnDriverPreamble {
         config: TurnDriverConfig {
-            protocol: Arc::new(crate::protocol::RlmDriver),
+            protocol: Arc::new(crate::protocol::RlmDriver::new(Arc::clone(
+                &config.redaction_roots,
+            ))),
             projector: Arc::new(RlmContextProjector {
                 max_output_chars: config.max_output_chars,
                 max_budget_tokens: config.max_budget_tokens,
@@ -301,6 +306,10 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         ));
 
         let mut generation = ctx.config.generation.clone();
+        // RLM owns the generation boundary. Keeping unrelated caller stops
+        // would make a provider's generic `Stop` terminal reason ambiguous.
+        // The typed replacement helper retains that ownership for the
+        // response and attempt dispositions.
         generation.replace_stop_sequences_for_protocol(vec![
             crate::cell_scan::LASHLANG_END_TAG.to_string(),
         ]);
@@ -571,6 +580,8 @@ mod tests {
                     vec![output.to_string()]
                 },
                 images: Vec::new(),
+                calls: Vec::new(),
+                calls_omitted: 0,
                 error: None,
                 final_output: None,
             },
@@ -591,6 +602,8 @@ mod tests {
                 code: code.to_string(),
                 output,
                 images,
+                calls: Vec::new(),
+                calls_omitted: 0,
                 error: None,
                 final_output: Some(final_output),
             },
@@ -676,7 +689,7 @@ mod tests {
         generation: lash_core::GenerationOptions,
     ) -> Arc<LlmRequest> {
         let config = lash_core::TurnMachineConfig {
-            protocol_driver: Arc::new(crate::protocol::RlmDriver),
+            protocol_driver: Arc::new(crate::protocol::RlmDriver::default()),
             projector: Arc::new(lash_core::sansio::ChatContextProjector),
             sync_execution_environment: true,
             model: model.to_string(),
@@ -1248,6 +1261,8 @@ mod tests {
                     type_metadata: Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
                     label: Some("img.png".to_string()),
                 }],
+                calls: Vec::new(),
+                calls_omitted: 0,
                 error: None,
                 final_output: None,
             }),

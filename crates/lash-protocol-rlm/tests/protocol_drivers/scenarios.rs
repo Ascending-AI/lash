@@ -268,7 +268,7 @@ fn rlm_protocol_unclosed_cell_retries_in_natural_mode_without_journaling_markup(
             llm_call_count: Some(2),
             no_exec_code: true,
             system_message_contains: vec!["did not close", "complete paired block"],
-            assistant_visible_texts: Some(Vec::new()),
+            assistant_visible_texts: Some(vec!["Visible plan."]),
             ..RlmProtocolExpectations::default()
         })
         .run();
@@ -568,6 +568,10 @@ fn rlm_protocol_scenario_exec_result_emits_accounting_without_storing_tool_call_
                 output: lash_core::ToolCallOutput::success(serde_json::json!("contents")),
                 duration_ms: 7,
             }],
+            executed_calls: vec![lash_core::ExecutedCallRecord {
+                operation: "tools.read_file".to_string(),
+                outcome: lash_core::ExecutedCallOutcome::Ok,
+            }],
             images: Vec::new(),
             printed_images: Vec::new(),
             error: None,
@@ -614,6 +618,10 @@ fn rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal() {
                         task: Some("continue".to_string()),
                     }),
                 duration_ms: 3,
+            }],
+            executed_calls: vec![lash_core::ExecutedCallRecord {
+                operation: "tools.custom_frame_switch".to_string(),
+                outcome: lash_core::ExecutedCallOutcome::Ok,
             }],
             images: Vec::new(),
             printed_images: Vec::new(),
@@ -667,6 +675,10 @@ fn rlm_protocol_scenario_exec_any_tool_control_fail_is_terminal_error() {
                         ),
                     }),
                 duration_ms: 3,
+            }],
+            executed_calls: vec![lash_core::ExecutedCallRecord {
+                operation: "tools.custom_fail".to_string(),
+                outcome: lash_core::ExecutedCallOutcome::Ok,
             }],
             images: Vec::new(),
             printed_images: Vec::new(),

@@ -1035,14 +1035,16 @@ mod tests {
             lash_core::ExecutionScope::turn("standard-batch-session", "turn-1"),
         )
         .expect("scoped controller");
-        let mut runtime = lash_core::facade_support::LashRuntime::builder()
-            .with_session_id("standard-batch-session")
-            .with_policy(policy)
-            .with_runtime_host(host)
-            .with_plugin_factories(factories)
-            .build()
-            .await
-            .expect("runtime");
+        let mut runtime = Box::pin(
+            lash_core::facade_support::LashRuntime::builder()
+                .with_session_id("standard-batch-session")
+                .with_policy(policy)
+                .with_runtime_host(host)
+                .with_plugin_factories(factories)
+                .build(),
+        )
+        .await
+        .expect("runtime");
 
         let turn = runtime
             .stream_turn(

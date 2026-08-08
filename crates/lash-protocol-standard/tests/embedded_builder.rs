@@ -69,14 +69,16 @@ async fn embedded_runtime_builder_loads_state_from_store() {
         .await
         .expect("commit session state");
 
-    let runtime = LashRuntime::builder()
-        .with_store(store.clone() as Arc<dyn RuntimePersistence>)
-        .with_plugin_factories(vec![Arc::new(
-            lash_protocol_standard::StandardProtocolPluginFactory,
-        )])
-        .build()
-        .await
-        .expect("runtime");
+    let runtime = Box::pin(
+        LashRuntime::builder()
+            .with_store(store.clone() as Arc<dyn RuntimePersistence>)
+            .with_plugin_factories(vec![Arc::new(
+                lash_protocol_standard::StandardProtocolPluginFactory,
+            )])
+            .build(),
+    )
+    .await
+    .expect("runtime");
 
     let state = runtime.export_state();
     let read_view = state.read_view();
@@ -112,14 +114,16 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
         .await
         .expect("commit session state");
 
-    let err = match LashRuntime::builder()
-        .with_store(store as Arc<dyn RuntimePersistence>)
-        .with_session_id("beta")
-        .with_plugin_factories(vec![Arc::new(
-            lash_protocol_standard::StandardProtocolPluginFactory,
-        )])
-        .build()
-        .await
+    let err = match Box::pin(
+        LashRuntime::builder()
+            .with_store(store as Arc<dyn RuntimePersistence>)
+            .with_session_id("beta")
+            .with_plugin_factories(vec![Arc::new(
+                lash_protocol_standard::StandardProtocolPluginFactory,
+            )])
+            .build(),
+    )
+    .await
     {
         Ok(_) => panic!("mismatched store session should fail"),
         Err(err) => err,

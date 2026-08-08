@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use lash_core::sansio::{
     CheckpointResumeAction, CompletedToolCall, ProtocolDriverHandle, WaitingExecState,
@@ -15,7 +17,9 @@ use lash_core::{
     facade_support::TurnStop, facade_support::append_assistant_text_part,
     facade_support::normalized_response_parts,
 };
-use lash_rlm_types::{RlmDiagnosticEvent, RlmProtocolEvent, RlmTermination, RlmTrajectoryEntry};
+use lash_rlm_types::{
+    RlmDiagnosticEvent, RlmExecutedCall, RlmProtocolEvent, RlmTermination, RlmTrajectoryEntry,
+};
 use serde_json::Value;
 
 #[cfg(feature = "testing")]
@@ -27,6 +31,7 @@ use crate::rlm_support::decode_rlm_termination_options;
 use super::actions::{invalid_driver_state_actions, invalid_turn_options_actions};
 use super::cell::{
     CellExtraction, CellExtractionError, extract_lashlang_cell, normalize_cell_boundary,
+    project_visible_assistant_prose,
 };
 use super::finish::{
     finish_required_reminder_message, finish_schema_mismatch_message,
@@ -35,7 +40,16 @@ use super::finish::{
 };
 use super::state::{RlmDriverState, RlmReasoningPart, decode_rlm_driver_state, rlm_driver_state};
 
-pub struct RlmDriver;
+#[derive(Clone, Default)]
+pub struct RlmDriver {
+    redaction_roots: Arc<[PathBuf]>,
+}
+
+impl RlmDriver {
+    pub fn new(redaction_roots: Arc<[PathBuf]>) -> Self {
+        Self { redaction_roots }
+    }
+}
 
 const MAX_EXEC_TOOL_CALL_RECORDS: usize = 128;
 const MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES: usize = 64 * 1024;
@@ -84,9 +98,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         };
         let assistant_text = normalize_cell_boundary(&projected.assistant_text);
         let reasoning = projected.reasoning;
+        let visible_prose = project_visible_assistant_prose(&assistant_text);
         actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {
             protocol_iteration: ctx.protocol_iteration(),
-            content: assistant_text.clone(),
+            content: visible_prose.clone(),
             duration_ms: 0,
         }));
 
@@ -138,11 +153,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     ),
                 )]));
                 let mut retry_events = Vec::new();
-                let retry_prose = if err == CellExtractionError::UnclosedCell {
-                    String::new()
-                } else {
-                    assistant_text
-                };
+                let retry_prose = visible_prose;
                 if !retry_prose.trim().is_empty() || !reasoning.is_empty() {
                     retry_events.push(conversation_event(internal_assistant_prose_message(
                         rlm_message_id(
@@ -345,6 +356,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         .map(tool_call_event)
                         .map(DriverAction::Emit),
                 );
+                (state.calls, state.calls_omitted) = executed_call_ledger(&response.executed_calls);
                 state.images.extend(response.printed_images);
                 for observation in response.observations {
                     if !observation.is_empty() {
@@ -362,6 +374,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
+                        &self.redaction_roots,
                         None,
                         None,
                     )));
@@ -397,12 +410,12 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
+                        &self.redaction_roots,
                         Some(error_text.clone()),
                         None,
                     ),
                     vec![conversation_event(finish_schema_mismatch_message(
                         rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "schema_mismatch"),
-                        &error_text,
                     ))],
                 ) {
                     return invalid_turn_options_actions(err);
@@ -414,6 +427,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 ctx.turn_id(),
                 ctx.protocol_iteration(),
                 &state,
+                &self.redaction_roots,
                 None,
                 Some(finish_value.clone()),
             )));
@@ -431,7 +445,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         if let Err(err) = continue_or_stop_after_nonterminal(
             &ctx,
             &mut actions,
-            trajectory_events(ctx.turn_id(), ctx.protocol_iteration(), &state, None, None),
+            trajectory_events(
+                ctx.turn_id(),
+                ctx.protocol_iteration(),
+                &state,
+                &self.redaction_roots,
+                None,
+                None,
+            ),
             Vec::new(),
         ) {
             return invalid_turn_options_actions(err);
@@ -683,6 +704,14 @@ fn bounded_exec_tool_call_records(records: &[ToolCallRecord]) -> Vec<ToolCallRec
     bounded
 }
 
+fn executed_call_ledger(
+    records: &[lash_core::ExecutedCallRecord],
+) -> (Vec<RlmExecutedCall>, usize) {
+    let omitted = records.len().saturating_sub(MAX_EXEC_TOOL_CALL_RECORDS);
+    let calls = records.iter().skip(omitted).cloned().collect();
+    (calls, omitted)
+}
+
 fn bounded_tool_call_record(record: &ToolCallRecord) -> ToolCallRecord {
     ToolCallRecord {
         call_id: record.call_id.clone(),
@@ -821,16 +850,22 @@ fn trajectory_entry(
     turn_id: &str,
     protocol_iteration: usize,
     state: &RlmDriverState,
+    redaction_roots: &[PathBuf],
     validation_error: Option<String>,
     final_output: Option<Value>,
 ) -> RlmTrajectoryEntry {
+    let error = validation_error.or_else(|| state.exec_error.clone());
     RlmTrajectoryEntry {
         id: format!("lashlang_step_{turn_id}_{protocol_iteration}"),
         protocol_iteration,
         code: state.executed_code.clone().unwrap_or_default(),
         output: state.output.clone(),
         images: state.images.clone(),
-        error: validation_error.or_else(|| state.exec_error.clone()),
+        calls: state.calls.clone(),
+        calls_omitted: state.calls_omitted,
+        error: error
+            .as_deref()
+            .map(|error| crate::public_error::public_error_message(error, redaction_roots)),
         final_output,
     }
 }
@@ -843,6 +878,7 @@ fn trajectory_events(
     turn_id: &str,
     protocol_iteration: usize,
     state: &RlmDriverState,
+    redaction_roots: &[PathBuf],
     validation_error: Option<String>,
     final_output: Option<Value>,
 ) -> Vec<SessionHistoryRecord> {
@@ -856,6 +892,7 @@ fn trajectory_events(
         turn_id,
         protocol_iteration,
         state,
+        redaction_roots,
         validation_error,
         final_output,
     )));
@@ -1156,6 +1193,58 @@ mod tests {
             payload.pointer("/raw/omitted_failures"),
             Some(&serde_json::json!(1))
         );
+    }
+
+    #[test]
+    fn executed_call_ledger_elides_arguments_and_keeps_the_diagnostic_tail() {
+        let records = (0..MAX_EXEC_TOOL_CALL_RECORDS + 3)
+            .map(|index| lash_core::ExecutedCallRecord {
+                operation: format!("module.call_{index}"),
+                outcome: if index == MAX_EXEC_TOOL_CALL_RECORDS + 2 {
+                    lash_core::ExecutedCallOutcome::Err
+                } else {
+                    lash_core::ExecutedCallOutcome::Ok
+                },
+            })
+            .collect::<Vec<_>>();
+
+        let (calls, omitted) = executed_call_ledger(&records);
+
+        assert_eq!(calls.len(), MAX_EXEC_TOOL_CALL_RECORDS);
+        assert_eq!(omitted, 3);
+        assert_eq!(calls[0].operation, "module.call_3");
+        assert_eq!(
+            calls.last().expect("retained tail").operation,
+            format!("module.call_{}", MAX_EXEC_TOOL_CALL_RECORDS + 2)
+        );
+        assert_eq!(calls[0].outcome, lash_rlm_types::RlmExecutedCallOutcome::Ok);
+        assert_eq!(
+            calls.last().expect("retained tail").outcome,
+            lash_rlm_types::RlmExecutedCallOutcome::Err
+        );
+    }
+
+    #[test]
+    fn trajectory_capture_redacts_model_visible_error_before_journaling() {
+        let workspace = std::path::PathBuf::from("/workspace");
+        let private_path = workspace.join("private").join("secret.txt");
+        let state = RlmDriverState {
+            exec_error: Some(format!("read failed at {}", private_path.display())),
+            ..RlmDriverState::default()
+        };
+
+        let entry = trajectory_entry(
+            "turn",
+            0,
+            &state,
+            std::slice::from_ref(&workspace),
+            None,
+            None,
+        );
+        let error = entry.error.expect("captured public error");
+
+        assert!(!error.contains(&workspace.display().to_string()));
+        assert_eq!(error, "read failed at private/secret.txt");
     }
 
     #[test]

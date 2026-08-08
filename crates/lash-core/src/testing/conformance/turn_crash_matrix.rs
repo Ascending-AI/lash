@@ -1271,15 +1271,17 @@ async fn build_runtime(
         "turn_crash_trace_tool",
         PluginSpec::new().with_tool_provider(Arc::new(trace_tool)),
     )));
-    crate::LashRuntime::builder()
-        .with_session_id(&identity.session_id)
-        .with_policy(runtime_policy())
-        .with_runtime_host(host)
-        .with_store(store)
-        .with_plugin_factories(plugin_factories)
-        .build()
-        .await
-        .expect("build reference runtime")
+    Box::pin(
+        crate::LashRuntime::builder()
+            .with_session_id(&identity.session_id)
+            .with_policy(runtime_policy())
+            .with_runtime_host(host)
+            .with_store(store)
+            .with_plugin_factories(plugin_factories)
+            .build(),
+    )
+    .await
+    .expect("build reference runtime")
 }
 
 async fn seed_reference_ingress(store: &Arc<dyn RuntimePersistence>, identity: &ReferenceIdentity) {
