@@ -355,7 +355,9 @@ fn attachment_usage_gate_core(
     trace_sink: Option<Arc<dyn TraceSink>>,
 ) -> LashCore {
     let model = with_workbench_model_capability(
-        lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None)
+        lash::ModelSpec::builder("test-model")
+            .context_window_tokens(4096)
+            .build()
             .expect("gate model spec"),
     );
     let mut builder = explicit_durable_test_facets(data_dir)

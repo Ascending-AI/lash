@@ -498,13 +498,10 @@ fn session_request(session_id: &str) -> crate::SessionStoreCreateRequest {
         session_id: session_id.to_string(),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy {
-            model: crate::ModelSpec::from_token_limits(
-                "attachment-owner-conformance-model",
-                Default::default(),
-                8_192,
-                None,
-            )
-            .expect("valid model"),
+            model: crate::ModelSpec::builder("attachment-owner-conformance-model")
+                .context_window_tokens(8_192)
+                .build()
+                .expect("valid model"),
             provider_id: "attachment-owner-conformance".to_string(),
             session_id: Some(session_id.to_string()),
             ..crate::SessionPolicy::default()

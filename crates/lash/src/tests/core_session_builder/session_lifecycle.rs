@@ -397,10 +397,14 @@ async fn prompt_layers_apply_across_core_session_turn_and_mutation_scopes() -> R
     let core = explicit_ephemeral_facets(LashCore::standard_builder())
         .provider(recording_prompt_provider(Arc::clone(&seen)))
         .model(mock_model_spec())
+        .instructions("Zulu core instruction.")
+        .instructions("Repeated instruction.")
+        .instructions("Repeated instruction.")
         .prompt_contribution(PromptContribution::guidance("Core", "core guidance"))
         .build()?;
     let session = core
         .session("prompt-api")
+        .instructions("Alpha session instruction.")
         .prompt_contribution(PromptContribution::guidance("Session", "session guidance"))
         .open()
         .await?;
@@ -430,6 +434,17 @@ async fn prompt_layers_apply_across_core_session_turn_and_mutation_scopes() -> R
     session.turn(TurnInput::text("third")).run().await?;
 
     let prompts = seen.lock().expect("seen prompts");
+    assert_eq!(prompts.len(), 3);
+    for prompt in prompts.iter() {
+        assert!(prompt.contains("Alpha session instruction."));
+        assert!(prompt.contains("Zulu core instruction."));
+        assert_eq!(prompt.matches("Repeated instruction.").count(), 1);
+        assert!(
+            prompt.find("Alpha session instruction.")
+                < prompt.find("Zulu core instruction."),
+            "same-priority instructions should sort by content, not scope or call order: {prompt}"
+        );
+    }
     assert!(prompts[0].contains("core guidance"));
     assert!(prompts[0].contains("session guidance"));
     assert!(prompts[0].contains("turn guidance"));

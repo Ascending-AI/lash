@@ -428,7 +428,9 @@ pub async fn start_bot(
     let mut runtime_config = RuntimeConfig::new(data_dir.join("lash"));
     runtime_config.trace_to_stderr = false;
     let session_owner = runtime::session_owner(&runtime_config.incarnation);
-    let model = ModelSpec::from_token_limits("mock/model", Default::default(), 200_000, None)
+    let model = ModelSpec::builder("mock/model")
+        .context_window_tokens(200_000)
+        .build()
         .expect("valid mock model metadata");
     let core = runtime::build_core(&runtime_config, script.provider(), model, Arc::clone(&api))
         .await

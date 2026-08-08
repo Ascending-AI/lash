@@ -38,7 +38,9 @@ mod derived_notes_tests {
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
             .model(
-                lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None)
+                lash::ModelSpec::builder("test-model")
+                    .context_window_tokens(4096)
+                    .build()
                     .expect("model spec"),
             )
             .store_factory(Arc::clone(&store_factory))

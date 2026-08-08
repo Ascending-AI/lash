@@ -87,7 +87,9 @@ async fn recoverable_chat_test_state_with_dependencies(
         .expect("open process registry"),
     ) as Arc<dyn lash::process::ProcessRegistry>;
     let model = with_workbench_model_capability(
-        lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None)
+        lash::ModelSpec::builder("test-model")
+            .context_window_tokens(4096)
+            .build()
             .expect("model spec"),
     );
     let mut core_builder = explicit_durable_test_facets(data_dir)

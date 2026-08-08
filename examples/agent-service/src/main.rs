@@ -174,14 +174,14 @@ async fn async_main() -> anyhow_like::Result<()> {
     let app_db = AppDb::open(&data_dir.join("app.db")).map_err(|err| err.to_string())?;
     #[cfg(feature = "restate")]
     let shared_db = Arc::new(Mutex::new(app_db));
-    let model_spec = lash::ModelSpec::from_token_limits(
-        model.clone(),
-        lash::provider::ReasoningSelection::Effort(model_variant.clone()),
-        200_000,
-        None,
-    )
-    .map_err(|err| format!("invalid OPENROUTER_MODEL metadata: {err}"))?
-    .with_capability(default_openrouter_model_capability());
+    let model_spec = lash::ModelSpec::builder(model.clone())
+        .variant(lash::provider::ReasoningSelection::Effort(
+            model_variant.clone(),
+        ))
+        .context_window_tokens(200_000)
+        .build()
+        .map_err(|err| format!("invalid OPENROUTER_MODEL metadata: {err}"))?
+        .with_capability(default_openrouter_model_capability());
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::default(),
         artifact_store,

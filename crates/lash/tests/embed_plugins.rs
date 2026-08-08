@@ -212,7 +212,9 @@ fn core_with_responses(responses: Vec<LlmResponse>) -> LashCore {
     LashCore::standard_builder()
         .provider(provider)
         .model(
-            lash::ModelSpec::from_token_limits("mock-model", Default::default(), 16_000, None)
+            lash::ModelSpec::builder("mock-model")
+                .context_window_tokens(16_000)
+                .build()
                 .expect("valid model spec"),
         )
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))

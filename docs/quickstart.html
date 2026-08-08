@@ -82,7 +82,7 @@ tokio                = { version = "1", features = ["full"] }</code></pre>
 
 <pre data-lang="rust" data-snippet="quickstart#hello-lash"><code>use std::sync::Arc;
 
-use lash::{LashCore, TurnInput, provider::ProviderHandle};
+use lash::{LashCore, ModelSpec, PromptLayerSink, TurnInput, provider::ProviderHandle};
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 
 #[tokio::main]
@@ -95,22 +95,19 @@ async fn main() -&gt; anyhow::Result&lt;()&gt; {
             .into_components(),
     );
 
+    let model = ModelSpec::builder("anthropic/claude-sonnet-4.6")
+        .context_window_tokens(200_000)
+        .capability(lash::provider::ModelCapability {
+            cache_control: Some(lash::provider::CacheControlDialect::Anthropic),
+            ..Default::default()
+        })
+        .build()?;
+
     // one LashCore per app, cloned freely.
-    let core = lash::LashCore::standard_builder()
+    let core = LashCore::standard_builder()
         .provider(provider)
-        .model(
-            lash::ModelSpec::from_token_limits(
-                "anthropic/claude-sonnet-4.6",
-                Default::default(),
-                200_000,
-                None,
-            )
-            .expect("valid model metadata")
-            .with_capability(lash::provider::ModelCapability {
-                cache_control: Some(lash::provider::CacheControlDialect::Anthropic),
-                ..Default::default()
-            }),
-        )
+        .model(model)
+        .instructions("Answer in one short sentence. Skip preamble.")
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .build()?;
@@ -136,6 +133,12 @@ async fn main() -&gt; anyhow::Result&lt;()&gt; {
       <p>The quickstart intentionally leaves most host features out. Add them one at a time.</p>
     </div>
       <div class="listing">
+        <div class="listing__row">
+          <div class="listing__label">agent instructions</div>
+          <div class="listing__body">
+            <p>Use <code>.instructions(text)</code> to add project instructions without replacing Lash's built-in agent intro. See <a href="./embedding-prompts.html#prompt-templates">Prompt Templates And Slots</a> for composition and ordering semantics.</p>
+          </div>
+        </div>
         <div class="listing__row">
           <div class="listing__label">live streaming</div>
           <div class="listing__body">

@@ -33,7 +33,9 @@ mod turn_control_timeout_tests {
             .build()
             .into_handle();
         let model =
-            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None)
+            lash::ModelSpec::builder("test-model")
+                .context_window_tokens(4096)
+                .build()
                 .expect("model spec");
         let event_tx = SessionEventRegistry::new(16);
         let core = explicit_durable_test_facets(&data_dir)
@@ -268,7 +270,9 @@ mod turn_control_timeout_tests {
             .build()
             .into_handle();
         let model =
-            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None)
+            lash::ModelSpec::builder("test-model")
+                .context_window_tokens(4096)
+                .build()
                 .expect("model spec");
         let event_tx = SessionEventRegistry::new(16);
         let core = explicit_durable_test_facets(data_dir)
@@ -444,7 +448,9 @@ finish (await handle)?
             .build()
             .into_handle();
         let model =
-            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None)
+            lash::ModelSpec::builder("test-model")
+                .context_window_tokens(4096)
+                .build()
                 .expect("model spec");
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)

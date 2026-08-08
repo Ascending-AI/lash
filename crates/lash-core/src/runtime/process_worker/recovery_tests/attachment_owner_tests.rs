@@ -142,7 +142,9 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
     const PROCESS_ID: &str = "parent-bound-process";
     let policy = crate::SessionPolicy {
         provider_id: "test".to_string(),
-        model: crate::ModelSpec::from_token_limits("test-model", Default::default(), 16_384, None)
+        model: crate::ModelSpec::builder("test-model")
+            .context_window_tokens(16_384)
+            .build()
             .expect("valid model spec"),
         ..crate::SessionPolicy::default()
     };
@@ -220,7 +222,9 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
         crate::ProcessEngineRegistry::new().with_engine(Arc::new(AttachmentWritingEngine));
     let policy = crate::SessionPolicy {
         provider_id: "test".to_string(),
-        model: crate::ModelSpec::from_token_limits("test-model", Default::default(), 16_384, None)
+        model: crate::ModelSpec::builder("test-model")
+            .context_window_tokens(16_384)
+            .build()
             .expect("valid model spec"),
         ..crate::SessionPolicy::default()
     };

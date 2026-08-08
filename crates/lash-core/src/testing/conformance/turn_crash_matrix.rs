@@ -1215,13 +1215,10 @@ fn recovery_timings() -> crate::LeaseTimings {
 fn runtime_policy() -> crate::SessionPolicy {
     crate::SessionPolicy {
         provider_id: "turn-crash-script".to_string(),
-        model: crate::ModelSpec::from_token_limits(
-            "turn-crash-model",
-            Default::default(),
-            16_000,
-            None,
-        )
-        .expect("valid conformance model"),
+        model: crate::ModelSpec::builder("turn-crash-model")
+            .context_window_tokens(16_000)
+            .build()
+            .expect("valid conformance model"),
         ..Default::default()
     }
 }

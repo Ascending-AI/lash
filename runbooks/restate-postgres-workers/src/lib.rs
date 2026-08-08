@@ -646,7 +646,9 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
     let mut builder = lash::LashCore::rlm_builder(factory)
         .provider(provider)
         .model(
-            lash::ModelSpec::from_token_limits("e2e-mock", Default::default(), 200_000, None)
+            lash::ModelSpec::builder("e2e-mock")
+                .context_window_tokens(200_000)
+                .build()
                 .map_err(|err| anyhow::anyhow!(err))?,
         )
         .store_factory(session_store_factory)

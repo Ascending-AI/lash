@@ -1722,7 +1722,9 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
     let recorder = RecordingEffectController::default();
     let policy = SessionPolicy {
         provider_id: "mock".to_string(),
-        model: crate::ModelSpec::from_token_limits("mock-model", Default::default(), 200_000, None)
+        model: crate::ModelSpec::builder("mock-model")
+            .context_window_tokens(200_000)
+            .build()
             .expect("valid model spec"),
         ..SessionPolicy::default()
     };
@@ -1770,7 +1772,9 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
 async fn start_exec_without_code_executor_stops_as_runtime_error() {
     let policy = SessionPolicy {
         provider_id: "mock".to_string(),
-        model: crate::ModelSpec::from_token_limits("mock-model", Default::default(), 200_000, None)
+        model: crate::ModelSpec::builder("mock-model")
+            .context_window_tokens(200_000)
+            .build()
             .expect("valid model spec"),
         ..SessionPolicy::default()
     };

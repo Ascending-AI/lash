@@ -109,12 +109,10 @@ async fn async_main() -> AnyhowResult<()> {
                 .into_components(),
         )
     };
-    let model_spec = lash::ModelSpec::from_token_limits(
-        model.clone(),
-        lash::provider::ReasoningSelection::Effort(model_variant.clone()),
-        context_window_tokens,
-        None,
-    )
+    let model_spec = lash::ModelSpec::builder(model.clone())
+        .variant(lash::provider::ReasoningSelection::Effort(model_variant.clone()))
+        .context_window_tokens(context_window_tokens)
+        .build()
     .map_err(|err| anyhow!("invalid OPENROUTER_MODEL metadata: {err}"))?;
     let model_spec = with_workbench_model_capability(model_spec);
     let database_url = std::env::var("AGENT_WORKBENCH_DATABASE_URL")

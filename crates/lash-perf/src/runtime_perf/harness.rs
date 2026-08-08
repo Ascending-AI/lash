@@ -42,7 +42,9 @@ const BENCHMARK_MAIL_ALIAS: &str = "mail";
 const BENCHMARK_MAIL_EVENT: &str = "received";
 
 fn benchmark_model_spec() -> lash::ModelSpec {
-    lash::ModelSpec::from_token_limits("mock-model", Default::default(), 200_000, None)
+    lash::ModelSpec::builder("mock-model")
+        .context_window_tokens(200_000)
+        .build()
         .expect("valid benchmark model spec")
 }
 

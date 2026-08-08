@@ -54,13 +54,10 @@ pub async fn wake_delivery_crash_matrix(
         session_id: target_session_id.to_string(),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy {
-            model: crate::ModelSpec::from_token_limits(
-                "wake-crash-model",
-                Default::default(),
-                200_000,
-                None,
-            )
-            .expect("valid crash-matrix model"),
+            model: crate::ModelSpec::builder("wake-crash-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("valid crash-matrix model"),
             provider_id: "conformance-provider".to_string(),
             session_id: Some(target_session_id.to_string()),
             autonomous: false,

@@ -17,6 +17,17 @@ mod recovery_disposition_tests;
 
 const TEST_PROCESS_EXECUTION_CONCURRENCY: usize = 4;
 
+fn test_session_policy() -> crate::SessionPolicy {
+    crate::SessionPolicy {
+        provider_id: "test".to_string(),
+        model: crate::ModelSpec::builder("test-model")
+            .context_window_tokens(16_384)
+            .build()
+            .expect("valid model spec"),
+        ..crate::SessionPolicy::default()
+    }
+}
+
 #[test]
 fn process_execution_concurrency_validates_semaphore_bounds() {
     DurableProcessWorkerConfig::validate_process_execution_concurrency(1)
@@ -152,12 +163,7 @@ async fn worker_with_engine_registry_and_timings(
     if let Some(lease_timings) = lease_timings {
         runtime_host = runtime_host.with_lease_timings(lease_timings);
     }
-    let policy = crate::SessionPolicy {
-        provider_id: "test".to_string(),
-        model: crate::ModelSpec::from_token_limits("test-model", Default::default(), 16_384, None)
-            .expect("valid model spec"),
-        ..crate::SessionPolicy::default()
-    };
+    let policy = test_session_policy();
     let env_ref = crate::persist_process_execution_env(
         runtime_host.durability.process_env_store.as_ref(),
         &crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone()),
@@ -1009,12 +1015,7 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
     runtime_host.process_engines = crate::ProcessEngineRegistry::new().with_engine(nested_engine);
     runtime_host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(provider));
-    let policy = crate::SessionPolicy {
-        provider_id: "test".to_string(),
-        model: crate::ModelSpec::from_token_limits("test-model", Default::default(), 16_384, None)
-            .expect("valid model spec"),
-        ..crate::SessionPolicy::default()
-    };
+    let policy = test_session_policy();
     let mut plugin_factories = crate::testing::test_standard_protocol_factories();
     plugin_factories.push(Arc::new(crate::plugin::StaticPluginFactory::new(
         "nested-process-wait-tool",
@@ -1112,12 +1113,7 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
         crate::ProcessEngineRegistry::new().with_engine(Arc::new(BoundaryThenTerminalEngine {
             runs: Arc::clone(&runs),
         }));
-    let policy = crate::SessionPolicy {
-        provider_id: "test".to_string(),
-        model: crate::ModelSpec::from_token_limits("test-model", Default::default(), 16_384, None)
-            .expect("valid model spec"),
-        ..crate::SessionPolicy::default()
-    };
+    let policy = test_session_policy();
     let env_spec =
         crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone());
     let env_ref = crate::persist_process_execution_env(
@@ -1238,12 +1234,7 @@ async fn snapshot_recovery_fixture(
         crate::ProcessEngineRegistry::new().with_engine(Arc::new(SnapshotRecordingEngine {
             payloads: Arc::clone(&payloads),
         }));
-    let policy = crate::SessionPolicy {
-        provider_id: "test".to_string(),
-        model: crate::ModelSpec::from_token_limits("test-model", Default::default(), 16_384, None)
-            .expect("valid model spec"),
-        ..crate::SessionPolicy::default()
-    };
+    let policy = test_session_policy();
     let env_ref = crate::persist_process_execution_env(
         runtime_host.durability.process_env_store.as_ref(),
         &crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone()),

@@ -155,7 +155,9 @@ fn text_response(text: &str) -> LlmResponse {
 }
 
 fn model() -> lash_core::ModelSpec {
-    lash_core::ModelSpec::from_token_limits("logical-turn-sim", Default::default(), 200_000, None)
+    lash_core::ModelSpec::builder("logical-turn-sim")
+        .context_window_tokens(200_000)
+        .build()
         .expect("valid sim model")
 }
 

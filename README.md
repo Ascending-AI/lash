@@ -32,7 +32,7 @@ tokio                = { version = "1", features = ["full"] }
 ```rust
 use std::sync::Arc;
 
-use lash::{LashCore, ModelSpec, TurnInput, provider::ProviderHandle};
+use lash::{LashCore, ModelSpec, PromptLayerSink, TurnInput, provider::ProviderHandle};
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 
 #[tokio::main]
@@ -44,22 +44,19 @@ async fn main() -> anyhow::Result<()> {
             .into_components(),
     );
 
-    let model = ModelSpec::from_token_limits(
-        "anthropic/claude-sonnet-4.6",
-        Default::default(),
-        200_000,
-        None,
-    )
-    .map_err(anyhow::Error::msg)?
-    .with_capability(lash::provider::ModelCapability {
-        cache_control: Some(lash::provider::CacheControlDialect::Anthropic),
-        ..Default::default()
-    });
+    let model = ModelSpec::builder("anthropic/claude-sonnet-4.6")
+        .context_window_tokens(200_000)
+        .capability(lash::provider::ModelCapability {
+            cache_control: Some(lash::provider::CacheControlDialect::Anthropic),
+            ..Default::default()
+        })
+        .build()?;
 
     // one LashCore per app, cloned freely.
-    let core = lash::LashCore::standard_builder()
+    let core = LashCore::standard_builder()
         .provider(provider)
         .model(model)
+        .instructions("Answer in one short sentence. Skip preamble.")
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .build()?;

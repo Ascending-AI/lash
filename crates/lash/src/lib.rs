@@ -48,8 +48,8 @@ pub use crate::turn::{
 pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, EffectReplayOwnership, InputItem, LlmCallRecord,
-    ModelLimits, ModelSpec, PendingTurnInput, PendingTurnInputCancelOutcome,
-    PendingTurnInputCancelResult, PendingTurnInputCancelTarget,
+    ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder, PendingTurnInput,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelResult, PendingTurnInputCancelTarget,
     PendingTurnInputSuffixCancelOutcome, Resolution, ResolveOutcome, SessionCreateRequest,
     SessionError, SessionStartPoint, TurnActivity, TurnActivityId, TurnCancelOriginHint, TurnCause,
     TurnEvent, TurnInput, TurnInputApplication, facade_support::ExecutionSummary,
@@ -73,15 +73,15 @@ pub use tokio_util::sync::CancellationToken;
 pub mod prelude {
     pub use crate::{
         AdvancedToolAdmin, CoreTriggerAdmin, EmbedError, EnqueueTurnBuilder, ExecutionSummary,
-        InputItem, LashCore, LashCoreBuilder, LashSession, ModelLimits, ModelSpec,
-        ObservableSession, ParkedSession, PendingTurnInputCancelOutcome, PluginBinding,
-        PluginOperations, PluginStack, PromptLayerSink, QueuedTurnBuilder, Result, SessionBuilder,
-        SessionCommand, SessionCommandAdmin, SessionCommandReceipt, SessionConfigPatch,
-        SessionCreateRequest, SessionDeleteReport, SessionSpec, SessionStartPoint,
-        SessionTriggerAdmin, ToolAdmin, TurnActivity, TurnActivityFanout, TurnActivityId,
-        TurnActivitySink, TurnBuilder, TurnCause, TurnEvent, TurnFinish, TurnInput,
-        TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnResult, TurnStop, TurnStream,
-        message_role, message_text,
+        InputItem, LashCore, LashCoreBuilder, LashSession, ModelLimits, ModelLimitsError,
+        ModelSpec, ModelSpecBuilder, ObservableSession, ParkedSession,
+        PendingTurnInputCancelOutcome, PluginBinding, PluginOperations, PluginStack,
+        PromptLayerSink, QueuedTurnBuilder, Result, SessionBuilder, SessionCommand,
+        SessionCommandAdmin, SessionCommandReceipt, SessionConfigPatch, SessionCreateRequest,
+        SessionDeleteReport, SessionSpec, SessionStartPoint, SessionTriggerAdmin, ToolAdmin,
+        TurnActivity, TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBuilder, TurnCause,
+        TurnEvent, TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput,
+        TurnResult, TurnStop, TurnStream, message_role, message_text,
     };
 }
 

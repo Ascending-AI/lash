@@ -4,7 +4,9 @@ async fn durable_core_without_advanced(
     provider: lash::provider::ProviderHandle,
     data_dir: &Path,
 ) -> lash::Result<lash::LashCore> {
-    let model = lash::ModelSpec::from_token_limits("compile-only", Default::default(), 4096, None)
+    let model = lash::ModelSpec::builder("compile-only")
+        .context_window_tokens(4096)
+        .build()
         .expect("valid model metadata");
 
     lash::LashCore::rlm_builder(lash_protocol_rlm::RlmProtocolPluginFactory::new(

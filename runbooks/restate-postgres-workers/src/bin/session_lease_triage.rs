@@ -283,13 +283,10 @@ impl Backend {
         let core = lash::LashCore::rlm_builder(factory)
             .provider(provider)
             .model(
-                lash::ModelSpec::from_token_limits(
-                    "session-lease-triage-mock",
-                    Default::default(),
-                    200_000,
-                    None,
-                )
-                .map_err(anyhow::Error::msg)?,
+                lash::ModelSpec::builder("session-lease-triage-mock")
+                    .context_window_tokens(200_000)
+                    .build()
+                    .map_err(anyhow::Error::msg)?,
             )
             .store_factory(Arc::clone(&self.factory))
             .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(

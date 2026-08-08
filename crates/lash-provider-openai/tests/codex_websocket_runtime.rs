@@ -40,7 +40,9 @@ fn websocket_core(provider: ProviderHandle) -> LashCore {
     LashCore::standard_builder()
         .provider(provider)
         .model(
-            lash::ModelSpec::from_token_limits("gpt-5.4", Default::default(), 16_000, None)
+            lash::ModelSpec::builder("gpt-5.4")
+                .context_window_tokens(16_000)
+                .build()
                 .expect("valid model spec"),
         )
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
@@ -154,7 +156,9 @@ async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
     let core = LashCore::standard_builder()
         .provider(websocket_provider(&server))
         .model(
-            lash::ModelSpec::from_token_limits("gpt-5.4", Default::default(), 16_000, None)
+            lash::ModelSpec::builder("gpt-5.4")
+                .context_window_tokens(16_000)
+                .build()
                 .expect("valid model spec"),
         )
         .tools(Arc::new(StaticToolProvider::new(

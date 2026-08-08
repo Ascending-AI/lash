@@ -162,13 +162,10 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
             as Arc<dyn lash_core::ProcessRegistry>)
         .provider(provider)
         .model(
-            lash_core::ModelSpec::from_token_limits(
-                "cache-regression-model",
-                Default::default(),
-                200_000,
-                None,
-            )
-            .expect("cache regression model"),
+            lash_core::ModelSpec::builder("cache-regression-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("cache regression model"),
         )
         .build()
         .expect("RLM cache regression core");

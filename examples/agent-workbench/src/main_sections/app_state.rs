@@ -573,16 +573,14 @@ fn model_spec_for_request(
         .unwrap_or(selected_model.model.as_str())
         .to_string();
     let model_variant = model_variant_for_request(selected_model, model_variant);
-    lash::ModelSpec::from_token_limits(
-        model,
-        model_variant
+    lash::ModelSpec::builder(model)
+        .variant(model_variant
             .map(lash::provider::ReasoningSelection::Effort)
-            .unwrap_or_default(),
-        workbench_context_window_tokens(),
-        None,
-    )
+            .unwrap_or_default())
+        .context_window_tokens(workbench_context_window_tokens())
+        .build()
         .map(with_workbench_model_capability)
-        .map_err(AppError::bad_request)
+        .map_err(|error| AppError::bad_request(error.to_string()))
 }
 
 fn model_variant_for_request(
@@ -603,15 +601,13 @@ fn model_variant_for_request(
 }
 
 fn model_spec_from_selection(selection: ModelSelection) -> lash::ModelSpec {
-    lash::ModelSpec::from_token_limits(
-        selection.model,
-        selection
+    lash::ModelSpec::builder(selection.model)
+        .variant(selection
             .model_variant
             .map(lash::provider::ReasoningSelection::Effort)
-            .unwrap_or_default(),
-        workbench_context_window_tokens(),
-        None,
-    )
+            .unwrap_or_default())
+        .context_window_tokens(workbench_context_window_tokens())
+        .build()
     .expect("workbench model selection should use a valid token limit")
     .with_capability(workbench_model_capability())
 }

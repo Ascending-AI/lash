@@ -30,6 +30,13 @@ mod tests {
         .expect("runtime thread")
     }
 
+    fn test_model() -> lash::ModelSpec {
+        lash::ModelSpec::builder("test-model")
+            .context_window_tokens(4096)
+            .build()
+            .expect("model spec")
+    }
+
     include!("tests/recoverable_chat.rs");
     include!("tests/continue_as_projection.rs");
     include!("tests/tool_catalog.rs");
@@ -398,8 +405,7 @@ mod tests {
             .complete_error("transient done test should not call the provider")
             .build()
             .into_handle();
-        let model =
-            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None).expect("model spec");
+        let model = test_model();
         let event_tx = SessionEventRegistry::new(16);
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
@@ -478,9 +484,7 @@ mod tests {
             .complete_error("trigger dispatch done test should not call the provider")
             .build()
             .into_handle();
-        let model =
-            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None)
-                .expect("model spec");
+        let model = test_model();
         let event_tx = SessionEventRegistry::new(16);
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
@@ -556,8 +560,7 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-        let model =
-            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None).expect("model spec");
+        let model = test_model();
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-observation-stream-test")
             .complete(|_request| async {
@@ -649,8 +652,7 @@ finish "observed through live replay"
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-        let model =
-            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None).expect("model spec");
+        let model = test_model();
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-observation-gap-test")
             .complete(|_request| async {
@@ -751,8 +753,7 @@ finish "gap source"
             .complete_error("cancel route test should not call the provider")
             .build()
             .into_handle();
-        let model =
-            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None).expect("model spec");
+        let model = test_model();
         let event_tx = SessionEventRegistry::new(16);
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
@@ -883,8 +884,7 @@ finish "gap source"
         let mail_world = mail::MailWorld::new();
         mail_world.add_account("test").expect("add test");
         let provider = catalog_lifecycle_provider();
-        let model =
-            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None).expect("model spec");
+        let model = test_model();
         let session_id = WorkbenchSessionIds::fresh().current();
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
@@ -967,8 +967,7 @@ finish initial
             })
             .build()
             .into_handle();
-        let model =
-            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None).expect("model spec");
+        let model = test_model();
         let session_id = WorkbenchSessionIds::fresh().current();
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
@@ -1031,8 +1030,7 @@ finish initial
             .complete_error("dynamic inbox surface test should not call the provider")
             .build()
             .into_handle();
-        let model =
-            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None).expect("model spec");
+        let model = test_model();
         let session_ids = WorkbenchSessionIds::fresh();
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
@@ -1210,8 +1208,7 @@ finish initial
             .complete(|_| async { Ok(trigger_registration_response()) })
             .build()
             .into_handle();
-        let model =
-            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None).expect("model spec");
+        let model = test_model();
         let model = with_workbench_model_capability(model);
         let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
         let event_tx =
@@ -1392,8 +1389,7 @@ finish initial
                 .expect("open registry"),
         ) as Arc<dyn lash::process::ProcessRegistry>;
         let provider = trigger_registration_provider();
-        let model =
-            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None).expect("model spec");
+        let model = test_model();
         let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
@@ -1817,14 +1813,13 @@ finish initial
             Arc::clone(&lashlang_execution) as Arc<dyn TraceSink>,
             Arc::new(JsonlTraceSink::new(lashlang_execution_path)) as Arc<dyn TraceSink>,
         ])) as Arc<dyn TraceSink>;
-        let model =
-            lash::ModelSpec::from_token_limits(
-                "mock-model",
-                lash::provider::ReasoningSelection::Effort("high".to_string()),
-                4096,
-                None,
-            )
-                .expect("model spec");
+        let model = lash::ModelSpec::builder("mock-model")
+            .variant(lash::provider::ReasoningSelection::Effort(
+                "high".to_string(),
+            ))
+            .context_window_tokens(4096)
+            .build()
+            .expect("model spec");
         let model = with_workbench_model_capability(model);
         let process_deployment = lash_restate::RestateProcessDeployment::new(
             restate_ingress_url.clone(),
@@ -2174,8 +2169,7 @@ finish initial
         process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
     ) -> LashCore {
         let provider = trigger_registration_provider();
-        let model =
-            lash::ModelSpec::from_token_limits("test-model", Default::default(), 4096, None).expect("model spec");
+        let model = test_model();
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::default()
                 .with_lashlang_abilities(workbench_lashlang_abilities()),

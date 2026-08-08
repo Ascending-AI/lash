@@ -106,7 +106,9 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
                 as Arc<dyn lash_core::ProcessRegistry>)
             .provider(ProviderHandle::new(provider.into_components()))
             .model(
-                lash_core::ModelSpec::from_token_limits(model, Default::default(), 200_000, None)
+                lash_core::ModelSpec::builder(model)
+                    .context_window_tokens(200_000)
+                    .build()
                     .expect("model limits")
                     .with_capability(lash_core::ModelCapability {
                         cache_control: Some(cache_control),

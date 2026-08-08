@@ -566,13 +566,11 @@ fn process_start_requests_round_trip_core_values() {
         .expect("plugin options"),
         lash_core::SessionPolicy {
             provider_id: "process-provider".to_string(),
-            model: lash_core::ModelSpec::from_token_limits(
-                "process-model",
-                Default::default(),
-                4096,
-                Some(512),
-            )
-            .expect("model"),
+            model: lash_core::ModelSpec::builder("process-model")
+                .context_window_tokens(4096)
+                .output_token_capacity(512)
+                .build()
+                .expect("model"),
             generation: lash_core::GenerationOptions {
                 output_token_cap: std::num::NonZeroUsize::new(256),
                 temperature: Some(

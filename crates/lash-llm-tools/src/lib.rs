@@ -331,15 +331,15 @@ mod tests {
     use lash_core::{SessionCreateRequest, SessionSnapshot, ToolCall};
 
     fn model_spec(model: &str, variant: Option<&str>) -> lash_core::ModelSpec {
-        lash_core::ModelSpec::from_token_limits(
-            model,
-            variant
-                .map(|effort| lash_core::ReasoningSelection::Effort(effort.to_string()))
-                .unwrap_or_default(),
-            200_000,
-            None,
-        )
-        .expect("valid test model spec")
+        lash_core::ModelSpec::builder(model)
+            .variant(
+                variant
+                    .map(|effort| lash_core::ReasoningSelection::Effort(effort.to_string()))
+                    .unwrap_or_default(),
+            )
+            .context_window_tokens(200_000)
+            .build()
+            .expect("valid test model spec")
     }
 
     #[derive(Default)]

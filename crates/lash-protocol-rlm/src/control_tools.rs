@@ -158,7 +158,9 @@ mod tests {
     use lash_rlm_types::{RlmProtocolEvent, RlmTermination};
 
     fn model_spec(model: &str) -> lash_core::ModelSpec {
-        lash_core::ModelSpec::from_token_limits(model, Default::default(), 200_000, None)
+        lash_core::ModelSpec::builder(model)
+            .context_window_tokens(200_000)
+            .build()
             .expect("valid test model spec")
     }
 

@@ -7770,13 +7770,10 @@ fn recovery_worker_with_plugins(
 
 fn recovery_session_policy() -> lash_core::SessionPolicy {
     lash_core::SessionPolicy {
-        model: lash_core::ModelSpec::from_token_limits(
-            "mock-model",
-            Default::default(),
-            200_000,
-            None,
-        )
-        .expect("model spec"),
+        model: lash_core::ModelSpec::builder("mock-model")
+            .context_window_tokens(200_000)
+            .build()
+            .expect("model spec"),
         ..lash_core::SessionPolicy::default()
     }
 }
@@ -7983,13 +7980,10 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
             session_id: "root".to_string(),
             relation: lash_core::SessionRelation::default(),
             policy: lash_core::SessionPolicy {
-                model: lash_core::ModelSpec::from_token_limits(
-                    "mock-model",
-                    Default::default(),
-                    200_000,
-                    None,
-                )
-                .expect("model spec"),
+                model: lash_core::ModelSpec::builder("mock-model")
+                    .context_window_tokens(200_000)
+                    .build()
+                    .expect("model spec"),
                 ..lash_core::SessionPolicy::default()
             },
         })

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use lash_core::{PromptContribution, PromptLayer, PromptSlot, PromptTemplate};
 
 /// Builder-agnostic prompt-layer mutation surface.
@@ -15,6 +17,23 @@ use lash_core::{PromptContribution, PromptLayer, PromptSlot, PromptTemplate};
 pub trait PromptLayerSink: Sized {
     /// Mutable access to the builder's prompt layer, created on first use.
     fn prompt_layer_mut(&mut self) -> &mut PromptLayer;
+
+    /// Add agent instructions to the project-instructions prompt slot.
+    ///
+    /// This is shorthand for [`PromptContribution::project_instructions`] in
+    /// [`PromptSlot::ProjectInstructions`]. With the default template it
+    /// renders under `## Guidance` / `### Project Instructions`; it does not
+    /// replace the built-in main-agent intro.
+    ///
+    /// Repeated calls append rather than replace, while identical
+    /// contributions deduplicate when the prompt is assembled. Contributions
+    /// with the same priority render sorted by content, not in call order, so a
+    /// session-scoped instruction does not override a core-scoped instruction.
+    fn instructions(mut self, instructions: impl Into<Arc<str>>) -> Self {
+        self.prompt_layer_mut()
+            .add_contribution(PromptContribution::project_instructions(instructions));
+        self
+    }
 
     /// Set the base prompt template.
     fn prompt_template(mut self, template: PromptTemplate) -> Self {

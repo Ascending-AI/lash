@@ -1255,7 +1255,9 @@ mod reconcile_tests {
     use super::*;
 
     fn model(id: &str) -> lash_core::ModelSpec {
-        lash_core::ModelSpec::from_token_limits(id, Default::default(), 200_000, None)
+        lash_core::ModelSpec::builder(id)
+            .context_window_tokens(200_000)
+            .build()
             .expect("valid test model")
     }
 
