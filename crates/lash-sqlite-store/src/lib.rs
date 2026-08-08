@@ -160,9 +160,36 @@ fn sqlite_error(err: rusqlite::Error) -> StoreError {
         }
         rusqlite::Error::ToSqlConversionFailure(error) => match error.downcast::<StoreError>() {
             Ok(error) => *error,
-            Err(error) => StoreError::Backend(error.to_string()),
+            Err(error) => StoreError::StorageFailure {
+                backend: "sqlite",
+                message: error.to_string(),
+            },
         },
-        err => StoreError::Backend(err.to_string()),
+        err => StoreError::StorageFailure {
+            backend: "sqlite",
+            message: err.to_string(),
+        },
+    }
+}
+
+fn sqlite_conversion_error(error: StoreError) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+}
+
+fn stored_data_corrupt(record_kind: &'static str, error: impl std::fmt::Display) -> StoreError {
+    StoreError::StoredDataCorrupt {
+        record_kind,
+        message: error.to_string(),
+    }
+}
+
+fn map_record_decode_error(record_kind: &'static str, error: StoreError) -> StoreError {
+    match error {
+        StoreError::UnsupportedRecordSchemaVersion { .. }
+        | StoreError::MissingRecordSchemaVersion { .. }
+        | StoreError::InvalidRecordSchemaVersion { .. }
+        | StoreError::StoredDataCorrupt { .. } => error,
+        error => stored_data_corrupt(record_kind, error),
     }
 }
 
@@ -555,7 +582,12 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             .await
             .map_err(|err| err.to_string())?,
         );
-        if store.load_session_meta().await.is_none() {
+        if store
+            .load_session_meta()
+            .await
+            .map_err(|error| error.to_string())?
+            .is_none()
+        {
             return Ok(None);
         }
         Ok(Some(store as Arc<dyn RuntimePersistence>))
@@ -937,11 +969,12 @@ fn compress_blob(content: &[u8]) -> Vec<u8> {
     encoder.finish().expect("submit blob compression")
 }
 
-fn decompress_blob(content: &[u8]) -> Option<Vec<u8>> {
+fn decompress_blob(content: &[u8]) -> Result<Vec<u8>, StoreError> {
     let mut decoder = ZlibDecoder::new(content);
     let mut out = Vec::new();
-    std::io::Read::read_to_end(&mut decoder, &mut out).ok()?;
-    Some(out)
+    std::io::Read::read_to_end(&mut decoder, &mut out)
+        .map_err(|error| stored_data_corrupt("compressed artifact blob", error))?;
+    Ok(out)
 }
 
 fn encode_artifact_blob(
@@ -962,11 +995,13 @@ fn encode_artifact_blob(
     })
 }
 
-fn decode_artifact_blob(bytes: &[u8]) -> Option<Vec<u8>> {
-    let envelope = decode_msgpack::<StoredBlobEnvelope>(bytes)?;
+fn decode_artifact_blob(bytes: &[u8]) -> Result<Option<Vec<u8>>, StoreError> {
+    let Some(envelope) = decode_msgpack::<StoredBlobEnvelope>(bytes) else {
+        return Ok(None);
+    };
     match envelope.compression {
-        BlobCompression::None => Some(envelope.content),
-        BlobCompression::Zlib => decompress_blob(&envelope.content),
+        BlobCompression::None => Ok(Some(envelope.content)),
+        BlobCompression::Zlib => decompress_blob(&envelope.content).map(Some),
     }
 }
 
@@ -999,7 +1034,8 @@ fn try_load_session_head_meta_from_conn(
         &head_json,
         "SessionHeadMeta",
         lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
-    )?;
+    )
+    .map_err(|error| map_record_decode_error("SessionHeadMeta", error))?;
     Ok(Some(SessionHeadMeta::assemble(
         payload,
         head_revision as u64,
@@ -1008,50 +1044,57 @@ fn try_load_session_head_meta_from_conn(
     )))
 }
 
-fn load_session_head_meta_from_conn(
+fn load_session_meta_from_conn(
     conn: &Connection,
     session_id: &str,
-) -> Option<SessionHeadMeta> {
-    try_load_session_head_meta_from_conn(conn, session_id)
-        .ok()
-        .flatten()
-}
-
-fn load_session_meta_from_conn(conn: &Connection, session_id: &str) -> Option<SessionMeta> {
-    conn.query_row(
-        "SELECT session_id, session_name, created_at, model, cwd, relation_json
-         FROM session_meta WHERE session_id = ?1",
-        params![session_id],
-        |row| {
-            let relation_json: Option<String> = row.get(5)?;
-            let relation = relation_json
-                .and_then(|json| serde_json::from_str(&json).ok())
-                .unwrap_or_default();
-            Ok(SessionMeta {
-                session_id: row.get(0)?,
-                session_name: row.get(1)?,
-                created_at: row.get(2)?,
-                model: row.get(3)?,
-                cwd: row.get(4)?,
-                relation,
-            })
-        },
-    )
-    .optional()
-    .ok()
-    .flatten()
+) -> Result<Option<SessionMeta>, StoreError> {
+    let row = conn
+        .query_row(
+            "SELECT session_id, session_name, created_at, model, cwd, relation_json
+             FROM session_meta WHERE session_id = ?1",
+            params![session_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    let Some((session_id, session_name, created_at, model, cwd, relation_json)) = row else {
+        return Ok(None);
+    };
+    let relation = relation_json
+        .map(|json| {
+            serde_json::from_str(&json)
+                .map_err(|error| stored_data_corrupt("SessionMeta relation", error))
+        })
+        .transpose()?
+        .unwrap_or_default();
+    Ok(Some(SessionMeta {
+        session_id,
+        session_name,
+        created_at,
+        model,
+        cwd,
+        relation,
+    }))
 }
 
 fn decode_checkpoint(bytes: &[u8]) -> Result<SessionCheckpoint, StoreError> {
     let value: serde_json::Value = rmp_serde::from_slice(bytes)
-        .map_err(|err| StoreError::Backend(format!("failed to decode SessionCheckpoint: {err}")))?;
+        .map_err(|err| stored_data_corrupt("SessionCheckpoint", err))?;
     lash_core::store::ensure_supported_record_schema_version(
         "SessionCheckpoint",
         &value,
         lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
     )?;
-    rmp_serde::from_slice(bytes)
-        .map_err(|err| StoreError::Backend(format!("failed to decode SessionCheckpoint: {err}")))
+    rmp_serde::from_slice(bytes).map_err(|err| stored_data_corrupt("SessionCheckpoint", err))
 }
 
 fn encode_msgpack<T: serde::Serialize>(value: &T) -> Vec<u8> {
@@ -1065,6 +1108,9 @@ fn encode_msgpack<T: serde::Serialize>(value: &T) -> Vec<u8> {
 fn decode_msgpack<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Option<T> {
     rmp_serde::from_slice(bytes).ok()
 }
+
+#[cfg(test)]
+mod read_failure_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1205,6 +1251,38 @@ mod tests {
         assert!(
             result.is_err(),
             "an unreadable durable-core catalog must abort discovery, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn open_existing_store_aborts_on_unreadable_requested_session_meta() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("sessions");
+        let factory = SqliteSessionStoreFactory::new(&root);
+        let request = SessionStoreCreateRequest {
+            session_id: "corrupt-session-meta".to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::default(),
+        };
+
+        let store = factory
+            .create_store(&request)
+            .await
+            .expect("create requested session");
+        drop(store);
+        let raw = rusqlite::Connection::open(factory.catalog_path()).expect("open raw catalog");
+        raw.execute(
+            "UPDATE session_meta SET relation_json = '{'
+             WHERE session_id = ?1",
+            params![request.session_id],
+        )
+        .expect("corrupt requested session metadata");
+        drop(raw);
+
+        let result = factory.open_existing_store(&request).await;
+        assert!(
+            result.is_err(),
+            "unreadable requested session metadata must not look absent"
         );
     }
 

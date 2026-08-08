@@ -3,7 +3,8 @@ use lash_core::{
     HydratedSessionCheckpoint, LeaseOwnerIdentity, Message, MessageRole, ModelSpec, Part, PartKind,
     PersistedTurnState, PluginSessionSnapshot, PruneState, RuntimeCommit, RuntimeSessionState,
     SessionCommitStore, SessionExecutionLeaseStore, SessionPolicy, SessionStoreCreateRequest,
-    SessionStoreFactory, TokenLedgerEntry, TokenUsage, ToolState, facade_support::shared_parts,
+    SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage, ToolState,
+    facade_support::shared_parts,
 };
 use lash_sqlite_store::{
     BlobArtifactDescriptor, BuiltinBlobProfile, SqliteSessionStoreFactory, Store, StoreGcPolicy,
@@ -118,13 +119,38 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
     let checkpoint = store
         .get_checkpoint(&stored.checkpoint_ref)
         .await
+        .expect("read checkpoint")
         .expect("checkpoint manifest");
     let dynamic_ref = checkpoint.tool_state_ref.expect("dynamic state ref");
     let plugin_ref = checkpoint.plugin_snapshot_ref.expect("plugin snapshot ref");
-    assert!(store.get_blob(&stored.checkpoint_ref).await.is_some());
-    assert!(store.get_blob(&dynamic_ref).await.is_some());
-    assert!(store.get_blob(&plugin_ref).await.is_some());
-    assert!(store.get_blob(&orphan).await.is_none());
+    assert!(
+        store
+            .get_blob(&stored.checkpoint_ref)
+            .await
+            .expect("read checkpoint blob")
+            .is_some()
+    );
+    assert!(
+        store
+            .get_blob(&dynamic_ref)
+            .await
+            .expect("read dynamic blob")
+            .is_some()
+    );
+    assert!(
+        store
+            .get_blob(&plugin_ref)
+            .await
+            .expect("read plugin blob")
+            .is_some()
+    );
+    assert!(
+        store
+            .get_blob(&orphan)
+            .await
+            .expect("read orphan blob")
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -167,7 +193,13 @@ async fn auto_gc_runs_after_commit_without_reentrant_locking() {
         .await
         .expect("commit");
 
-    assert!(store.get_blob(&orphan).await.is_none());
+    assert!(
+        store
+            .get_blob(&orphan)
+            .await
+            .expect("read orphan blob")
+            .is_none()
+    );
 }
 
 #[test]
@@ -634,10 +666,13 @@ async fn sqlite_snapshot_read_propagates_graph_statement_errors() {
         .execute("DROP TABLE graph_nodes", [])
         .expect("drop graph table");
 
-    assert!(
-        store.load_session().await.is_err(),
-        "a graph statement error must not decode as an empty snapshot"
-    );
+    assert!(matches!(
+        store.load_session().await,
+        Err(StoreError::StorageFailure {
+            backend: "sqlite",
+            ..
+        })
+    ));
 }
 
 #[tokio::test]
@@ -681,12 +716,13 @@ async fn sqlite_snapshot_read_rejects_undecodable_graph_nodes() {
         .load_session()
         .await
         .expect_err("an undecodable graph node must fail the snapshot");
-    assert!(
-        error
-            .to_string()
-            .contains("failed to decode session graph node"),
-        "unexpected graph decode error: {error}"
-    );
+    assert!(matches!(
+        error,
+        StoreError::StoredDataCorrupt {
+            record_kind: "SessionGraph node",
+            ..
+        }
+    ));
 }
 
 #[tokio::test]
@@ -749,7 +785,11 @@ async fn sqlite_picker_reads_inherited_history_from_fork_head_columns() {
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&branch_state, &[]))
         .await
         .expect("bind picker store to fork");
-    let picker = picker_store.load_picker_info().await.expect("picker info");
+    let picker = picker_store
+        .load_picker_info()
+        .await
+        .expect("read picker info")
+        .expect("picker info");
 
     assert_eq!(picker.first_user_message, "first inherited message");
     assert_eq!(picker.user_message_count, 2);
@@ -777,10 +817,13 @@ async fn sqlite_snapshot_read_propagates_usage_statement_errors() {
         .execute("DROP TABLE usage_deltas", [])
         .expect("drop usage table");
 
-    assert!(
-        store.load_session().await.is_err(),
-        "a usage statement error must not decode as an empty ledger"
-    );
+    assert!(matches!(
+        store.load_session().await,
+        Err(StoreError::StorageFailure {
+            backend: "sqlite",
+            ..
+        })
+    ));
 }
 
 fn unique_temp_dir(name: &str) -> std::path::PathBuf {

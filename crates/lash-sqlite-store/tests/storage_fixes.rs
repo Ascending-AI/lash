@@ -188,19 +188,28 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         "the orphan blob should be collected, report={report:?}"
     );
     assert!(
-        store.get_blob(&orphan).await.is_none(),
+        store
+            .get_blob(&orphan)
+            .await
+            .expect("read orphan blob")
+            .is_none(),
         "orphan blob must be collected"
     );
 
     // The live committed checkpoint manifest and every snapshot it references
     // must survive GC.
     assert!(
-        store.get_blob(&result.checkpoint_ref).await.is_some(),
+        store
+            .get_blob(&result.checkpoint_ref)
+            .await
+            .expect("read checkpoint blob")
+            .is_some(),
         "live checkpoint manifest must survive gc"
     );
     let manifest = store
         .get_checkpoint(&result.checkpoint_ref)
         .await
+        .expect("read checkpoint")
         .expect("checkpoint manifest");
     for blob_ref in [
         manifest.tool_state_ref.as_ref(),
@@ -211,7 +220,11 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
     .flatten()
     {
         assert!(
-            store.get_blob(blob_ref).await.is_some(),
+            store
+                .get_blob(blob_ref)
+                .await
+                .expect("read checkpoint child blob")
+                .is_some(),
             "live checkpoint child blob {blob_ref} must survive gc"
         );
     }
