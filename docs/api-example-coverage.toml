@@ -45962,8 +45962,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ScopedEffectController"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2424#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2393#assert_eq!(round_trip_tail, expected_tail);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2425#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2394#assert_eq!(round_trip_tail, expected_tail);"
 
 [[api]]
 symbol = "lash::runtime::ScopedEffectController::borrowed"
@@ -46000,7 +46000,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ScopedEffectController::shared"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2424#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2425#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
 assertion = "examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs:74#assert_eq!(first_report.started_process_ids().len(), 1);"
 
 [[api]]
@@ -66692,4 +66692,3 @@ area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/restate_cron.rs:66#.session_was_deleted(session_id)"
 assertion = "examples/agent-workbench/src/restate_cron_tests.rs:313#\"decision_basis\": \"deleted_session_tombstone\","
-

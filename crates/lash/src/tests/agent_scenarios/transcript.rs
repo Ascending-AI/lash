@@ -27,7 +27,9 @@
 
 use std::collections::BTreeMap;
 
+#[cfg(feature = "rlm")]
 use super::harness::AgentScenarioRun;
+#[cfg(feature = "rlm")]
 use lash_core::testing::behavior_transcript::{Actor, Attr, Component, Entry, IdKind, Kind, Usage};
 use lash_core::testing::checkpoint_observer::{CheckpointComponentWriteKind, CheckpointWriteEvent};
 
@@ -36,6 +38,7 @@ use lash_core::testing::checkpoint_observer::{CheckpointComponentWriteKind, Chec
 /// `root` is the semantic name pinned to the scenario's root session, so the
 /// text reads `root` instead of an alias that shifts when an unrelated session
 /// appears first.
+#[cfg(feature = "rlm")]
 pub(super) fn agent_scenario_transcript(run: &AgentScenarioRun, root: &str) -> String {
     let mut transcript = lash_core::testing::behavior_transcript::Transcript::new();
     transcript.pin(run.session_id.clone(), root.to_string());
@@ -74,6 +77,7 @@ pub(super) fn agent_scenario_transcript(run: &AgentScenarioRun, root: &str) -> S
     transcript.render()
 }
 
+#[cfg(feature = "rlm")]
 fn activity_entry(event: &lash_core::TurnEvent, session_id: &str) -> Option<Entry> {
     let actor = || Actor::session(session_id.to_string());
     Some(match event {
@@ -237,6 +241,7 @@ fn commit_shape(group: &[&CheckpointWriteEvent]) -> String {
     shape
 }
 
+#[cfg(feature = "rlm")]
 fn commit_entry(write: &CheckpointWriteEvent) -> Entry {
     let mut entry = Entry::commit(
         Actor::session(write.attributed_session().to_string()),

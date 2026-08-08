@@ -1,5 +1,7 @@
 use super::*;
+#[cfg(feature = "rlm")]
 use crate::rlm::{RlmFinalAnswerFormat, RlmSessionBuilderExt as _, RlmTurnBuilderExt as _};
+#[cfg(feature = "rlm")]
 use lash_lashlang_runtime::LashlangArtifactStore as _;
 
 #[tokio::test]
@@ -32,20 +34,24 @@ fn persisted_tool_state_at_generation(
     serde_json::from_value(value).expect("deserialize persisted tool state")
 }
 
+#[cfg(feature = "rlm")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ReconciliationTransformObservation {
     max_context_tokens: Option<usize>,
     session_model: String,
 }
 
+#[cfg(feature = "rlm")]
 struct ReconciliationTransformProbe {
     observations: Arc<std::sync::Mutex<Vec<ReconciliationTransformObservation>>>,
 }
 
+#[cfg(feature = "rlm")]
 struct ReconciliationProbeFactory {
     transform: Arc<dyn lash_core::facade_support::TurnContextTransform>,
 }
 
+#[cfg(feature = "rlm")]
 impl lash_core::facade_support::PluginFactory for ReconciliationProbeFactory {
     fn id(&self) -> &'static str {
         "session-model-reconciliation-probe"
@@ -61,10 +67,12 @@ impl lash_core::facade_support::PluginFactory for ReconciliationProbeFactory {
     }
 }
 
+#[cfg(feature = "rlm")]
 struct ReconciliationProbePlugin {
     transform: Arc<dyn lash_core::facade_support::TurnContextTransform>,
 }
 
+#[cfg(feature = "rlm")]
 impl lash_core::facade_support::SessionPlugin for ReconciliationProbePlugin {
     fn id(&self) -> &'static str {
         "session-model-reconciliation-probe"
@@ -79,6 +87,7 @@ impl lash_core::facade_support::SessionPlugin for ReconciliationProbePlugin {
     }
 }
 
+#[cfg(feature = "rlm")]
 #[async_trait]
 impl lash_core::facade_support::TurnContextTransform for ReconciliationTransformProbe {
     fn id(&self) -> &'static str {
@@ -145,16 +154,19 @@ fn conflicting_reopen_state(session_id: &str) -> RuntimeSessionState {
     state
 }
 
+#[cfg(feature = "rlm")]
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 struct CompileSurfaceToolConfig {
     tool_name: String,
 }
 
+#[cfg(feature = "rlm")]
 struct CompileSurfaceToolFactory {
     id: &'static str,
     default_tool_name: &'static str,
 }
 
+#[cfg(feature = "rlm")]
 impl CompileSurfaceToolFactory {
     fn new(id: &'static str, default_tool_name: &'static str) -> Self {
         Self {
@@ -164,6 +176,7 @@ impl CompileSurfaceToolFactory {
     }
 }
 
+#[cfg(feature = "rlm")]
 impl lash_core::facade_support::PluginFactory for CompileSurfaceToolFactory {
     fn id(&self) -> &'static str {
         self.id
@@ -187,11 +200,13 @@ impl lash_core::facade_support::PluginFactory for CompileSurfaceToolFactory {
     }
 }
 
+#[cfg(feature = "rlm")]
 struct CompileSurfaceToolPlugin {
     plugin_id: &'static str,
     tool_name: String,
 }
 
+#[cfg(feature = "rlm")]
 impl lash_core::facade_support::SessionPlugin for CompileSurfaceToolPlugin {
     fn id(&self) -> &'static str {
         self.plugin_id
@@ -208,10 +223,12 @@ impl lash_core::facade_support::SessionPlugin for CompileSurfaceToolPlugin {
     }
 }
 
+#[cfg(feature = "rlm")]
 struct CompileSurfaceToolProvider {
     tool_name: String,
 }
 
+#[cfg(feature = "rlm")]
 #[async_trait]
 impl lash_core::ToolProvider for CompileSurfaceToolProvider {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
@@ -228,8 +245,9 @@ impl lash_core::ToolProvider for CompileSurfaceToolProvider {
     }
 }
 
+#[cfg(feature = "rlm")]
 fn compile_surface_tool_definition(name: &str) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+    test_tool_definition_with_lashlang_binding(lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
         name.to_string(),
         "Compile-surface test tool.",
@@ -239,11 +257,7 @@ fn compile_surface_tool_definition(name: &str) -> lash_core::ToolDefinition {
             "additionalProperties": false
         }),
         serde_json::json!({ "type": "object" }),
-    )
-    .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
-        ["tools"],
-        name.to_string(),
-    ))
+    ), name.to_string())
 }
 
 #[tokio::test]
@@ -346,18 +360,21 @@ fn typed_core_builders_require_explicit_store_choice() {
     };
     assert!(matches!(err, EmbedError::MissingAttachmentStore));
 
-    // The RLM factory now requires the Lashlang artifact store at construction,
-    // so a missing-artifact-store error is unrepresentable. The RLM preset still
-    // must not install implicit generic stores.
-    let err = match rlm_core_builder()
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build()
+    #[cfg(feature = "rlm")]
     {
-        Ok(_) => panic!("rlm preset must not install implicit generic stores"),
-        Err(err) => err,
-    };
-    assert!(matches!(err, EmbedError::MissingEffectHost));
+        // The RLM factory requires the Lashlang artifact store at construction,
+        // so a missing-artifact-store error is unrepresentable. The RLM preset
+        // still must not install implicit generic stores.
+        let err = match rlm_core_builder()
+            .provider(mock_provider())
+            .model(mock_model_spec())
+            .build()
+        {
+            Ok(_) => panic!("rlm preset must not install implicit generic stores"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, EmbedError::MissingEffectHost));
+    }
 }
 
 #[test]
@@ -551,6 +568,7 @@ async fn provider_only_overrides_keep_session_model_and_variant() -> Result<()> 
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[tokio::test]
 async fn rlm_core_opens_rlm_session() -> Result<()> {
     let core = explicit_ephemeral_facets(rlm_core_builder())
@@ -562,6 +580,7 @@ async fn rlm_core_opens_rlm_session() -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[tokio::test]
 async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -614,6 +633,7 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[tokio::test]
 async fn rlm_completed_finish_is_single_copy_in_next_turn_request() -> Result<()> {
     const ANSWER: &str = "FIG-461 terminal answer";
@@ -706,6 +726,7 @@ async fn rlm_completed_finish_is_single_copy_in_next_turn_request() -> Result<()
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[tokio::test]
 async fn rlm_multi_turn_finish_history_preserves_observed_lashlang_few_shots() -> Result<()> {
     const ANSWERS: [&str; 3] = [
@@ -784,6 +805,7 @@ async fn rlm_multi_turn_finish_history_preserves_observed_lashlang_few_shots() -
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[tokio::test]
 async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options() -> Result<()> {
     // The compile APIs are now operations over the RLM factory and a plugin host
@@ -879,6 +901,7 @@ finish value
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[tokio::test]
 async fn rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_raw() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -908,6 +931,7 @@ async fn rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_ra
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[tokio::test]
 async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()> {
     let core = explicit_ephemeral_facets(rlm_core_builder())
@@ -954,6 +978,7 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[tokio::test]
 async fn rlm_projection_errors_surface_from_protocol_extensions() -> Result<()> {
     use lash_protocol_rlm::{RlmProjectedBindings, RlmTurnInputExt};
@@ -1532,6 +1557,7 @@ async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<(
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[tokio::test]
 async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Result<()> {
     use lash_subagents::Capability as _;

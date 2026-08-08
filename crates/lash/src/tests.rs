@@ -11,6 +11,7 @@ use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{
     LlmContentBlock, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, ResponseTextMeta,
 };
+#[cfg(feature = "rlm")]
 use lash_lashlang_runtime::ToolDefinitionLashlangExt;
 use tokio::sync::{Mutex as TokioMutex, oneshot};
 
@@ -1196,8 +1197,10 @@ impl ToolProvider for AppTools {
     }
 }
 
+#[cfg(feature = "rlm")]
 struct FailingAppTools;
 
+#[cfg(feature = "rlm")]
 #[async_trait]
 impl ToolProvider for FailingAppTools {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
@@ -1248,14 +1251,17 @@ impl ToolProvider for PendingAppTools {
     }
 }
 
+#[cfg(feature = "rlm")]
 struct DurableInputTools {
     key_tx:
         StdMutex<Option<oneshot::Sender<std::result::Result<lash_core::AwaitEventKey, String>>>>,
     attempt_count: Arc<AtomicUsize>,
 }
 
+#[cfg(feature = "rlm")]
 struct RetryingDirectTools;
 
+#[cfg(feature = "rlm")]
 #[async_trait]
 impl ToolProvider for RetryingDirectTools {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
@@ -1302,25 +1308,26 @@ impl ToolProvider for RetryingDirectTools {
     }
 }
 
+#[cfg(feature = "rlm")]
 fn retrying_direct_tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
-        "tool:retrying_direct",
+    test_tool_definition_with_lashlang_binding(
+        lash_core::ToolDefinition::raw(
+            "tool:retrying_direct",
+            "retrying_direct",
+            "Call a direct completion and retry the complete attempt once.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+            serde_json::json!({ "type": "string" }),
+        )
+        .with_retry_policy(lash_core::ToolRetryPolicy::safe(2, 0, 0)),
         "retrying_direct",
-        "Call a direct completion and retry the complete attempt once.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false
-        }),
-        serde_json::json!({ "type": "string" }),
     )
-    .with_retry_policy(lash_core::ToolRetryPolicy::safe(2, 0, 0))
-    .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
-        ["tools"],
-        "retrying_direct",
-    ))
 }
 
+#[cfg(feature = "rlm")]
 impl DurableInputTools {
     fn new(key_tx: oneshot::Sender<std::result::Result<lash_core::AwaitEventKey, String>>) -> Self {
         Self {
@@ -1340,6 +1347,7 @@ impl DurableInputTools {
     }
 }
 
+#[cfg(feature = "rlm")]
 #[async_trait]
 impl ToolProvider for DurableInputTools {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
@@ -1385,33 +1393,33 @@ impl ToolProvider for DurableInputTools {
     }
 }
 
+#[cfg(feature = "rlm")]
 fn durable_input_tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
-        "tool:mock_input_request",
+    test_tool_definition_with_lashlang_binding(
+        lash_core::ToolDefinition::raw(
+            "tool:mock_input_request",
+            "mock_input_request",
+            "Open a durable input request and wait for the answer.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "question": { "type": "string" }
+                },
+                "required": ["question"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "request_id": { "type": "string" },
+                    "answer": {}
+                },
+                "required": ["request_id", "answer"],
+                "additionalProperties": true
+            }),
+        ),
         "mock_input_request",
-        "Open a durable input request and wait for the answer.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "question": { "type": "string" }
-            },
-            "required": ["question"],
-            "additionalProperties": false
-        }),
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "request_id": { "type": "string" },
-                "answer": {}
-            },
-            "required": ["request_id", "answer"],
-            "additionalProperties": true
-        }),
     )
-    .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
-        ["tools"],
-        "mock_input_request",
-    ))
 }
 
 struct AgentFrameSwitchTools;
@@ -1462,21 +1470,20 @@ fn agent_frame_switch_tool_definition() -> lash_core::ToolDefinition {
 }
 
 fn app_tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
-        "tool:app_lookup",
+    test_tool_definition_with_lashlang_binding(
+        lash_core::ToolDefinition::raw(
+            "tool:app_lookup",
+            "app_lookup",
+            "Look up app state.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+            serde_json::json!({ "type": "object" }),
+        ),
         "app_lookup",
-        "Look up app state.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false
-        }),
-        serde_json::json!({ "type": "object" }),
     )
-    .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
-        ["tools"],
-        "app_lookup",
-    ))
 }
 
 struct LongTextTools;
@@ -1497,21 +1504,39 @@ impl ToolProvider for LongTextTools {
 }
 
 fn long_text_tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
-        "tool:app_lookup",
+    test_tool_definition_with_lashlang_binding(
+        lash_core::ToolDefinition::raw(
+            "tool:app_lookup",
+            "app_lookup",
+            "Look up verbose app state.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+            serde_json::json!({ "type": "string" }),
+        ),
         "app_lookup",
-        "Look up verbose app state.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false
-        }),
-        serde_json::json!({ "type": "string" }),
     )
-    .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
+}
+
+#[cfg(feature = "rlm")]
+fn test_tool_definition_with_lashlang_binding(
+    definition: lash_core::ToolDefinition,
+    name: impl Into<String>,
+) -> lash_core::ToolDefinition {
+    definition.with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
         ["tools"],
-        "app_lookup",
+        name,
     ))
+}
+
+#[cfg(not(feature = "rlm"))]
+fn test_tool_definition_with_lashlang_binding(
+    definition: lash_core::ToolDefinition,
+    _name: impl Into<String>,
+) -> lash_core::ToolDefinition {
+    definition
 }
 
 struct SurfacePluginFactory;
@@ -1661,10 +1686,12 @@ fn text_response(text: &str) -> LlmResponse {
     }
 }
 
+#[cfg(feature = "rlm")]
 fn lashlang_block(source: &str) -> String {
     format!("<lashlang>\n{}\n</lashlang>", source.trim())
 }
 
+#[cfg(feature = "rlm")]
 fn queued_text_provider(texts: Vec<impl Into<String>>) -> ProviderHandle {
     let responses = Arc::new(TokioMutex::new(VecDeque::from(
         texts
@@ -1816,6 +1843,7 @@ fn system_text(request: &LlmRequest) -> String {
         .unwrap_or_default()
 }
 
+#[cfg(feature = "rlm")]
 fn request_text(request: &LlmRequest) -> String {
     request
         .messages
@@ -1853,6 +1881,7 @@ fn recording_prompt_provider(seen: Arc<std::sync::Mutex<Vec<String>>>) -> Provid
         .into_handle()
 }
 
+#[cfg(feature = "rlm")]
 fn recording_request_provider(seen: Arc<std::sync::Mutex<Vec<String>>>) -> ProviderHandle {
     crate::testing::TestProvider::builder()
         .kind("request-test")
@@ -2046,8 +2075,11 @@ use harness::{
 };
 mod agent_scenarios;
 mod plugin_stack;
+#[cfg(feature = "rlm")]
 mod processes_endstate;
+#[cfg(feature = "rlm")]
 mod rebuild_conformance;
+#[cfg(feature = "rlm")]
 mod stack_budget;
 mod turn_streaming;
 

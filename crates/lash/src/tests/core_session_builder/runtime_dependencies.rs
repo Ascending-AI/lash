@@ -2,22 +2,12 @@
 // Explicit runtime dependency wiring
 // =============================================================================
 //
-/// An RLM builder with a model + provider already named, ready for the explicit
-/// dependency wiring under test.
-fn peer_coherence_builder(
-    artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore>,
-) -> crate::core::LashCoreBuilder {
-    LashCore::rlm_builder(lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::default(),
-        artifact_store,
-    ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
-}
-
-/// The named in-memory Lashlang artifact store used by builder tests.
-fn inline_artifact_store() -> Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> {
-    Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new())
+/// A standard-mode builder with a model + provider already named, ready for the
+/// explicit dependency wiring under test.
+fn peer_coherence_builder() -> crate::core::LashCoreBuilder {
+    LashCore::standard_builder()
+        .provider(mock_provider())
+        .model(mock_model_spec())
 }
 
 fn durable_session_store_factory(dir: &std::path::Path) -> Arc<dyn lash_core::SessionStoreFactory> {
@@ -39,16 +29,6 @@ fn expect_build_error<T>(result: std::result::Result<T, EmbedError>, message: &s
         Ok(_) => panic!("{message}"),
         Err(err) => err,
     }
-}
-
-async fn durable_artifact_store(
-    dir: &std::path::Path,
-) -> Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> {
-    Arc::new(
-        lash_sqlite_store::Store::open(&dir.join("artifacts.db"))
-            .await
-            .expect("open durable artifact store"),
-    )
 }
 
 async fn durable_process_env_store(
@@ -146,7 +126,7 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
 
 #[tokio::test]
 async fn builder_requires_explicit_process_env_store_at_build() {
-    let result = peer_coherence_builder(inline_artifact_store())
+    let result = peer_coherence_builder()
         .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()))
         .build();
@@ -160,9 +140,9 @@ async fn builder_requires_explicit_process_env_store_at_build() {
 
 #[tokio::test]
 async fn all_durable_stores_build_successfully() -> Result<()> {
-    // Positive control: a coherent durable wiring (durable session store +
-    // durable attachment + durable artifact + durable process registry +
-    // durable trigger store) builds without error.
+    // Positive control: a coherent standard-mode durable wiring (durable
+    // session store + durable attachment + durable process environment +
+    // durable process registry + durable trigger store) builds without error.
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
@@ -172,7 +152,7 @@ async fn all_durable_stores_build_successfully() -> Result<()> {
         .await
         .expect("open durable registry"),
     );
-    peer_coherence_builder(durable_artifact_store(dir.path()).await)
+    peer_coherence_builder()
         .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::default()))
         .store_factory(durable_session_store_factory(dir.path()))
         .attachment_store(durable_attachment_store(dir.path()))
@@ -196,7 +176,7 @@ async fn durable_registry_with_only_child_store_factory_builds() -> Result<()> {
         .await
         .expect("open durable registry"),
     );
-    peer_coherence_builder(durable_artifact_store(dir.path()).await)
+    peer_coherence_builder()
         .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::default()))
         .child_store_factory(durable_session_store_factory(dir.path()))
         .attachment_store(durable_attachment_store(dir.path()))
@@ -211,7 +191,7 @@ async fn durable_registry_with_only_child_store_factory_builds() -> Result<()> {
 async fn explicit_ephemeral_facets_build_successfully() -> Result<()> {
     // An all-in-memory build succeeds, including the explicit session store
     // factory that backs process execution.
-    explicit_ephemeral_facets(peer_coherence_builder(inline_artifact_store()))
+    explicit_ephemeral_facets(peer_coherence_builder())
         .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build()?;
@@ -235,7 +215,7 @@ async fn process_work_driver_configures_external_runner_without_inline_store_fac
     let driver =
         lash_core::facade_support::ProcessWorkDriver::new(Arc::clone(&registry), Arc::new(NoopProcessRunHandle));
     let driver_registry = driver.process_registry();
-    let core = explicit_ephemeral_facets(peer_coherence_builder(inline_artifact_store()))
+    let core = explicit_ephemeral_facets(peer_coherence_builder())
         .process_work_driver(driver)
         .build()?;
 
@@ -266,7 +246,7 @@ async fn default_process_work_driver_resolves_when_registry_and_store_factory_pr
         ..Default::default()
     };
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
-    let core = explicit_ephemeral_facets(peer_coherence_builder(inline_artifact_store()))
+    let core = explicit_ephemeral_facets(peer_coherence_builder())
         .store_factory(Arc::new(ReusableStoreFactory { store }))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build()?;
@@ -284,7 +264,7 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;
     let trigger_store =
         Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()) as Arc<dyn lash_core::TriggerStore>;
-    let core = explicit_ephemeral_facets(peer_coherence_builder(inline_artifact_store()))
+    let core = explicit_ephemeral_facets(peer_coherence_builder())
         .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
         .trigger_store(Arc::clone(&trigger_store))
         .process_registry(Arc::clone(&registry))
@@ -976,7 +956,7 @@ async fn nested_session_observer_intents_settle_every_layer_before_open_returns(
 #[test]
 fn builder_rejects_invalid_process_execution_concurrency() {
     let err = expect_build_error(
-        explicit_ephemeral_facets(peer_coherence_builder(inline_artifact_store()))
+        explicit_ephemeral_facets(peer_coherence_builder())
             .process_execution_concurrency(0)
             .build(),
         "zero process execution concurrency must be rejected",
@@ -987,7 +967,7 @@ fn builder_rejects_invalid_process_execution_concurrency() {
 #[test]
 fn builder_rejects_invalid_queued_work_execution_concurrency() {
     let err = expect_build_error(
-        explicit_ephemeral_facets(peer_coherence_builder(inline_artifact_store()))
+        explicit_ephemeral_facets(peer_coherence_builder())
             .queued_work_execution_concurrency(0)
             .build(),
         "zero queued-work execution concurrency must be rejected",
@@ -1000,7 +980,7 @@ fn builder_rejects_invalid_queued_work_execution_concurrency() {
 
 #[tokio::test]
 async fn durable_process_worker_config_requires_core_process_registry() {
-    let core = explicit_ephemeral_facets(peer_coherence_builder(inline_artifact_store()))
+    let core = explicit_ephemeral_facets(peer_coherence_builder())
         .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
         .build()
         .expect("build core without process support");
@@ -1017,7 +997,7 @@ async fn registry_without_store_factory_fails_loudly() {
     // session runtime per process and cannot do so without a store factory, so
     // build must fail loudly rather than silently leave processes unexecuted
     // (a process started in such a host would otherwise hang forever).
-    let result = explicit_ephemeral_facets(peer_coherence_builder(inline_artifact_store()))
+    let result = explicit_ephemeral_facets(peer_coherence_builder())
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build();
     let err = expect_build_error(

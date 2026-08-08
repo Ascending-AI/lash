@@ -1,23 +1,29 @@
+#[cfg(feature = "rlm")]
 use super::super::*;
+#[cfg(feature = "rlm")]
 use super::contracts::{
     GraphContract, assert_all_processes_terminal, assert_failed_code_block_present,
     assert_graph_lineage_connected, assert_labeled_resource_operation,
     assert_no_duplicate_label_step, assert_no_false_finishted_success,
     assert_no_forbidden_error_text, assert_subagent_bridge_exec_graphs,
 };
+#[cfg(feature = "rlm")]
 use super::harness::{
     AgentScenario, lashlang_block, run_agent_direct_completion_attempt_retry_scenario,
     run_agent_durable_input_request_scenario, run_agent_process_llm_query_scenario,
     run_agent_session_turn_process_scenario, run_agent_turn_scenario,
     run_agent_turn_scenario_without_success_assertions,
 };
+#[cfg(feature = "rlm")]
 use super::transcript::agent_scenario_transcript;
+#[cfg(feature = "rlm")]
 use lash_core::llm::types::LlmUsage;
 use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug)]
 struct AgentScenarioCoverage {
     test_name: &'static str,
+    #[cfg(feature = "rlm")]
     declared_test: fn() -> Result<()>,
     scenario_name: &'static str,
     owned_boundary: &'static str,
@@ -27,6 +33,7 @@ macro_rules! agent_scenario_coverage {
     ($test_fn:ident, $scenario_name:literal, $owned_boundary:literal) => {
         AgentScenarioCoverage {
             test_name: stringify!($test_fn),
+            #[cfg(feature = "rlm")]
             declared_test: $test_fn,
             scenario_name: $scenario_name,
             owned_boundary: $owned_boundary,
@@ -121,6 +128,7 @@ fn agent_scenario_coverage_metadata_is_unique_and_complete() {
     assert_eq!(AGENT_SCENARIO_COVERAGE.len(), 13);
     let mut names = BTreeSet::new();
     for coverage in AGENT_SCENARIO_COVERAGE {
+        #[cfg(feature = "rlm")]
         let _declared_test = coverage.declared_test;
         assert!(
             coverage.test_name.starts_with("agent_scenario_"),
@@ -137,6 +145,7 @@ fn agent_scenario_coverage_metadata_is_unique_and_complete() {
     }
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn agent_scenario_foreground_labeled_tool_call() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-foreground-tool", || async {
@@ -160,6 +169,7 @@ finish value"#,
     })
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn agent_scenario_started_process_labeled_tool_call() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-started-process-tool", || async {
@@ -211,6 +221,7 @@ finish result"#,
     })
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn agent_scenario_process_durable_input_request_tool() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-durable-input-request", || async {
@@ -218,6 +229,7 @@ fn agent_scenario_process_durable_input_request_tool() -> Result<()> {
     })
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn agent_scenario_process_llm_query_with_typed_output() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-process-llm-query", || async {
@@ -225,6 +237,7 @@ fn agent_scenario_process_llm_query_with_typed_output() -> Result<()> {
     })
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn agent_scenario_direct_completion_attempt_retry_reinvokes_provider_once() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-direct-completion-attempt-retry", || async {
@@ -232,6 +245,7 @@ fn agent_scenario_direct_completion_attempt_retry_reinvokes_provider_once() -> R
     })
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn agent_scenario_shell_nonzero_and_pipeline_results_are_data() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-shell-results-are-data", || async {
@@ -266,6 +280,7 @@ finish {
     })
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn agent_scenario_shell_output_survives_print_projection_in_variable() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-shell-output-variable", || async {
@@ -303,6 +318,7 @@ finish {
     })
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn agent_scenario_started_process_labeled_subagent_spawn() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-started-process-subagent", || async {
@@ -368,6 +384,7 @@ finish result"#,
     })
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn agent_scenario_nested_process_start_await() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-nested-process", || async {
@@ -418,6 +435,7 @@ finish result"#,
     })
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn agent_scenario_session_turn_process_child() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-session-turn-process", || async {
@@ -425,6 +443,7 @@ fn agent_scenario_session_turn_process_child() -> Result<()> {
     })
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn agent_scenario_failed_child_preserves_failure_graph() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-failed-child", || async {
@@ -509,6 +528,7 @@ finish result"#,
     })
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn agent_scenario_parallel_spawn_and_join() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-parallel-spawn-join", || async {
@@ -561,6 +581,7 @@ finish { joined: [left_value, right_value] }"#,
     })
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn agent_scenario_tuple_values_finish_as_json_arrays() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-tuple-values", || async {
@@ -598,6 +619,7 @@ finish {
     })
 }
 
+#[cfg(feature = "rlm")]
 fn assert_lashlang_process_ids_unique_for_labels<const N: usize>(
     processes: &[lash_core::ProcessHandleSummary],
     expected_labels: [&str; N],

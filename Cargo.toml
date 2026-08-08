@@ -18,7 +18,6 @@ members = [
     "crates/lash-protocol-rlm",
     "crates/lash-protocol-standard",
     "crates/lash-plugin-mcp",
-    "crates/lash-plugin-plan-mode",
     "crates/lash-plugin-process-controls",
     "crates/lash-plugin-tool-output-budget",
     "crates/lash-llm-tools",
@@ -63,7 +62,6 @@ default-members = [
     "crates/lash-tools",
     "crates/lash-standard-plugins",
     "crates/lash-plugin-mcp",
-    "crates/lash-plugin-plan-mode",
     "crates/lash-plugin-process-controls",
     "crates/lash-plugin-tool-output-budget",
     "crates/lash-subagents",
@@ -150,7 +148,6 @@ lash-lashlang-runtime = { path = "crates/lash-lashlang-runtime", version = "=0.0
 lash-postgres-store = { path = "crates/lash-postgres-store", version = "=0.0.0-dev" }
 lash-s3-store = { path = "crates/lash-s3-store", version = "=0.0.0-dev" }
 lash-plugin-mcp = { path = "crates/lash-plugin-mcp", version = "=0.0.0-dev" }
-lash-plugin-plan-mode = { path = "crates/lash-plugin-plan-mode", version = "=0.0.0-dev" }
 lash-plugin-process-controls = { path = "crates/lash-plugin-process-controls", version = "=0.0.0-dev" }
 lash-plugin-tool-output-budget = { path = "crates/lash-plugin-tool-output-budget", version = "=0.0.0-dev" }
 lash-protocol-rlm = { path = "crates/lash-protocol-rlm", version = "=0.0.0-dev" }

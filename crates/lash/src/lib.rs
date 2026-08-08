@@ -23,7 +23,7 @@ pub mod scenario_contracts;
 mod session;
 mod session_lease;
 mod support;
-#[cfg(all(test, feature = "rlm"))]
+#[cfg(test)]
 mod tests;
 mod tool_catalog;
 pub mod turn;

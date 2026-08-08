@@ -17,7 +17,7 @@
 <script src="./docs.js?v=7" defer></script>
 <script src="./syntax.js" defer></script>
 </head>
-<body class="docs-page" data-cover-source="<code>crates/lash-core</code>, <code>crates/lash-plugin-plan-mode</code>, <code>crates/lash</code>.">
+<body class="docs-page" data-cover-source="<code>crates/lash-core</code>, <code>examples/docs-snippets</code>, <code>crates/lash</code>.">
   <a class="skip-link" href="#content">skip to content</a>
 <section class="opener">
     <h1 class="opener__title">plugins</h1>
@@ -88,7 +88,7 @@ let core = lash::LashCore::rlm_builder(factory)
     <div class="section" id="worked-example">
       <div class="section-header">
         <h2>Worked Example</h2>
-        <p>The plan-mode plugin is a compact model for a tool that really does need plugin behavior: one factory, one session plugin, a session-local state object, one tool provider, and hooks that emit UI state after tool calls.</p>
+        <p>This update-plan plugin is a compact model for a tool that really does need plugin behavior: one factory, one session plugin, a session-local state object, one tool provider, and hooks that emit UI state after tool calls.</p>
       </div>
 <pre data-lang="rust" data-snippet="plugins#update-plan-plugin"><code>use std::sync::Mutex;
 
