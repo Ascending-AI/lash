@@ -40,6 +40,187 @@ impl lash_core::facade_support::SessionPlugin for QueuedWorkHydrationProbePlugin
     }
 }
 
+#[cfg(feature = "rlm")]
+struct TurnPersistedGraphAppendFactory {
+    append_count: Arc<AtomicUsize>,
+    max_appends: usize,
+}
+
+#[cfg(feature = "rlm")]
+impl lash_core::facade_support::PluginFactory for TurnPersistedGraphAppendFactory {
+    fn id(&self) -> &'static str {
+        "turn-persisted-graph-append"
+    }
+
+    fn build(
+        &self,
+        _ctx: &lash_core::facade_support::PluginSessionContext,
+    ) -> std::result::Result<
+        Arc<dyn lash_core::facade_support::SessionPlugin>,
+        lash_core::PluginError,
+    > {
+        Ok(Arc::new(TurnPersistedGraphAppendPlugin {
+            append_count: Arc::clone(&self.append_count),
+            max_appends: self.max_appends,
+        }))
+    }
+}
+
+#[cfg(feature = "rlm")]
+struct TurnPersistedGraphAppendPlugin {
+    append_count: Arc<AtomicUsize>,
+    max_appends: usize,
+}
+
+#[cfg(feature = "rlm")]
+#[derive(Default)]
+struct FrameHandoffTraceSink {
+    records: std::sync::Mutex<Vec<crate::tracing::TraceRecord>>,
+}
+
+#[cfg(feature = "rlm")]
+impl crate::tracing::TraceSink for FrameHandoffTraceSink {
+    fn append(
+        &self,
+        record: &crate::tracing::TraceRecord,
+    ) -> std::result::Result<(), crate::tracing::TraceSinkError> {
+        self.records
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(record.clone());
+        Ok(())
+    }
+}
+
+#[cfg(feature = "rlm")]
+fn nested_commit_handoff_transfers(
+    trace: &FrameHandoffTraceSink,
+) -> Vec<(String, String, u64, u64)> {
+    let records = trace
+        .records
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    records
+        .iter()
+        .filter_map(|record| match &record.event {
+            crate::tracing::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred {
+                owner_id,
+                incarnation_id,
+                previous_fencing_token,
+                transferred_fencing_token,
+                trigger,
+            } if *trigger
+                == crate::tracing::TraceSessionExecutionLeaseTransferTrigger::NestedCommit =>
+            {
+                Some((
+                    owner_id.clone(),
+                    incarnation_id.clone(),
+                    *previous_fencing_token,
+                    *transferred_fencing_token,
+                ))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[cfg(feature = "rlm")]
+fn assert_nested_commit_handoff_trace_count(trace: &FrameHandoffTraceSink, expected: usize) {
+    let transfers = nested_commit_handoff_transfers(trace);
+    assert_eq!(
+        transfers.len(),
+        expected,
+        "unexpected handoff transfers: {transfers:?}"
+    );
+    for (owner_id, incarnation_id, previous, transferred) in &transfers {
+        assert!(!owner_id.is_empty());
+        assert!(!incarnation_id.is_empty());
+        assert_eq!(
+            *transferred,
+            previous + 1,
+            "reacquiring the released nested-commit lane must advance its fencing generation"
+        );
+    }
+    for pair in transfers.windows(2) {
+        assert_eq!(pair[0].0, pair[1].0, "one runtime owns both handoffs");
+        assert_eq!(pair[0].1, pair[1].1, "one incarnation owns both handoffs");
+        assert!(pair[0].2 < pair[1].2, "previous tokens must ascend");
+        assert!(pair[0].3 < pair[1].3, "transferred tokens must ascend");
+    }
+}
+
+#[cfg(feature = "rlm")]
+fn assert_nested_commit_handoff_trace(trace: &FrameHandoffTraceSink) {
+    assert_nested_commit_handoff_trace_count(trace, 1);
+}
+
+#[cfg(feature = "rlm")]
+fn assert_sqlite_session_lane_free(
+    store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
+    session_id: &str,
+) {
+    let conn = rusqlite::Connection::open(store_factory.catalog_path())
+        .expect("open SQLite session catalog");
+    let owner = conn
+        .query_row(
+            "SELECT lease_owner_id FROM session_execution_leases WHERE session_id = ?1",
+            [session_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .expect("read session execution lease row");
+    assert!(
+        owner.is_none(),
+        "completed handoff must leave the lane free"
+    );
+}
+
+#[cfg(feature = "rlm")]
+impl lash_core::facade_support::SessionPlugin for TurnPersistedGraphAppendPlugin {
+    fn id(&self) -> &'static str {
+        "turn-persisted-graph-append"
+    }
+
+    fn register(
+        &self,
+        reg: &mut lash_core::facade_support::PluginRegistrar,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        let append_count = Arc::clone(&self.append_count);
+        let max_appends = self.max_appends;
+        reg.session().on_event(Arc::new(move |event| {
+            let append_count = Arc::clone(&append_count);
+            Box::pin(async move {
+                let lash_core::facade_support::PluginLifecycleEvent::TurnPersisted(ctx) = event
+                else {
+                    return Ok(());
+                };
+                let Ok(append_index) =
+                    append_count.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                        (current < max_appends).then_some(current + 1)
+                    })
+                else {
+                    return Ok(());
+                };
+                let _ = ctx
+                    .session_graph
+                    .append_session_nodes(
+                        &ctx.session_id,
+                        lash_core::AppendSessionNodesRequest {
+                            operation_id: format!("turn-persisted-graph-append-{append_index}"),
+                            nodes: vec![lash_core::SessionAppendNode::plugin(
+                                "test.turn-persisted",
+                                serde_json::json!({ "committed": true }),
+                            )],
+                            requires_ancestor_node_id: None,
+                        },
+                    )
+                    .await;
+                Ok(())
+            })
+        }));
+        Ok(())
+    }
+}
+
 struct CreateOnlySessionStoreFactory {
     inner: lash_core::facade_support::InMemorySessionStoreFactory,
 }
@@ -4558,6 +4739,230 @@ async fn continue_as_observation_emits_frame_switch_then_commit_inner() -> Resul
         )),
         "expected AgentFrameSwitched immediately followed by Committed, got {events:?}"
     );
+    Ok(())
+}
+
+#[cfg(feature = "rlm")]
+#[test]
+fn nested_release_from_plain_turn_does_not_transfer_next_turn() -> Result<()> {
+    run_async_test_on_stack_budget("nested-release-turn-latch-test", || {
+        nested_release_from_plain_turn_does_not_transfer_next_turn_inner()
+    })
+}
+
+#[cfg(feature = "rlm")]
+async fn nested_release_from_plain_turn_does_not_transfer_next_turn_inner() -> Result<()> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = "nested-release-turn-latch";
+    let append_count = Arc::new(AtomicUsize::new(0));
+    let trace = Arc::new(FrameHandoffTraceSink::default());
+    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+        dir.path().join("sessions"),
+    ));
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
+        .provider(queued_text_provider(vec![
+            lashlang_block(r#"finish "plain turn complete""#),
+            lashlang_block(r#"await control.continue_as({ task: "finish turn two" })?"#),
+            lashlang_block(r#"finish "turn two complete""#),
+        ]))
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .trace_sink(Arc::clone(&trace) as Arc<dyn crate::tracing::TraceSink>)
+        .plugin(Arc::new(TurnPersistedGraphAppendFactory {
+            append_count: Arc::clone(&append_count),
+            max_appends: 1,
+        }))
+        .disable_queued_work_driver()
+        .build()?;
+    let session = core.session(session_id).open().await?;
+
+    let first = session
+        .turn(TurnInput::text("plain finish with nested append"))
+        .run()
+        .await?;
+    assert_eq!(
+        first.final_value(),
+        Some(&serde_json::json!("plain turn complete"))
+    );
+    assert_eq!(append_count.load(Ordering::SeqCst), 1);
+    trace
+        .records
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clear();
+
+    let second = session
+        .turn(TurnInput::text("continue without another nested append"))
+        .run()
+        .await?;
+    assert_eq!(
+        second.final_value(),
+        Some(&serde_json::json!("turn two complete"))
+    );
+    assert_eq!(append_count.load(Ordering::SeqCst), 1);
+    assert_nested_commit_handoff_trace_count(trace.as_ref(), 0);
+    assert_sqlite_session_lane_free(store_factory.as_ref(), session_id);
+    Ok(())
+}
+
+#[cfg(feature = "rlm")]
+#[test]
+fn probe_inprocess_continue_as_survives_post_commit_graph_append() -> Result<()> {
+    run_async_test_on_stack_budget("inprocess-continue-as-authority-test", || {
+        probe_inprocess_continue_as_survives_post_commit_graph_append_inner()
+    })
+}
+
+#[cfg(feature = "rlm")]
+async fn probe_inprocess_continue_as_survives_post_commit_graph_append_inner() -> Result<()> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = "inprocess-continue-as";
+    let append_count = Arc::new(AtomicUsize::new(0));
+    let trace = Arc::new(FrameHandoffTraceSink::default());
+    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+        dir.path().join("sessions"),
+    ));
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
+        .provider(queued_text_provider(vec![
+            lashlang_block(r#"await control.continue_as({ task: "finish in process" })?"#),
+            lashlang_block(r#"finish "done after in-process handoff""#),
+        ]))
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .trace_sink(Arc::clone(&trace) as Arc<dyn crate::tracing::TraceSink>)
+        .plugin(Arc::new(TurnPersistedGraphAppendFactory {
+            append_count: Arc::clone(&append_count),
+            max_appends: 1,
+        }))
+        .disable_queued_work_driver()
+        .build()?;
+    let session = core.session(session_id).open().await?;
+
+    let output = session
+        .turn(TurnInput::text("switch frames in process"))
+        .run()
+        .await?;
+
+    assert_eq!(append_count.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        output.final_value(),
+        Some(&serde_json::json!("done after in-process handoff")),
+        "post-commit graph writes must not strand the in-process frame handoff: {output:?}"
+    );
+    assert_nested_commit_handoff_trace(trace.as_ref());
+    assert_sqlite_session_lane_free(store_factory.as_ref(), session_id);
+    Ok(())
+}
+
+#[cfg(feature = "rlm")]
+#[test]
+fn durable_queued_continue_as_survives_post_commit_graph_append() -> Result<()> {
+    run_async_test_on_stack_budget("durable-queued-continue-as-authority-test", || {
+        durable_queued_continue_as_survives_post_commit_graph_append_inner()
+    })
+}
+
+#[cfg(feature = "rlm")]
+async fn durable_queued_continue_as_survives_post_commit_graph_append_inner() -> Result<()> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = "durable-queued-continue-as";
+    let append_count = Arc::new(AtomicUsize::new(0));
+    let trace = Arc::new(FrameHandoffTraceSink::default());
+    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+        dir.path().join("sessions"),
+    ));
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
+        .provider(queued_text_provider(vec![
+            lashlang_block(
+                r#"await control.continue_as({ task: "finish from durable handoff" })?"#,
+            ),
+            lashlang_block(r#"finish "done after durable handoff""#),
+        ]))
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .trace_sink(Arc::clone(&trace) as Arc<dyn crate::tracing::TraceSink>)
+        .plugin(Arc::new(TurnPersistedGraphAppendFactory {
+            append_count: Arc::clone(&append_count),
+            max_appends: 1,
+        }))
+        .disable_queued_work_driver()
+        .build()?;
+    let session = core.session(session_id).open().await?;
+    session
+        .enqueue(TurnInput::text("switch frames from queued work"))
+        .id("queued-continue-as")
+        .send()
+        .await?;
+
+    let output = session
+        .queued_turn()
+        .run()
+        .await?
+        .expect("queued turn should run");
+
+    assert_eq!(append_count.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        output.final_value(),
+        Some(&serde_json::json!("done after durable handoff")),
+        "post-commit graph writes must not strand the committed frame handoff: {output:?}"
+    );
+    assert_nested_commit_handoff_trace(trace.as_ref());
+    assert_sqlite_session_lane_free(store_factory.as_ref(), session_id);
+    Ok(())
+}
+
+#[cfg(feature = "rlm")]
+#[test]
+fn durable_queued_chained_continue_as_survives_nested_commit_handoff() -> Result<()> {
+    run_async_test_on_stack_budget("durable-queued-chained-continue-as-test", || {
+        durable_queued_chained_continue_as_survives_nested_commit_handoff_inner()
+    })
+}
+
+#[cfg(feature = "rlm")]
+async fn durable_queued_chained_continue_as_survives_nested_commit_handoff_inner() -> Result<()> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = "durable-queued-chained-continue-as";
+    let append_count = Arc::new(AtomicUsize::new(0));
+    let trace = Arc::new(FrameHandoffTraceSink::default());
+    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+        dir.path().join("sessions"),
+    ));
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
+        .provider(queued_text_provider(vec![
+            lashlang_block(r#"await control.continue_as({ task: "switch again" })?"#),
+            lashlang_block(r#"await control.continue_as({ task: "finish chain" })?"#),
+            lashlang_block(r#"finish "done after chained handoffs""#),
+        ]))
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .trace_sink(Arc::clone(&trace) as Arc<dyn crate::tracing::TraceSink>)
+        .plugin(Arc::new(TurnPersistedGraphAppendFactory {
+            append_count: Arc::clone(&append_count),
+            max_appends: 2,
+        }))
+        .disable_queued_work_driver()
+        .build()?;
+    let session = core.session(session_id).open().await?;
+    session
+        .enqueue(TurnInput::text("start chained frame handoff"))
+        .id("queued-chained-continue-as")
+        .send()
+        .await?;
+
+    let output = session
+        .queued_turn()
+        .run()
+        .await?
+        .expect("queued chained turn should run");
+
+    assert_eq!(append_count.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        output.final_value(),
+        Some(&serde_json::json!("done after chained handoffs"))
+    );
+    assert_nested_commit_handoff_trace_count(trace.as_ref(), 2);
+    assert_sqlite_session_lane_free(store_factory.as_ref(), session_id);
     Ok(())
 }
 

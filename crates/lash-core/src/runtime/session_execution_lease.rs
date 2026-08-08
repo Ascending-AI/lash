@@ -12,6 +12,7 @@
 //! |---|---|---|---|
 //! | `session_execution_lease.acquired` | INFO | the claimant | this runner acquired the lane |
 //! | `session_execution_lease.taken_over` | INFO | the *winner* | this claim displaced a named lapsed holder |
+//! | `session_execution_lease.frame_handoff_transferred` | INFO | the logical-turn handoff boundary | `owner_id`, `incarnation_id`, old/new fencing tokens, and `nested_commit` explain why a live retained guard was rotated before the next frame |
 //! | `session_execution_lease.lost` | WARN | the loser | a renewal was fence-rejected; this runner no longer holds the lane |
 //! | `session_execution_lease.renewal_refused` | WARN | the store | durable owner/token decision evidence for a refused renewal |
 //! | `session_execution_lease.release_refused` | WARN | the store | durable owner/token decision evidence for a refused release |
@@ -48,7 +49,7 @@ use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 
-use super::Clock;
+use super::{Clock, NestedLeaseReleaseSignal};
 use crate::LeaseTimings;
 use crate::store::{
     RuntimeCommit, RuntimeCommitResult, RuntimePersistence, SessionExecutionLease,
@@ -340,6 +341,7 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
     owner: &crate::LeaseOwnerIdentity,
     timings: LeaseTimings,
     clock: Arc<dyn Clock>,
+    released: NestedLeaseReleaseSignal,
 ) -> Result<RuntimeCommitResult, StoreError> {
     let session_id = commit.session_id.clone();
     let Some(lease) = SessionExecutionLeaseGuard::try_acquire(
@@ -360,17 +362,23 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
     match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await {
         Ok(result) => {
             lease.mark_released();
+            released.mark_released();
             Ok(result)
         }
         Err(error) => {
             trace_commit_cas_rejected(&session_id, Some(&evidence), owner, &error);
-            if let Err(release_error) = lease.release_if_live().await {
-                tracing::warn!(
-                    error = %release_error,
-                    original_error = %error,
-                    session_id,
-                    "failed to release fresh session execution lease after rejected commit"
-                );
+            // A failed release leaves the signal unset on purpose: the outer guard was already
+            // invalidated by reentry rotation, preserving the pre-fix loud failure path.
+            match lease.release_if_live().await {
+                Ok(()) => released.mark_released(),
+                Err(release_error) => {
+                    tracing::warn!(
+                        error = %release_error,
+                        original_error = %error,
+                        session_id,
+                        "failed to release fresh session execution lease after rejected commit"
+                    );
+                }
             }
             Err(error)
         }

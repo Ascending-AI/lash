@@ -34,6 +34,10 @@ impl ManagedSessionCapability {
                 &materialized.runtime.runtime_lease_owner,
                 materialized.runtime.host.core.control.lease_timings,
                 Arc::clone(&materialized.runtime.host.core.clock),
+                materialized
+                    .runtime
+                    .fresh_session_execution_lease_released
+                    .clone(),
             )
             .await
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;

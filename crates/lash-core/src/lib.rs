@@ -745,8 +745,8 @@ pub use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEffectEnvelopeDiffEntry,
     TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue, TraceError, TraceEvent,
     TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TracePromptComponent,
-    TraceProviderRequestEvent, TraceProviderStreamEvent, TraceRuntimeStreamEvent, TraceTokenUsage,
-    TraceToolSpec,
+    TraceProviderRequestEvent, TraceProviderStreamEvent, TraceRuntimeStreamEvent,
+    TraceSessionExecutionLeaseTransferTrigger, TraceTokenUsage, TraceToolSpec,
 };
 pub use llm::transport::ProviderFailureKind;
 pub use model::{ModelLimits, ModelSpec};

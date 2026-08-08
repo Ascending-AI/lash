@@ -584,10 +584,11 @@ pub mod tracing {
         TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue, TraceError, TraceEvent,
         TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TracePromptComponent,
         TraceProviderRequestEvent, TraceProviderStreamEvent, TraceRuntimeStreamEvent,
-        TraceTokenUsage, TraceToolSpec, facade_support::JsonlTraceSink,
-        facade_support::TraceBranchSelection, facade_support::TraceLabelMetadata,
-        facade_support::TraceRecord, facade_support::TraceRuntimeScope,
-        facade_support::TraceRuntimeSubject, facade_support::TraceSinkError,
+        TraceSessionExecutionLeaseTransferTrigger, TraceTokenUsage, TraceToolSpec,
+        facade_support::JsonlTraceSink, facade_support::TraceBranchSelection,
+        facade_support::TraceLabelMetadata, facade_support::TraceRecord,
+        facade_support::TraceRuntimeScope, facade_support::TraceRuntimeSubject,
+        facade_support::TraceSinkError,
     };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{

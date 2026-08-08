@@ -158,7 +158,7 @@ impl LashRuntime {
         scoped_effect_controller: ScopedEffectController<'_>,
         cancel: CancellationToken,
         mut claims: LogicalTurnClaims,
-        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+        session_execution_lease: &mut Option<SessionExecutionLeaseGuard>,
         stopwatch: TurnStopwatch,
     ) -> Result<AgentFrameRun, RuntimeError> {
         let (follow_protocol_turn_options, follow_turn_context, supplied_trace_turn_id) =
@@ -211,7 +211,7 @@ impl LashRuntime {
                         claims.queued,
                         claims.turn_inputs,
                         true,
-                        session_execution_lease,
+                        session_execution_lease.as_ref(),
                         SessionExecutionLeaseReleasePolicy::KeepOnAgentFrameSwitch,
                     ))
                     .await
@@ -243,7 +243,7 @@ impl LashRuntime {
                         cancel.clone(),
                         claims.queued,
                         claims.turn_inputs,
-                        session_execution_lease,
+                        session_execution_lease.as_ref(),
                         SessionExecutionLeaseReleasePolicy::KeepOnAgentFrameSwitch,
                     ))
                     .await
@@ -278,13 +278,17 @@ impl LashRuntime {
             };
 
             let next = async {
+                self.transfer_session_execution_lease_for_agent_frame_handoff(
+                    session_execution_lease,
+                )
+                .await?;
                 if enqueued_queue_batches.is_empty() {
                     let mut input = turn_input_from_text(task);
                     input.protocol_turn_options = follow_protocol_turn_options.clone();
                     input.turn_context = follow_turn_context.clone();
                     return Ok((input, LogicalTurnClaims::new(Vec::new(), Vec::new())));
                 }
-                let lease = session_execution_lease.ok_or_else(|| {
+                let lease = session_execution_lease.as_ref().ok_or_else(|| {
                     RuntimeError::new(
                         RuntimeErrorCode::StoreCommitFailed,
                         "claimed agent-frame handoff requires a session execution lease",
@@ -400,7 +404,7 @@ impl LashRuntime {
                         terminal_effect_controller,
                         cancel.clone(),
                         next_claims,
-                        session_execution_lease,
+                        session_execution_lease.as_ref(),
                     ))
                     .await;
                 let mut terminal = match terminal_result {
