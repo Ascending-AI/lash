@@ -11,10 +11,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::trace_capture::{EventCapture, capturing};
+use crate::facade_support::ToolStateFacadeOps;
 use crate::runtime::session_execution_lease::{
-    SessionExecutionLeaseCommitEvidence, SessionExecutionLeaseGuard, trace_commit_cas_rejected,
+    SessionExecutionLeaseCommitEvidence, SessionExecutionLeaseGuard,
+    commit_runtime_state_with_fresh_session_execution_lease, trace_commit_cas_rejected,
 };
-use crate::store::StoreError;
+use crate::store::{RuntimeCommit, StoreError};
 use crate::{LeaseOwnerIdentity, LeaseTimings, SystemClock};
 /// Several renewal intervals, so the loop has provably run and failed.
 const TRANSIENT_SETTLE: Duration = Duration::from_millis(400);
@@ -30,6 +32,52 @@ fn new_store() -> Arc<dyn crate::store::RuntimePersistence> {
 fn short_timings() -> LeaseTimings {
     LeaseTimings::new(Duration::from_millis(90), Duration::from_millis(30))
         .expect("ttl >= 3 * renew_interval")
+}
+
+async fn bind_test_session(store: &Arc<dyn crate::store::RuntimePersistence>, session_id: &str) {
+    store
+        .admit_and_bind_session(&crate::SessionBinding::root(
+            session_id,
+            &crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        ))
+        .await
+        .expect("bind observability test session");
+}
+
+fn generation_commit(session_id: &str, generation: u64, head_revision: u64) -> RuntimeCommit {
+    RuntimeCommit::persisted_state_with_operation_for_testing(
+        &crate::RuntimeSessionState {
+            session_id: session_id.to_string(),
+            tool_state_snapshot: Some(crate::ToolState::default().with_generation(generation)),
+            head_revision,
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
+        },
+        &[],
+        crate::OperationId::new(
+            crate::ExecutionScope::runtime_operation(format!(
+                "lease-observability-generation-{generation}"
+            )),
+            "commit",
+        ),
+    )
+}
+
+async fn published_generation(
+    store: &Arc<dyn crate::store::RuntimePersistence>,
+) -> (u64, Option<u64>) {
+    let state = crate::store::load_persisted_session_state(store.as_ref())
+        .await
+        .expect("load committed state")
+        .expect("committed state exists");
+    (
+        state.head_revision,
+        state
+            .tool_state_snapshot
+            .as_ref()
+            .map(crate::ToolState::generation),
+    )
 }
 
 #[tokio::test]
@@ -419,6 +467,227 @@ async fn a_lane_less_writer_that_loses_the_cas_is_still_attributable() {
     );
     assert_eq!(rejected.field("expected_head_revision"), "3");
     assert_eq!(rejected.field("actual_head_revision"), "4");
+}
+
+/// Two live successor incarnations may both pass the same-owner advisory, but
+/// only one can publish. Neither attempt may rotate, release, renew, or displace
+/// the predecessor row, and an unrelated owner must still stop at the lease.
+#[tokio::test]
+async fn successor_incarnations_race_only_at_head_cas_without_touching_predecessor_lane() {
+    let session_id = "lease-successor-incarnation-race";
+    let clock = Arc::new(crate::testing::TestClock::new(1_000));
+    let store: Arc<dyn crate::store::RuntimePersistence> = Arc::new(
+        crate::runtime::InMemorySessionStore::with_clock(clock.clone()),
+    );
+    bind_test_session(&store, session_id).await;
+    let predecessor = owner("workflow-owner", "workflow-owner:predecessor");
+    let winner = owner("workflow-owner", "workflow-owner:successor-winner");
+    let loser = owner("workflow-owner", "workflow-owner:successor-loser");
+    let foreign = owner("foreign-owner", "foreign-owner:incarnation");
+    let predecessor_row = store
+        .try_claim_session_execution_lease(session_id, &predecessor, 60_000)
+        .await
+        .expect("predecessor claims the lane")
+        .acquired()
+        .expect("the lane begins unheld");
+
+    let ((), capture) = capturing(|| async {
+        let published = commit_runtime_state_with_fresh_session_execution_lease(
+            Arc::clone(&store),
+            generation_commit(session_id, 11, 0),
+            &winner,
+            LeaseTimings::default(),
+            clock.clone(),
+        )
+        .await
+        .expect("the first successor publishes under the head CAS");
+        assert_eq!(published.head_revision, 1);
+        assert_eq!(
+            store
+                .get_session_execution_lease(session_id)
+                .await
+                .expect("read predecessor after winning commit"),
+            Some(predecessor_row.clone()),
+            "the advisory winner must leave the predecessor row byte-identical"
+        );
+
+        let rejected = commit_runtime_state_with_fresh_session_execution_lease(
+            Arc::clone(&store),
+            generation_commit(session_id, 12, 0),
+            &loser,
+            LeaseTimings::default(),
+            clock.clone(),
+        )
+        .await;
+        assert!(
+            matches!(
+                rejected,
+                Err(StoreError::HeadRevisionConflict {
+                    expected: 0,
+                    actual: 1
+                })
+            ),
+            "the pinned-head loser must receive the typed CAS conflict: {rejected:?}"
+        );
+        assert_eq!(
+            published_generation(&store).await,
+            (1, Some(11)),
+            "the rejected successor must write nothing"
+        );
+
+        let foreign_refusal = commit_runtime_state_with_fresh_session_execution_lease(
+            Arc::clone(&store),
+            generation_commit(session_id, 13, 1),
+            &foreign,
+            LeaseTimings::default(),
+            clock.clone(),
+        )
+        .await;
+        assert!(
+            matches!(foreign_refusal, Err(StoreError::Backend(ref message)) if message.contains("is busy")),
+            "a different owner must retain the hard busy refusal: {foreign_refusal:?}"
+        );
+        assert_eq!(
+            published_generation(&store).await,
+            (1, Some(11)),
+            "the different-owner refusal must write nothing"
+        );
+        assert_eq!(
+            store
+                .get_session_execution_lease(session_id)
+                .await
+                .expect("read predecessor after all contenders"),
+            Some(predecessor_row.clone()),
+            "no contender may take over, rotate, renew, or release the predecessor row"
+        );
+    })
+    .await;
+
+    let advisories = capture.named("session_execution_lease.successor_busy_advisory");
+    assert_eq!(
+        advisories.len(),
+        2,
+        "both successor incarnations use the advisory arm"
+    );
+    let expected_owner_sha = crate::stable_hash::sha256_hex(predecessor.owner_id.as_bytes());
+    let expected_incarnation_sha =
+        crate::stable_hash::sha256_hex(predecessor.incarnation_id.as_bytes());
+    for advisory in advisories {
+        assert_eq!(advisory.level, "INFO");
+        assert_eq!(advisory.field("session_id"), session_id);
+        assert_eq!(advisory.field("holder_owner_id_sha256"), expected_owner_sha);
+        assert_eq!(
+            advisory.field("holder_incarnation_id_sha256"),
+            expected_incarnation_sha
+        );
+        assert_eq!(
+            advisory.field("message"),
+            "same logical owner, different incarnation: proceeding under the commit CAS fence"
+        );
+        assert_eq!(
+            advisory.field_count(),
+            7,
+            "the event field shape is intentional"
+        );
+    }
+    let cas_rejected = capture.exactly_one("session_execution_lease.commit_cas_rejected");
+    assert_eq!(cas_rejected.field("owner_id"), "workflow-owner");
+    assert_eq!(
+        cas_rejected.field("incarnation_id"),
+        "workflow-owner:successor-loser"
+    );
+    assert_eq!(cas_rejected.field("lane_held"), "false");
+    assert!(!cas_rejected.contains_field("fencing_token"));
+}
+
+async fn publish_on_one_side_of_ttl(
+    session_id: &str,
+    advance_to_expiry: bool,
+) -> ((u64, Option<u64>), EventCapture) {
+    let clock = Arc::new(crate::testing::TestClock::new(5_000));
+    let store: Arc<dyn crate::store::RuntimePersistence> = Arc::new(
+        crate::runtime::InMemorySessionStore::with_clock(clock.clone()),
+    );
+    bind_test_session(&store, session_id).await;
+    let predecessor = owner("ttl-owner", "ttl-owner:predecessor");
+    let successor = owner("ttl-owner", "ttl-owner:successor");
+    let predecessor_row = store
+        .try_claim_session_execution_lease(session_id, &predecessor, short_timings().ttl_ms())
+        .await
+        .expect("predecessor claims boundary lane")
+        .acquired()
+        .expect("boundary lane begins unheld");
+    if advance_to_expiry {
+        clock.advance(short_timings().ttl_ms());
+    }
+
+    let ((), capture) = capturing(|| async {
+        commit_runtime_state_with_fresh_session_execution_lease(
+            Arc::clone(&store),
+            generation_commit(session_id, 21, 0),
+            &successor,
+            short_timings(),
+            clock.clone(),
+        )
+        .await
+        .expect("successor publishes on either side of the TTL");
+    })
+    .await;
+    if advance_to_expiry {
+        assert!(
+            store
+                .get_session_execution_lease(session_id)
+                .await
+                .expect("read released post-TTL lane")
+                .is_none(),
+            "post-TTL acquisition commits with an ordinary atomic release"
+        );
+    } else {
+        assert_eq!(
+            store
+                .get_session_execution_lease(session_id)
+                .await
+                .expect("read live pre-TTL lane"),
+            Some(predecessor_row),
+            "pre-TTL advisory publication leaves the predecessor untouched"
+        );
+    }
+    (published_generation(&store).await, capture)
+}
+
+#[tokio::test]
+async fn pre_ttl_advisory_and_post_ttl_displacement_converge_on_publication() {
+    let (pre_ttl, pre_capture) = publish_on_one_side_of_ttl("lease-before-ttl", false).await;
+    let (post_ttl, post_capture) = publish_on_one_side_of_ttl("lease-after-ttl", true).await;
+    assert_eq!(pre_ttl, (1, Some(21)));
+    assert_eq!(
+        post_ttl, pre_ttl,
+        "TTL timing changes lane ownership, not publication"
+    );
+    assert_eq!(
+        pre_capture
+            .named("session_execution_lease.successor_busy_advisory")
+            .len(),
+        1,
+        "before TTL the successor uses the lane-less advisory arm"
+    );
+    assert!(
+        pre_capture
+            .named("session_execution_lease.taken_over")
+            .is_empty()
+    );
+    assert!(
+        post_capture
+            .named("session_execution_lease.successor_busy_advisory")
+            .is_empty()
+    );
+    assert_eq!(
+        post_capture
+            .named("session_execution_lease.taken_over")
+            .len(),
+        1,
+        "at TTL the successor acquires by displacement before publishing"
+    );
 }
 
 #[tokio::test]
