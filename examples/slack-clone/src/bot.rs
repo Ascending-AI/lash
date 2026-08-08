@@ -96,7 +96,8 @@ pub async fn run(config: BotConfig) -> Result<()> {
         .context("open bot event ledger")?;
     let ledger = EventLedger::new(ledger_database);
 
-    let mut runtime_config = RuntimeConfig::new(config.data_dir.join("lash"));
+    let mut runtime_config = RuntimeConfig::new(config.data_dir.join("lash"))
+        .with_demo_mcp_server(&config.api_base_url, &config.bot_token)?;
     runtime_config.trace_path = config.trace_path.clone();
     let (provider, model) = runtime::provider_from_env()?;
     let session_owner = runtime::session_owner(&runtime_config.incarnation);

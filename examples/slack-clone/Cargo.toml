@@ -25,6 +25,10 @@ path = "src/bin/platform.rs"
 name = "slack-clone-bot"
 path = "src/bin/bot.rs"
 
+[[bin]]
+name = "slack-clone-mcp-server"
+path = "src/bin/mcp_server.rs"
+
 # Standard-mode host: no `rlm` feature, no `lash-protocol-rlm`, no Lashlang
 # artifact store. `LashCore::standard_builder()` pre-seeds the standard protocol
 # plugin, and the bot's turns are native tool-loop turns.
@@ -37,11 +41,13 @@ bytes = { workspace = true }
 dotenvy = "0.15"
 futures-util = { workspace = true }
 lash = { workspace = true }
+lash-plugin-mcp = { workspace = true }
 lash-provider-openai = { workspace = true }
 lash-sqlite-store = { workspace = true }
 # `form` is not optional here: Slack accepts form-encoded bodies for every Web
 # API method and JSON for only some, so the client's default encoding is form.
 reqwest = { workspace = true, features = ["json", "rustls", "http2", "form"] }
+rmcp = { workspace = true, features = ["macros", "server", "transport-io"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 schemars = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }

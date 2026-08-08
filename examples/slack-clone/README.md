@@ -59,6 +59,7 @@ State lives under `.slack-clone/`. `cargo test -p slack-clone` needs no model ke
 | Ambient context as queued turn input, with no turn | `bot/channel.rs::ingest` |
 | Mention-triggered turn that drains the queue | `bot/channel.rs::run_mention_turn` |
 | Standard-mode native tool loop | `bot/tools.rs` |
+| MCP tools in that same standard tool loop | `mcp_server.rs`, `bot/runtime.rs` |
 | Idempotent event consumption | `bot/ledger.rs` |
 | Restart recovery, stage by stage | `bot/channel.rs::recover` |
 | Telling "already committed" from "cannot reach it yet" | `bot/channel.rs::settle_empty_drain` |
@@ -67,6 +68,35 @@ State lives under `.slack-clone/`. `cargo test -p slack-clone` needs no model ke
 | Transactional outbox | `platform/state.rs::post_message` |
 | A liftable API client | `bot/slack_api.rs` |
 | One wire contract for both processes | `wire/methods.rs`, `wire/events.rs` |
+
+## MCP
+
+The bot registers `lash-plugin-mcp` when it builds its `LashCore`. The plugin
+spawns the bundled `slack-clone-mcp-server` over stdio and imports its tools into
+the same catalog as `list_channels` and `channel_history`:
+
+- `mcp__slack_clone__list_channels_summary` returns channel ids, names, topics,
+  and member counts.
+- `mcp__slack_clone__workspace_stats` returns aggregate channel, member, and
+  channel-membership counts.
+
+The server uses the official `rmcp` server-side SDK. Its results are not fixtures:
+both tools call the platform's Slack-compatible HTTP API with the bot token. A
+mention asking for one of these summaries therefore traverses the standard model
+tool loop, `lash-plugin-mcp`, stdio JSON-RPC, the separate server process, and the
+platform HTTP API before the result reaches the transcript.
+
+`lash-plugin-mcp` prefixes imported tools as `mcp__<server>__<tool>`. Ordinary
+native names therefore do not collide. If a host deliberately registers the exact
+same fully prefixed name, Lash rejects the catalog update as a duplicate instead
+of shadowing either implementation.
+
+The bundled process is demonstration wiring, not a deployment prescription. A
+real deployment normally configures `McpServerConfig::streamable_http(...)`, puts
+credentials in the HTTP `headers` map or the deployment's secret injection, and
+points at a separately operated MCP endpoint. `SLACK_CLONE_MCP_SERVER` can override
+the local server executable while developing this example; the bot passes the API
+origin and token to its child process without placing the token in argv.
 
 ## Session mapping doctrine
 
@@ -523,11 +553,14 @@ src/
   bot/slack_api.rs    the liftable client
   bot/tools.rs        native tools for the standard tool loop
   bot/webhook.rs      the Events API request URL
+  mcp_server.rs       rmcp server and read-only workspace tools
+  bin/mcp_server.rs   stdio server process entry point
 
   tests/platform_wire.rs     wire shapes, asserted on raw JSON keys
   tests/bot_events.rs        dedupe, ambient fold, isolation, tool loop
   tests/restart_recovery.rs  restart, every recovery stage, retries, client encoding
   tests/support.rs           harness: real sockets, scripted provider
+  ../tests/mcp.rs            live MCP catalog, loop, death/recovery, collision
 ```
 
 The two `/api/*` and `/platform/*` namespaces are kept visibly apart so a reader
@@ -552,6 +585,7 @@ that method needs the bot token, and a bot token has no business in a browser.
 | `SLACK_CLONE_RETRY_BACKOFF_MS` | `1000` | platform |
 | `SLACK_CLONE_DELIVERY_TIMEOUT_MS` | `3000` | platform |
 | `SLACK_CLONE_BOT_TRACE` | `<bot data dir>/lash/trace.jsonl` | bot |
+| `SLACK_CLONE_MCP_SERVER` | sibling `slack-clone-mcp-server` binary | bot |
 | `OPENROUTER_API_KEY` | — | bot (required) |
 | `OPENROUTER_MODEL` | `anthropic/claude-sonnet-4.6` | bot |
 

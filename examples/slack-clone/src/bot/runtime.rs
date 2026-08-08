@@ -7,6 +7,7 @@
 //! processes or triggers — those are RLM-mode concerns and their absence is
 //! deliberate.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -16,10 +17,15 @@ use lash::prompt::{PromptContribution, PromptLayer};
 use lash::provider::{ProviderHandle, ProviderOptions};
 use lash::tracing::{JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceLevel, TraceSink};
 use lash::{LashCore, ModelSpec, SessionSpec};
+use lash_plugin_mcp::{McpPluginFactory, McpServerConfig};
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 
 use super::slack_api::SlackApi;
 use super::tools;
+use crate::mcp_server::{API_BASE_URL_ENV, BOT_TOKEN_ENV};
+
+const DEMO_MCP_SERVER_NAME: &str = "slack_clone";
+const DEMO_MCP_SERVER_BINARY: &str = "slack-clone-mcp-server";
 
 /// Where the bot's durable Lash state lives, and how this boot identifies itself.
 #[derive(Clone, Debug)]
@@ -32,6 +38,8 @@ pub struct RuntimeConfig {
     pub incarnation: String,
     /// Whether to mirror trace records to stderr.
     pub trace_to_stderr: bool,
+    /// MCP servers registered into the bot's standard tool catalog.
+    pub mcp_servers: BTreeMap<String, McpServerConfig>,
 }
 
 impl RuntimeConfig {
@@ -42,7 +50,31 @@ impl RuntimeConfig {
             trace_path: None,
             incarnation: fresh_incarnation(),
             trace_to_stderr: true,
+            mcp_servers: BTreeMap::new(),
         }
+    }
+
+    /// Wire the bundled stdio server to the platform API used by this bot.
+    pub fn with_demo_mcp_server(mut self, api_base_url: &str, bot_token: &str) -> Result<Self> {
+        let command = std::env::var("SLACK_CLONE_MCP_SERVER")
+            .map(PathBuf::from)
+            .unwrap_or(demo_mcp_server_binary()?);
+        let mut env = BTreeMap::new();
+        env.insert(API_BASE_URL_ENV.to_string(), api_base_url.to_string());
+        env.insert(BOT_TOKEN_ENV.to_string(), bot_token.to_string());
+        self.mcp_servers.insert(
+            DEMO_MCP_SERVER_NAME.to_string(),
+            McpServerConfig::Stdio {
+                command: command.display().to_string(),
+                args: Vec::new(),
+                env,
+                cwd: None,
+                startup_timeout_ms: 10_000,
+                call_timeout_ms: 20_000,
+                binary_content_attachments: false,
+            },
+        );
+        Ok(self)
     }
 }
 
@@ -86,7 +118,16 @@ pub async fn build_core(
             .map_err(|error| anyhow::anyhow!("open process env store: {error}"))?,
     );
 
-    LashCore::standard_builder()
+    let mcp = if config.mcp_servers.is_empty() {
+        None
+    } else {
+        Some(Arc::new(
+            McpPluginFactory::new(config.mcp_servers.clone())
+                .await
+                .context("connect slack-clone MCP servers")?,
+        ))
+    };
+    let mut builder = LashCore::standard_builder()
         .provider(provider)
         // `session_spec` replaces the builder's whole spec, so it must precede
         // `model`, which writes into that same spec.
@@ -100,7 +141,11 @@ pub async fn build_core(
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .tools(tools::workspace_tools(api))
         .trace_sink(trace_sink(config))
-        .trace_level(TraceLevel::Extended)
+        .trace_level(TraceLevel::Extended);
+    if let Some(mcp) = mcp {
+        builder = builder.plugin(mcp);
+    }
+    builder
         // Ambient channel traffic is admitted as queued turn input but must NOT
         // provoke a reply. The default inline queued-work driver would drain that
         // input on its own schedule and run a turn nobody asked for, so the bot
@@ -109,6 +154,16 @@ pub async fn build_core(
         .disable_queued_work_driver()
         .build()
         .context("build slack-clone bot Lash core")
+}
+
+fn demo_mcp_server_binary() -> Result<PathBuf> {
+    let current = std::env::current_exe().context("locate slack-clone bot binary")?;
+    let extension = current.extension().map(|value| value.to_owned());
+    let mut binary = current.with_file_name(DEMO_MCP_SERVER_BINARY);
+    if let Some(extension) = extension {
+        binary.set_extension(extension);
+    }
+    Ok(binary)
 }
 
 /// The bot's system prompt, expressed as a session prompt layer.
@@ -131,7 +186,10 @@ fn bot_prompt() -> PromptLayer {
             "Workspace tools",
             "Use `list_channels` and `channel_history` when a question is about the \
              workspace itself rather than about this channel's conversation. Do not guess \
-             at channel names or at what was said somewhere else.",
+             at channel names or at what was said somewhere else. The bundled MCP server \
+             also exposes `mcp__slack_clone__list_channels_summary` and \
+             `mcp__slack_clone__workspace_stats`; use those when the question asks for a \
+             compact channel summary or aggregate workspace counts.",
         ))
 }
 

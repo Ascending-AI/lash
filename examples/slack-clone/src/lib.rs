@@ -22,6 +22,7 @@
 
 pub mod bot;
 pub mod ids;
+pub mod mcp_server;
 pub mod platform;
 pub mod secrets;
 pub mod store;
