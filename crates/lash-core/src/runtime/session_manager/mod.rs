@@ -66,7 +66,11 @@ pub(in crate::runtime) struct CurrentSessionCapability {
     plugins: Arc<crate::PluginSession>,
     store: Option<Arc<dyn crate::store::RuntimePersistence>>,
     runtime_lease_owner: crate::LeaseOwnerIdentity,
-    fresh_session_execution_lease_released: NestedLeaseReleaseSignal,
+    /// Explicit lane context for services scoped to a running parent turn.
+    /// `None` identifies a lane-less host/service call and selects the fresh
+    /// acquisition path at the persistence call site.
+    held_session_execution_lease: Option<BorrowedLaneAuthority>,
+    resident_graph_head_stale: Arc<AtomicBool>,
     turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
 }
 
@@ -186,6 +190,7 @@ impl CurrentSessionCapability {
         runtime: &LashRuntime,
         plugins: Arc<crate::PluginSession>,
         persist_usage_to_store: bool,
+        held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
     ) -> Self {
         Self {
             session_id: runtime.state.session_id.clone(),
@@ -203,9 +208,9 @@ impl CurrentSessionCapability {
             plugins,
             store: runtime.services.store.clone(),
             runtime_lease_owner: runtime.runtime_lease_owner.clone(),
-            fresh_session_execution_lease_released: runtime
-                .fresh_session_execution_lease_released
-                .clone(),
+            held_session_execution_lease: held_session_execution_lease
+                .map(SessionExecutionLeaseGuard::borrowed_authority),
+            resident_graph_head_stale: Arc::clone(&runtime.resident_graph_head_stale),
             turn_phase_probe: runtime.turn_phase_probe.clone(),
         }
     }
@@ -327,6 +332,7 @@ impl RuntimeSessionServices {
         runtime: &LashRuntime,
         persist_usage_to_store: bool,
         child_usage_event_relay: Option<ChildUsageEventRelay>,
+        held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
     ) -> Result<Self, PluginOperationInvokeError> {
         let Some(session) = runtime.session.as_ref() else {
             return Err(PluginOperationInvokeError::Unknown(
@@ -338,6 +344,7 @@ impl RuntimeSessionServices {
                 runtime,
                 Arc::clone(session.plugins()),
                 persist_usage_to_store,
+                held_session_execution_lease,
             ),
             managed: ManagedSessionCapability::new(runtime),
             processes: ProcessCapability::new(runtime),
@@ -392,7 +399,8 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
         &crate::SystemClock,
     );
     let services = Arc::new(
-        RuntimeSessionServices::new(&runtime, true, None).expect("mixed-envelope session services"),
+        RuntimeSessionServices::new(&runtime, true, None, None)
+            .expect("mixed-envelope session services"),
     );
     let graph = services.graph_service();
     let request = crate::AppendSessionNodesRequest {
@@ -425,7 +433,7 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
         .await
         .expect("refresh between lost response and retry");
     let retry_services = Arc::new(
-        RuntimeSessionServices::new(&runtime, true, None)
+        RuntimeSessionServices::new(&runtime, true, None, None)
             .expect("mixed-envelope retry session services"),
     );
     let replay = retry_services
@@ -550,7 +558,8 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
         .await
         .expect("refresh before ordinal-reuse sequence");
     let ordinal_services = Arc::new(
-        RuntimeSessionServices::new(&runtime, true, None).expect("ordinal-reuse session services"),
+        RuntimeSessionServices::new(&runtime, true, None, None)
+            .expect("ordinal-reuse session services"),
     );
     let first_usage = crate::TokenUsage {
         input_tokens: 13,
@@ -699,7 +708,7 @@ pub(crate) async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
     .await
     .expect("cancelled usage runtime");
     let services = Arc::new(
-        RuntimeSessionServices::new(&runtime, true, None)
+        RuntimeSessionServices::new(&runtime, true, None, None)
             .expect("cancelled usage session services"),
     );
     let usage = crate::TokenUsage {

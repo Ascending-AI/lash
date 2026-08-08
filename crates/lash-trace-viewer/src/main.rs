@@ -1265,13 +1265,6 @@ mod tests {
                     frame_id: "f1".to_string(),
                 }),
             },
-            TraceEvent::SessionExecutionLeaseFrameHandoffTransferred {
-                owner_id: "worker-1".to_string(),
-                incarnation_id: "boot-1".to_string(),
-                previous_fencing_token: 7,
-                transferred_fencing_token: 8,
-                trigger: lash_trace::TraceSessionExecutionLeaseTransferTrigger::NestedCommit,
-            },
             TraceEvent::Custom {
                 name: "x".to_string(),
                 payload: serde_json::json!({"ok": true}),

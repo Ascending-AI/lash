@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::atomic::Ordering;
 
 #[derive(Clone, Debug)]
 #[cfg_attr(any(test, feature = "testing"), derive(serde::Serialize))]
@@ -152,16 +153,40 @@ impl UsageCapability {
                 operation,
             )
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-        let result = commit_runtime_state_with_fresh_session_execution_lease(
-            Arc::clone(store),
-            commit,
-            &current.runtime_lease_owner,
-            current.host.core.control.lease_timings,
-            Arc::clone(&current.host.core.clock),
-            current.fresh_session_execution_lease_released.clone(),
-        )
-        .await
-        .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+        // Dual-context site: ordinary host services are lane-less, but a
+        // TurnPersisted observer may finish managed-child usage while the
+        // parent lane is still held. Select authority from the explicit
+        // service context, never from scheduling or elapsed time.
+        let result = if let Some(lease) = &current.held_session_execution_lease {
+            let result = commit_runtime_state_with_borrowed_lease(
+                lease,
+                Arc::clone(store),
+                commit,
+                &current.runtime_lease_owner,
+            )
+            .await;
+            if result.is_ok() {
+                current
+                    .resident_graph_head_stale
+                    .store(true, Ordering::Release);
+            }
+            result
+        } else {
+            commit_runtime_state_with_fresh_session_execution_lease(
+                Arc::clone(store),
+                commit,
+                &current.runtime_lease_owner,
+                current.host.core.control.lease_timings,
+                Arc::clone(&current.host.core.clock),
+            )
+            .await
+        }
+        .map_err(|err| match err {
+            crate::StoreError::SessionExecutionLeaseExpired { session_id } => {
+                crate::PluginError::SessionExecutionLeaseLost { session_id }
+            }
+            err => crate::PluginError::Session(err.to_string()),
+        })?;
         let confirmed_usage = result.committed_usage_delta_identities.clone();
         state.apply_persisted_commit_result(result);
         state.mark_node_ids_persisted(persisted_node_ids);

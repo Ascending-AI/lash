@@ -12,7 +12,6 @@
 //! |---|---|---|---|
 //! | `session_execution_lease.acquired` | INFO | the claimant | this runner acquired the lane |
 //! | `session_execution_lease.taken_over` | INFO | the *winner* | this claim displaced a named lapsed holder |
-//! | `session_execution_lease.frame_handoff_transferred` | INFO | the logical-turn handoff boundary | `owner_id`, `incarnation_id`, old/new fencing tokens, and `nested_commit` explain why a live retained guard was rotated before the next frame |
 //! | `session_execution_lease.lost` | WARN | the loser | a renewal was fence-rejected; this runner no longer holds the lane |
 //! | `session_execution_lease.renewal_refused` | WARN | the store | durable owner/token decision evidence for a refused renewal |
 //! | `session_execution_lease.release_refused` | WARN | the store | durable owner/token decision evidence for a refused release |
@@ -49,7 +48,7 @@ use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 
-use super::{Clock, NestedLeaseReleaseSignal};
+use super::Clock;
 use crate::LeaseTimings;
 use crate::store::{
     RuntimeCommit, RuntimeCommitResult, RuntimePersistence, SessionExecutionLease,
@@ -113,6 +112,38 @@ pub(super) struct SessionExecutionLeaseGuard {
     clock: Arc<dyn Clock>,
     guard_id: u64,
     renew_task: tokio::task::JoinHandle<()>,
+}
+
+/// A non-owning view of a turn driver's execution lane.
+///
+/// It shares only the live fence and loss evidence needed by nested commits.
+/// Retaining this authority cannot renew, release, or otherwise keep the lane
+/// alive after the uniquely-owned turn-driver guard is dropped.
+#[derive(Clone)]
+pub(super) struct BorrowedLaneAuthority {
+    lease: Arc<StdMutex<SessionExecutionLease>>,
+    lost: Arc<AtomicBool>,
+}
+
+impl BorrowedLaneAuthority {
+    pub(super) fn fence(&self) -> SessionExecutionLeaseAuthority {
+        self.lease
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .fence()
+    }
+
+    fn commit_evidence(&self) -> Box<SessionExecutionLeaseCommitEvidence> {
+        let lease = self
+            .lease
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Box::new(SessionExecutionLeaseCommitEvidence {
+            owner: lease.owner.clone(),
+            fencing_token: lease.fencing_token,
+            lease_lost: self.lost.load(Ordering::Acquire),
+        })
+    }
 }
 
 impl SessionExecutionLeaseGuard {
@@ -190,6 +221,13 @@ impl SessionExecutionLeaseGuard {
             clock,
             guard_id: NEXT_LEASE_GUARD_ID.fetch_add(1, Ordering::Relaxed),
             renew_task,
+        }
+    }
+
+    pub(super) fn borrowed_authority(&self) -> BorrowedLaneAuthority {
+        BorrowedLaneAuthority {
+            lease: Arc::clone(&self.lease),
+            lost: Arc::clone(&self.lost),
         }
     }
 
@@ -341,7 +379,6 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
     owner: &crate::LeaseOwnerIdentity,
     timings: LeaseTimings,
     clock: Arc<dyn Clock>,
-    released: NestedLeaseReleaseSignal,
 ) -> Result<RuntimeCommitResult, StoreError> {
     let session_id = commit.session_id.clone();
     let Some(lease) = SessionExecutionLeaseGuard::try_acquire(
@@ -362,15 +399,12 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
     match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await {
         Ok(result) => {
             lease.mark_released();
-            released.mark_released();
             Ok(result)
         }
         Err(error) => {
             trace_commit_cas_rejected(&session_id, Some(&evidence), owner, &error);
-            // A failed release leaves the signal unset on purpose: the outer guard was already
-            // invalidated by reentry rotation, preserving the pre-fix loud failure path.
             match lease.release_if_live().await {
-                Ok(()) => released.mark_released(),
+                Ok(()) => {}
                 Err(release_error) => {
                     tracing::warn!(
                         error = %release_error,
@@ -380,6 +414,31 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
                     );
                 }
             }
+            Err(error)
+        }
+    }
+}
+
+/// Commit under a lane already held by the caller.
+///
+/// The ordinary store fence validates the guard's current owner, generation,
+/// token, and expiry inside the commit transaction. No claim, rotation, or
+/// release occurs on either outcome; the outer guard therefore remains the
+/// sole owner of renewal and eventual release.
+pub(super) async fn commit_runtime_state_with_borrowed_lease(
+    lease: &BorrowedLaneAuthority,
+    store: Arc<dyn RuntimePersistence>,
+    commit: RuntimeCommit,
+    owner: &crate::LeaseOwnerIdentity,
+) -> Result<RuntimeCommitResult, StoreError> {
+    let session_id = commit.session_id.clone();
+    debug_assert_eq!(lease.fence().session_id, session_id);
+    let evidence = lease.commit_evidence();
+    let commit = commit.borrowing_session_execution_lease(lease.fence());
+    match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await {
+        Ok(result) => Ok(result),
+        Err(error) => {
+            trace_commit_cas_rejected(&session_id, Some(&evidence), owner, &error);
             Err(error)
         }
     }
@@ -619,7 +678,7 @@ fn trace_busy(
 mod tests {
     use super::*;
     use crate::runtime::in_memory_store::InMemorySessionStore;
-    use crate::store::SessionExecutionLeaseStore;
+    use crate::store::{SessionCommitStore, SessionExecutionLeaseStore};
 
     const SESSION_ID: &str = "cancelled-release";
 
@@ -653,6 +712,97 @@ mod tests {
             .await
             .expect("peer claim attempt");
         matches!(outcome, SessionExecutionLeaseClaimOutcome::Busy { .. })
+    }
+
+    fn borrowed_commit(session_id: &str) -> RuntimeCommit {
+        RuntimeCommit::persisted_state_for_test(
+            &crate::RuntimeSessionState {
+                session_id: session_id.to_string(),
+                ..crate::RuntimeSessionState::default()
+            },
+            &[],
+        )
+    }
+
+    #[tokio::test]
+    async fn borrowed_commit_leaves_outer_guard_fence_valid() {
+        let store = Arc::new(InMemorySessionStore::new());
+        let persistence: Arc<dyn RuntimePersistence> = store.clone();
+        let owner = crate::LeaseOwnerIdentity::opaque("borrow-owner", "borrow-incarnation");
+        store
+            .admit_and_bind_session(&crate::SessionBinding::root(
+                "borrow-valid",
+                &crate::SessionPolicy::default(),
+            ))
+            .await
+            .expect("bind borrowed-commit session");
+        let guard = SessionExecutionLeaseGuard::try_acquire(
+            Arc::clone(&persistence),
+            "borrow-valid",
+            &owner,
+            LeaseTimings::default(),
+            Arc::new(crate::runtime::SystemClock),
+        )
+        .await
+        .expect("claim outer lane")
+        .expect("outer lane acquired");
+
+        commit_runtime_state_with_borrowed_lease(
+            &guard.borrowed_authority(),
+            persistence,
+            borrowed_commit("borrow-valid"),
+            &owner,
+        )
+        .await
+        .expect("borrowed commit succeeds");
+
+        let renewed = store
+            .renew_session_execution_lease(&guard.fence(), LeaseTimings::default().ttl_ms())
+            .await
+            .expect("outer guard remains current after borrowed commit");
+        assert_eq!(renewed.lease_token, guard.fence().lease_token);
+        guard.release_if_live().await.expect("release outer lane");
+    }
+
+    #[tokio::test]
+    async fn lapsed_guard_cannot_authorize_borrowed_commit() {
+        let store = Arc::new(InMemorySessionStore::new());
+        let persistence: Arc<dyn RuntimePersistence> = store.clone();
+        let owner = crate::LeaseOwnerIdentity::opaque("lapsed-owner", "lapsed-incarnation");
+        store
+            .admit_and_bind_session(&crate::SessionBinding::root(
+                "borrow-lapsed",
+                &crate::SessionPolicy::default(),
+            ))
+            .await
+            .expect("bind lapsed borrowed-commit session");
+        let timings = LeaseTimings::from_ttl(std::time::Duration::from_millis(30))
+            .expect("valid short lease timings");
+        let guard = SessionExecutionLeaseGuard::try_acquire(
+            Arc::clone(&persistence),
+            "borrow-lapsed",
+            &owner,
+            timings,
+            Arc::new(crate::runtime::SystemClock),
+        )
+        .await
+        .expect("claim outer lane")
+        .expect("outer lane acquired");
+        guard.renew_task.abort();
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+
+        let error = commit_runtime_state_with_borrowed_lease(
+            &guard.borrowed_authority(),
+            persistence,
+            borrowed_commit("borrow-lapsed"),
+            &owner,
+        )
+        .await
+        .expect_err("lapsed guard must fail the ordinary execution fence");
+        assert!(matches!(
+            error,
+            StoreError::SessionExecutionLeaseExpired { .. }
+        ));
     }
 
     /// The release await is the hazardous point: dropping the future there used

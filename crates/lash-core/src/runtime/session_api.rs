@@ -178,6 +178,8 @@ impl LashRuntime {
             .as_ref()
             .and_then(|session| session.history_store())
         else {
+            self.resident_graph_head_stale
+                .store(false, Ordering::Release);
             return Ok(());
         };
         let read = store.load_session().await.map_err(|err| {
@@ -185,12 +187,16 @@ impl LashRuntime {
         })?;
         self.graph_loaded_from_store = true;
         let Some(read) = read else {
+            self.resident_graph_head_stale
+                .store(false, Ordering::Release);
             return Ok(());
         };
         let has_newer_graph = self.state.head_revision != read.head_revision
             || read.graph.leaf_node_id != self.state.session_graph.leaf_node_id
             || read.checkpoint_ref != self.state.checkpoint_ref;
         if !has_newer_graph {
+            self.resident_graph_head_stale
+                .store(false, Ordering::Release);
             return Ok(());
         }
         read.graph
@@ -217,6 +223,8 @@ impl LashRuntime {
         })?;
         self.policy = self.state.effective_policy().clone();
         self.protocol_turn_options = self.state.effective_protocol_turn_options().clone();
+        self.resident_graph_head_stale
+            .store(false, Ordering::Release);
         Ok(())
     }
 
@@ -229,17 +237,33 @@ impl LashRuntime {
                 "resident session state is invalidated; durable reload is required".to_string(),
             ));
         }
-        Ok(Arc::new(RuntimeSessionServices::new(self, true, None)?))
+        Ok(Arc::new(RuntimeSessionServices::new(
+            self, true, None, None,
+        )?))
     }
 
     pub(super) fn runtime_session_services_for_turn(
         &self,
         child_usage_event_relay: Option<ChildUsageEventRelay>,
+        held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
         Ok(Arc::new(RuntimeSessionServices::new(
             self,
             false,
             child_usage_event_relay,
+            held_session_execution_lease,
+        )?))
+    }
+
+    pub(super) fn runtime_session_services_after_commit(
+        &self,
+        held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+    ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
+        Ok(Arc::new(RuntimeSessionServices::new(
+            self,
+            true,
+            None,
+            held_session_execution_lease,
         )?))
     }
 
@@ -257,6 +281,7 @@ impl LashRuntime {
             .map(|services| services.lifecycle_service())
     }
 
+    /// Returns a lane-less host service for calls between turn drivers, never concurrently with a running turn.
     pub fn session_graph_service(
         &self,
     ) -> Result<Arc<dyn crate::plugin::SessionGraphService>, PluginOperationInvokeError> {
@@ -627,6 +652,8 @@ impl LashRuntime {
                 operation,
             )
             .map_err(super::runtime_error_from_store_commit)?;
+        // Queue-claim settlement is generation-pinned per ADR 0029; presenting
+        // the live execution fence on this commit is FIG-1072 territory.
         let Some(_session_execution_lease) = session_execution_lease else {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::StoreCommitFailed,

@@ -76,6 +76,14 @@ async fn perf_store_enforces_core_lease_fence_authority() {
 }
 
 #[tokio::test]
+async fn perf_store_enforces_borrowed_commit_contract() {
+    lash_core::testing::conformance::borrowed_session_execution_lease_commit_contract(Arc::new(
+        RuntimePerfStore::default(),
+    ))
+    .await;
+}
+
+#[tokio::test]
 async fn perf_store_pins_durable_claim_id_dialects() {
     let store = RuntimePerfStore::default();
     let session_id = "perf-claim-id-dialects";

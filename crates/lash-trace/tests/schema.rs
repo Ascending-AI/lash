@@ -13,19 +13,19 @@ use lash_trace::{
     TraceEffectEnvelopeDiffValue, TraceError, TraceEvent, TraceLashlangExecutionEvent,
     TraceLashlangExecutionIdentity, TraceLashlangStatus, TraceLlmRequest, TraceLlmResponse,
     TraceProviderRequestEvent, TraceProviderStreamEvent, TraceRecord, TraceRuntimeScope,
-    TraceRuntimeStreamEvent, TraceRuntimeSubject, TraceSessionExecutionLeaseTransferTrigger,
-    TraceTokenUsage, TraceToolCallOutcome, TraceToolCallOutput,
+    TraceRuntimeStreamEvent, TraceRuntimeSubject, TraceTokenUsage, TraceToolCallOutcome,
+    TraceToolCallOutput,
 };
 use serde_json::json;
 
 #[test]
-fn trace_schema_version_is_pinned_at_2() {
+fn trace_schema_version_is_pinned_at_3() {
     // Tripwire. This is the current on-disk trace schema version. Every reader
     // (viewer, exporter, OTel bridge) keys off it, so a change here must be a
     // deliberate, documented schema bump — see the crate-level rustdoc and the
     // `TRACE_SCHEMA_VERSION` doc comment for the bump policy. If this fails,
     // read that policy before touching the constant.
-    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 2);
+    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 3);
 }
 
 #[test]
@@ -38,7 +38,7 @@ fn new_records_stamp_the_schema_version() {
     );
     assert_eq!(record.schema_version, lash_trace::TRACE_SCHEMA_VERSION);
     let json = serde_json::to_value(&record).unwrap();
-    assert_eq!(json["schema_version"], 2);
+    assert_eq!(json["schema_version"], 3);
 }
 
 fn token_usage_sample() -> TraceTokenUsage {
@@ -223,13 +223,6 @@ fn event_samples() -> Vec<TraceEvent> {
             done_reason: "modelstop".to_string(),
             agent_frame_switch: None,
         },
-        TraceEvent::SessionExecutionLeaseFrameHandoffTransferred {
-            owner_id: "worker-1".to_string(),
-            incarnation_id: "boot-1".to_string(),
-            previous_fencing_token: 7,
-            transferred_fencing_token: 8,
-            trigger: TraceSessionExecutionLeaseTransferTrigger::NestedCommit,
-        },
         TraceEvent::Custom {
             name: "x.event".to_string(),
             payload: json!({ "ok": true }),
@@ -258,7 +251,6 @@ const ALL_TRACE_EVENT_KINDS: &[&str] = &[
     "token_usage",
     "lashlang_execution",
     "turn_completed",
-    "session_execution_lease.frame_handoff_transferred",
     "custom",
 ];
 
@@ -331,28 +323,6 @@ fn rolling_history_events_pin_decision_payloads() {
                 "summary_nodes": 1,
             }),
         ]
-    );
-}
-
-#[test]
-fn session_execution_lease_frame_handoff_transfer_pins_payload() {
-    let event = TraceEvent::SessionExecutionLeaseFrameHandoffTransferred {
-        owner_id: "worker-1".to_string(),
-        incarnation_id: "boot-1".to_string(),
-        previous_fencing_token: 7,
-        transferred_fencing_token: 8,
-        trigger: TraceSessionExecutionLeaseTransferTrigger::NestedCommit,
-    };
-    assert_eq!(
-        serde_json::to_value(event).expect("serialize handoff transfer"),
-        json!({
-            "type": "session_execution_lease.frame_handoff_transferred",
-            "owner_id": "worker-1",
-            "incarnation_id": "boot-1",
-            "previous_fencing_token": 7,
-            "transferred_fencing_token": 8,
-            "trigger": "nested_commit",
-        })
     );
 }
 
@@ -584,7 +554,7 @@ fn jsonl_round_trip_preserves_records() {
 
     assert_eq!(parsed, records, "JSONL round-trip must preserve records");
     for record in &parsed {
-        assert_eq!(record.schema_version, 2);
+        assert_eq!(record.schema_version, 3);
     }
 
     // Pin the diagnostic's `tool_calls` entry fields explicitly on the parsed

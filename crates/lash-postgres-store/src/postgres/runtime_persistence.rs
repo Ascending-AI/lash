@@ -414,6 +414,9 @@ impl SessionCommitStore for PostgresSessionStore {
         // alone cannot serialize create-versus-delete. This session-keyed lock
         // is the common authority for every history commit and deletion.
         ensure_session_not_deleted_tx(&mut tx, &commit.session_id).await?;
+        if let Some(fence) = commit.session_execution_lease_fence.as_ref() {
+            ensure_session_execution_lease_tx(&mut tx, &commit.session_id, fence).await?;
+        }
         // Read without a lock for early validation and receipt replay. Before
         // mutating graph reachability, existing sessions lock and recheck this
         // revision so commit, maintenance, and deletion share one authority.

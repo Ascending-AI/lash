@@ -9,6 +9,10 @@ pub enum PluginError {
     Invoke(String),
     #[error("plugin session error: {0}")]
     Session(String),
+    /// A turn-scoped plugin write presented a lapsed or superseded borrowed
+    /// session-execution guard.
+    #[error("session execution lease for `{session_id}` was lost before plugin commit")]
+    SessionExecutionLeaseLost { session_id: String },
     /// A session append operation id was reused for different semantic request content.
     #[error(
         "append operation `{operation_key}` for session `{session_id}` was reused with different request content"

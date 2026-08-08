@@ -54,6 +54,26 @@ fn lifecycle_event_hook_kind(event: &PluginLifecycleEvent<'_>) -> &'static str {
 }
 
 pub(crate) fn plugin_lifecycle_hook_issue(error: PluginError) -> crate::runtime::TurnIssue {
+    let error = match error {
+        PluginError::SessionExecutionLeaseLost { session_id } => {
+            return crate::runtime::TurnIssue {
+                kind: "runtime".to_string(),
+                code: Some(
+                    crate::RuntimeErrorCode::SessionExecutionLeaseLost
+                        .as_str()
+                        .to_string(),
+                ),
+                terminal_reason: None,
+                message: format!(
+                    "session execution lease for session `{session_id}` was lost before commit"
+                ),
+                raw: None,
+                retryable: Some(false),
+                provider_failure_kind: None,
+            };
+        }
+        error => error,
+    };
     crate::runtime::TurnIssue {
         kind: "plugin".to_string(),
         code: Some("lifecycle_hook_failed".to_string()),
@@ -470,6 +490,16 @@ impl PluginSession {
         }
         if failures.is_empty() {
             return Ok(());
+        }
+        // Execution-lane loss is runtime authority evidence, not an ordinary
+        // plugin hook failure. Preserve it through the fan-out aggregation so
+        // the turn boundary can retain the loud typed failure.
+        if let Some(error @ PluginError::SessionExecutionLeaseLost { .. }) = failures
+            .iter()
+            .map(|(_, error)| error)
+            .find(|error| matches!(error, PluginError::SessionExecutionLeaseLost { .. }))
+        {
+            return Err(error.clone());
         }
         failures.sort_by(|(left_id, left_error), (right_id, right_error)| {
             left_id

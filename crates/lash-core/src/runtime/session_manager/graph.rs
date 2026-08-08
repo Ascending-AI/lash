@@ -101,16 +101,37 @@ impl CurrentSessionCapability {
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         commit.turn_commit = append_stamp;
         commit.debug_assert_append_envelope_scope();
-        let result = match commit_runtime_state_with_fresh_session_execution_lease(
-            Arc::clone(store),
-            commit,
-            &self.runtime_lease_owner,
-            self.host.core.control.lease_timings,
-            Arc::clone(&self.host.core.clock),
-            self.fresh_session_execution_lease_released.clone(),
-        )
-        .await
-        {
+        // Dual-context site: TurnPersisted observers run under the parent
+        // turn's held lane, while host-created graph services are lane-less.
+        // Keep the distinction explicit so timing can never select authority.
+        let commit_result = if let Some(lease) = &self.held_session_execution_lease {
+            let result = commit_runtime_state_with_borrowed_lease(
+                lease,
+                Arc::clone(store),
+                commit,
+                &self.runtime_lease_owner,
+            )
+            .await;
+            if result.is_ok() {
+                // The guard remains current, but this service committed from a
+                // snapshot outside the owning runtime. Force a deliberate head
+                // reload before its next physical turn; planner CAS is not the
+                // graph-freshness discovery mechanism.
+                self.resident_graph_head_stale
+                    .store(true, Ordering::Release);
+            }
+            result
+        } else {
+            commit_runtime_state_with_fresh_session_execution_lease(
+                Arc::clone(store),
+                commit,
+                &self.runtime_lease_owner,
+                self.host.core.control.lease_timings,
+                Arc::clone(&self.host.core.clock),
+            )
+            .await
+        };
+        let result = match commit_result {
             Ok(result) => result,
             Err(crate::StoreError::AppendAncestorNotActive { required_node_id }) => {
                 return Ok(crate::AppendSessionNodesResult::StaleBranch { required_node_id });
@@ -136,6 +157,9 @@ impl CurrentSessionCapability {
                     stored,
                     attempted,
                 });
+            }
+            Err(crate::StoreError::SessionExecutionLeaseExpired { session_id }) => {
+                return Err(crate::PluginError::SessionExecutionLeaseLost { session_id });
             }
             Err(err) => return Err(crate::PluginError::Session(err.to_string())),
         };

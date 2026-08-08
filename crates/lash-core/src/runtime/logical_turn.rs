@@ -278,10 +278,6 @@ impl LashRuntime {
             };
 
             let next = async {
-                self.transfer_session_execution_lease_for_agent_frame_handoff(
-                    session_execution_lease,
-                )
-                .await?;
                 if enqueued_queue_batches.is_empty() {
                     let mut input = turn_input_from_text(task);
                     input.protocol_turn_options = follow_protocol_turn_options.clone();

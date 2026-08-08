@@ -294,6 +294,7 @@ where
     commit_rejects_leaf_without_frame_open_ancestor(make()).await;
     // [`SessionExecutionLeaseStore`]: single-writer lane fencing.
     session_execution_lease_contract(make()).await;
+    borrowed_session_execution_lease_commit_contract(make()).await;
     same_incarnation_rotation_gates_claims_not_commits(make()).await;
     session_execution_lease_fence_authority(make().as_ref()).await;
     concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable(make()).await;
@@ -2498,6 +2499,105 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         .expect("queue work claim");
     assert_eq!(claim.batches[0].batch_id, batch.batch_id);
     release_session_execution_lease_for_test(&store, &queue_lease).await;
+}
+
+/// A borrowed commit validates the ordinary current-token fence without
+/// participating in the lease lifecycle. Run through the shared conformance
+/// suite so in-memory, SQLite, PostgreSQL, and perf backends cannot drift.
+pub async fn borrowed_session_execution_lease_commit_contract(store: Arc<dyn RuntimePersistence>) {
+    let session_id = "borrowed-commit-fence";
+    let owner = lease_owner("borrowed-commit-owner");
+    let held = store
+        .try_claim_session_execution_lease(session_id, &owner, 120_000)
+        .await
+        .expect("claim borrowed-commit lane")
+        .acquired()
+        .expect("borrowed-commit lane acquired");
+    let mut state = RuntimeSessionState {
+        session_id: session_id.to_string(),
+        ..RuntimeSessionState::default()
+    };
+    let operation = crate::OperationId::new(
+        crate::ExecutionScope::runtime_operation("borrowed-commit-replay"),
+        "commit",
+    );
+    let same_operation =
+        RuntimeCommit::persisted_state_with_operation_for_testing(&state, &[], operation);
+    let committed = store
+        .commit_runtime_state(
+            same_operation
+                .clone()
+                .borrowing_session_execution_lease(held.fence()),
+        )
+        .await
+        .expect("borrowed commit accepts the current held authority");
+    state.head_revision = committed.head_revision;
+
+    let renewed = store
+        .renew_session_execution_lease(&held.fence(), 120_000)
+        .await
+        .expect("borrowed commit leaves the outer guard fence-valid");
+    assert_eq!(renewed.lease_token, held.lease_token);
+    assert_eq!(renewed.fencing_token, held.fencing_token);
+
+    let replay_successor = store
+        .try_claim_session_execution_lease(session_id, &owner, 120_000)
+        .await
+        .expect("rotate the fence before replaying the same operation")
+        .acquired()
+        .expect("same-incarnation replay rotation acquired");
+    let error = store
+        .commit_runtime_state(same_operation.borrowing_session_execution_lease(held.fence()))
+        .await
+        .expect_err("a stale borrowed fence must veto receipt replay");
+    assert!(matches!(
+        error,
+        StoreError::SessionExecutionLeaseExpired { .. }
+    ));
+    assert_ne!(replay_successor.lease_token, held.lease_token);
+
+    let lapsed = store
+        .try_claim_session_execution_lease(session_id, &owner, 0)
+        .await
+        .expect("rotate to an immediately lapsed borrowed-commit lane")
+        .acquired()
+        .expect("same-incarnation lapsed lane acquired");
+    let error = store
+        .commit_runtime_state(
+            RuntimeCommit::persisted_state_for_test(&state, &[])
+                .borrowing_session_execution_lease(lapsed.fence()),
+        )
+        .await
+        .expect_err("a lapsed guard cannot authorize a borrowed commit");
+    assert!(matches!(
+        error,
+        StoreError::SessionExecutionLeaseExpired { .. }
+    ));
+
+    let rotated = store
+        .try_claim_session_execution_lease(session_id, &owner, 120_000)
+        .await
+        .expect("rotate borrowed-commit lane")
+        .acquired()
+        .expect("same-incarnation rotation acquired");
+    let error = store
+        .commit_runtime_state(
+            RuntimeCommit::persisted_state_for_test(&state, &[])
+                .borrowing_session_execution_lease(held.fence()),
+        )
+        .await
+        .expect_err("a stale outer guard cannot authorize a borrowed commit");
+    assert!(matches!(
+        error,
+        StoreError::SessionExecutionLeaseExpired { .. }
+    ));
+    let after_rejection = store
+        .get_session_execution_lease(session_id)
+        .await
+        .expect("read lane after stale borrow rejection")
+        .expect("stale borrow rejection leaves successor live");
+    assert_eq!(after_rejection.lease_token, rotated.lease_token);
+    release_session_execution_lease_for_test(&store, &rotated).await;
 }
 
 async fn same_incarnation_rotation_gates_claims_not_commits(store: Arc<dyn RuntimePersistence>) {

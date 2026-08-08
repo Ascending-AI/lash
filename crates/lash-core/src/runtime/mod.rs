@@ -93,31 +93,6 @@ use turn_boundary::*;
 use turn_commit_draft::*;
 use turn_driver::*;
 
-/// Session-scoped notification that a nested fresh-lease commit released the lane.
-///
-/// Keeping the atomic behind this type makes commit helpers accept only the runtime's
-/// canonical signal instead of an arbitrary freshly allocated boolean.
-#[derive(Clone, Default)]
-struct NestedLeaseReleaseSignal(Arc<AtomicBool>);
-
-impl NestedLeaseReleaseSignal {
-    fn clear_before_claim(&self) {
-        self.0.store(false, Ordering::Release);
-    }
-
-    fn mark_released(&self) {
-        self.0.store(true, Ordering::Release);
-    }
-
-    fn consume(&self) -> bool {
-        self.0.swap(false, Ordering::AcqRel)
-    }
-
-    fn is_set(&self) -> bool {
-        self.0.load(Ordering::Acquire)
-    }
-}
-
 pub(super) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> RuntimeError {
     match err {
         crate::store::StoreError::Contended => RuntimeError::new(
@@ -1471,10 +1446,10 @@ pub struct LashRuntime {
     pub(in crate::runtime) shared_token_ledger:
         Arc<std::sync::Mutex<Vec<session_manager::PendingTokenLedgerEntry>>>,
     pub(in crate::runtime) process_sync_needed: Arc<AtomicBool>,
-    /// Set whenever a nested runtime-state commit rotates and releases this
-    /// session's execution lane. Agent-frame handoff consumes this signal to
-    /// transfer the retained guard and invalidate its resident graph premise.
-    fresh_session_execution_lease_released: NestedLeaseReleaseSignal,
+    /// Set by a successful borrowed nested commit. The lane remains continuous,
+    /// but the durable head may have advanced outside this runtime's resident
+    /// state, so the next physical turn must reload deliberately before planning.
+    resident_graph_head_stale: Arc<AtomicBool>,
     pub(in crate::runtime) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
     /// Lease-guard identity retained across a successful physical-turn commit.
     /// A match proves no release/reacquisition boundary occurred before the

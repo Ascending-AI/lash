@@ -277,10 +277,10 @@ impl TraceSink for FanoutTraceSink {
         <div class="section" id="jsonl-schema">
           <div class="section-header">
             <h2>The JSONL Schema</h2>
-            <p>One line of UTF-8 JSON per record. <code>TRACE_SCHEMA_VERSION = 2</code>. Reject or warn on higher unrecognized versions. When to bump it — and when an additive change (a new variant, an optional field, a reshaped <code>Custom</code> / <code>ProtocolStep</code> payload) does not — is the <a href="./reporting.html#schema-evolution">schema-evolution policy</a>.</p>
+            <p>One line of UTF-8 JSON per record. <code>TRACE_SCHEMA_VERSION = 3</code>. Reject or warn on higher unrecognized versions. When to bump it — and when an additive change (a new variant, an optional field, a reshaped <code>Custom</code> / <code>ProtocolStep</code> payload) does not — is the <a href="./reporting.html#schema-evolution">schema-evolution policy</a>.</p>
           </div>
           <pre data-lang="json"><code>{
-  "schema_version": 2,
+  "schema_version": 3,
   "id": "6621dfa7-2cd0-4296-ac20-15c0f2d3cec1",
   "timestamp": "2026-05-11T11:42:01.234+00:00",
   "context": {
