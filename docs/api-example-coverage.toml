@@ -40901,6 +40901,14 @@ disposition = "unused-add"
 reason = "The current example use of lash::rlm::LashlangHostEnvironment::abilities is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::rlm::LashlangHostEnvironment::globals"
+kind = "field"
+availability = "all-features"
+area = "protocol"
+disposition = "unused-add"
+reason = "Add lash::rlm::LashlangHostEnvironment::globals to the docs-snippets Lashlang module example and assert that live bindings are available during linking."
+
+[[api]]
 symbol = "lash::rlm::LashlangHostEnvironment::language_features"
 kind = "field"
 availability = "all-features"
@@ -40931,6 +40939,14 @@ availability = "all-features"
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::rlm::LashlangHostEnvironment::satisfies to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::rlm::LashlangHostEnvironment::with_globals"
+kind = "function"
+availability = "all-features"
+area = "protocol"
+disposition = "unused-add"
+reason = "Add lash::rlm::LashlangHostEnvironment::with_globals to the docs-snippets Lashlang module example and assert that live bindings are available during linking."
 
 [[api]]
 symbol = "lash::rlm::LashlangHostEnvironment::with_language_features"

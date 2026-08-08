@@ -378,7 +378,7 @@ impl<'module> Linker<'module> {
         process: &ProcessDecl,
         span: Option<Span>,
     ) -> Result<TypeExpr, LinkError> {
-        let mut scope = Scope::new(false, true, span);
+        let mut scope = Scope::new(true, span);
         scope.expected_return = process.return_ty.clone();
         for param in &process.params {
             scope.bind(param.name.as_str(), self.binding_for_type(&param.ty));
@@ -544,8 +544,6 @@ impl<'module> Linker<'module> {
                     binding_type(Some(&binding))
                 } else if let Some(process_ty) = self.process_types.get(name.as_str()) {
                     process_ty.clone()
-                } else if scope.allow_unknown_globals {
-                    TypeExpr::Any
                 } else {
                     return Err(LinkError::UnknownName {
                         name: name.to_string(),
@@ -717,6 +715,10 @@ impl<'module> Linker<'module> {
                             self.resource_type_for_type(&receiver_ty).ok_or_else(|| {
                                 LinkError::UnresolvedReceiver {
                                     operation: operation.to_string(),
+                                    suggestions: self
+                                        .surface
+                                        .resources
+                                        .operation_suggestions_for_operation(operation.as_str()),
                                     span: scope.span,
                                 }
                             })?,
@@ -733,6 +735,10 @@ impl<'module> Linker<'module> {
                     return Err(LinkError::UnknownResourceOperation {
                         resource_type: resource_type.clone(),
                         operation: operation.to_string(),
+                        suggestions: self
+                            .surface
+                            .resources
+                            .operation_suggestions_for_resource_type(&resource_type),
                         span: scope.span,
                     });
                 }
@@ -743,6 +749,10 @@ impl<'module> Linker<'module> {
                     .ok_or_else(|| LinkError::UnknownResourceOperation {
                         resource_type: resource_type.clone(),
                         operation: operation.to_string(),
+                        suggestions: self
+                            .surface
+                            .resources
+                            .operation_suggestions_for_resource_type(&resource_type),
                         span: scope.span,
                     })?;
                 if crate::is_trigger_resource_type(&resource_type)

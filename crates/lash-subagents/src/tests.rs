@@ -184,9 +184,9 @@ fn rlm_definitions_expose_spawn_without_mini_api() {
             .iter()
             .any(|example| example.contains("await agents.spawn"))
     );
-    assert!(rlm_spawn.description().contains("module operation"));
-    assert!(rlm_spawn.description().contains("agents: Agents"));
-    assert!(rlm_spawn.description().contains("list[str]"));
+    assert!(!rlm_spawn.description().contains("agents: Agents"));
+    assert!(!rlm_spawn.description().contains("list[str]"));
+    assert!(!rlm_spawn.description().contains("output` field"));
     assert!(
         rlm_spawn
             .contract
@@ -202,6 +202,11 @@ fn rlm_definitions_expose_spawn_without_mini_api() {
             .all(|example| !example.contains(r#"["str"]"#))
     );
     assert!(!rlm_spawn.description().contains("use `start spawn_agent"));
+    let docs = rlm_spawn
+        .contract()
+        .compact_contract_with_signature_name(&rlm_spawn.manifest(), "agents.spawn")
+        .render_markdown();
+    assert!(docs.len() <= 3_000, "agents.spawn docs exceeded budget");
 }
 
 #[test]

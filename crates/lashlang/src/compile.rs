@@ -181,12 +181,12 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn compile_module_facade_returns_artifact_and_introspection() {
-        let environment = LashlangHostEnvironment {
-            abilities: crate::LashlangAbilities::default()
+        let environment = LashlangHostEnvironment::new(
+            Default::default(),
+            crate::LashlangAbilities::default()
                 .with_processes()
                 .with_process_signals(),
-            ..LashlangHostEnvironment::default()
-        };
+        );
         let output = compile_module(ModuleCompileRequest {
             source: "process echo(value: str) { finish value }",
             environment: &environment,
@@ -300,10 +300,10 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn compile_module_facade_reports_persistence_errors() {
-        let environment = LashlangHostEnvironment {
-            abilities: crate::LashlangAbilities::default().with_processes(),
-            ..LashlangHostEnvironment::default()
-        };
+        let environment = LashlangHostEnvironment::new(
+            Default::default(),
+            crate::LashlangAbilities::default().with_processes(),
+        );
         let store = FailingStore;
         let err = compile_module(ModuleCompileRequest {
             source: "process echo(value: str) { finish value }",
@@ -355,13 +355,15 @@ mod tests {
                 .expect("valid event type"),
             )
             .expect("valid trigger source");
-        let environment = LashlangHostEnvironment {
+        let environment = LashlangHostEnvironment::new(
             resources,
-            abilities: crate::LashlangAbilities::default()
+            crate::LashlangAbilities::default()
                 .with_processes()
                 .with_process_signals(),
-            language_features: crate::LashlangLanguageFeatures::default().with_label_annotations(),
-        };
+        )
+        .with_language_features(
+            crate::LashlangLanguageFeatures::default().with_label_annotations(),
+        );
         let output = compile_module(ModuleCompileRequest {
             source: r#"
 @label(title: "Watcher", description: "Tracks button presses")

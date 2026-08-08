@@ -130,6 +130,24 @@ async fn execute_code_inner(
         }
     }
 
+    let mut live_global_names = state
+        .rlm
+        .globals()
+        .iter()
+        .map(|(name, _)| name.to_string())
+        .collect::<BTreeSet<_>>();
+    live_global_names.insert("history".to_string());
+    live_global_names.extend(session_projected_bindings.names());
+    if let Some(extension) = ctx
+        .turn_context()
+        .plugin_input::<crate::projection::RlmProjectionExtension>(
+            crate::projection::RLM_TURN_INPUT_PLUGIN_ID,
+        )
+    {
+        live_global_names.extend(extension.bindings.names());
+    }
+    host_environment = host_environment.with_globals(live_global_names);
+
     let compile_result = {
         let _phase = ctx.named_phase("rlm_lashlang.compile_link");
         state
@@ -1921,6 +1939,34 @@ mod tests {
 
             assert!(error.starts_with(RLM_BARE_TOOL_CALL_DIAGNOSTIC), "{error}");
             assert!(error.contains("hint: use `files.read`"), "{error}");
+            assert!(response.tool_calls.is_empty());
+            assert!(response.terminal_finish.is_none());
+        });
+    }
+
+    #[test]
+    fn top_level_typo_on_line_40_fails_before_any_effect() {
+        block_on(async {
+            let mut lines = (1..40)
+                .map(|index| format!("print {index}"))
+                .collect::<Vec<_>>();
+            lines.push("finish misspelled_result".to_string());
+            let response = execute_with_lashlang_abilities(
+                &lines.join("\n"),
+                lashlang::LashlangAbilities::default(),
+            )
+            .await;
+
+            let error = response.error.expect("link should reject typo");
+            assert!(
+                error.contains("unknown name `misspelled_result`"),
+                "{error}"
+            );
+            assert!(error.contains("--> line 40, column 8"), "{error}");
+            assert!(
+                response.observations.is_empty(),
+                "no print effect may execute before a link failure"
+            );
             assert!(response.tool_calls.is_empty());
             assert!(response.terminal_finish.is_none());
         });

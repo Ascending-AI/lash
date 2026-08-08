@@ -294,10 +294,9 @@ fn spawn_agent_definition(capability_names: &[String], examples: Vec<String>) ->
     let cap_list = capability_list_for_description(capability_names);
     let capability_detail = capability_detail_for_tool_description(capability_names);
     let description = format!(
-        "Run one subagent through the `agents.spawn` module operation and return its final result. A direct `await agents.spawn(...)` call blocks until that child finishes, so multiple direct awaits are serial. For parallel subagent fan-out, declare a named process that accepts `agents: Agents`, call `await agents.spawn({{ ... }})?` inside it, start every branch process first with `agents: agents`, then join the handles with `results = await handles`. {capability_detail} `output` defines the typed return shape. Available capabilities: {cap_list}. \
-        In record shorthand, each `output` field value is a string type descriptor such as `\"str\"`, `\"int\"`, or `\"list[str]\"`; pass a Lashlang `Type {{ ... }}` literal for nested shapes. \
-        \n\nThe child starts with **no** inherited state — globals, projected bindings, message history are all blank. Hand it specific data via `seed: {{ name: value, ... }}`. Each entry's kind is preserved automatically: if `value`'s lashlang source root is a host-projected binding (e.g. `seed: {{ problem: input.prompt }}`) the child receives `problem` as a read-only projected binding, identical to how it appeared on the parent. Otherwise it lands as a regular RLM global. Computed expressions default to global. Projected seed entries require an RLM child; passing one to a non-RLM capability is an error.\
-        \n\nA child can fail terminally with `await task.fail({{ reason: \"...\" }})?`; this tool returns an error with that reason."
+        "Run one subagent and return its final result. Direct awaits are serial; for parallel fan-out, start every branch process before awaiting the handle collection. {capability_detail} Available capabilities: {cap_list}. \
+        \n\nThe child inherits no state. Pass required context through `seed`; projected roots remain read-only projections, while computed values become writable globals. Projected seeds require an RLM child.\
+        \n\nA child can fail terminally through `task.fail`; this operation returns that reason as an error."
     );
     tool_definition(
         "spawn_agent",
