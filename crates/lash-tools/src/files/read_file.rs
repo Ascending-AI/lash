@@ -8,7 +8,8 @@ use lash_core::{ToolCall, ToolDefinition, ToolResult, ToolRetryPolicy};
 
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, execute_typed_tool_result,
-    invalid_tool_args, non_empty_string, run_blocking_value,
+    execution_failure, invalid_request_failure, invalid_tool_args, io_failure, non_empty_string,
+    resolve_under, run_blocking_value,
 };
 
 /// Read files with line-number-prefixed output. Supports images natively.
@@ -104,7 +105,7 @@ impl StaticToolExecute for ReadFile {
             .await
             {
                 Ok(result) => result.into_tool_result(call.context).await,
-                Err(err) => ToolResult::err_fmt(format_args!("{err}")),
+                Err(err) => err,
             }
         })
         .await
@@ -135,34 +136,48 @@ fn execute_read_file_sync(
     limit: usize,
     attach_as: Option<lash_core::MediaType>,
 ) -> ReadFileBlockingResult {
-    let path = Path::new(path_str);
+    let cwd = match std::env::current_dir() {
+        Ok(cwd) => cwd,
+        Err(err) => {
+            return ReadFileBlockingResult::tool(io_failure(
+                "current_dir_failed",
+                format!("Failed to determine cwd: {err}"),
+            ));
+        }
+    };
+    let path = resolve_under(&cwd, Path::new(path_str));
+    let path_str = path.to_string_lossy();
     if !path.exists() {
-        return ReadFileBlockingResult::tool(ToolResult::err_fmt(format_args!(
-            "Path does not exist: {path_str}. Use `files.glob` to locate the correct path."
-        )));
+        return ReadFileBlockingResult::tool(io_failure(
+            "path_not_found",
+            format!(
+                "Path does not exist: {path_str}. Use `files.glob` to locate the correct path."
+            ),
+        ));
     }
 
     // Directory reads are intentionally exact: use glob to discover paths,
     // then read a known directory for an immediate paginated entry list.
     if path.is_dir() {
-        let output = match read_directory(path, offset, limit).into_done_output() {
+        let output = match read_directory(&path, offset, limit).into_done_output() {
             Ok(output) => output,
             Err(_) => {
-                return ReadFileBlockingResult::tool(ToolResult::err_fmt(format_args!(
-                    "directory listing unexpectedly returned pending output"
-                )));
+                return ReadFileBlockingResult::tool(execution_failure(
+                    "directory_listing_pending",
+                    "directory listing unexpectedly returned pending output",
+                ));
             }
         };
         return ReadFileBlockingResult::tool(ToolResult::from_output(output));
     }
 
     if let Some(media_type) = attach_as {
-        return read_native_attachment(path, path_str, media_type);
+        return read_native_attachment(&path, &path_str, media_type);
     }
 
     // Image files — return as visual attachment
-    if let Some(mime) = image_mime(path) {
-        return read_image(path, path_str, mime);
+    if let Some(mime) = image_mime(&path) {
+        return read_image(&path, &path_str, mime);
     }
 
     // PDF files — extract text via pdf-extract (pure Rust)
@@ -172,22 +187,26 @@ fn execute_read_file_sync(
         .map(|e| e.eq_ignore_ascii_case("pdf"))
         .unwrap_or(false)
     {
-        return ReadFileBlockingResult::tool(read_pdf(path, path_str, offset, limit));
+        return ReadFileBlockingResult::tool(read_pdf(&path, &path_str, offset, limit));
     }
 
     // Binary detection
-    if is_likely_binary(path) {
-        return ReadFileBlockingResult::tool(ToolResult::err_fmt(format_args!(
-            "Binary file detected: {path_str}. Use image-aware reads for images, or `shell.exec` for binary inspection."
-        )));
+    if is_likely_binary(&path) {
+        return ReadFileBlockingResult::tool(invalid_request_failure(
+            "binary_file_requires_explicit_handling",
+            format!(
+                "Binary file detected: {path_str}. Use image-aware reads for images, or `shell.exec` for binary inspection."
+            ),
+        ));
     }
 
-    let file = match std::fs::File::open(path) {
+    let file = match std::fs::File::open(&path) {
         Ok(file) => file,
         Err(e) => {
-            return ReadFileBlockingResult::tool(ToolResult::err_fmt(format_args!(
-                "Failed to open file: {e}"
-            )));
+            return ReadFileBlockingResult::tool(io_failure(
+                "open_file_failed",
+                format!("Failed to open file {path_str}: {e}"),
+            ));
         }
     };
     let reader = BufReader::new(file);
@@ -234,7 +253,10 @@ fn read_directory(path: &Path, offset: usize, limit: usize) -> ToolResult {
             };
             ToolResult::ok(json!(render_window(&slice, WindowKind::Entries)))
         }
-        Err(e) => ToolResult::err_fmt(format_args!("Failed to read directory: {e}")),
+        Err(err) => io_failure(
+            "read_directory_failed",
+            format!("Failed to read directory {}: {err}", path.display()),
+        ),
     }
 }
 
@@ -272,9 +294,10 @@ fn read_image(path: &Path, path_str: &str, mime: &str) -> ReadFileBlockingResult
     let data = match std::fs::read(path) {
         Ok(d) => d,
         Err(e) => {
-            return ReadFileBlockingResult::tool(ToolResult::err_fmt(format_args!(
-                "Failed to read image: {e}"
-            )));
+            return ReadFileBlockingResult::tool(io_failure(
+                "read_image_failed",
+                format!("Failed to read image {path_str}: {e}"),
+            ));
         }
     };
 
@@ -306,9 +329,10 @@ fn read_native_attachment(
     let data = match std::fs::read(path) {
         Ok(data) => data,
         Err(err) => {
-            return ReadFileBlockingResult::tool(ToolResult::err_fmt(format_args!(
-                "Failed to read native attachment: {err}"
-            )));
+            return ReadFileBlockingResult::tool(io_failure(
+                "read_attachment_failed",
+                format!("Failed to read native attachment {path_str}: {err}"),
+            ));
         }
     };
     let type_metadata = if media_type.is_image() {
@@ -347,7 +371,10 @@ async fn store_attachment(
     {
         Ok(reference) => reference,
         Err(err) => {
-            return ToolResult::err_fmt(format_args!("Failed to store attachment: {err}"));
+            return io_failure(
+                "store_attachment_failed",
+                format!("Failed to store attachment: {err}"),
+            );
         }
     };
     ToolResult::from_output(lash_core::ToolCallOutput::success(
@@ -359,7 +386,12 @@ async fn store_attachment(
 fn read_pdf(path: &Path, path_str: &str, offset: usize, limit: usize) -> ToolResult {
     let pdf_bytes = match std::fs::read(path) {
         Ok(b) => b,
-        Err(e) => return ToolResult::err_fmt(format_args!("Failed to read PDF: {e}")),
+        Err(err) => {
+            return io_failure(
+                "read_pdf_failed",
+                format!("Failed to read PDF {path_str}: {err}"),
+            );
+        }
     };
 
     let file_size_kb = pdf_bytes.len() / 1024;
@@ -367,9 +399,10 @@ fn read_pdf(path: &Path, path_str: &str, offset: usize, limit: usize) -> ToolRes
     let text = match pdf_extract::extract_text_from_mem(&pdf_bytes) {
         Ok(t) => t,
         Err(e) => {
-            return ToolResult::err_fmt(format_args!(
-                "Failed to extract text from PDF {path_str}: {e}"
-            ));
+            return execution_failure(
+                "pdf_extraction_failed",
+                format!("Failed to extract text from PDF {path_str}: {e}"),
+            );
         }
     };
 
@@ -499,7 +532,10 @@ where
 
     for item in items {
         let item = item.map_err(|err| {
-            ToolResult::err_fmt(format_args!("Failed to read {item_label}: {err}"))
+            io_failure(
+                "read_item_failed",
+                format!("Failed to read {item_label}: {err}"),
+            )
         })?;
         total_items += 1;
         if total_items < offset {
@@ -523,9 +559,10 @@ where
     }
 
     if total_items < offset && !(total_items == 0 && offset == 1) {
-        return Err(ToolResult::err_fmt(format_args!(
-            "Offset {offset} is out of range for this {item_label} ({total_items} items)"
-        )));
+        return Err(invalid_request_failure(
+            "offset_out_of_range",
+            format!("Offset {offset} is out of range for this {item_label} ({total_items} items)"),
+        ));
     }
 
     let shown_start = (!rendered.is_empty()).then_some(offset);
@@ -620,6 +657,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn read_file_collapses_dot_segments_end_to_end() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("subdir")).unwrap();
+        let path = dir.path().join("file.txt");
+        std::fs::write(&path, "via dot segments").unwrap();
+        let dotted = dir.path().join("subdir/../file.txt");
+        let result = lash_core::testing::run_tool(
+            &read_file_provider(),
+            "read_file",
+            &json!({"path": dotted.to_str().unwrap()}),
+        )
+        .await;
+        assert!(result.is_success());
+        let value = result.value_for_projection();
+        assert!(value.as_str().unwrap().contains("via dot segments"));
+    }
+
+    #[tokio::test]
     async fn test_read_file() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("test.txt");
@@ -685,13 +740,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_nonexistent() {
+        let missing = "/nonexistent/path/to/file.txt";
         let result = lash_core::testing::run_tool(
             &read_file_provider(),
             "read_file",
-            &json!({"path": "/nonexistent/path/to/file.txt"}),
+            &json!({"path": missing}),
         )
         .await;
-        assert!(!result.is_success());
+        let lash_core::ToolCallOutcome::Failure(failure) = &result.as_output().outcome else {
+            panic!("missing file must fail");
+        };
+        assert_eq!(failure.class, lash_core::ToolFailureClass::Io);
+        assert_eq!(failure.code, "path_not_found");
+        assert!(failure.message.contains(missing));
+        assert_eq!(failure.source, lash_core::ToolFailureSource::Tool);
+        assert_eq!(failure.retry, lash_core::ToolRetryDisposition::Never);
     }
 
     #[tokio::test]

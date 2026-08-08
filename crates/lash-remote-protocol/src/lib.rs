@@ -32,6 +32,9 @@ pub use turn_input::*;
 pub use turn_result::*;
 pub use usage_activity::*;
 
+// Bumped to 28: `RemoteToolFailureClass` gained the `Io` variant (FIG-1098);
+// older peers reject the unknown variant mid-payload, so the addition needs a
+// clean version rejection.
 // Bumped to 27: `RemoteGenerationDisposition` gained an always-serialized
 // `cache` field (FIG-1101); older peers reject the unknown field on every
 // disposition, so the shape change requires a clean version rejection. (26 is
@@ -53,7 +56,7 @@ pub use usage_activity::*;
 // generation options, mirroring `SessionPolicy.generation`. A version 19 peer
 // would drop them on the way in and resume a session with uncontrolled
 // sampling instead of the caller's.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 27;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 28;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {

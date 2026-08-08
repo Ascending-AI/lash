@@ -19,6 +19,8 @@ use tokio::process::Command as TokioCommand;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
+use lash_core::{ToolFailure, ToolFailureClass};
+
 use crate::shell::output::{
     OUTPUT_QUIET_PERIOD_MS, PollOutcome, ProcessState, ShellOutputSpill, activate_spill,
     clean_terminal_output, exit_status_code, kill_child, kill_process_group_and_reap,
@@ -33,6 +35,24 @@ const DEFAULT_PTY_SIZE: PtySize = PtySize {
     pixel_width: 0,
     pixel_height: 0,
 };
+
+type ShellResult<T> = Result<T, Box<ToolFailure>>;
+
+fn shell_invalid_request(code: &'static str, message: impl Into<String>) -> Box<ToolFailure> {
+    Box::new(ToolFailure::invalid_request(code, message))
+}
+
+fn shell_io_failure(code: &'static str, message: impl Into<String>) -> Box<ToolFailure> {
+    Box::new(ToolFailure::io(code, message))
+}
+
+fn shell_execution_failure(code: &'static str, message: impl Into<String>) -> Box<ToolFailure> {
+    Box::new(ToolFailure::tool(
+        ToolFailureClass::Execution,
+        code,
+        message,
+    ))
+}
 
 struct ShellProcess {
     _master: Box<dyn MasterPty + Send>,
@@ -200,13 +220,16 @@ impl ShellRuntime {
         login: bool,
         shell_path: &str,
         pty: bool,
-    ) -> Result<Vec<String>, String> {
+    ) -> ShellResult<Vec<String>> {
         let command = self.command_for_spawn(command, shell_path, pty);
         if login {
             if !shell_supports_login(Self::shell_name(shell_path)) {
-                return Err(format!(
-                    "Login shell mode is not supported for {}",
-                    Self::shell_name(shell_path)
+                return Err(shell_invalid_request(
+                    "unsupported_login_shell",
+                    format!(
+                        "Login shell mode is not supported for {}",
+                        Self::shell_name(shell_path)
+                    ),
                 ));
             }
             Ok(vec!["-l".to_string(), "-c".to_string(), command])
@@ -222,11 +245,11 @@ impl ShellRuntime {
         workdir: &Path,
         login: bool,
         shell_path: &str,
-    ) -> Result<(), String> {
+    ) -> ShellResult<()> {
         let pty_system = native_pty_system();
-        let pair = pty_system
-            .openpty(DEFAULT_PTY_SIZE)
-            .map_err(|err| format!("Failed to open PTY: {err}"))?;
+        let pair = pty_system.openpty(DEFAULT_PTY_SIZE).map_err(|err| {
+            shell_io_failure("open_pty_failed", format!("Failed to open PTY: {err}"))
+        })?;
 
         let mut cmd = CommandBuilder::new(shell_path);
         for arg in self.shell_args(command, login, shell_path, true)? {
@@ -235,10 +258,13 @@ impl ShellRuntime {
         cmd.cwd(workdir.as_os_str());
 
         let child = pair.slave.spawn_command(cmd).map_err(|err| {
-            format!(
-                "Failed to spawn PTY command with shell `{}` in `{}`: {err}",
-                shell_path,
-                workdir.display()
+            shell_io_failure(
+                "spawn_pty_command_failed",
+                format!(
+                    "Failed to spawn PTY command with shell `{}` in `{}`: {err}",
+                    shell_path,
+                    workdir.display()
+                ),
             )
         })?;
         let killer = child.clone_killer();
@@ -246,14 +272,18 @@ impl ShellRuntime {
         // The PTY child is a session/process-group leader, so we kill the whole
         // group on cancel/timeout to reap backgrounded descendants.
         let pid = child.process_id();
-        let reader = pair
-            .master
-            .try_clone_reader()
-            .map_err(|err| format!("Failed to clone PTY reader: {err}"))?;
-        let writer = pair
-            .master
-            .take_writer()
-            .map_err(|err| format!("Failed to take PTY writer: {err}"))?;
+        let reader = pair.master.try_clone_reader().map_err(|err| {
+            shell_io_failure(
+                "clone_pty_reader_failed",
+                format!("Failed to clone PTY reader: {err}"),
+            )
+        })?;
+        let writer = pair.master.take_writer().map_err(|err| {
+            shell_io_failure(
+                "take_pty_writer_failed",
+                format!("Failed to take PTY writer: {err}"),
+            )
+        })?;
         drop(pair.slave);
 
         let buffer = Arc::new(StdMutex::new(Vec::new()));
@@ -313,7 +343,7 @@ impl ShellRuntime {
         workdir: &Path,
         login: bool,
         shell_path: &str,
-    ) -> Result<DetachedLaunch, String> {
+    ) -> ShellResult<DetachedLaunch> {
         let mut cmd = std::process::Command::new(shell_path);
         for arg in self.shell_args(command, login, shell_path, false)? {
             cmd.arg(arg);
@@ -335,10 +365,13 @@ impl ShellRuntime {
         }
 
         let child = cmd.spawn().map_err(|err| {
-            format!(
-                "Failed to spawn detached command with shell `{}` in `{}`: {err}",
-                shell_path,
-                workdir.display()
+            shell_io_failure(
+                "spawn_detached_command_failed",
+                format!(
+                    "Failed to spawn detached command with shell `{}` in `{}`: {err}",
+                    shell_path,
+                    workdir.display()
+                ),
             )
         })?;
         let pid = child.id();
@@ -375,11 +408,11 @@ impl ShellRuntime {
         self.table.processes.lock().unwrap().len()
     }
 
-    fn process_state(&self, id: &str) -> Result<ProcessState, String> {
+    fn process_state(&self, id: &str) -> ShellResult<ProcessState> {
         let procs = self.table.processes.lock().unwrap();
-        let proc = procs
-            .get(id)
-            .ok_or_else(|| format!("No process with id: {id}"))?;
+        let proc = procs.get(id).ok_or_else(|| {
+            shell_invalid_request("unknown_shell_process", format!("No process with id: {id}"))
+        })?;
         Ok(ProcessState {
             buffer: Arc::clone(&proc.buffer),
             exit_code: Arc::clone(&proc.exit_code),
@@ -394,12 +427,12 @@ impl ShellRuntime {
         &self,
         id: &str,
         max_output_tokens: Option<usize>,
-    ) -> Result<(String, Option<usize>, Option<PathBuf>), String> {
+    ) -> ShellResult<(String, Option<usize>, Option<PathBuf>)> {
         let (buffer, buffer_start, truncated, read_cursor, spill) = {
             let procs = self.table.processes.lock().unwrap();
-            let proc = procs
-                .get(id)
-                .ok_or_else(|| format!("Unknown session id {id}"))?;
+            let proc = procs.get(id).ok_or_else(|| {
+                shell_invalid_request("unknown_shell_process", format!("Unknown session id {id}"))
+            })?;
             (
                 Arc::clone(&proc.buffer),
                 Arc::clone(&proc.buffer_start),
@@ -443,7 +476,7 @@ impl ShellRuntime {
         timeout: Option<Duration>,
         max_output_tokens: Option<usize>,
         cancel: Option<CancellationToken>,
-    ) -> Result<PollOutcome, String> {
+    ) -> ShellResult<PollOutcome> {
         let state = self.process_state(id)?;
         let deadline = timeout.map(|value| tokio::time::Instant::now() + value);
         loop {
@@ -529,35 +562,42 @@ impl ShellRuntime {
         }
     }
 
-    pub(crate) async fn write_stdin(&self, id: &str, input: &str) -> Result<(), String> {
+    pub(crate) async fn write_stdin(&self, id: &str, input: &str) -> ShellResult<()> {
         let writer = {
             let procs = self.table.processes.lock().unwrap();
-            let proc = procs
-                .get(id)
-                .ok_or_else(|| format!("Unknown session id {id}"))?;
+            let proc = procs.get(id).ok_or_else(|| {
+                shell_invalid_request("unknown_shell_process", format!("Unknown session id {id}"))
+            })?;
             Arc::clone(&proc.writer)
         };
         let input = input.to_string();
         tokio::task::spawn_blocking(move || {
             let mut writer = writer.lock().unwrap();
-            let writer = writer
-                .as_mut()
-                .ok_or_else(|| "Process stdin not available".to_string())?;
-            writer
-                .write_all(input.as_bytes())
-                .map_err(|err| format!("Write failed: {err}"))?;
-            writer.flush().map_err(|err| format!("Flush failed: {err}"))
+            let writer = writer.as_mut().ok_or_else(|| {
+                shell_execution_failure("shell_stdin_unavailable", "Process stdin not available")
+            })?;
+            writer.write_all(input.as_bytes()).map_err(|err| {
+                shell_io_failure("shell_stdin_write_failed", format!("Write failed: {err}"))
+            })?;
+            writer.flush().map_err(|err| {
+                shell_io_failure("shell_stdin_flush_failed", format!("Flush failed: {err}"))
+            })
         })
         .await
-        .map_err(|err| format!("Write task failed: {err}"))?
+        .map_err(|err| {
+            shell_execution_failure(
+                "shell_stdin_task_failed",
+                format!("Write task failed: {err}"),
+            )
+        })?
     }
 
-    pub(crate) async fn close_stdin(&self, id: &str) -> Result<(), String> {
+    pub(crate) async fn close_stdin(&self, id: &str) -> ShellResult<()> {
         let writer = {
             let procs = self.table.processes.lock().unwrap();
-            let proc = procs
-                .get(id)
-                .ok_or_else(|| format!("Unknown session id {id}"))?;
+            let proc = procs.get(id).ok_or_else(|| {
+                shell_invalid_request("unknown_shell_process", format!("Unknown session id {id}"))
+            })?;
             Arc::clone(&proc.writer)
         };
         tokio::task::spawn_blocking(move || {
@@ -566,13 +606,18 @@ impl ShellRuntime {
             Ok(())
         })
         .await
-        .map_err(|err| format!("Close stdin task failed: {err}"))?
+        .map_err(|err| {
+            shell_execution_failure(
+                "close_shell_stdin_task_failed",
+                format!("Close stdin task failed: {err}"),
+            )
+        })?
     }
 
     pub(crate) async fn exec_pipe_process(
         &self,
         request: PipeExecProcessRequest<'_>,
-    ) -> Result<PollOutcome, String> {
+    ) -> ShellResult<PollOutcome> {
         let PipeExecProcessRequest {
             id,
             command,
@@ -603,10 +648,13 @@ impl ShellRuntime {
         }
 
         let mut child = cmd.spawn().map_err(|err| {
-            format!(
-                "Failed to spawn command with shell `{}` in `{}`: {err}",
-                shell_path,
-                workdir.display()
+            shell_io_failure(
+                "spawn_shell_command_failed",
+                format!(
+                    "Failed to spawn command with shell `{}` in `{}`: {err}",
+                    shell_path,
+                    workdir.display()
+                ),
             )
         })?;
         let child_pid = child.id();
@@ -688,7 +736,12 @@ impl ShellRuntime {
                 tokio::select! {
                     status = &mut wait_handle => {
                         let exit_code = status
-                            .map_err(|err| format!("Wait task failed: {err}"))?
+                            .map_err(|err| {
+                                shell_execution_failure(
+                                    "shell_wait_task_failed",
+                                    format!("Wait task failed: {err}"),
+                                )
+                            })?
                             .map(exit_status_code)
                             .unwrap_or(-1);
                         wait_for_pipe_readers(&mut reader_handles).await;
@@ -714,7 +767,12 @@ impl ShellRuntime {
                 tokio::select! {
                     status = &mut wait_handle => {
                         let exit_code = status
-                            .map_err(|err| format!("Wait task failed: {err}"))?
+                            .map_err(|err| {
+                                shell_execution_failure(
+                                    "shell_wait_task_failed",
+                                    format!("Wait task failed: {err}"),
+                                )
+                            })?
                             .map(exit_status_code)
                             .unwrap_or(-1);
                         wait_for_pipe_readers(&mut reader_handles).await;

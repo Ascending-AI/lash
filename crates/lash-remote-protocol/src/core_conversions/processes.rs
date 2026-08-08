@@ -114,6 +114,7 @@ impl From<lash_core::ToolFailureClass> for RemoteToolFailureClass {
     fn from(value: lash_core::ToolFailureClass) -> Self {
         match value {
             lash_core::ToolFailureClass::InvalidRequest => Self::InvalidRequest,
+            lash_core::ToolFailureClass::Io => Self::Io,
             lash_core::ToolFailureClass::Unavailable => Self::Unavailable,
             lash_core::ToolFailureClass::PermissionDenied => Self::PermissionDenied,
             lash_core::ToolFailureClass::Timeout => Self::Timeout,
@@ -129,6 +130,7 @@ impl From<RemoteToolFailureClass> for lash_core::ToolFailureClass {
     fn from(value: RemoteToolFailureClass) -> Self {
         match value {
             RemoteToolFailureClass::InvalidRequest => Self::InvalidRequest,
+            RemoteToolFailureClass::Io => Self::Io,
             RemoteToolFailureClass::Unavailable => Self::Unavailable,
             RemoteToolFailureClass::PermissionDenied => Self::PermissionDenied,
             RemoteToolFailureClass::Timeout => Self::Timeout,

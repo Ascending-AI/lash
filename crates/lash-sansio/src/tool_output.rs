@@ -569,6 +569,16 @@ impl ToolFailure {
         }
     }
 
+    /// Constructs a non-retryable invalid-request failure reported by a tool.
+    pub fn invalid_request(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::tool(ToolFailureClass::InvalidRequest, code, message)
+    }
+
+    /// Constructs a non-retryable filesystem or transport I/O failure reported by a tool.
+    pub fn io(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::tool(ToolFailureClass::Io, code, message)
+    }
+
     pub fn safe_retry(
         class: ToolFailureClass,
         code: impl Into<String>,
@@ -589,6 +599,7 @@ impl ToolFailure {
 #[serde(rename_all = "snake_case")]
 pub enum ToolFailureClass {
     InvalidRequest,
+    Io,
     Unavailable,
     PermissionDenied,
     Timeout,
@@ -894,5 +905,20 @@ mod tests {
         assert_eq!(failure.status(), ToolCallStatus::Failure);
         assert_eq!(cancelled.status(), ToolCallStatus::Cancelled);
         assert!(!cancelled.is_success());
+    }
+
+    #[test]
+    fn typed_tool_failure_constructors_set_class_code_source_and_retry() {
+        let invalid = ToolFailure::invalid_request("invalid_glob", "bad pattern");
+        assert_eq!(invalid.class, ToolFailureClass::InvalidRequest);
+        assert_eq!(invalid.code, "invalid_glob");
+        assert_eq!(invalid.source, ToolFailureSource::Tool);
+        assert_eq!(invalid.retry, ToolRetryDisposition::Never);
+
+        let io = ToolFailure::io("read_failed", "could not read file");
+        assert_eq!(io.class, ToolFailureClass::Io);
+        assert_eq!(io.code, "read_failed");
+        assert_eq!(io.source, ToolFailureSource::Tool);
+        assert_eq!(io.retry, ToolRetryDisposition::Never);
     }
 }

@@ -7,8 +7,8 @@ use lash_core::{ToolCall, ToolDefinition, ToolResult};
 
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, compact_diff,
-    display_relative, execute_typed_tool_result, invalid_tool_args, non_empty_string,
-    resolve_under, run_blocking,
+    display_relative, execute_typed_tool_result, invalid_request_failure, invalid_tool_args,
+    io_failure, non_empty_string, resolve_under, run_blocking,
 };
 
 const EDIT_DESCRIPTION: &str = "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.";
@@ -100,19 +100,27 @@ fn edit_file(args: EditArgs) -> ToolResult {
     }
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
-        Err(err) => return ToolResult::err_fmt(format_args!("Failed to determine cwd: {err}")),
+        Err(err) => {
+            return io_failure(
+                "current_dir_failed",
+                format!("Failed to determine cwd: {err}"),
+            );
+        }
     };
     let absolute_path = resolve_under(&cwd, Path::new(&args.path));
     let display_path = display_relative(&cwd, &absolute_path);
 
     if let Err(err) = ensure_editable_file(&absolute_path, &args.path) {
-        return ToolResult::err_fmt(err);
+        return err;
     }
 
     let raw_content = match std::fs::read_to_string(&absolute_path) {
         Ok(content) => content,
         Err(err) => {
-            return ToolResult::err_fmt(format_args!("Could not edit file: {}. {err}.", args.path));
+            return io_failure(
+                "read_file_failed",
+                format!("Could not edit file: {}. {err}.", args.path),
+            );
         }
     };
 
@@ -122,7 +130,7 @@ fn edit_file(args: EditArgs) -> ToolResult {
     let applied =
         match apply_edits_to_normalized_content(&normalized_content, &args.edits, &args.path) {
             Ok(applied) => applied,
-            Err(err) => return ToolResult::err_fmt(err),
+            Err(err) => return invalid_request_failure("edit_not_applicable", err),
         };
 
     let final_content = format!(
@@ -130,7 +138,10 @@ fn edit_file(args: EditArgs) -> ToolResult {
         restore_line_endings(&applied.new_content, original_ending)
     );
     if let Err(err) = std::fs::write(&absolute_path, final_content) {
-        return ToolResult::err_fmt(format_args!("Could not edit file: {}. {err}.", args.path));
+        return io_failure(
+            "write_file_failed",
+            format!("Could not edit file: {}. {err}.", args.path),
+        );
     }
 
     let diff = compact_diff(
@@ -161,13 +172,17 @@ fn edit_file(args: EditArgs) -> ToolResult {
     })
 }
 
-fn ensure_editable_file(path: &Path, input_path: &str) -> Result<(), String> {
+fn ensure_editable_file(path: &Path, input_path: &str) -> Result<(), ToolResult> {
     match std::fs::metadata(path) {
         Ok(metadata) if metadata.is_file() => Ok(()),
-        Ok(_) => Err(format!(
-            "Could not edit file: {input_path}. Path is not a file."
+        Ok(_) => Err(invalid_request_failure(
+            "path_not_file",
+            format!("Could not edit file: {input_path}. Path is not a file."),
         )),
-        Err(err) => Err(format!("Could not edit file: {input_path}. {err}.")),
+        Err(err) => Err(io_failure(
+            "file_metadata_failed",
+            format!("Could not edit file: {input_path}. {err}."),
+        )),
     }
 }
 
@@ -675,13 +690,13 @@ mod tests {
 
         let result = run_edit(&dir, "missing.txt", vec![replacement("a", "b")]);
 
-        assert!(!result.is_success());
-        assert!(
-            result
-                .value_for_projection()
-                .to_string()
-                .contains("Could not edit file")
-        );
+        let lash_core::ToolCallOutcome::Failure(failure) = &result.as_output().outcome else {
+            panic!("missing edit target must fail");
+        };
+        assert_eq!(failure.class, lash_core::ToolFailureClass::Io);
+        assert_eq!(failure.code, "file_metadata_failed");
+        assert!(failure.message.contains("missing.txt"));
+        assert_eq!(failure.retry, lash_core::ToolRetryDisposition::Never);
     }
 
     #[test]
