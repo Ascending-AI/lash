@@ -110,6 +110,7 @@ chrono-tz = "0.10"
 clap = "4"
 croner = "3"
 futures-util = "0.3"
+fastrand = "2"
 hmac = "0.12"
 jsonschema = { version = "0.18", default-features = false }
 object_store = { version = "0.13.2", default-features = false }

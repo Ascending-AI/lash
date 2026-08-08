@@ -204,7 +204,10 @@ fn direct_server_config(api_base_url: &str) -> McpServerConfig {
         ]),
         cwd: None,
         startup_timeout_ms: 5_000,
-        call_timeout_ms: 5_000,
+        call_policy: lash_plugin_mcp::McpCallPolicy {
+            call_timeout_ms: 5_000,
+            ..Default::default()
+        },
         binary_content_attachments: false,
     }
 }
@@ -227,7 +230,10 @@ fn wrapped_server_config(api_base_url: &str, pid_file: &std::path::Path) -> McpS
         ]),
         cwd: None,
         startup_timeout_ms: 5_000,
-        call_timeout_ms: 5_000,
+        call_policy: lash_plugin_mcp::McpCallPolicy {
+            call_timeout_ms: 5_000,
+            ..Default::default()
+        },
         binary_content_attachments: false,
     }
 }

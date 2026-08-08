@@ -101,6 +101,44 @@ origin and token to its child process without placing the token in argv. Bot boo
 fails with a clear error when a configured stdio executable cannot be found, so
 an absent binary cannot leave the prompt advertising unavailable bundled tools.
 
+Each stdio or streamable-HTTP server has the same timeout, liveness, and reconnect
+policy knobs. In Rust these fields live in `McpCallPolicy`, one flattened
+`call_policy` field on either transport variant; serialized configuration keeps
+the flat shape shown below.
+
+| Field | Default | Behavior |
+| --- | ---: | --- |
+| `startup_timeout_ms` | `10_000` | Bounds initialization and tool discovery. Initialization is never cancelled. |
+| `call_timeout_ms` | `60_000` | Idle clock for a tool call. Matching progress notifications reset it by default. |
+| `call_max_total_timeout_ms` | `600_000` | Mandatory wall-clock cap, regardless of progress. |
+| `reset_call_timeout_on_progress` | `true` | Lets a progressing call extend past the idle clock. |
+| `timeout_disconnect_policy` | `ping_probe` | `never`, `ping_probe`, or `consecutive_timeouts`; decides whether an idle timeout disconnects the peer. |
+| `liveness_probe_timeout_ms` | `5_000` | Bounds a timeout-triggered or interval `ping`. |
+| `consecutive_timeouts_before_disconnect` | `3` | Counting threshold; a successful tool call resets the counter. |
+| `liveness_probe_interval_ms` | `0` | Optional background probe interval; `0` disables keepalive. About `30_000` is a useful starting point for half-open streamable-HTTP connections. |
+| `reconnect_initial_backoff_ms` | `500` | Initial reconnect backoff before full jitter. |
+| `reconnect_max_backoff_ms` | `30_000` | Maximum exponential reconnect backoff before full jitter. |
+| `reconnect_max_attempts` | `0` | Reconnect attempt limit; `0` retries without a limit. |
+
+`call_timeout_ms` is now an idle clock rather than a total wall-clock deadline.
+Deployments whose servers emit matching progress can therefore run beyond that
+duration, up to the default 600-second `call_max_total_timeout_ms` cap. Set the
+wall cap explicitly when that longer upper bound is not appropriate.
+
+Tool-call expiry uses rmcp's cancellable request path, so a timeout sends the MCP
+`notifications/cancelled` notification. Under the default `ping_probe` policy, an
+answered probe returns a typed timeout while preserving the healthy connection; a
+failed probe returns unavailable, records the disconnect cause, and starts the
+configured reconnect loop. MCP protocol `2026-07-28` removed `ping`, so Lash warns
+once per server and automatically degrades `ping_probe` to
+`consecutive_timeouts`; interval probes become a no-op for that negotiated version
+and later versions, and the keepalive task exits instead of polling pointlessly.
+
+When keepalive is enabled, a disconnected entry re-arms a reconnect loop after a
+bounded attempt set is exhausted (including a failed boot connection). With
+keepalive disabled, a server with bounded reconnect attempts stays down after
+exhaustion until it is attached again.
+
 ## Session mapping doctrine
 
 **One channel, one Lash session, forever.** The session id is

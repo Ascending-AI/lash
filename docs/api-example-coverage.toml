@@ -2186,7 +2186,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::ModelSpec::with_capability", "lash_core::ModelSpec::with_capability"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/slack-clone/src/bot/runtime.rs:279#.with_capability(lash::provider::ModelCapability {"
+usage = "examples/slack-clone/src/bot/runtime.rs:282#.with_capability(lash::provider::ModelCapability {"
 
 [[api]]
 symbol = "lash::ModelSpec::with_limits"
