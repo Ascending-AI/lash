@@ -1,3 +1,4 @@
+mod deferred_tools;
 mod execution_graphs;
 mod failure_provider;
 mod mail;

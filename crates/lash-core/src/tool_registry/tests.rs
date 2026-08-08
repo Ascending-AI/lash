@@ -1,5 +1,5 @@
 /// Project every catalog member to a JSON record for host-owned discovery
-/// (e.g. the reference `search_tools` example in `lash-cli`). The projection
+/// (e.g. the production `tools.search` path in agent-workbench). The projection
 /// ranges over members and emits no tiered state.
 pub(crate) fn project_tool_catalog<I>(entries: I) -> Vec<serde_json::Value>
 where

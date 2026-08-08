@@ -43,8 +43,11 @@ lash-tools = { path = "../../crates/lash-tools", default-features = false, featu
 percent-encoding = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 restate-sdk = { workspace = true }
+rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-stream = "0.1"
 uuid = { workspace = true, features = ["v4"] }
@@ -55,7 +58,6 @@ lash-llm-tools = { workspace = true }
 lash = { workspace = true, features = ["rlm", "testing"] }
 lash-core = { workspace = true }
 lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
-rusqlite = { version = "0.37", features = ["bundled"] }
 sqlx = { workspace = true }
 tempfile = { workspace = true }
 

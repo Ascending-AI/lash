@@ -1,8 +1,8 @@
 # Agent Workbench
 
 A production-grade recoverable-chat host reference for RLM background
-processes, subagents, web tools, button triggers, and Restate-backed cron
-triggers.
+processes, subagents, web tools, deferred-tool discovery, button triggers, and
+Restate-backed cron triggers.
 
 Restate is required. Run the example from the repo root with the bundled
 entrypoint. The default command starts the workbench as a detached local
@@ -57,8 +57,8 @@ Configuration is read from `.env` or the process environment:
 
 - `OPENROUTER_API_KEY`: model provider key. Startup refuses to continue when it is
   unset or empty unless `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO` is active.
-- `TAVILY_API_KEY`: Tavily key for `web.search(...)` and `web.fetch(...)`, matching the
-  CLI web tools.
+- `TAVILY_API_KEY`: Tavily key for the bundled `web.search(...)` and
+  `web.fetch(...)` tools.
 - `AGENT_WORKBENCH_ADDR`: bind address, default `127.0.0.1:3030`. Passing a
   port to the `just` recipes, for example `just agent-workbench 3000`, binds
   `127.0.0.1:<port>`.
@@ -142,6 +142,18 @@ registry. Hosts can delete and rotate the current session with `DELETE /api/sess
 (`POST /api/reset` remains the UI-compatible alias) without deleting Runtime Processes.
 Rotation is required: a deleted session id is permanently retired and cannot
 be reopened in the same store.
+
+Six low-frequency data utilities under `text`, `json`, and `list` are kept out
+of the resident RLM tool catalog. The prompt carries only a capped catalogue
+preview and the resident `tools.search` contract. Search results persist full
+execution grants in `<data-dir>/deferred-tool-grants.db`; the RLM factory's
+production `DeferredToolResolver` authorizes only those stored call paths. The
+search tool's own description states the handshake constraint: discovered
+operations become callable in the next code block. Grants remain available in
+later turns and after `just agent-workbench-restart` reopens the same data
+directory. See [`runbooks/workbench-deferred-tools`](../../runbooks/workbench-deferred-tools/runbook.md)
+for the real-model, three-layer restart check.
+
 The **stop turn** button (or **Esc**) cooperatively cancels the exact running
 turn: `POST /api/turn/cancel` sends its stable session and turn address through
 `TurnWorkDriver::request_cancel`. The request lives on Lash's durable

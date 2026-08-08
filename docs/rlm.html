@@ -113,7 +113,7 @@ let output = session
 }</code></pre>
       <dl class="def-list">
         <dt>System prompt</dt>
-        <dd>The prompt template plus RLM execution instructions for the effective host surface, full tool contracts for every catalog member (rendered under their Lashlang call-path), projected-variable sections, and plugin prompt hooks. RLM has no native tools array, so every member is documented in the prompt; the long tail of non-resident tools is reached on demand through one batched <code>DeferredToolResolver</code> call per code link (the CLI's MCP example wires one) and advertised via a catalogue-preview prompt contribution.</dd>
+        <dd>The prompt template plus RLM execution instructions for the effective host surface, full tool contracts for every catalog member (rendered under their Lashlang call-path), projected-variable sections, and plugin prompt hooks. RLM has no native tools array, so every member is documented in the prompt; a host-owned non-resident tail is reached on demand through one batched <code>DeferredToolResolver</code> call per code link and advertised via a catalogue-preview prompt contribution. The production reference is <code>examples/agent-workbench</code>, whose <code>tools.search</code> grants become callable in the next code block and persist in SQLite across restarts.</dd>
         <dt>History messages</dt>
         <dd>Prior user messages, tool calls, protocol events, and RLM steps. Long fields are previewed with <code>history[N]</code> handles for full lookup in Lashlang.</dd>
         <dt>Iteration tail</dt>
