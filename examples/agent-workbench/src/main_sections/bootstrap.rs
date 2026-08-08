@@ -242,7 +242,7 @@ async fn async_main() -> AnyhowResult<()> {
         restate_ingress_url,
         restate_admin_url,
         restate_http,
-        restate_cron_job_keys: Arc::new(Mutex::new(BTreeSet::new())),
+        restate_cron_job_keys: Arc::new(Mutex::new(BTreeMap::new())),
         mail_world,
         active_turns,
         authorization: WorkbenchAuthorization::allow_all(),

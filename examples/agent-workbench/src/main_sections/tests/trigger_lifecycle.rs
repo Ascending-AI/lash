@@ -199,7 +199,7 @@
             restate_ingress_url: "http://127.0.0.1:8080".to_string(),
             restate_admin_url: "http://127.0.0.1:9070".to_string(),
             restate_http: reqwest::Client::new(),
-            restate_cron_job_keys: Arc::new(Mutex::new(BTreeSet::new())),
+            restate_cron_job_keys: Arc::new(Mutex::new(BTreeMap::new())),
             mail_world: mail::MailWorld::new(),
             active_turns: active_turns.clone(),
             authorization: WorkbenchAuthorization::allow_all(),

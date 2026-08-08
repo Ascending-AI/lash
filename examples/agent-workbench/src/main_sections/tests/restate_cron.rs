@@ -7,21 +7,19 @@ fn rotate_cron_session_out_of_current(state: &AppState) -> String {
 }
 
 fn cron_job_key_for_session(state: &AppState, session_id: &str) -> String {
-    let prefix = format!("{session_id}:");
-    let mut matching = state
+    let guard = state
         .restate_cron_job_keys
         .lock()
-        .expect("cron job key lock")
-        .iter()
-        .filter(|job_key| job_key.starts_with(&prefix))
-        .cloned()
-        .collect::<Vec<_>>();
+        .expect("cron job key lock");
+    let matching = guard
+        .get(session_id)
+        .unwrap_or_else(|| panic!("missing cron job keys for session `{session_id}`"));
     assert_eq!(
         matching.len(),
         1,
         "expected exactly one cron job key for rotated session `{session_id}`, got {matching:?}"
     );
-    matching.pop().expect("one matching cron job key")
+    matching.iter().next().expect("one matching cron job key").clone()
 }
 
 fn cron_trace_records_for_job(

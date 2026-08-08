@@ -422,10 +422,15 @@ metadata cancels as an orphan with `reason: "session_absent"`. Resetting the
 workbench cancels the old session's cron jobs derived from its durable trigger
 registrations (plus anything armed in-process), clears the mocked mail world,
 and rotates the session; an equal-request re-sync revives a chain whose stored
-next execution is already in the past. The disposition read and cancel trace
+next execution is already in the past. Trigger lifecycle routes return `200`
+only after the committed durable mutation has converged in Restate. A `500`
+means the mutation is durable but Restate may still be stale; the next sync
+reconciles it. Two same-session syncs may race, but the next sync self-heals.
+The disposition read and cancel trace
 are Restate-journaled. Tick and zombie-guard traces record
 `session_state: "live"`, `"retired"`, or `"unknown"`. The trace JSONL files include
 `agent_workbench.cron.restate.sync_upserted`,
+`agent_workbench.cron.restate.sync_cancelled`,
 `agent_workbench.cron.restate.run`, and
 `agent_workbench.cron.restate.zombie_cancelled` events.
 
