@@ -303,9 +303,9 @@ async fn response_metadata_captures_only_allowlisted_headers() {
         DEFAULT_RECORDING_RESPONSE_BODY,
     ));
     let mut provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_compat(OpenAiCompat {
-            response_metadata_headers: Some(vec!["X-Opper-Cost".to_string()]),
-            ..OpenAiCompat::default()
+        .with_options(ProviderOptions {
+            response_metadata_headers: vec!["X-Opper-Cost".to_string()],
+            ..ProviderOptions::default()
         })
         .with_transport(transport);
 
@@ -345,9 +345,9 @@ async fn response_metadata_captures_buffered_body_json_pointers() {
         r#"{"id":"gen-123","model":"test-model","choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"cost":0.000063}"#,
     ));
     let mut provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_compat(OpenAiCompat {
-            response_metadata_body_paths: Some(vec!["/cost".to_string(), "/missing".to_string()]),
-            ..OpenAiCompat::default()
+        .with_options(ProviderOptions {
+            response_metadata_body_paths: vec!["/cost".to_string(), "/missing".to_string()],
+            ..ProviderOptions::default()
         })
         .with_transport(transport);
 
@@ -366,9 +366,13 @@ async fn response_metadata_captures_buffered_responses_endpoint_observations() {
         vec![("x-opper-cost".to_string(), "0.000008".to_string())],
         r#"{"id":"resp-123","model":"test-model","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"done"}]}],"cost":0.000063}"#,
     ));
-    let mut provider = OpenAiProvider::new("key").with_transport(transport);
-    provider.inner.compat.response_metadata_headers = Some(vec!["X-Opper-Cost".to_string()]);
-    provider.inner.compat.response_metadata_body_paths = Some(vec!["/cost".to_string()]);
+    let mut provider = OpenAiProvider::new("key")
+        .with_options(ProviderOptions {
+            response_metadata_headers: vec!["X-Opper-Cost".to_string()],
+            response_metadata_body_paths: vec!["/cost".to_string()],
+            ..ProviderOptions::default()
+        })
+        .with_transport(transport);
 
     let response = provider
         .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
@@ -1255,16 +1259,20 @@ fn responses_none_cache_retention_omits_prompt_cache_fields() {
 
 #[test]
 fn openai_compat_config_serializes_when_non_default() {
-    let provider = openrouter_provider().with_compat(OpenAiCompat {
-        max_tokens_field: Some(OpenAiCompatMaxTokensField::MaxCompletionTokens),
-        streaming_usage: Some(false),
-        provider_routing: Some(ProviderRoutingPrefs {
-            require_parameters: true,
-        }),
-        response_metadata_headers: Some(vec!["X-Opper-Cost".to_string()]),
-        response_metadata_body_paths: Some(vec!["/cost".to_string()]),
-        ..OpenAiCompat::default()
-    });
+    let provider = openrouter_provider()
+        .with_compat(OpenAiCompat {
+            max_tokens_field: Some(OpenAiCompatMaxTokensField::MaxCompletionTokens),
+            streaming_usage: Some(false),
+            provider_routing: Some(ProviderRoutingPrefs {
+                require_parameters: true,
+            }),
+            ..OpenAiCompat::default()
+        })
+        .with_options(ProviderOptions {
+            response_metadata_headers: vec!["X-Opper-Cost".to_string()],
+            response_metadata_body_paths: vec!["/cost".to_string()],
+            ..ProviderOptions::default()
+        });
 
     let config = provider.serialize_config();
 
@@ -1278,11 +1286,11 @@ fn openai_compat_config_serializes_when_non_default() {
         json!({ "require_parameters": true })
     );
     assert_eq!(
-        config["compat"]["response_metadata_headers"],
+        config["options"]["response_metadata_headers"],
         json!(["X-Opper-Cost"])
     );
     assert_eq!(
-        config["compat"]["response_metadata_body_paths"],
+        config["options"]["response_metadata_body_paths"],
         json!(["/cost"])
     );
 
@@ -1291,7 +1299,7 @@ fn openai_compat_config_serializes_when_non_default() {
         .expect("response metadata allowlists deserialize");
     let serialized = round_trip.provider.serialize_config();
     assert_eq!(
-        serialized["compat"]["response_metadata_headers"],
+        serialized["options"]["response_metadata_headers"],
         json!(["X-Opper-Cost"])
     );
     assert_eq!(
@@ -1299,7 +1307,7 @@ fn openai_compat_config_serializes_when_non_default() {
         json!({ "require_parameters": true })
     );
     assert_eq!(
-        serialized["compat"]["response_metadata_body_paths"],
+        serialized["options"]["response_metadata_body_paths"],
         json!(["/cost"])
     );
 }
@@ -1451,7 +1459,7 @@ fn openai_compat_resolver_covers_openrouter_and_session_affinity() {
     // Endpoint facts only: restricted routing and response-metadata capture
     // are host decisions, so the preset resolves neither.
     assert_eq!(openrouter_caps.provider_routing, None);
-    assert!(openrouter_caps.response_metadata_body_paths.is_empty());
+    assert!(openrouter.options.response_metadata_body_paths.is_empty());
 }
 
 #[test]
@@ -2105,9 +2113,9 @@ async fn response_metadata_streaming_body_capture_is_last_wins() {
         body,
     ));
     let mut provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_compat(OpenAiCompat {
-            response_metadata_body_paths: Some(vec!["/cost".to_string()]),
-            ..OpenAiCompat::default()
+        .with_options(ProviderOptions {
+            response_metadata_body_paths: vec!["/cost".to_string()],
+            ..ProviderOptions::default()
         })
         .with_transport(transport);
 
@@ -2130,9 +2138,9 @@ async fn response_metadata_buffered_sse_body_capture_is_last_wins() {
     );
     let transport = Arc::new(RecordingHttpTransport::responding_with(Vec::new(), body));
     let mut provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
-        .with_compat(OpenAiCompat {
-            response_metadata_body_paths: Some(vec!["/cost".to_string()]),
-            ..OpenAiCompat::default()
+        .with_options(ProviderOptions {
+            response_metadata_body_paths: vec!["/cost".to_string()],
+            ..ProviderOptions::default()
         })
         .with_transport(transport);
 
@@ -2160,8 +2168,11 @@ async fn response_metadata_headers_are_preserved_on_partial_stream_responses() {
     let mut provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
         .with_compat(OpenAiCompat {
             stream_termination: Some(StreamTermination::RequireTerminalEvidence),
-            response_metadata_headers: Some(vec!["X-Opper-Cost".to_string()]),
             ..OpenAiCompat::default()
+        })
+        .with_options(ProviderOptions {
+            response_metadata_headers: vec!["X-Opper-Cost".to_string()],
+            ..ProviderOptions::default()
         })
         .with_transport(transport);
 
@@ -2312,23 +2323,40 @@ fn generation_disposition_reports_what_each_dialect_carried() {
     use lash_core::llm::types::GenerationOptionDisposition::{Applied, OmittedUnsupported};
 
     let provider = openrouter_provider();
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    let mut req = request(vec![LlmMessage::new(
+        LlmRole::User,
+        vec![LlmContentBlock::Text {
+            text: "hello".into(),
+            response_meta: None,
+            cache_breakpoint: true,
+        }],
+    )]);
+    enable_cache_control(&mut req, CacheControlDialect::Anthropic);
     req.generation.temperature = Some(lash_core::NonNegativeFiniteF64::new(0.25).unwrap());
     req.generation.seed = Some(7);
 
     // Chat Completions carries both sampling controls.
     let chat = provider.build_chat_request_body(&req, false).unwrap();
-    let chat = generation_disposition(&req.generation, &chat);
+    let chat = generation_disposition(&req, &chat);
     assert_eq!((chat.temperature, chat.seed), (Applied, Applied));
+    assert_eq!(chat.cache, Applied);
     assert!(chat.nothing_omitted());
 
     // Responses has no seed field, so a repeatability request is dropped —
     // silently on the wire, but not in the report.
     let responses = provider.build_responses_request_body(&req, false).unwrap();
-    let responses = generation_disposition(&req.generation, &responses);
+    let responses = generation_disposition(&req, &responses);
     assert_eq!(
         (responses.temperature, responses.seed),
         (Applied, OmittedUnsupported)
     );
     assert!(!responses.nothing_omitted());
+
+    let direct = OpenAiProvider::new("key");
+    let direct_body = direct.build_responses_request_body(&req, false).unwrap();
+    assert_eq!(
+        generation_disposition(&req, &direct_body).cache,
+        Applied,
+        "OpenAI Responses carries prompt-cache intent via prompt_cache_key"
+    );
 }

@@ -1,8 +1,6 @@
 //! The [`Provider`] trait implementation: config serialization plus the
 //! `complete` request/stream driver.
 
-use lash_llm_transport::util::extract_error_detail;
-
 use crate::config::DEFAULT_BASE_URL;
 use crate::policy::{ANTHROPIC_VERSION, FINE_GRAINED_BETA, INTERLEAVED_THINKING_BETA};
 use crate::stream::StreamState;
@@ -110,14 +108,8 @@ impl Provider for AnthropicProvider {
             )
             .await
             .unwrap_or_default();
-            let detail = extract_error_detail(&text);
-            let message = if let Some(detail) = detail {
-                format!("Anthropic request failed with {}: {}", status, detail,)
-            } else {
-                format!("Anthropic request failed with {}", status)
-            };
             return Err(http_error_envelope(
-                message,
+                format!("Anthropic request failed with {}", status),
                 status,
                 headers,
                 text,
@@ -125,12 +117,15 @@ impl Provider for AnthropicProvider {
             ));
         }
 
+        let mut response_metadata =
+            ResponseMetadataCapture::from_response(&self.options, &resp.headers);
         let mut state = StreamState::default();
         let expose_thinking = self.options.expose_thinking;
         let stream_result = drive_sse_response(
             resp.body,
             timeouts.chunk_timeout,
             "Anthropic stream chunk timed out",
+            &mut response_metadata,
             |raw| {
                 emit_provider_trace(provider_trace.as_ref(), "anthropic", raw);
                 Self::process_sse_event(raw, &mut state, stream_events.as_ref(), expose_thinking)
@@ -143,27 +138,27 @@ impl Provider for AnthropicProvider {
             .stream_termination
             .unwrap_or(self.stream_termination);
         if let Err(error) = stream_result {
-            return Err(error.with_partial_response(Self::partial_response(
+            let mut partial = Self::partial_response(
                 state.clone(),
                 request_body.clone(),
                 &url,
                 generation_disposition,
-            )));
+            );
+            partial.response_metadata = response_metadata.into_metadata();
+            return Err(error.with_partial_response(partial));
         }
         if stream_termination == StreamTermination::RequireTerminalEvidence
             && !state.message_stopped
         {
+            let mut partial =
+                Self::partial_response(state, request_body, &url, generation_disposition);
+            partial.response_metadata = response_metadata.into_metadata();
             return Err(
                 LlmTransportError::new("Anthropic stream ended before message_stop")
                     .with_kind(ProviderFailureKind::Stream)
                     .with_code("stream_ended_before_message_stop")
                     .retryable(true)
-                    .with_partial_response(Self::partial_response(
-                        state,
-                        request_body,
-                        &url,
-                        generation_disposition,
-                    )),
+                    .with_partial_response(partial),
             );
         }
 
@@ -180,7 +175,7 @@ impl Provider for AnthropicProvider {
             http_summary: Some(format!("HTTP POST {} (stream)", url)),
             execution_evidence: None,
             generation_disposition,
-            response_metadata: Default::default(),
+            response_metadata: response_metadata.into_metadata(),
         })
     }
 
@@ -209,6 +204,7 @@ impl AnthropicProvider {
                 GenerationOptionDisposition::sampling_pinned(req.generation.temperature.is_some())
             },
             seed: GenerationOptionDisposition::unsupported(req.generation.seed.is_some()),
+            cache: lash_llm_transport::cache_intent_disposition(req, Some(body)),
         }
     }
 

@@ -25,6 +25,7 @@ impl GoogleOAuthProvider {
             ),
             temperature: GenerationOptionDisposition::applied(req.generation.temperature.is_some()),
             seed: GenerationOptionDisposition::applied(req.generation.seed.is_some()),
+            cache: lash_llm_transport::cache_intent_disposition(req, None),
         }
     }
 
@@ -93,6 +94,8 @@ impl GoogleOAuthProvider {
             ));
         }
 
+        let mut response_metadata =
+            ResponseMetadataCapture::from_response(&self.options, &resp.headers);
         if stream_events.is_none() {
             let text = read_http_body_text(
                 resp.body,
@@ -100,6 +103,7 @@ impl GoogleOAuthProvider {
                 "Cloud Code response body timed out",
             )
             .await?;
+            response_metadata.capture_body_text(&text);
             emit_provider_trace(provider_trace.as_ref(), "google", &text);
             let value: Value = serde_json::from_str(&text).map_err(|e| {
                 LlmTransportError::new(format!("Invalid Cloud Code response JSON: {e}"))
@@ -131,7 +135,7 @@ impl GoogleOAuthProvider {
                 http_summary: Some(format!("HTTP POST {}", url)),
                 execution_evidence: None,
                 generation_disposition,
-                response_metadata: Default::default(),
+                response_metadata: response_metadata.into_metadata(),
             });
         }
 
@@ -149,6 +153,7 @@ impl GoogleOAuthProvider {
             resp.body,
             self.options.llm_timeouts().chunk_timeout,
             "Cloud Code stream chunk timed out",
+            &mut response_metadata,
             |raw| {
                 emit_provider_trace(provider_trace.as_ref(), "google", raw);
                 let mut text_deltas = Vec::new();
@@ -210,7 +215,7 @@ impl GoogleOAuthProvider {
                 http_summary: Some(format!("HTTP POST {url} (stream)")),
                 execution_evidence: None,
                 generation_disposition,
-                response_metadata: Default::default(),
+                response_metadata: response_metadata.metadata(),
             }
         };
         if let Err(error) = stream_result {
@@ -264,7 +269,7 @@ impl GoogleOAuthProvider {
             http_summary: Some(format!("HTTP POST {}", url)),
             execution_evidence: None,
             generation_disposition,
-            response_metadata: Default::default(),
+            response_metadata: response_metadata.into_metadata(),
         })
     }
 
@@ -491,5 +496,59 @@ impl Provider for GoogleOAuthProvider {
 
     fn clone_boxed(&self) -> Box<dyn Provider> {
         Box::new(self.clone())
+    }
+}
+
+#[cfg(test)]
+mod error_detail_tests {
+    use super::*;
+
+    #[derive(Debug)]
+    struct ApiErrorTransport;
+
+    #[async_trait::async_trait]
+    impl LlmHttpTransport for ApiErrorTransport {
+        async fn send(
+            &self,
+            _request: LlmHttpRequest,
+            _timeout: Option<std::time::Duration>,
+        ) -> Result<lash_llm_transport::LlmHttpResponse, LlmTransportError> {
+            Ok(lash_llm_transport::LlmHttpResponse {
+                status: 400,
+                headers: Vec::new(),
+                body: lash_llm_transport::LlmHttpBody::buffered(
+                    r#"{"error":{"message":"Gemini API detail"}}"#,
+                ),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn generate_content_error_surfaces_api_message() {
+        let provider = GoogleOAuthProvider::new("access", "refresh", u64::MAX)
+            .with_transport(Arc::new(ApiErrorTransport));
+        let error = provider
+            .execute_request(
+                "access",
+                json!({ "model": "gemini-test" }),
+                None,
+                None,
+                StreamTermination::EofTolerated,
+                None,
+            )
+            .await
+            .expect_err("fixture is an HTTP error");
+        assert!(error.message.contains("Gemini API detail"));
+    }
+
+    #[tokio::test]
+    async fn load_code_assist_error_surfaces_api_message() {
+        let provider = GoogleOAuthProvider::new("access", "refresh", u64::MAX)
+            .with_transport(Arc::new(ApiErrorTransport));
+        let error = provider
+            .resolve_project_id("access", None)
+            .await
+            .expect_err("fixture is an HTTP error");
+        assert!(error.message.contains("Gemini API detail"));
     }
 }

@@ -32,6 +32,11 @@ pub use turn_input::*;
 pub use turn_result::*;
 pub use usage_activity::*;
 
+// Bumped to 27: `RemoteGenerationDisposition` gained an always-serialized
+// `cache` field (FIG-1101); older peers reject the unknown field on every
+// disposition, so the shape change requires a clean version rejection. (26 is
+// taken by the FIG-1087 turn-budget wire change, which may land before or
+// after this bump; a gap is harmless because the check is exact-equality.)
 // Bumped to 25: residual process/trigger/effect identities use the FIG-915
 // structural and shared-framing families; older peers cannot safely replay
 // their durable names.
@@ -48,7 +53,7 @@ pub use usage_activity::*;
 // generation options, mirroring `SessionPolicy.generation`. A version 19 peer
 // would drop them on the way in and resume a session with uncontrolled
 // sampling instead of the caller's.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 25;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 27;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {

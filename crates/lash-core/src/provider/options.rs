@@ -134,6 +134,16 @@ pub struct ProviderOptions {
     /// Prompt-cache lifetime hint; see [`CacheRetention`].
     #[serde(default, skip_serializing_if = "CacheRetention::is_default")]
     pub cache_retention: CacheRetention,
+    /// Response header names (case-insensitive) captured into
+    /// `LlmResponse.response_metadata` as `header:<lowercased-name>` entries.
+    /// Headers not named here are never retained.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_metadata_headers: Vec<String>,
+    /// JSON pointers probed against buffered response bodies and every SSE
+    /// event. Captured values use `body:<pointer>` keys; unlisted body fields
+    /// are never retained.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_metadata_body_paths: Vec<String>,
 }
 
 impl ProviderOptions {
@@ -142,6 +152,8 @@ impl ProviderOptions {
             && !self.expose_thinking
             && self.max_output_tokens.is_none()
             && self.cache_retention.is_default()
+            && self.response_metadata_headers.is_empty()
+            && self.response_metadata_body_paths.is_empty()
     }
 
     pub fn llm_timeouts(&self) -> LlmTimeouts {

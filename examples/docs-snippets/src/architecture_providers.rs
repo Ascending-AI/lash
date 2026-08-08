@@ -283,11 +283,15 @@ mod asserted_examples {
             },
             expose_thinking: true,
             max_output_tokens: Some(4_096),
+            response_metadata_headers: vec!["X-Request-Cost".to_string()],
+            response_metadata_body_paths: vec!["/usage/cost".to_string()],
             ..ProviderOptions::default()
         };
         assert!(!ProviderOptions::is_default(&options));
         assert!(options.expose_thinking);
         assert_eq!(options.max_output_tokens, Some(4_096));
+        assert_eq!(options.response_metadata_headers, ["X-Request-Cost"]);
+        assert_eq!(options.response_metadata_body_paths, ["/usage/cost"]);
         assert_eq!(
             serde_json::to_value(options.cache_retention).unwrap(),
             "short"
@@ -303,6 +307,14 @@ mod asserted_examples {
             4
         );
         assert_eq!(options_wire["max_output_tokens"], 4_096);
+        assert_eq!(
+            options_wire["response_metadata_headers"],
+            serde_json::json!(["X-Request-Cost"])
+        );
+        assert_eq!(
+            options_wire["response_metadata_body_paths"],
+            serde_json::json!(["/usage/cost"])
+        );
 
         assert_eq!(
             serde_json::to_value(RequestTimeout::Disabled).unwrap(),

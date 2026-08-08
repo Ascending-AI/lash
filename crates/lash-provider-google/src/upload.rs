@@ -266,3 +266,90 @@ impl GoogleOAuthProvider {
         Ok((parts, used_uploaded_files))
     }
 }
+
+#[cfg(test)]
+mod error_detail_tests {
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+    use lash_llm_transport::{LlmHttpBody, LlmHttpResponse};
+
+    #[derive(Debug)]
+    struct ResponseQueue(Mutex<VecDeque<LlmHttpResponse>>);
+
+    #[async_trait::async_trait]
+    impl LlmHttpTransport for ResponseQueue {
+        async fn send(
+            &self,
+            _request: LlmHttpRequest,
+            _timeout: Option<std::time::Duration>,
+        ) -> Result<LlmHttpResponse, LlmTransportError> {
+            Ok(self
+                .0
+                .lock()
+                .expect("response queue")
+                .pop_front()
+                .expect("scripted response"))
+        }
+    }
+
+    fn response(
+        status: u16,
+        headers: Vec<(String, String)>,
+        body: &'static str,
+    ) -> LlmHttpResponse {
+        LlmHttpResponse {
+            status,
+            headers,
+            body: LlmHttpBody::buffered(body),
+        }
+    }
+
+    async fn upload_with(responses: Vec<LlmHttpResponse>) -> LlmTransportError {
+        let provider = GoogleOAuthProvider::new("access", "refresh", u64::MAX)
+            .with_transport(Arc::new(ResponseQueue(Mutex::new(responses.into()))));
+        provider
+            .upload_attachment(
+                "access",
+                None,
+                &lash_core::MediaType::parse("image/png").expect("valid MIME"),
+                b"png",
+                "fixture.png",
+            )
+            .await
+            .expect_err("fixture is an HTTP error")
+    }
+
+    #[tokio::test]
+    async fn upload_start_error_surfaces_api_message() {
+        let error = upload_with(vec![response(
+            400,
+            Vec::new(),
+            r#"{"error":{"message":"upload start detail"}}"#,
+        )])
+        .await;
+        assert!(error.message.contains("upload start detail"));
+    }
+
+    #[tokio::test]
+    async fn upload_finalize_error_surfaces_api_message() {
+        let error = upload_with(vec![
+            response(
+                200,
+                vec![(
+                    "x-goog-upload-url".to_string(),
+                    "https://upload.example/session".to_string(),
+                )],
+                "",
+            ),
+            response(
+                400,
+                Vec::new(),
+                r#"{"error":{"message":"upload finalize detail"}}"#,
+            ),
+        ])
+        .await;
+        assert!(error.message.contains("upload finalize detail"));
+    }
+}

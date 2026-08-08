@@ -81,6 +81,11 @@ sent. It rides the response, the per-attempt ledger of ADR 0032, the durable eff
 the trace record, and the remote mirror, so a host asserts "nothing was dropped" instead of
 trusting that one temperature survived every model a run touched.
 
+Prompt-cache intent follows the same rule. An explicit `cache_breakpoint` is `Applied` when
+the adapter emits its cache-control dialect (including OpenAI's `prompt_cache_key`) and
+`OmittedUnsupported` when the provider drops it. Direct Google currently reports the latter
+rather than silently discarding the rolling RLM fence.
+
 `output_token_cap` **clamps rather than fails**, for the same reason. It is the one option
 a model can refuse arithmetically, and it was validated hard: a cap above the model's
 `output_token_capacity` failed the call non-retryably. As per-turn intent that was a loud,

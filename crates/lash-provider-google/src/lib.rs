@@ -32,11 +32,24 @@ mod tests {
     use serde_json::{Value, json};
 
     #[derive(Debug)]
-    struct StaticSseTransport(String);
+    struct StaticSseTransport {
+        body: String,
+        headers: Vec<(String, String)>,
+    }
 
     impl StaticSseTransport {
         fn new(body: impl Into<String>) -> Self {
-            Self(body.into())
+            Self {
+                body: body.into(),
+                headers: vec![("content-type".to_string(), "text/event-stream".to_string())],
+            }
+        }
+
+        fn with_headers(body: impl Into<String>, headers: Vec<(String, String)>) -> Self {
+            Self {
+                body: body.into(),
+                headers,
+            }
         }
     }
 
@@ -50,8 +63,8 @@ mod tests {
         {
             Ok(lash_llm_transport::LlmHttpResponse {
                 status: 200,
-                headers: vec![("content-type".to_string(), "text/event-stream".to_string())],
-                body: lash_llm_transport::LlmHttpBody::buffered(self.0.clone()),
+                headers: self.headers.clone(),
+                body: lash_llm_transport::LlmHttpBody::buffered(self.body.clone()),
             })
         }
     }
@@ -85,6 +98,52 @@ mod tests {
 
     fn request(model_variant: Option<&str>) -> LlmRequest {
         request_with_capability(model_variant, ModelCapability::default())
+    }
+
+    #[tokio::test]
+    async fn response_metadata_capture_respects_shared_allowlists() {
+        let body = "data: {\"response\":{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"done\"}]} }],\"billing\":{\"cost\":2},\"private\":\"hidden\"}}\n\n";
+        let provider = GoogleOAuthProvider::new("access", "refresh", 0)
+            .with_options(ProviderOptions {
+                response_metadata_headers: vec!["X-Request-Cost".to_string()],
+                response_metadata_body_paths: vec!["/response/billing/cost".to_string()],
+                ..ProviderOptions::default()
+            })
+            .with_transport(Arc::new(StaticSseTransport::with_headers(
+                body,
+                vec![
+                    ("content-type".to_string(), "text/event-stream".to_string()),
+                    ("x-request-cost".to_string(), "0.03".to_string()),
+                    ("set-cookie".to_string(), "secret".to_string()),
+                ],
+            )));
+        let response = provider
+            .execute_request(
+                "access",
+                json!({ "model": "gemini-test" }),
+                Some(LlmEventSender::new(|_| {})),
+                None,
+                StreamTermination::RequireTerminalEvidence,
+                None,
+            )
+            .await
+            .expect("metadata fixture completes");
+
+        assert_eq!(
+            response.response_metadata["header:x-request-cost"],
+            json!("0.03")
+        );
+        assert_eq!(
+            response.response_metadata["body:/response/billing/cost"],
+            json!(2)
+        );
+        assert!(!response.response_metadata.contains_key("header:set-cookie"));
+        assert!(
+            !response
+                .response_metadata
+                .values()
+                .any(|value| value == "hidden")
+        );
     }
 
     #[tokio::test]
@@ -962,6 +1021,26 @@ mod tests {
         let body = GoogleOAuthProvider::build_request(&provider, &req, vec![], None);
         assert_eq!(body["request"]["generationConfig"]["temperature"], 0.8);
         assert_eq!(body["request"]["generationConfig"]["seed"], 11);
+    }
+
+    #[test]
+    fn cache_breakpoint_is_reported_as_dropped() {
+        let mut req = request(None);
+        req.messages = vec![LlmMessage::new(
+            LlmRole::User,
+            vec![LlmContentBlock::Text {
+                text: "stable history".into(),
+                response_meta: None,
+                cache_breakpoint: true,
+            }],
+        )];
+
+        let disposition = GoogleOAuthProvider::generation_disposition(&req);
+        assert_eq!(
+            disposition.cache,
+            lash_core::GenerationOptionDisposition::OmittedUnsupported
+        );
+        assert!(!disposition.nothing_omitted());
     }
 
     #[test]

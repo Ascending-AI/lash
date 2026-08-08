@@ -1164,6 +1164,7 @@ mod clamp_report_tests {
             output_token_cap: crate::GenerationOptionDisposition::Applied,
             temperature: crate::GenerationOptionDisposition::Applied,
             seed: crate::GenerationOptionDisposition::NotRequested,
+            cache: crate::GenerationOptionDisposition::NotRequested,
         })
     }
 

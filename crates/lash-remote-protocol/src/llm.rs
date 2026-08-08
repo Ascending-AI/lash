@@ -158,8 +158,8 @@ pub struct RemoteLlmResponse {
 }
 
 /// Mirror of the core `GenerationDisposition`: the adapter-reported fate of a
-/// request's generation options, so a remote host can tell an honored
-/// repeatability request from a silently dropped one.
+/// request's generation and prompt-cache intent, so a remote host can tell an
+/// honored repeatability request from a silently dropped one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteGenerationDisposition {
@@ -169,6 +169,8 @@ pub struct RemoteGenerationDisposition {
     pub temperature: RemoteGenerationOptionDisposition,
     #[serde(default)]
     pub seed: RemoteGenerationOptionDisposition,
+    #[serde(default)]
+    pub cache: RemoteGenerationOptionDisposition,
 }
 
 /// Mirror of the core `GenerationOptionDisposition`.

@@ -7015,6 +7015,7 @@ async fn omitted_generation_options_are_reported_on_the_turn_llm_call_record() {
         output_token_cap: crate::GenerationOptionDisposition::Applied,
         temperature: crate::GenerationOptionDisposition::OmittedSamplingPinned,
         seed: crate::GenerationOptionDisposition::OmittedUnsupported,
+        cache: crate::GenerationOptionDisposition::NotRequested,
     };
     let provider = TestProvider::builder()
         .kind("disposition-reporting")
@@ -7116,6 +7117,7 @@ async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
                         output_token_cap: crate::GenerationOptionDisposition::Applied,
                         temperature: crate::GenerationOptionDisposition::Applied,
                         seed: crate::GenerationOptionDisposition::NotRequested,
+                        cache: crate::GenerationOptionDisposition::NotRequested,
                     }),
                     ..LlmResponse::default()
                 })

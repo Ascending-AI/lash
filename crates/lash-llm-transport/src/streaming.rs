@@ -4,6 +4,7 @@ use lash_sansio::llm::types::{LlmEventSender, LlmStreamEvent, LlmUsage};
 use std::time::Duration;
 
 use crate::http::LlmHttpBody;
+use crate::response_metadata::ResponseMetadataCapture;
 
 struct SseBuffer {
     /// Raw, not-yet-newline-terminated bytes. Held at the byte level so a
@@ -98,16 +99,21 @@ pub async fn drive_sse_response<F>(
     body: LlmHttpBody,
     timeout: Duration,
     read_timeout_message: &str,
+    response_metadata: &mut ResponseMetadataCapture,
     mut on_event: F,
 ) -> Result<(), LlmTransportError>
 where
     F: FnMut(&str) -> Result<(), LlmTransportError>,
 {
+    let mut capture_then_emit = |event: &str| {
+        response_metadata.capture_sse_event(event);
+        on_event(event)
+    };
     let mut buffer = SseBuffer::new();
     let mut stream = match body {
         LlmHttpBody::Buffered(bytes) => {
-            buffer.push_chunk(&bytes, &mut on_event)?;
-            return buffer.finish(on_event);
+            buffer.push_chunk(&bytes, &mut capture_then_emit)?;
+            return buffer.finish(capture_then_emit);
         }
         LlmHttpBody::Streamed(stream) => stream,
     };
@@ -118,7 +124,7 @@ where
                 // Read timed out: flush whatever event is already buffered so a
                 // terminal event sent without a trailing blank line isn't lost,
                 // then surface the timeout.
-                let _ = buffer.finish(&mut on_event);
+                let _ = buffer.finish(&mut capture_then_emit);
                 return Err(LlmTransportError::new(read_timeout_message)
                     .with_kind(ProviderFailureKind::Timeout)
                     .with_code("timeout")
@@ -131,7 +137,7 @@ where
                 // Mid-stream disconnect: flush the buffered event before
                 // propagating, so a final event delivered without a trailing
                 // blank line still reaches the caller.
-                let _ = buffer.finish(&mut on_event);
+                let _ = buffer.finish(&mut capture_then_emit);
                 if let Some(rest) = error.message.strip_prefix("HTTP response read failed: ") {
                     error.message = format!("Stream read failed: {rest}");
                 }
@@ -139,9 +145,9 @@ where
             }
         };
         let Some(chunk) = chunk_opt else { break };
-        buffer.push_chunk(&chunk, &mut on_event)?;
+        buffer.push_chunk(&chunk, &mut capture_then_emit)?;
     }
-    buffer.finish(on_event)
+    buffer.finish(capture_then_emit)
 }
 
 pub fn emit_stream_progress(
@@ -245,6 +251,7 @@ mod tests {
             LlmHttpBody::streamed(PendingStream),
             Duration::from_millis(1),
             "stream chunk timed out",
+            &mut ResponseMetadataCapture::default(),
             |_event| Ok(()),
         )
         .await;
