@@ -19,6 +19,13 @@ assert.ok(
   triggerIdentities,
   "LASH_WORKBENCH_TRIGGER_IDENTITIES must come from the Rust projection gate",
 );
+const multiAttachmentMessage = JSON.parse(
+  process.env.LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE ?? "null",
+);
+assert.ok(
+  multiAttachmentMessage,
+  "LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE must come from the Rust projection gate",
+);
 
 function expectedSubscriptionIdDetail(value) {
   const prefix = "trigger-subscription:v2:sha256:";
@@ -680,6 +687,92 @@ test("settled transcript rendering consumes durable reasoning and code disclosur
       ["code_block", "code-1", 'print("durable")', "durable"],
     ],
   );
+});
+
+test("message attachments render as linked images and degrade visibly on load failure", () => {
+  function element(tagName) {
+    return {
+      tagName,
+      children: [],
+      dataset: {},
+      hidden: false,
+      listeners: {},
+      append(...children) {
+        this.children.push(...children);
+      },
+      appendChild(child) {
+        this.children.push(child);
+      },
+      addEventListener(name, callback) {
+        this.listeners[name] = callback;
+      },
+    };
+  }
+
+  const body = element("div");
+  const renderContext = { document: { createElement: element }, body };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_MESSAGE_ATTACHMENTS", "WORKBENCH_MESSAGE_ATTACHMENTS")}
+     renderMessageAttachments(body, [{
+       attachment_id: "sha256:fig994-browser",
+       retrieve_url: "/api/attachments/sha256:fig994-browser"
+     }]);`,
+    renderContext,
+  );
+
+  const gallery = body.children[0];
+  const link = gallery.children[0];
+  const image = link.children[0];
+  const broken = link.children[1];
+  assert.equal(gallery.className, "message-attachments");
+  assert.equal(link.href, "/api/attachments/sha256:fig994-browser");
+  assert.equal(link.target, "_blank");
+  assert.equal(link.rel, "noopener");
+  assert.equal(link.dataset.attachmentId, "sha256:fig994-browser");
+  assert.equal(image.src, link.href);
+  assert.equal(image.alt, "Uploaded image attachment");
+  assert.equal(broken.hidden, true);
+
+  image.listeners.error();
+  assert.equal(image.hidden, true);
+  assert.equal(broken.hidden, false);
+  assert.equal(broken.textContent, "Image unavailable · open original");
+});
+
+test("a committed RLM printed-image message numbers multiple image alt labels", () => {
+  function element(tagName) {
+    return {
+      tagName,
+      children: [],
+      dataset: {},
+      hidden: false,
+      append(...children) {
+        this.children.push(...children);
+      },
+      appendChild(child) {
+        this.children.push(child);
+      },
+      addEventListener() {},
+    };
+  }
+
+  const body = element("div");
+  const renderContext = {
+    document: { createElement: element },
+    body,
+    attachments: multiAttachmentMessage.attachments,
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_MESSAGE_ATTACHMENTS", "WORKBENCH_MESSAGE_ATTACHMENTS")}
+     renderMessageAttachments(body, attachments);`,
+    renderContext,
+  );
+
+  const [first, second] = body.children[0].children;
+  assert.equal(first.children[0].alt, "Uploaded image attachment 1");
+  assert.equal(second.children[0].alt, "Uploaded image attachment 2");
+  assert.equal(first.dataset.attachmentId, "sha256:rlm-printed-image-a");
+  assert.equal(second.dataset.attachmentId, "sha256:rlm-printed-image-b");
 });
 
 test("a Done product event behaviorally retracts the provisional draft", () => {

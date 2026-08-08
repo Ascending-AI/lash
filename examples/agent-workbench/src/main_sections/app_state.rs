@@ -144,9 +144,15 @@ impl AppState {
         self.active_turns.insert(session_id, turn_id);
     }
 
-    fn track_turn_prompt(&self, session_id: &str, turn_id: &str, prompt: String) {
+    fn track_turn_prompt(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        prompt: String,
+        attachment_id: Option<String>,
+    ) {
         self.active_turns
-            .insert_with_prompt(session_id, turn_id, Some(prompt));
+            .insert_with_prompt(session_id, turn_id, Some(prompt), attachment_id);
     }
 
     /// Delete `session_id`, reclaim the finished work it left behind, and report
@@ -395,11 +401,29 @@ impl AppState {
         role: impl Into<String>,
         text: impl Into<String>,
     ) -> ChatMessage {
+        self.push_message_with_id_and_attachments_for_session(
+            session_id,
+            id,
+            role,
+            text,
+            Vec::new(),
+        )
+    }
+
+    fn push_message_with_id_and_attachments_for_session(
+        &self,
+        session_id: &str,
+        id: impl Into<String>,
+        role: impl Into<String>,
+        text: impl Into<String>,
+        attachments: Vec<ChatAttachment>,
+    ) -> ChatMessage {
         let message = ChatMessage {
             id: id.into(),
             role: role.into(),
             text: text.into(),
             at: Utc::now().to_rfc3339(),
+            attachments,
         };
         let inserted = self.event_tx.publish_identified(
             session_id,

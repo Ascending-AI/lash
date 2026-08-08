@@ -83,6 +83,7 @@ dependencies = [
  "lash-subagents",
  "lash-tools",
  "lashlang",
+ "percent-encoding",
  "reqwest 0.13.4",
  "restate-sdk",
  "rusqlite",

@@ -92,6 +92,7 @@ mod turn_control_timeout_tests {
             &session_id,
             "running-turn",
             "restored active prompt".to_string(),
+            None,
         );
         let Json(injected) = enqueue_turn_input(
             State(state.clone()),

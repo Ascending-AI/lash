@@ -197,6 +197,7 @@ mod tests {
             &session_id,
             "durable-stop-turn",
             Some("actual restored prompt".into()),
+            None,
         );
         drop(session_ids);
         drop(turns);
@@ -207,12 +208,11 @@ mod tests {
             recovered_turns.for_session(&session_id),
             vec![lash::TurnAddress::new(&session_id, "durable-stop-turn")]
         );
-        assert_eq!(
-            recovered_turns
-                .prompt_for(&session_id, "durable-stop-turn")
-                .as_deref(),
-            Some("actual restored prompt")
-        );
+        let recovered_prompt = recovered_turns
+            .prompt_for(&session_id, "durable-stop-turn")
+            .expect("restored prompt");
+        assert_eq!(recovered_prompt.text, "actual restored prompt");
+        assert_eq!(recovered_prompt.attachment_id, None);
     }
 
     include!("tests/session_resume.rs");
@@ -1418,6 +1418,7 @@ finish initial
                 role: "user".to_string(),
                 text: "before reset".to_string(),
                 at: "2026-05-27T00:00:00Z".to_string(),
+                attachments: Vec::new(),
             }])),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),
@@ -1691,7 +1692,12 @@ finish initial
         .await
         .expect("Restate-backed workbench turn timed out")
         .expect("finish Restate-backed workbench turn");
-        state.track_turn_prompt(&state.current_session_id(), &turn_id, text.to_string());
+        state.track_turn_prompt(
+            &state.current_session_id(),
+            &turn_id,
+            text.to_string(),
+            None,
+        );
         invocation_id
     }
 

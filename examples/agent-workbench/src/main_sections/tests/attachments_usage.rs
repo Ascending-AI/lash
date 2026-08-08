@@ -15,6 +15,9 @@ fn workbench_ui_exposes_attachment_and_usage_affordances() {
         "id=\"attachmentInput\"",
         "/api/attachments",
         "attachment_id: attachment?.id || null",
+        "renderMessageAttachments(body, message.attachments)",
+        "max-width: min(100%, 640px)",
+        "Image unavailable · open original",
         "id=\"usageTotal\"",
         "id=\"usageBreakdown\"",
         "renderUsage(state.usage)",
@@ -267,6 +270,7 @@ async fn run_attachment_usage_gate(
         Box::pin(app_state(State(state.clone()), Query(SessionQuery::default())))
             .await
             .expect("read pre-restart workbench state API");
+    assert_snapshot_attachment(&before_restart, &uploaded.attachment.id);
     assert_usage_report_consistent(&before_restart.usage);
     let call_usage = completed_llm_call_usage(&trace_path);
     assert_eq!(call_usage.len(), 1);
@@ -309,12 +313,35 @@ async fn run_attachment_usage_gate(
         Box::pin(app_state(State(resumed_state), Query(SessionQuery::default())))
             .await
             .expect("read post-restart workbench state API");
+    assert_snapshot_attachment(&after_restart, &attachment_id);
     assert_eq!(after_restart.usage, persisted_usage);
     assert_usage_report_consistent(&after_restart.usage);
 
     println!(
         "workbench attachment/usage gate passed: session={session_id} attachment={attachment_id} total_tokens={}",
         after_restart.usage.usage.total_tokens
+    );
+}
+
+fn assert_snapshot_attachment(
+    snapshot: &StateReadSnapshot,
+    expected_id: &lash::attachments::AttachmentId,
+) {
+    let attached_messages = snapshot
+        .messages
+        .iter()
+        .filter(|message| !message.attachments.is_empty())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        attached_messages.len(),
+        1,
+        "the snapshot must carry exactly one attached message"
+    );
+    let attachment = &attached_messages[0].attachments[0];
+    assert_eq!(attachment.attachment_id, expected_id.to_string());
+    assert_eq!(
+        attachment.retrieve_url,
+        format!("/api/attachments/{expected_id}")
     );
 }
 
@@ -411,6 +438,20 @@ async fn assert_retrieved_attachment(
     assert_eq!(
         response.headers().get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok()),
         Some("image/png")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("x-content-type-options")
+            .and_then(|value| value.to_str().ok()),
+        Some("nosniff")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("x-lash-attachment-id")
+            .and_then(|value| value.to_str().ok()),
+        Some(attachment_id.to_string().as_str())
     );
     let bytes = axum::body::to_bytes(response.into_body(), MAX_WORKBENCH_ATTACHMENT_BYTES)
         .await

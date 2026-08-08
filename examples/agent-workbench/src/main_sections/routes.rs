@@ -165,7 +165,7 @@ async fn upload_attachment(
         .await
         // Audited: the content-addressed attachment store has no session identity or tombstone error variant.
         .map_err(AppError::internal)?;
-    let retrieve_url = format!("/api/attachments/{}", attachment.id);
+    let retrieve_url = attachment_retrieve_url(&attachment.id.to_string());
     state.trace(
         "api.attachment.uploaded",
         json!({
@@ -181,6 +181,11 @@ async fn upload_attachment(
     }))
 }
 
+// Retrieval is deliberately not session-gated: reloads and retired-session transcripts must
+// still render. The unguessable SHA-256 content address is the bearer capability, and the URL
+// carries no session data. That capability does not expire and blobs outlive sessions; reclaiming
+// them belongs to ADR 0024 retention work. If ids are not content addresses, or an id can reach a
+// viewer who may not read the blob, this route MUST be protected by an authorization gate.
 async fn retrieve_attachment(
     AxumPath(attachment_id): AxumPath<String>,
     State(state): State<AppState>,
@@ -205,7 +210,10 @@ async fn retrieve_attachment(
     };
     Ok(Response::builder()
         .status(StatusCode::OK)
+        // StoredAttachment is bytes-only by design; image/png is host knowledge from this
+        // PNG-only upload contract, not metadata supplied by the blob store.
         .header(header::CONTENT_TYPE, "image/png")
+        .header("x-content-type-options", "nosniff")
         .header(header::CACHE_CONTROL, "private, no-store")
         .header("x-lash-attachment-id", attachment_id)
         .body(Body::from(stored.bytes))
@@ -393,13 +401,24 @@ async fn send_turn(
         return Ok(Json(TurnAccepted::queued(receipt)));
     }
     let turn_id = format!("workbench-turn-{}", uuid::Uuid::new_v4());
-    state.push_message_with_id_for_session(
+    let chat_attachments = attachment_id
+        .iter()
+        .cloned()
+        .map(ChatAttachment::from_id)
+        .collect();
+    state.push_message_with_id_and_attachments_for_session(
         &session_id,
         workbench_turn_user_message_id(&turn_id),
         "user",
         text.clone(),
+        chat_attachments,
     );
-    state.track_turn_prompt(&session_id, &turn_id, text.clone());
+    state.track_turn_prompt(
+        &session_id,
+        &turn_id,
+        text.clone(),
+        attachment_id.clone(),
+    );
     if let Err(err) = restate::submit_user_turn(
         &state,
         restate::WorkbenchTurnWorkflowRequest {
