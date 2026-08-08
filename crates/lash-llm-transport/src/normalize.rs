@@ -13,7 +13,7 @@ use lash_core::{ProviderFailureKind, facade_support::LlmTransportError};
 use lash_sansio::llm::types::{LlmOutputPart, LlmTerminalReason, LlmUsage};
 use serde_json::Value;
 
-use crate::util::parse_i64;
+use crate::util::{extract_error_detail, parse_i64};
 
 /// Merge incremental streaming usage: overwrite each `dst` field with the
 /// corresponding `next` field only when `next` reports a non-zero value,
@@ -236,8 +236,10 @@ where
 /// headers, and the raw body, plus the originating request body when available.
 ///
 /// `message` is the provider-specific human-readable summary (e.g.
-/// `"Anthropic request failed with 429: rate limited"`); retryability is left
-/// to the central provider failure classifier, which reads the attached status.
+/// `"Anthropic request failed with 429"`). The provider's `error.message`, or
+/// a bounded raw-body fallback, is appended here so every caller gets the same
+/// detail extraction. Retryability is left to the central provider failure
+/// classifier, which reads the attached status.
 ///
 /// The envelope is pre-labelled [`ProviderFailureKind::Http`] so it is
 /// self-describing even before classification. This matches what
@@ -253,6 +255,10 @@ pub fn http_error_envelope(
     request_body: Option<String>,
 ) -> LlmTransportError {
     let raw_body = raw_body.into();
+    let message = message.into();
+    let message = extract_error_detail(&raw_body)
+        .filter(|detail| !message.contains(detail))
+        .map_or(message.clone(), |detail| format!("{message}: {detail}"));
     let mut err = LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Http)
         .with_status(status)

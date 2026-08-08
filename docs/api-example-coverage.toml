@@ -7943,6 +7943,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
+symbol = "lash::direct::GenerationDisposition::cache"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::GenerationDisposition::cache"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
+
+[[api]]
 symbol = "lash::direct::GenerationDisposition::fully_honored"
 kind = "function"
 availability = "default+all-features"
@@ -28959,9 +28968,9 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:316#ProviderFailureKind::Transport,"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:327#failure_kinds.map(ProviderFailureKind::code),"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:316; the assertion at examples/docs-snippets/src/architecture_providers.rs:327 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
+usage = "examples/docs-snippets/src/architecture_providers.rs:328#ProviderFailureKind::Transport,"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:328; the assertion at examples/docs-snippets/src/architecture_providers.rs:339 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
 
 [[api]]
 symbol = "lash::provider::ProviderFailureKind::Auth"
@@ -28970,9 +28979,9 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Auth"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:320#ProviderFailureKind::Auth,"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:327#failure_kinds.map(ProviderFailureKind::code),"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:320; the assertion at examples/docs-snippets/src/architecture_providers.rs:327 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
+usage = "examples/docs-snippets/src/architecture_providers.rs:332#ProviderFailureKind::Auth,"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:332; the assertion at examples/docs-snippets/src/architecture_providers.rs:339 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
 
 [[api]]
 symbol = "lash::provider::ProviderFailureKind::Http"
@@ -28981,9 +28990,9 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Http"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:318#ProviderFailureKind::Http,"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:327#failure_kinds.map(ProviderFailureKind::code),"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:318; the assertion at examples/docs-snippets/src/architecture_providers.rs:327 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
+usage = "examples/docs-snippets/src/architecture_providers.rs:330#ProviderFailureKind::Http,"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:330; the assertion at examples/docs-snippets/src/architecture_providers.rs:339 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
 
 [[api]]
 symbol = "lash::provider::ProviderFailureKind::Quota"
@@ -28992,9 +29001,9 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Quota"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:322#ProviderFailureKind::Quota,"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:327#failure_kinds.map(ProviderFailureKind::code),"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:322; the assertion at examples/docs-snippets/src/architecture_providers.rs:327 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
+usage = "examples/docs-snippets/src/architecture_providers.rs:334#ProviderFailureKind::Quota,"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:334; the assertion at examples/docs-snippets/src/architecture_providers.rs:339 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
 
 [[api]]
 symbol = "lash::provider::ProviderFailureKind::Stream"
@@ -29003,9 +29012,9 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Stream"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:319#ProviderFailureKind::Stream,"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:327#failure_kinds.map(ProviderFailureKind::code),"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:319; the assertion at examples/docs-snippets/src/architecture_providers.rs:327 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
+usage = "examples/docs-snippets/src/architecture_providers.rs:331#ProviderFailureKind::Stream,"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:331; the assertion at examples/docs-snippets/src/architecture_providers.rs:339 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
 
 [[api]]
 symbol = "lash::provider::ProviderFailureKind::Timeout"
@@ -29014,9 +29023,9 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Timeout"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:317#ProviderFailureKind::Timeout,"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:327#failure_kinds.map(ProviderFailureKind::code),"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:317; the assertion at examples/docs-snippets/src/architecture_providers.rs:327 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
+usage = "examples/docs-snippets/src/architecture_providers.rs:329#ProviderFailureKind::Timeout,"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:329; the assertion at examples/docs-snippets/src/architecture_providers.rs:339 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
 
 [[api]]
 symbol = "lash::provider::ProviderFailureKind::Transport"
@@ -29025,9 +29034,9 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Transport"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:316#ProviderFailureKind::Transport,"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:327#failure_kinds.map(ProviderFailureKind::code),"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:316; the assertion at examples/docs-snippets/src/architecture_providers.rs:327 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
+usage = "examples/docs-snippets/src/architecture_providers.rs:328#ProviderFailureKind::Transport,"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:328; the assertion at examples/docs-snippets/src/architecture_providers.rs:339 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
 
 [[api]]
 symbol = "lash::provider::ProviderFailureKind::Unknown"
@@ -29036,9 +29045,9 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Unknown"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:324#ProviderFailureKind::Unknown,"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:327#failure_kinds.map(ProviderFailureKind::code),"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:324; the assertion at examples/docs-snippets/src/architecture_providers.rs:327 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
+usage = "examples/docs-snippets/src/architecture_providers.rs:336#ProviderFailureKind::Unknown,"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:336; the assertion at examples/docs-snippets/src/architecture_providers.rs:339 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
 
 [[api]]
 symbol = "lash::provider::ProviderFailureKind::Unsupported"
@@ -29047,9 +29056,9 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Unsupported"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:323#ProviderFailureKind::Unsupported,"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:327#failure_kinds.map(ProviderFailureKind::code),"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:323; the assertion at examples/docs-snippets/src/architecture_providers.rs:327 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
+usage = "examples/docs-snippets/src/architecture_providers.rs:335#ProviderFailureKind::Unsupported,"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:335; the assertion at examples/docs-snippets/src/architecture_providers.rs:339 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
 
 [[api]]
 symbol = "lash::provider::ProviderFailureKind::Validation"
@@ -29058,9 +29067,9 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::Validation"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:321#ProviderFailureKind::Validation,"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:327#failure_kinds.map(ProviderFailureKind::code),"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:321; the assertion at examples/docs-snippets/src/architecture_providers.rs:327 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
+usage = "examples/docs-snippets/src/architecture_providers.rs:333#ProviderFailureKind::Validation,"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:333; the assertion at examples/docs-snippets/src/architecture_providers.rs:339 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
 
 [[api]]
 symbol = "lash::provider::ProviderFailureKind::code"
@@ -29069,9 +29078,9 @@ availability = "default+all-features"
 aliases = ["lash_core::ProviderFailureKind::code"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:327#failure_kinds.map(ProviderFailureKind::code),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:327#failure_kinds.map(ProviderFailureKind::code),"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:327; the assertion at examples/docs-snippets/src/architecture_providers.rs:327 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
+usage = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:339#failure_kinds.map(ProviderFailureKind::code),"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:339; the assertion at examples/docs-snippets/src/architecture_providers.rs:339 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `failure_kinds.map(ProviderFailureKind::code)` equals `[ \"transport\", \"timeout\", \"http\", \"stream\", \"auth\", \"validation\", \"quota\", \"unsupported...`."
 
 [[api]]
 symbol = "lash::provider::ProviderHandle"
@@ -29181,8 +29190,8 @@ aliases = ["lash_core::provider::options::ProviderOptions"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:277#let options = ProviderOptions {"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:277; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:277; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderOptions::cache_retention"
@@ -29191,9 +29200,9 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderOptions::cache_retention"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:292#serde_json::to_value(options.cache_retention).unwrap(),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:292; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+usage = "examples/docs-snippets/src/architecture_providers.rs:296#serde_json::to_value(options.cache_retention).unwrap(),"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:296; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderOptions::expose_thinking"
@@ -29203,8 +29212,8 @@ aliases = ["lash_core::provider::options::ProviderOptions::expose_thinking"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:284#expose_thinking: true,"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:284; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:284; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderOptions::is_default"
@@ -29213,9 +29222,9 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderOptions::is_default"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:288#assert!(!ProviderOptions::is_default(&options));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:288; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+usage = "examples/docs-snippets/src/architecture_providers.rs:290#assert!(!ProviderOptions::is_default(&options));"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:290; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderOptions::llm_timeouts"
@@ -29224,9 +29233,9 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::options::ProviderOptions::llm_timeouts"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/architecture_providers.rs:296#ProviderOptions::llm_timeouts(&options).request_timeout,"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:296; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+usage = "examples/docs-snippets/src/architecture_providers.rs:300#ProviderOptions::llm_timeouts(&options).request_timeout,"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:300; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderOptions::max_output_tokens"
@@ -29236,8 +29245,8 @@ aliases = ["lash_core::provider::options::ProviderOptions::max_output_tokens"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:285#max_output_tokens: Some(4_096),"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:285; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:285; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderOptions::reliability"
@@ -29250,6 +29259,28 @@ usage = "examples/agent-workbench/src/failure_provider.rs:60#reliability: Provid
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:60, inside `provider`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:51 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `provider` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
+symbol = "lash::provider::ProviderOptions::response_metadata_body_paths"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::provider::options::ProviderOptions::response_metadata_body_paths"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:287#response_metadata_body_paths: vec![\"/usage/cost\".to_string()],"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:294#assert_eq!(options.response_metadata_body_paths, [\"/usage/cost\"]);"
+reason = "Exercised by the docs-snippets provider-policy example; the assertion observes the exact JSON-pointer allowlist exposed to hosts."
+
+[[api]]
+symbol = "lash::provider::ProviderOptions::response_metadata_headers"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::provider::options::ProviderOptions::response_metadata_headers"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/architecture_providers.rs:286#response_metadata_headers: vec![\"X-Request-Cost\".to_string()],"
+assertion = "examples/docs-snippets/src/architecture_providers.rs:293#assert_eq!(options.response_metadata_headers, [\"X-Request-Cost\"]);"
+reason = "Exercised by the docs-snippets provider-policy example; the assertion observes the exact response-header allowlist exposed to hosts."
+
+[[api]]
 symbol = "lash::provider::ProviderRateLimitPolicy"
 kind = "struct"
 availability = "default+all-features"
@@ -29257,8 +29288,8 @@ aliases = ["lash_core::provider::options::ProviderRateLimitPolicy"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:270#let rate_limits = ProviderRateLimitPolicy {"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:270; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:270; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderRateLimitPolicy::max_concurrency"
@@ -29268,8 +29299,8 @@ aliases = ["lash_core::provider::options::ProviderRateLimitPolicy::max_concurren
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:231#.max_concurrency(Some(8))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:231; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:231; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderRateLimitPolicy::request_window_ms"
@@ -29279,8 +29310,8 @@ aliases = ["lash_core::provider::options::ProviderRateLimitPolicy::request_windo
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:248#assert_eq!(reliability.rate_limits.request_window_ms, Some(60_000));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:248; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:248; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderRateLimitPolicy::requests_per_window"
@@ -29290,8 +29321,8 @@ aliases = ["lash_core::provider::options::ProviderRateLimitPolicy::requests_per_
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:232#.requests_per_window(Some(120), Some(60_000))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:232; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:232; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderRateLimitPolicy::token_window_ms"
@@ -29301,8 +29332,8 @@ aliases = ["lash_core::provider::options::ProviderRateLimitPolicy::token_window_
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:250#assert_eq!(reliability.rate_limits.token_window_ms, Some(60_000));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:250; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:250; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderRateLimitPolicy::tokens_per_window"
@@ -29312,8 +29343,8 @@ aliases = ["lash_core::provider::options::ProviderRateLimitPolicy::tokens_per_wi
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:233#.tokens_per_window(Some(200_000), Some(60_000));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:233; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:233; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability"
@@ -29323,8 +29354,8 @@ aliases = ["lash_core::provider::options::ProviderReliability"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:223#let reliability = ProviderReliability::codex()"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:223; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:223; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::base_delay_ms"
@@ -29334,8 +29365,8 @@ aliases = ["lash_core::provider::options::ProviderReliability::base_delay_ms"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:227#.base_delay_ms(125)"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:227; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:227; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::chunk_timeout"
@@ -29345,8 +29376,8 @@ aliases = ["lash_core::provider::options::ProviderReliability::chunk_timeout"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:238#assert_eq!(reliability.chunk_timeout, Some(7_500));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:238; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:238; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::codex"
@@ -29356,8 +29387,8 @@ aliases = ["lash_core::provider::options::ProviderReliability::codex"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:223#let reliability = ProviderReliability::codex()"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:223; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:223; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::disabled"
@@ -29367,8 +29398,8 @@ aliases = ["lash_core::provider::options::ProviderReliability::disabled"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:256#ProviderReliability::disabled().request_timeout(Some(RequestTimeout::Disabled));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:256; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:256; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::llm_timeouts"
@@ -29378,8 +29409,8 @@ aliases = ["lash_core::provider::options::ProviderReliability::llm_timeouts"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:251#let timeouts = ProviderReliability::llm_timeouts(&reliability);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:251; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:251; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::max_attempts"
@@ -29399,8 +29430,8 @@ aliases = ["lash_core::provider::options::ProviderReliability::max_concurrency"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:231#.max_concurrency(Some(8))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:231; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:231; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::max_delay_ms"
@@ -29410,8 +29441,8 @@ aliases = ["lash_core::provider::options::ProviderReliability::max_delay_ms"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:228#.max_delay_ms(2_000)"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:228; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:228; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::rate_limits"
@@ -29421,8 +29452,8 @@ aliases = ["lash_core::provider::options::ProviderReliability::rate_limits"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:246#assert_eq!(reliability.rate_limits.max_concurrency, Some(8));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:246; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:246; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::request_timeout"
@@ -29432,8 +29463,8 @@ aliases = ["lash_core::provider::options::ProviderReliability::request_timeout"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:224#.request_timeout(Some(RequestTimeout::Millis(45_000)))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:224; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:224; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::request_timeout"
@@ -29443,8 +29474,8 @@ aliases = ["lash_core::provider::options::ProviderReliability::request_timeout"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:224#.request_timeout(Some(RequestTimeout::Millis(45_000)))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:224; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:224; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::requests_per_window"
@@ -29454,8 +29485,8 @@ aliases = ["lash_core::provider::options::ProviderReliability::requests_per_wind
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:232#.requests_per_window(Some(120), Some(60_000))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:232; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:232; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::retry"
@@ -29465,8 +29496,8 @@ aliases = ["lash_core::provider::options::ProviderReliability::retry"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:229#.retry_after_cap_ms(Some(15_000))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:229; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:229; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::retry_after_cap_ms"
@@ -29476,8 +29507,8 @@ aliases = ["lash_core::provider::options::ProviderReliability::retry_after_cap_m
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:229#.retry_after_cap_ms(Some(15_000))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:229; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:229; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::stream_chunk_timeout_ms"
@@ -29487,8 +29518,8 @@ aliases = ["lash_core::provider::options::ProviderReliability::stream_chunk_time
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:225#.stream_chunk_timeout_ms(Some(7_500))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:225; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:225; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::throttle_wait_budget_ms"
@@ -29498,8 +29529,8 @@ aliases = ["lash_core::provider::options::ProviderReliability::throttle_wait_bud
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:230#.throttle_wait_budget_ms(30_000)"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:230; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:230; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderReliability::tokens_per_window"
@@ -29509,8 +29540,8 @@ aliases = ["lash_core::provider::options::ProviderReliability::tokens_per_window
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:233#.tokens_per_window(Some(200_000), Some(60_000));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:233; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:233; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderRetryPolicy"
@@ -29520,8 +29551,8 @@ aliases = ["lash_core::provider::options::ProviderRetryPolicy"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:259#assert_eq!(ProviderRetryPolicy::disabled().max_attempts, 1);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:259; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:259; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderRetryPolicy::base_delay_ms"
@@ -29531,8 +29562,8 @@ aliases = ["lash_core::provider::options::ProviderRetryPolicy::base_delay_ms"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:227#.base_delay_ms(125)"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:227; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:227; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderRetryPolicy::disabled"
@@ -29542,8 +29573,8 @@ aliases = ["lash_core::provider::options::ProviderRetryPolicy::disabled"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:259#assert_eq!(ProviderRetryPolicy::disabled().max_attempts, 1);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:259; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:259; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderRetryPolicy::enabled"
@@ -29553,8 +29584,8 @@ aliases = ["lash_core::provider::options::ProviderRetryPolicy::enabled"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:245#assert!(reliability.retry.enabled);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:245; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:245; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderRetryPolicy::jitter_ms"
@@ -29564,8 +29595,8 @@ aliases = ["lash_core::provider::options::ProviderRetryPolicy::jitter_ms"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:242#assert_eq!(reliability.retry.jitter_ms, 0);"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:242; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:242; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderRetryPolicy::max_attempts"
@@ -29575,8 +29606,8 @@ aliases = ["lash_core::provider::options::ProviderRetryPolicy::max_attempts"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:226#.max_attempts(6)"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:226; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:226; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderRetryPolicy::max_delay_ms"
@@ -29586,8 +29617,8 @@ aliases = ["lash_core::provider::options::ProviderRetryPolicy::max_delay_ms"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:228#.max_delay_ms(2_000)"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:228; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:228; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderRetryPolicy::retry_after_cap_ms"
@@ -29597,8 +29628,8 @@ aliases = ["lash_core::provider::options::ProviderRetryPolicy::retry_after_cap_m
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:229#.retry_after_cap_ms(Some(15_000))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:229; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:229; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderRetryPolicy::throttle_wait_budget_ms"
@@ -29608,8 +29639,8 @@ aliases = ["lash_core::provider::options::ProviderRetryPolicy::throttle_wait_bud
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:230#.throttle_wait_budget_ms(30_000)"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:230; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:230; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::ProviderSpec"
@@ -29921,8 +29952,8 @@ aliases = ["lash_core::provider::options::RequestTimeout"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:224#.request_timeout(Some(RequestTimeout::Millis(45_000)))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:224; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:224; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::RequestTimeout::Disabled"
@@ -29932,8 +29963,8 @@ aliases = ["lash_core::provider::options::RequestTimeout::Disabled"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:256#ProviderReliability::disabled().request_timeout(Some(RequestTimeout::Disabled));"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:256; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:256; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::RequestTimeout::Millis"
@@ -29943,8 +29974,8 @@ aliases = ["lash_core::provider::options::RequestTimeout::Millis"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:224#.request_timeout(Some(RequestTimeout::Millis(45_000)))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:224; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:224; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::RequestTimeout::Millis::0"
@@ -29954,8 +29985,8 @@ aliases = ["lash_core::provider::options::RequestTimeout::Millis::0"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:224#.request_timeout(Some(RequestTimeout::Millis(45_000)))"
-assertion = "examples/docs-snippets/src/architecture_providers.rs:300#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:224; the assertion at examples/docs-snippets/src/architecture_providers.rs:300 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
+assertion = "examples/docs-snippets/src/architecture_providers.rs:304#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs:224; the assertion at examples/docs-snippets/src/architecture_providers.rs:304 in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
 
 [[api]]
 symbol = "lash::provider::SamplingCapability"
@@ -30833,6 +30864,14 @@ availability = "default+all-features"
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::remote::llm::RemoteGenerationDisposition to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::remote::llm::RemoteGenerationDisposition::cache"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-add"
+reason = "Add lash::remote::llm::RemoteGenerationDisposition::cache to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::llm::RemoteGenerationDisposition::output_token_cap"

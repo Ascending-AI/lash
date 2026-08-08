@@ -665,7 +665,7 @@ impl GenerationOptionDisposition {
     }
 }
 
-/// Adapter-reported fate of a request's [`GenerationOptions`].
+/// Adapter-reported fate of a request's generation and prompt-cache intent.
 ///
 /// This is request-side, adapter-owned bookkeeping and deliberately separate
 /// from [`ExecutionEvidence`], which carries only facts the provider reported
@@ -680,23 +680,28 @@ pub struct GenerationDisposition {
     pub temperature: GenerationOptionDisposition,
     #[serde(default)]
     pub seed: GenerationOptionDisposition,
+    /// Fate of explicit prompt-cache breakpoints in the request.
+    #[serde(default)]
+    pub cache: GenerationOptionDisposition,
 }
 
 impl GenerationDisposition {
-    /// Every option the caller asked for reached the wire, though an
+    /// Every requested control reached the wire, though an
     /// output-token cap may have reached it reduced to the model's capacity.
     /// Use [`fully_honored`](Self::fully_honored) to reject that too.
     pub fn nothing_omitted(&self) -> bool {
         !self.output_token_cap.is_omitted()
             && !self.temperature.is_omitted()
             && !self.seed.is_omitted()
+            && !self.cache.is_omitted()
     }
 
-    /// Every option the caller asked for reached the wire unchanged.
+    /// Every requested control reached the wire unchanged.
     pub fn fully_honored(&self) -> bool {
         self.output_token_cap.is_honored()
             && self.temperature.is_honored()
             && self.seed.is_honored()
+            && self.cache.is_honored()
     }
 }
 
@@ -1020,6 +1025,7 @@ mod generation_disposition_tests {
             output_token_cap: GenerationOptionDisposition::applied(false),
             temperature: GenerationOptionDisposition::sampling_pinned(false),
             seed: GenerationOptionDisposition::unsupported(false),
+            cache: GenerationOptionDisposition::unsupported(false),
         };
         assert_eq!(untouched, GenerationDisposition::default());
         assert!(untouched.nothing_omitted());
@@ -1028,6 +1034,7 @@ mod generation_disposition_tests {
             output_token_cap: GenerationOptionDisposition::applied(true),
             temperature: GenerationOptionDisposition::sampling_pinned(true),
             seed: GenerationOptionDisposition::unsupported(true),
+            cache: GenerationOptionDisposition::unsupported(true),
         };
         assert_eq!(
             dropped.output_token_cap,
@@ -1043,6 +1050,7 @@ mod generation_disposition_tests {
                 "output_token_cap": "applied",
                 "temperature": "omitted_sampling_pinned",
                 "seed": "omitted_unsupported",
+                "cache": "omitted_unsupported",
             })
         );
     }
@@ -1083,6 +1091,7 @@ mod attempt_record_tests {
                         output_token_cap: GenerationOptionDisposition::Applied,
                         temperature: GenerationOptionDisposition::OmittedSamplingPinned,
                         seed: GenerationOptionDisposition::OmittedUnsupported,
+                        cache: GenerationOptionDisposition::Applied,
                     }),
                     usage: None,
                 }],

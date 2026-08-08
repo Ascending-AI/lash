@@ -123,6 +123,7 @@ fn main() {
         output_token_cap: lash::remote::llm::RemoteGenerationOptionDisposition::Applied,
         temperature: lash::remote::llm::RemoteGenerationOptionDisposition::OmittedSamplingPinned,
         seed: lash::remote::llm::RemoteGenerationOptionDisposition::OmittedUnsupported,
+        cache: lash::remote::llm::RemoteGenerationOptionDisposition::Applied,
     };
     assert_ne!(
         disposition.seed,

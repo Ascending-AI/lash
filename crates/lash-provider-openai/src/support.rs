@@ -29,12 +29,10 @@ pub(crate) use lash_core::provider::{
 };
 pub(crate) use lash_llm_transport::streaming::{drive_sse_response, emit_stream_progress};
 pub(crate) use lash_llm_transport::timeouts::response_start_timeout;
-pub(crate) use lash_llm_transport::util::{
-    emit_provider_request_trace, emit_provider_trace, extract_error_detail,
-};
+pub(crate) use lash_llm_transport::util::{emit_provider_request_trace, emit_provider_trace};
 pub(crate) use lash_llm_transport::{
-    LlmHttpBody, LlmHttpMethod, LlmHttpRequest, LlmHttpTransport, first_header_value,
-    header_contains, http_error_envelope, read_http_body_text,
+    LlmHttpBody, LlmHttpMethod, LlmHttpRequest, LlmHttpTransport, ResponseMetadataCapture,
+    first_header_value, header_contains, http_error_envelope, read_http_body_text,
 };
 
 pub(crate) use crate::chat::*;
@@ -43,5 +41,4 @@ pub(crate) use crate::config::*;
 pub(crate) use crate::driver::*;
 
 pub(crate) use crate::reasoning::*;
-pub(crate) use crate::response_metadata::*;
 pub(crate) use crate::responses_shared::{ResponsesStreamState, role_name, tool_choice_value};

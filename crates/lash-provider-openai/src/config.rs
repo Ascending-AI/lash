@@ -55,15 +55,6 @@ pub struct OpenAiCompat {
     /// is one the caller relies on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_routing: Option<ProviderRoutingPrefs>,
-    /// Response header names (case-insensitive) to capture into
-    /// `LlmResponse.response_metadata` as `header:<lowercased-name>` entries.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub response_metadata_headers: Option<Vec<String>>,
-    /// JSON pointers probed against response bodies (buffered: final body;
-    /// streaming: every SSE event, last seen value wins), captured as
-    /// `body:<pointer>` entries.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub response_metadata_body_paths: Option<Vec<String>>,
 }
 
 impl OpenAiCompat {
@@ -107,8 +98,6 @@ pub(crate) struct OpenAiResolvedCompat {
     pub(crate) streaming_usage: bool,
     pub(crate) schema_capabilities: ProviderSchemaCapabilities,
     pub(crate) provider_routing: Option<ProviderRoutingPrefs>,
-    pub(crate) response_metadata_headers: Vec<String>,
-    pub(crate) response_metadata_body_paths: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -152,8 +141,6 @@ impl OpenAiCompatibleProvider {
             streaming_usage: true,
             schema_capabilities: ProviderSchemaCapabilities::openai(false),
             provider_routing: None,
-            response_metadata_headers: Vec::new(),
-            response_metadata_body_paths: Vec::new(),
         };
         let strict_tools = self.compat.strict_tools.unwrap_or(defaults.strict_tools);
         OpenAiResolvedCompat {
@@ -202,16 +189,6 @@ impl OpenAiCompatibleProvider {
                 .provider_routing
                 .clone()
                 .or(defaults.provider_routing),
-            response_metadata_headers: self
-                .compat
-                .response_metadata_headers
-                .clone()
-                .unwrap_or(defaults.response_metadata_headers),
-            response_metadata_body_paths: self
-                .compat
-                .response_metadata_body_paths
-                .clone()
-                .unwrap_or(defaults.response_metadata_body_paths),
         }
     }
 }

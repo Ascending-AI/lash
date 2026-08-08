@@ -23,9 +23,9 @@ use lash_llm_transport::streaming::{drive_sse_response, emit_stream_progress};
 use lash_llm_transport::timeouts::response_start_timeout;
 use lash_llm_transport::util::{emit_provider_request_trace, emit_provider_trace};
 use lash_llm_transport::{
-    LlmHttpMethod, LlmHttpRequest, first_header_value, header_contains, http_error_envelope,
-    openai_terminal_reason_from_response_value, openai_usage_from_response_value,
-    read_http_body_text,
+    LlmHttpMethod, LlmHttpRequest, ResponseMetadataCapture, first_header_value, header_contains,
+    http_error_envelope, openai_terminal_reason_from_response_value,
+    openai_usage_from_response_value, read_http_body_text,
 };
 use lash_provider_auth::{CredentialCallError, CredentialExecuteError};
 
@@ -410,7 +410,7 @@ impl CodexProvider {
                 self.websocket_http_summary(&diagnostics),
             );
             partial.terminal_reason = LlmTerminalReason::Unknown;
-            partial.generation_disposition = Some(Self::generation_disposition(&req.generation));
+            partial.generation_disposition = Some(Self::generation_disposition(req, full_body));
             return Err(CodexWebSocketAttemptError {
                 error: LlmTransportError::new("Codex WebSocket ended before response.completed")
                     .with_request_body(request_body)
@@ -436,7 +436,7 @@ impl CodexProvider {
             self.websocket_http_summary(&diagnostics),
         );
         response.http_summary = Some(self.websocket_http_summary(&diagnostics));
-        response.generation_disposition = Some(Self::generation_disposition(&req.generation));
+        response.generation_disposition = Some(Self::generation_disposition(req, full_body));
         attempt.finish(continuation);
         Ok(response)
     }
@@ -643,6 +643,7 @@ impl Provider for CodexProvider {
         let timeouts = self.options.llm_timeouts();
 
         let body = self.build_request_body(&req, stream_events.is_some())?;
+        let generation_disposition = Some(Self::generation_disposition(&req, &body));
 
         let request_body = serde_json::to_string(&body).ok();
         let body_bytes = serde_json::to_vec(&body).map_err(|e| {
@@ -728,6 +729,8 @@ impl Provider for CodexProvider {
                 request_body.clone(),
             ));
         }
+        let mut response_metadata =
+            ResponseMetadataCapture::from_response(&self.options, &response_headers);
 
         let parse_stream =
             Self::should_parse_stream(stream_events.is_some(), content_type.as_deref());
@@ -740,6 +743,7 @@ impl Provider for CodexProvider {
             )
             .await
             .map_err(|err| Self::non_sse_body_read_error(status, content_type.as_deref(), err))?;
+            response_metadata.capture_body_text(&text);
             emit_provider_trace(provider_trace.as_ref(), "codex", &text);
             if Self::looks_like_sse_payload(&text) {
                 let mut state = shared::ResponsesStreamState::default();
@@ -749,8 +753,8 @@ impl Provider for CodexProvider {
                     request_body,
                     format!("HTTP POST {} (stream/fallback)", self.responses_url),
                 );
-                response.generation_disposition =
-                    Some(Self::generation_disposition(&req.generation));
+                response.generation_disposition = generation_disposition;
+                response.response_metadata = response_metadata.into_metadata();
                 if let Some(tx) = &stream_events {
                     if response.usage != LlmUsage::default() {
                         tx.send(LlmStreamEvent::Usage(response.usage.clone()));
@@ -811,8 +815,8 @@ impl Provider for CodexProvider {
                 request_body,
                 http_summary: Some(format!("HTTP POST {}", self.responses_url)),
                 execution_evidence: None,
-                generation_disposition: Some(Self::generation_disposition(&req.generation)),
-                response_metadata: Default::default(),
+                generation_disposition,
+                response_metadata: response_metadata.into_metadata(),
             });
         }
 
@@ -831,6 +835,7 @@ impl Provider for CodexProvider {
             body,
             timeouts.chunk_timeout,
             "Codex stream chunk timed out",
+            &mut response_metadata,
             |raw| {
                 emit_provider_trace(provider_trace.as_ref(), "codex", raw);
                 let prev_usage = state.usage.clone();
@@ -869,7 +874,8 @@ impl Provider for CodexProvider {
                 format!("HTTP POST {} (stream)", self.responses_url),
             );
             partial.terminal_reason = LlmTerminalReason::Unknown;
-            partial.generation_disposition = Some(Self::generation_disposition(&req.generation));
+            partial.generation_disposition = generation_disposition;
+            partial.response_metadata = response_metadata.into_metadata();
             return Err(error.with_partial_response(partial));
         }
 
@@ -882,7 +888,8 @@ impl Provider for CodexProvider {
                 format!("HTTP POST {} (stream)", self.responses_url),
             );
             partial.terminal_reason = LlmTerminalReason::Unknown;
-            partial.generation_disposition = Some(Self::generation_disposition(&req.generation));
+            partial.generation_disposition = generation_disposition;
+            partial.response_metadata = response_metadata.into_metadata();
             return Err(LlmTransportError::new(
                 "Codex stream ended before a terminal response event",
             )
@@ -913,7 +920,8 @@ impl Provider for CodexProvider {
             request_body,
             format!("HTTP POST {} (stream)", self.responses_url),
         );
-        response.generation_disposition = Some(Self::generation_disposition(&req.generation));
+        response.generation_disposition = generation_disposition;
+        response.response_metadata = response_metadata.into_metadata();
         Ok(response)
     }
 

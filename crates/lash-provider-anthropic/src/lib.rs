@@ -49,6 +49,29 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct MetadataSseTransport(&'static str);
+
+    #[async_trait::async_trait]
+    impl lash_llm_transport::LlmHttpTransport for MetadataSseTransport {
+        async fn send(
+            &self,
+            _request: lash_llm_transport::LlmHttpRequest,
+            _timeout: Option<std::time::Duration>,
+        ) -> Result<lash_llm_transport::LlmHttpResponse, lash_core::facade_support::LlmTransportError>
+        {
+            Ok(lash_llm_transport::LlmHttpResponse {
+                status: 200,
+                headers: vec![
+                    ("content-type".to_string(), "text/event-stream".to_string()),
+                    ("x-request-cost".to_string(), "0.02".to_string()),
+                    ("set-cookie".to_string(), "secret".to_string()),
+                ],
+                body: lash_llm_transport::LlmHttpBody::buffered(self.0),
+            })
+        }
+    }
+
     // Capability data mirrors what the host catalog supplies. Effort encoding
     // sends the resolved variant verbatim (adaptive thinking); budget encoding
     // maps each variant to a token budget and omits the wire thinking block for
@@ -117,6 +140,40 @@ mod tests {
             generation: lash_core::GenerationOptions::default(),
             provider_trace: None,
         }
+    }
+
+    #[tokio::test]
+    async fn response_metadata_capture_respects_shared_allowlists() {
+        let body = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}},\"billing\":{\"cost\":1}}\n\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n",
+            "data: {\"type\":\"message_stop\",\"billing\":{\"cost\":2},\"private\":\"hidden\"}\n\n",
+        );
+        let mut provider = AnthropicProvider::new("key")
+            .with_options(ProviderOptions {
+                response_metadata_headers: vec!["X-Request-Cost".to_string()],
+                response_metadata_body_paths: vec!["/billing/cost".to_string()],
+                ..ProviderOptions::default()
+            })
+            .with_transport(Arc::new(MetadataSseTransport(body)));
+
+        let response = provider
+            .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+            .await
+            .expect("metadata fixture completes");
+
+        assert_eq!(
+            response.response_metadata["header:x-request-cost"],
+            json!("0.02")
+        );
+        assert_eq!(response.response_metadata["body:/billing/cost"], json!(2));
+        assert!(!response.response_metadata.contains_key("header:set-cookie"));
+        assert!(
+            !response
+                .response_metadata
+                .values()
+                .any(|value| value == "hidden")
+        );
     }
 
     #[tokio::test]
@@ -875,6 +932,10 @@ mod tests {
             body["messages"][0]["content"][0]
                 .get("__lash_cache_breakpoint")
                 .is_none()
+        );
+        assert_eq!(
+            AnthropicProvider::generation_disposition(&req, &body).cache,
+            lash_core::GenerationOptionDisposition::Applied,
         );
     }
 

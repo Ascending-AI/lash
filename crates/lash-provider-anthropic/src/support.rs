@@ -33,7 +33,8 @@ pub(crate) use lash_llm_transport::streaming::drive_sse_response;
 pub(crate) use lash_llm_transport::timeouts::response_start_timeout;
 pub(crate) use lash_llm_transport::util::{emit_provider_request_trace, emit_provider_trace};
 pub(crate) use lash_llm_transport::{
-    LlmHttpRequest, LlmHttpTransport, ReqwestLlmHttpTransport, read_http_body_text,
+    LlmHttpRequest, LlmHttpTransport, ReqwestLlmHttpTransport, ResponseMetadataCapture,
+    read_http_body_text,
 };
 
 pub(crate) use crate::config::*;

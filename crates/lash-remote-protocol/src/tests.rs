@@ -140,6 +140,7 @@ fn remote_llm_response_json_round_trips() {
             output_token_cap: RemoteGenerationOptionDisposition::Applied,
             temperature: RemoteGenerationOptionDisposition::OmittedSamplingPinned,
             seed: RemoteGenerationOptionDisposition::OmittedUnsupported,
+            cache: RemoteGenerationOptionDisposition::Applied,
         }),
     };
 
@@ -151,6 +152,7 @@ fn remote_llm_response_json_round_trips() {
             "output_token_cap": "applied",
             "temperature": "omitted_sampling_pinned",
             "seed": "omitted_unsupported",
+            "cache": "applied",
         })
     );
     let decoded: RemoteLlmResponse = serde_json::from_value(value).expect("deserialize");
@@ -540,7 +542,7 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 25, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 27, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         id: "process:1".to_string(),

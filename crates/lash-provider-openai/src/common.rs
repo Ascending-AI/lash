@@ -72,7 +72,7 @@ pub(crate) fn empty_response_error(raw: String) -> lash_core::llm::transport::Ll
 /// same on the wire — the key is simply absent. None of these endpoints drops
 /// a control because sampling is pinned; that is an Anthropic-only fact.
 pub(crate) fn generation_disposition(
-    generation: &lash_core::llm::types::GenerationOptions,
+    request: &LlmRequest,
     body: &Value,
 ) -> lash_core::llm::types::GenerationDisposition {
     use lash_core::llm::types::{GenerationDisposition, GenerationOptionDisposition};
@@ -89,12 +89,16 @@ pub(crate) fn generation_disposition(
         .iter()
         .any(|field| body.get(field).is_some());
     GenerationDisposition {
-        output_token_cap: record(generation.output_token_cap.is_some(), cap_emitted),
+        output_token_cap: record(request.generation.output_token_cap.is_some(), cap_emitted),
         temperature: record(
-            generation.temperature.is_some(),
+            request.generation.temperature.is_some(),
             body.get("temperature").is_some(),
         ),
-        seed: record(generation.seed.is_some(), body.get("seed").is_some()),
+        seed: record(
+            request.generation.seed.is_some(),
+            body.get("seed").is_some(),
+        ),
+        cache: lash_llm_transport::cache_intent_disposition(request, Some(body)),
     }
 }
 

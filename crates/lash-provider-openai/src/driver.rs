@@ -101,7 +101,7 @@ pub(crate) async fn complete(
                 .collect(),
         );
     }
-    let generation_disposition = Some(generation_disposition(&req.generation, &body));
+    let generation_disposition = Some(generation_disposition(&req, &body));
     let body_bytes = serde_json::to_vec(&body)
         .map_err(|e| LlmTransportError::new(format!("{}: {e}", endpoint.serialize_error())))?;
     emit_provider_request_trace(
@@ -157,17 +157,7 @@ pub(crate) async fn complete(
         )
         .await
         .unwrap_or_default();
-        let detail = extract_error_detail(&text);
-        let message = detail
-            .map(|detail| {
-                format!(
-                    "{} with {}: {}",
-                    endpoint.request_failed_prefix(),
-                    status,
-                    detail
-                )
-            })
-            .unwrap_or_else(|| format!("{} with {}", endpoint.request_failed_prefix(), status));
+        let message = format!("{} with {}", endpoint.request_failed_prefix(), status);
         // Retryability is decided centrally by the provider failure
         // classifier from the attached HTTP status; no inline override here.
         return Err(http_error_envelope(
@@ -180,8 +170,7 @@ pub(crate) async fn complete(
     }
 
     let provider_request_id = first_header_value(&resp.headers, "x-request-id").map(str::to_string);
-    let mut capture = ResponseMetadataCapture::from_compat(&compat);
-    capture.capture_headers(&resp.headers);
+    let mut capture = ResponseMetadataCapture::from_response(&provider.options, &resp.headers);
     let is_sse = header_contains(&resp.headers, "content-type", "text/event-stream");
 
     let response_context = ResponseContext {
@@ -214,7 +203,7 @@ pub(crate) async fn complete(
     let mut response = match response {
         Ok(response) => response,
         Err(mut failure) => {
-            let response_metadata = capture.into_map();
+            let response_metadata = capture.into_metadata();
             if failure.request_body.is_none() {
                 failure.request_body = Some(request_body_for_error.clone());
             }
@@ -260,7 +249,7 @@ pub(crate) async fn complete(
     // exact body is serialized in durable effect outcomes; that journal-size
     // cost is accepted deliberately for the existing cross-provider contract.
     response.request_body = Some(request_body_for_error);
-    response.response_metadata = capture.into_map();
+    response.response_metadata = capture.into_metadata();
     response.generation_disposition = generation_disposition;
     Ok(response)
 }
@@ -281,24 +270,15 @@ async fn complete_buffered_response(
     } = context;
     let stream_termination = stream_events.is_some().then_some(stream_termination);
     let text = read_http_body_text(body, timeout, endpoint.response_body_timeout_error()).await?;
+    capture.capture_body_text(&text);
     emit_provider_trace(provider_trace.as_ref(), "openai_compatible", &text);
     match endpoint {
-        CompletionEndpoint::Responses => complete_buffered_responses(
-            provider,
-            text,
-            stream_events,
-            url,
-            stream_termination,
-            capture,
-        ),
-        CompletionEndpoint::ChatCompletions => complete_buffered_chat(
-            provider,
-            text,
-            stream_events,
-            url,
-            stream_termination,
-            capture,
-        ),
+        CompletionEndpoint::Responses => {
+            complete_buffered_responses(provider, text, stream_events, url, stream_termination)
+        }
+        CompletionEndpoint::ChatCompletions => {
+            complete_buffered_chat(provider, text, stream_events, url, stream_termination)
+        }
     }
 }
 
@@ -308,17 +288,14 @@ fn complete_buffered_responses(
     stream_events: Option<LlmEventSender>,
     url: String,
     stream_termination: Option<StreamTermination>,
-    capture: &mut ResponseMetadataCapture,
 ) -> Result<LlmResponse, LlmTransportError> {
     let mut state = ResponsesStreamState::default();
     if text.trim_start().starts_with("data:") || text.contains("\ndata:") {
-        capture.capture_sse_body(&text)?;
         OpenAiCompatibleProvider::parse_sse_payload(&text, &mut state)?;
     } else {
         let value: Value = serde_json::from_str(&text).map_err(|e| {
             LlmTransportError::new(format!("Invalid Responses JSON: {e}")).with_raw(text.clone())
         })?;
-        capture.capture_body(&value);
         state.provider_usage = value.get("usage").cloned();
         state.usage = usage_from_response_value(&value);
         state.parts = OpenAiCompatibleProvider::response_parts_from_value(&value);
@@ -401,19 +378,16 @@ fn complete_buffered_chat(
     stream_events: Option<LlmEventSender>,
     url: String,
     stream_termination: Option<StreamTermination>,
-    capture: &mut ResponseMetadataCapture,
 ) -> Result<LlmResponse, LlmTransportError> {
     let mut state = ChatStreamState::default();
     let mut parsed_parts = None;
     if text.trim_start().starts_with("data:") || text.contains("\ndata:") {
-        capture.capture_sse_body(&text)?;
         OpenAiCompatibleProvider::parse_chat_sse_payload(&text, &mut state)?;
     } else {
         let value: Value = serde_json::from_str(&text).map_err(|e| {
             LlmTransportError::new(format!("Invalid Chat Completions JSON: {e}"))
                 .with_raw(text.clone())
         })?;
-        capture.capture_body(&value);
         state.capture_response_value(&value);
         state.provider_usage = value.get("usage").cloned();
         state.usage = usage_from_response_value(&value);
@@ -524,13 +498,9 @@ async fn drive_streaming_responses(
         body,
         chunk_timeout,
         CompletionEndpoint::Responses.stream_chunk_timeout_error(),
+        capture,
         |raw| {
             emit_provider_trace(provider_trace.as_ref(), "openai_compatible", raw);
-            if capture.is_active()
-                && let Ok(value) = serde_json::from_str(raw)
-            {
-                capture.capture_body(&value);
-            }
             let prev_usage = state.usage.clone();
             OpenAiCompatibleProvider::process_sse_event(raw, &mut state, Some(&mut emitted_parts))?;
             emit_stream_progress(
@@ -642,13 +612,9 @@ async fn drive_streaming_chat(
         body,
         chunk_timeout,
         CompletionEndpoint::ChatCompletions.stream_chunk_timeout_error(),
+        capture,
         |raw| {
             emit_provider_trace(provider_trace.as_ref(), "openai_compatible", raw);
-            if capture.is_active()
-                && let Ok(value) = serde_json::from_str(raw)
-            {
-                capture.capture_body(&value);
-            }
             let prev_usage = state.usage.clone();
             OpenAiCompatibleProvider::process_chat_sse_event(raw, &mut state)?;
             emit_stream_progress(

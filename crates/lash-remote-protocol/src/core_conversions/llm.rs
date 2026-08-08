@@ -381,11 +381,13 @@ impl From<core_llm::GenerationDisposition> for RemoteGenerationDisposition {
             output_token_cap,
             temperature,
             seed,
+            cache,
         } = value;
         Self {
             output_token_cap: output_token_cap.into(),
             temperature: temperature.into(),
             seed: seed.into(),
+            cache: cache.into(),
         }
     }
 }
@@ -396,11 +398,13 @@ impl From<RemoteGenerationDisposition> for core_llm::GenerationDisposition {
             output_token_cap,
             temperature,
             seed,
+            cache,
         } = value;
         Self {
             output_token_cap: output_token_cap.into(),
             temperature: temperature.into(),
             seed: seed.into(),
+            cache: cache.into(),
         }
     }
 }

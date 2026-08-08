@@ -18,6 +18,7 @@ fn frame_events(body: LlmHttpBody) -> Vec<String> {
             body,
             Duration::from_secs(5),
             "test stream chunk timed out",
+            &mut lash_llm_transport::ResponseMetadataCapture::default(),
             |event| {
                 events.push(event.to_string());
                 Ok(())
