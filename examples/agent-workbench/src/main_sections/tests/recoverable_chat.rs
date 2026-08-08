@@ -1595,3 +1595,28 @@ fn authorization_seam_can_deny_observation_without_product_specific_auth() {
         })
         .expect("independent enqueue policy remains pluggable");
 }
+
+pub(crate) async fn recoverable_chat_test_state_with_store_factory_and_trigger_store(
+    data_dir: &std::path::Path,
+    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    trigger_store: Arc<dyn lash::triggers::TriggerStore>,
+) -> AppState {
+    let provider = lash::testing::TestProvider::builder()
+        .kind("recoverable-chat-store-factory-test")
+        .complete(|_| async {
+            Ok(text_response(
+                "<lashlang>\nfinish \"canonical answer\"\n</lashlang>",
+            ))
+        })
+        .build()
+        .into_handle();
+    recoverable_chat_test_state_with_dependencies(
+        data_dir,
+        16,
+        provider,
+        trigger_store,
+        store_factory,
+        None,
+    )
+    .await
+}

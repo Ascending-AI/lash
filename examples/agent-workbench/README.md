@@ -406,12 +406,17 @@ Restate K/V state. Its `run` handler emits a validated
 The occurrence idempotency key includes the journaled fire time, so it is
 unique per tick and stable across retries of the same tick. The `run` handler
 re-arms the next delayed `run` *before* emitting, so a tick that fails cannot
-kill the schedule, and a job whose session is no longer the live workbench
-session terminates itself on its next fire. Resetting the workbench cancels
-the old session's cron jobs derived from its durable trigger registrations
-(plus anything armed in-process), clears the mocked mail world, and rotates
-the session; an equal-request re-sync revives a chain whose stored next
-execution is already in the past. The trace JSONL files include
+kill the schedule. A cron remains valid while its owning session has durable
+store metadata, including when another workbench session is current. A job
+whose session has a permanent deletion tombstone cancels with
+`reason: "session_retired"`; a job with neither a tombstone nor session store
+metadata cancels as an orphan with `reason: "session_absent"`. Resetting the
+workbench cancels the old session's cron jobs derived from its durable trigger
+registrations (plus anything armed in-process), clears the mocked mail world,
+and rotates the session; an equal-request re-sync revives a chain whose stored
+next execution is already in the past. The disposition read and cancel trace
+are Restate-journaled. Tick and zombie-guard traces record
+`session_state: "live"`, `"retired"`, or `"unknown"`. The trace JSONL files include
 `agent_workbench.cron.restate.sync_upserted`,
 `agent_workbench.cron.restate.run`, and
 `agent_workbench.cron.restate.zombie_cancelled` events.
