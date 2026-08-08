@@ -10,7 +10,7 @@ mod provider_trace_tests;
 mod reasoning;
 mod response_metadata;
 mod responses;
-pub mod responses_shared;
+mod responses_shared;
 pub mod schema;
 mod support;
 #[cfg(feature = "testing")]

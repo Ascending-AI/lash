@@ -645,7 +645,7 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     assert_eq!(core.status, summary.status);
 
     let event = process_event("process:record");
-    let remote = RemoteProcessEvent::from(event.clone());
+    let remote = RemoteProcessEvent::try_from(event.clone()).expect("remote process event");
     remote
         .validate("RemoteProcessEvent")
         .expect("valid process event");
@@ -699,14 +699,15 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     let core = lash_core::ProcessCancelSummary::try_from(cancel).expect("core cancel summary");
     assert_eq!(core.status, lash_core::ProcessStatus::Cancelled);
 
-    let await_result = RemoteProcessAwaitResult::from((
+    let await_result = RemoteProcessAwaitResult::try_from((
         "process:await".to_string(),
         lash_core::ProcessAwaitOutput::Cancelled {
             message: "stopped".to_string(),
             raw: None,
             control: None,
         },
-    ));
+    ))
+    .expect("remote await result");
     let (process_id, output) =
         <(String, lash_core::ProcessAwaitOutput)>::try_from(await_result).expect("await result");
     assert_eq!(process_id, "process:await");
@@ -716,7 +717,8 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     ));
 
     let events_response =
-        RemoteProcessEventsResponse::from(("process:record".to_string(), vec![event]));
+        RemoteProcessEventsResponse::try_from(("process:record".to_string(), vec![event]))
+            .expect("remote process events");
     let (process_id, events) = <(String, Vec<lash_core::ProcessEvent>)>::try_from(events_response)
         .expect("events response");
     assert_eq!(process_id, "process:record");

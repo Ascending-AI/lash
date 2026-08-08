@@ -6,6 +6,33 @@ use serde_json::Value;
 
 use crate::{CodexProvider, OPENAI_BASE_URL, OpenAiCompatibleProvider};
 
+#[derive(Clone, Debug, Default)]
+pub struct ResponsesStreamParser {
+    state: crate::responses_shared::ResponsesStreamState,
+}
+
+impl ResponsesStreamParser {
+    pub fn parse_payload(
+        &mut self,
+        provider: &str,
+        payload: &str,
+    ) -> Result<(), lash_core::facade_support::LlmTransportError> {
+        crate::responses_shared::parse_sse_payload(provider, payload, &mut self.state)
+    }
+
+    pub fn full_text(&self) -> &str {
+        &self.state.full_text
+    }
+
+    pub fn response_parts_len(&self) -> usize {
+        self.state.response_parts().len()
+    }
+
+    pub fn usage(&self) -> &lash_core::llm::types::LlmUsage {
+        &self.state.usage
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CacheBreakpointReport {
     pub requested: usize,
