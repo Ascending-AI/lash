@@ -32,16 +32,13 @@ async fn run_once_openai_responses_sse_parse(
 
         let (state, parse_phase) =
             measure_runtime_perf_phase("openai_responses_sse_parse.parse_payload", || {
-                let mut state =
-                    lash_provider_openai::responses_shared::ResponsesStreamState::default();
-                lash_provider_openai::responses_shared::parse_sse_payload(
-                    "OpenAI", payload, &mut state,
-                )?;
+                let mut state = lash_provider_openai::testing::ResponsesStreamParser::default();
+                state.parse_payload("OpenAI", payload)?;
                 Ok(state)
             })?;
         phase_profile.insert(parse_phase.0, parse_phase.1);
 
-        if !state.full_text.contains("runtime perf benchmark ok") {
+        if !state.full_text().contains("runtime perf benchmark ok") {
             anyhow::bail!(
                 "runtime perf scenario {} turn {} failed to parse benchmark marker",
                 scenario.name(),
@@ -51,7 +48,7 @@ async fn run_once_openai_responses_sse_parse(
 
         let (parts_len, parts_phase) =
             measure_runtime_perf_phase("openai_responses_sse_parse.project_parts", || {
-                Ok(state.response_parts().len())
+                Ok(state.response_parts_len())
             })?;
         parsed_parts += parts_len;
         phase_profile.insert(parts_phase.0, parts_phase.1);
@@ -89,7 +86,7 @@ async fn run_once_openai_responses_sse_parse(
                 total: turn_total_alloc,
             },
             phase_profile,
-            turn_usage: token_usage_from_llm_usage(&state.usage),
+            turn_usage: token_usage_from_llm_usage(state.usage()),
             usage_delta: SessionUsageReport::default(),
             cumulative_usage: SessionUsageReport::default(),
         });

@@ -31,7 +31,7 @@ lash-postgres-store = { workspace = true, features = ["testing"] }
 lash = { workspace = true, features = ["rlm"] }
 lash-llm-tools = { workspace = true, features = ["lashlang"] }
 lash-protocol-rlm = { workspace = true }
-lash-provider-openai = { workspace = true }
+lash-provider-openai = { workspace = true, features = ["testing"] }
 lash-rlm-types = { workspace = true }
 lash-sqlite-store = { workspace = true }
 lash-standard-plugins = { workspace = true, features = ["lashlang"] }
