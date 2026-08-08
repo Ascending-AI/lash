@@ -223,18 +223,12 @@ pub(crate) async fn apply_format_async(
                 }
 
                 let (slot, slot_text) = if cursor >= bytes.len() {
-                    return Err(RuntimeError::ValueError {
-                        message: "unmatched `{` in format string".to_string(),
-                    });
+                    return Err(RuntimeError::Format(FormatError::UnmatchedOpenBrace));
                 } else if bytes[cursor] != b'}' {
-                    return Err(RuntimeError::ValueError {
-                        message: "invalid format placeholder".to_string(),
-                    });
+                    return Err(RuntimeError::Format(FormatError::InvalidPlaceholder));
                 } else if cursor == index + 1 {
                     if uses_indexed {
-                        return Err(RuntimeError::ValueError {
-                            message: "can't mix `{}` and indexed format placeholders".to_string(),
-                        });
+                        return Err(RuntimeError::Format(FormatError::MixedPlaceholderKinds));
                     }
                     uses_sequential = true;
                     let slot = next_sequential;
@@ -242,17 +236,15 @@ pub(crate) async fn apply_format_async(
                     (slot, None)
                 } else {
                     if uses_sequential {
-                        return Err(RuntimeError::ValueError {
-                            message: "can't mix `{}` and indexed format placeholders".to_string(),
-                        });
+                        return Err(RuntimeError::Format(FormatError::MixedPlaceholderKinds));
                     }
                     uses_indexed = true;
                     let digits = &template[index + 1..cursor];
-                    let slot = digits
-                        .parse::<usize>()
-                        .map_err(|_| RuntimeError::ValueError {
-                            message: format!("bad format slot `{digits}`"),
-                        })?;
+                    let slot = digits.parse::<usize>().map_err(|_| {
+                        RuntimeError::Format(FormatError::InvalidSlot {
+                            slot: digits.to_string(),
+                        })
+                    })?;
                     if slot < args.len() {
                         if args.len() <= u64::BITS as usize {
                             used_indexed_bits |= 1u64 << slot;
@@ -265,11 +257,10 @@ pub(crate) async fn apply_format_async(
                     (slot, Some(digits))
                 };
 
-                let value = args.get(slot).ok_or_else(|| RuntimeError::ValueError {
-                    message: match slot_text {
-                        Some(slot_text) => format!("format slot `{slot_text}` is out of range"),
-                        None => "format slot `{}` is out of range".to_string(),
-                    },
+                let value = args.get(slot).ok_or_else(|| {
+                    RuntimeError::Format(FormatError::SlotOutOfRange {
+                        slot: slot_text.unwrap_or("{}").to_string(),
+                    })
                 })?;
                 append_stringified_value_async(&mut output, value).await?;
                 index = cursor + 1;
@@ -284,9 +275,7 @@ pub(crate) async fn apply_format_async(
                 continue;
             }
             b'}' => {
-                return Err(RuntimeError::ValueError {
-                    message: "unmatched `}` in format string".to_string(),
-                });
+                return Err(RuntimeError::Format(FormatError::UnmatchedCloseBrace));
             }
             _ => {}
         }
@@ -307,9 +296,9 @@ pub(crate) async fn apply_format_async(
         (!args.is_empty()).then_some(0)
     };
     if let Some(unused_index) = unused_index {
-        return Err(RuntimeError::ValueError {
-            message: format!("format argument `{unused_index}` is unused"),
-        });
+        return Err(RuntimeError::Format(FormatError::UnusedArgument {
+            index: unused_index,
+        }));
     }
     Ok(output)
 }
@@ -382,7 +371,7 @@ fn compiled_format_one_arg(
 pub(crate) fn parse_format_template(
     template: &str,
     argc: usize,
-) -> Result<Vec<CompiledFormatPart>, String> {
+) -> Result<Vec<CompiledFormatPart>, FormatError> {
     let mut parts = Vec::new();
     let bytes = template.as_bytes();
     let mut index = 0;
@@ -410,12 +399,12 @@ pub(crate) fn parse_format_template(
                 }
 
                 let (slot, slot_text) = if cursor >= bytes.len() {
-                    return Err("unmatched `{` in format string".to_string());
+                    return Err(FormatError::UnmatchedOpenBrace);
                 } else if bytes[cursor] != b'}' {
-                    return Err("invalid format placeholder".to_string());
+                    return Err(FormatError::InvalidPlaceholder);
                 } else if cursor == index + 1 {
                     if uses_indexed {
-                        return Err("can't mix `{}` and indexed format placeholders".to_string());
+                        return Err(FormatError::MixedPlaceholderKinds);
                     }
                     uses_sequential = true;
                     let slot = next_sequential;
@@ -423,13 +412,15 @@ pub(crate) fn parse_format_template(
                     (slot, None)
                 } else {
                     if uses_sequential {
-                        return Err("can't mix `{}` and indexed format placeholders".to_string());
+                        return Err(FormatError::MixedPlaceholderKinds);
                     }
                     uses_indexed = true;
                     let digits = &template[index + 1..cursor];
                     let slot = digits
                         .parse::<usize>()
-                        .map_err(|_| format!("bad format slot `{digits}`"))?;
+                        .map_err(|_| FormatError::InvalidSlot {
+                            slot: digits.to_string(),
+                        })?;
                     if slot < argc {
                         if argc <= u64::BITS as usize {
                             used_indexed_bits |= 1u64 << slot;
@@ -443,9 +434,8 @@ pub(crate) fn parse_format_template(
                 };
 
                 if slot >= argc {
-                    return Err(match slot_text {
-                        Some(slot_text) => format!("format slot `{slot_text}` is out of range"),
-                        None => "format slot `{}` is out of range".to_string(),
+                    return Err(FormatError::SlotOutOfRange {
+                        slot: slot_text.unwrap_or("{}").to_string(),
                     });
                 }
                 parts.push(CompiledFormatPart::Arg(slot));
@@ -461,7 +451,7 @@ pub(crate) fn parse_format_template(
                 continue;
             }
             b'}' => {
-                return Err("unmatched `}` in format string".to_string());
+                return Err(FormatError::UnmatchedCloseBrace);
             }
             _ => {}
         }
@@ -483,7 +473,9 @@ pub(crate) fn parse_format_template(
         (argc > 0).then_some(0)
     };
     if let Some(unused_index) = unused_index {
-        return Err(format!("format argument `{unused_index}` is unused"));
+        return Err(FormatError::UnusedArgument {
+            index: unused_index,
+        });
     }
     Ok(parts)
 }
@@ -498,14 +490,14 @@ pub(crate) async fn execute_compiled_format(
     template: &CompiledFormatTemplate,
     args: &[Value],
 ) -> Result<String, RuntimeError> {
-    if let Some(message) = &template.error {
-        return Err(RuntimeError::ValueError {
-            message: message.clone(),
-        });
+    if let Some(error) = &template.error {
+        return Err(RuntimeError::Format(error.clone()));
     }
     if let Some(shape) = &template.one_arg {
-        let value = args.first().ok_or_else(|| RuntimeError::ValueError {
-            message: "format slot `0` is out of range".to_string(),
+        let value = args.first().ok_or_else(|| {
+            RuntimeError::Format(FormatError::SlotOutOfRange {
+                slot: "0".to_string(),
+            })
         })?;
         let mut output = String::with_capacity(template.min_capacity);
         push_compiled_one_arg_prefix(&mut output, shape);
@@ -519,8 +511,10 @@ pub(crate) async fn execute_compiled_format(
         match part {
             CompiledFormatPart::Literal(literal) => output.push_str(literal),
             CompiledFormatPart::Arg(slot) => {
-                let value = args.get(*slot).ok_or_else(|| RuntimeError::ValueError {
-                    message: format!("format slot `{slot}` is out of range"),
+                let value = args.get(*slot).ok_or_else(|| {
+                    RuntimeError::Format(FormatError::SlotOutOfRange {
+                        slot: slot.to_string(),
+                    })
                 })?;
                 append_stringified_value_async(&mut output, value).await?;
             }
@@ -533,14 +527,14 @@ pub(crate) fn execute_compiled_format_direct(
     template: &CompiledFormatTemplate,
     args: &[Value],
 ) -> Result<String, RuntimeError> {
-    if let Some(message) = &template.error {
-        return Err(RuntimeError::ValueError {
-            message: message.clone(),
-        });
+    if let Some(error) = &template.error {
+        return Err(RuntimeError::Format(error.clone()));
     }
     if let Some(shape) = &template.one_arg {
-        let value = args.first().ok_or_else(|| RuntimeError::ValueError {
-            message: "format slot `0` is out of range".to_string(),
+        let value = args.first().ok_or_else(|| {
+            RuntimeError::Format(FormatError::SlotOutOfRange {
+                slot: "0".to_string(),
+            })
         })?;
         let mut output = String::with_capacity(template.min_capacity);
         push_compiled_one_arg_prefix(&mut output, shape);
@@ -554,8 +548,10 @@ pub(crate) fn execute_compiled_format_direct(
         match part {
             CompiledFormatPart::Literal(literal) => output.push_str(literal),
             CompiledFormatPart::Arg(slot) => {
-                let value = args.get(*slot).ok_or_else(|| RuntimeError::ValueError {
-                    message: format!("format slot `{slot}` is out of range"),
+                let value = args.get(*slot).ok_or_else(|| {
+                    RuntimeError::Format(FormatError::SlotOutOfRange {
+                        slot: slot.to_string(),
+                    })
                 })?;
                 append_stringified_value_direct(&mut output, value)?;
             }
@@ -568,10 +564,8 @@ pub(crate) fn execute_compiled_format_one_number_compact_direct(
     template: &CompiledFormatTemplate,
     value: f64,
 ) -> Result<CompactString, RuntimeError> {
-    if let Some(message) = &template.error {
-        return Err(RuntimeError::ValueError {
-            message: message.clone(),
-        });
+    if let Some(error) = &template.error {
+        return Err(RuntimeError::Format(error.clone()));
     }
     if let Some(shape) = &template.one_arg {
         let mut output = CompactString::with_capacity(template.min_capacity);
@@ -589,9 +583,9 @@ pub(crate) fn execute_compiled_format_one_number_compact_direct(
                 write_number(&mut output, value).expect("string writes should not fail");
             }
             CompiledFormatPart::Arg(slot) => {
-                return Err(RuntimeError::ValueError {
-                    message: format!("format slot `{slot}` is out of range"),
-                });
+                return Err(RuntimeError::Format(FormatError::SlotOutOfRange {
+                    slot: slot.to_string(),
+                }));
             }
         }
     }

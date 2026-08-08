@@ -23,23 +23,17 @@ pub(crate) fn read_field_ref_direct(value: &Value, field: &Name) -> Result<Value
             .unwrap_or(Value::Null)),
         Value::Image(image) => read_image_field(image, field),
         Value::Null => Ok(Value::Null),
-        _ => Err(RuntimeError::TypeError {
-            message: format!(
-                "can't read `.{}` from {}",
-                field.text,
-                value_type_name(value)
-            ),
+        _ => Err(RuntimeError::CannotReadField {
+            field: field.text.to_string(),
+            actual: value_type_name(value).to_string(),
         }),
     }
 }
 
 pub(crate) fn unwrap_tool_result(value: Value) -> Result<Value, RuntimeError> {
     let Value::Record(record) = value else {
-        return Err(RuntimeError::TypeError {
-            message: format!(
-                "`?` expected a tool result wrapper, got {}",
-                value_type_name(&value)
-            ),
+        return Err(RuntimeError::ToolResultExpected {
+            actual: value_type_name(&value).to_string(),
         });
     };
 
@@ -48,21 +42,15 @@ pub(crate) fn unwrap_tool_result(value: Value) -> Result<Value, RuntimeError> {
         Some(Value::Bool(true)) => record
             .get_symbol(result_names.value.symbol)
             .cloned()
-            .ok_or_else(|| RuntimeError::TypeError {
-                message: "`?` found a successful tool result wrapper missing `value`".to_string(),
-            }),
+            .ok_or(RuntimeError::ToolResultMissingValue),
         Some(Value::Bool(false)) => {
             let message = record
                 .get_symbol(result_names.error.symbol)
                 .map(Value::to_string)
                 .unwrap_or_else(|| "unknown error".to_string());
-            Err(RuntimeError::ValueError {
-                message: format!("`?` unwrapped failed tool result: {message}"),
-            })
+            Err(RuntimeError::UnwrappedToolResultFailed { message })
         }
-        _ => Err(RuntimeError::TypeError {
-            message: "`?` expected a tool result wrapper with boolean `ok`".to_string(),
-        }),
+        _ => Err(RuntimeError::ToolResultInvalidOk),
     }
 }
 
@@ -78,12 +66,9 @@ pub(crate) fn read_field_direct(value: Value, field: &Name) -> Result<Value, Run
             .unwrap_or(Value::Null)),
         Value::Image(image) => read_image_field(&image, field),
         Value::Null => Ok(Value::Null),
-        _ => Err(RuntimeError::TypeError {
-            message: format!(
-                "can't read `.{}` from {}",
-                field.text,
-                value_type_name(&value)
-            ),
+        _ => Err(RuntimeError::CannotReadField {
+            field: field.text.to_string(),
+            actual: value_type_name(&value).to_string(),
         }),
     }
 }
@@ -135,8 +120,8 @@ pub(crate) fn read_index_ref_direct(target: &Value, index: &Value) -> Result<Val
             .cloned()
             .unwrap_or(Value::Null)),
         Value::Null => Ok(Value::Null),
-        _ => Err(RuntimeError::TypeError {
-            message: format!("can't index {}", value_type_name(target)),
+        _ => Err(RuntimeError::CannotIndex {
+            actual: value_type_name(target).to_string(),
         }),
     }
 }
@@ -191,9 +176,7 @@ pub(crate) fn next_assign_index<'a>(
 ) -> Result<&'a Value, RuntimeError> {
     let index = indexes
         .get(*index_cursor)
-        .ok_or_else(|| RuntimeError::ValueError {
-            message: "missing assignment index".to_string(),
-        })?;
+        .ok_or(RuntimeError::MissingAssignmentIndex)?;
     *index_cursor += 1;
     Ok(index)
 }
@@ -208,15 +191,10 @@ pub(crate) fn assign_record_field(
             Arc::make_mut(record).insert_symbolized(field.symbol, field.text.clone(), value);
             Ok(())
         }
-        Value::Image(_) => Err(RuntimeError::TypeError {
-            message: "can't assign image fields; images are immutable".to_string(),
-        }),
-        _ => Err(RuntimeError::TypeError {
-            message: format!(
-                "can't assign `.{}` on {}",
-                field.text,
-                value_type_name(target)
-            ),
+        Value::Image(_) => Err(RuntimeError::ImmutableImageFields),
+        _ => Err(RuntimeError::CannotAssignField {
+            field: field.text.to_string(),
+            actual: value_type_name(target).to_string(),
         }),
     }
 }
@@ -228,18 +206,13 @@ pub(crate) fn descend_record_field<'a>(
     match target {
         Value::Record(record) => Arc::make_mut(record)
             .get_symbol_mut(field.symbol)
-            .ok_or_else(|| RuntimeError::ValueError {
-                message: format!("can't assign through missing field `.{}`", field.text),
+            .ok_or_else(|| RuntimeError::MissingAssignmentField {
+                field: field.text.to_string(),
             }),
-        Value::Image(_) => Err(RuntimeError::TypeError {
-            message: "can't assign through image fields; images are immutable".to_string(),
-        }),
-        _ => Err(RuntimeError::TypeError {
-            message: format!(
-                "can't assign through `.{}` on {}",
-                field.text,
-                value_type_name(target)
-            ),
+        Value::Image(_) => Err(RuntimeError::ImmutableImageFieldsThrough),
+        _ => Err(RuntimeError::CannotAssignThroughField {
+            field: field.text.to_string(),
+            actual: value_type_name(target).to_string(),
         }),
     }
 }
@@ -255,19 +228,15 @@ pub(crate) fn assign_index(
             values.make_mut()[idx] = value;
             Ok(())
         }
-        Value::Tuple(_) => Err(RuntimeError::TypeError {
-            message: "can't assign tuple indexes; tuples are immutable".to_string(),
-        }),
+        Value::Tuple(_) => Err(RuntimeError::ImmutableTupleIndexes),
         Value::Record(record) => {
             let key = coerce_string(index)?;
             Arc::make_mut(record).insert_str(key.as_ref(), value);
             Ok(())
         }
-        Value::Image(_) => Err(RuntimeError::TypeError {
-            message: "can't assign image fields; images are immutable".to_string(),
-        }),
-        _ => Err(RuntimeError::TypeError {
-            message: format!("can't assign index on {}", value_type_name(target)),
+        Value::Image(_) => Err(RuntimeError::ImmutableImageFields),
+        _ => Err(RuntimeError::CannotAssignIndex {
+            actual: value_type_name(target).to_string(),
         }),
     }
 }
@@ -281,25 +250,21 @@ pub(crate) fn descend_index<'a>(
             let idx = resolve_existing_list_assignment_index(index, values.len())?;
             Ok(&mut values.make_mut()[idx])
         }
-        Value::Tuple(_) => Err(RuntimeError::TypeError {
-            message: "can't assign through tuple indexes; tuples are immutable".to_string(),
-        }),
+        Value::Tuple(_) => Err(RuntimeError::ImmutableTupleIndexesThrough),
         Value::Record(record) => {
             let key = coerce_string(index)?;
             let record = Arc::make_mut(record);
             if let Some(value) = record.get_mut(key.as_ref()) {
                 Ok(value)
             } else {
-                Err(RuntimeError::ValueError {
-                    message: format!("can't assign through missing key `{}`", key.as_ref()),
+                Err(RuntimeError::MissingAssignmentKey {
+                    key: key.into_owned(),
                 })
             }
         }
-        Value::Image(_) => Err(RuntimeError::TypeError {
-            message: "can't assign through image fields; images are immutable".to_string(),
-        }),
-        _ => Err(RuntimeError::TypeError {
-            message: format!("can't assign through index on {}", value_type_name(target)),
+        Value::Image(_) => Err(RuntimeError::ImmutableImageFieldsThrough),
+        _ => Err(RuntimeError::CannotAssignThroughIndex {
+            actual: value_type_name(target).to_string(),
         }),
     }
 }
@@ -314,9 +279,7 @@ pub(crate) fn add_assign_index_number(
             let idx = resolve_existing_list_assignment_index(index, values.len())?;
             add_assign_value_number(&mut values.make_mut()[idx], right)
         }
-        Value::Tuple(_) => Err(RuntimeError::TypeError {
-            message: "can't assign tuple indexes; tuples are immutable".to_string(),
-        }),
+        Value::Tuple(_) => Err(RuntimeError::ImmutableTupleIndexes),
         Value::Record(record) => {
             let key = coerce_string(index)?;
             let record = Arc::make_mut(record);
@@ -328,11 +291,9 @@ pub(crate) fn add_assign_index_number(
                 Ok(value)
             }
         }
-        Value::Image(_) => Err(RuntimeError::TypeError {
-            message: "can't assign image fields; images are immutable".to_string(),
-        }),
-        _ => Err(RuntimeError::TypeError {
-            message: format!("can't assign index on {}", value_type_name(target)),
+        Value::Image(_) => Err(RuntimeError::ImmutableImageFields),
+        _ => Err(RuntimeError::CannotAssignIndex {
+            actual: value_type_name(target).to_string(),
         }),
     }
 }
@@ -369,22 +330,16 @@ pub(crate) fn resolve_existing_list_assignment_index(
     len: usize,
 ) -> Result<usize, RuntimeError> {
     let Value::Number(index) = index else {
-        return Err(RuntimeError::TypeError {
-            message: "list assignment index must be an integer".to_string(),
-        });
+        return Err(RuntimeError::InvalidListAssignmentIndex);
     };
     if !index.is_finite() || index.fract() != 0.0 {
-        return Err(RuntimeError::TypeError {
-            message: "list assignment index must be an integer".to_string(),
-        });
+        return Err(RuntimeError::InvalidListAssignmentIndex);
     }
     let index = *index as isize;
     let len = len as isize;
     let normalized = if index < 0 { len + index } else { index };
     if normalized < 0 || normalized >= len {
-        return Err(RuntimeError::ValueError {
-            message: "list assignment index out of bounds".to_string(),
-        });
+        return Err(RuntimeError::ListAssignmentIndexOutOfBounds);
     }
     Ok(normalized as usize)
 }

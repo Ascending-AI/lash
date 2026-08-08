@@ -57,8 +57,8 @@ pub fn compile_process(
 ) -> Result<CompiledProgram, RuntimeError> {
     let process = program
         .process(process_name)
-        .ok_or_else(|| RuntimeError::ValueError {
-            message: format!("unknown process `{process_name}`"),
+        .ok_or_else(|| RuntimeError::UnknownProcess {
+            name: process_name.to_string(),
         })?;
     let process_program = Program {
         declarations: program.declarations.clone(),
@@ -75,11 +75,12 @@ pub fn compile_linked_process(
     process_name: &str,
 ) -> Result<CompiledProgram, RuntimeError> {
     let linked_program = linked.program();
-    let process = linked_program
-        .process(process_name)
-        .ok_or_else(|| RuntimeError::ValueError {
-            message: format!("unknown process `{process_name}`"),
-        })?;
+    let process =
+        linked_program
+            .process(process_name)
+            .ok_or_else(|| RuntimeError::UnknownProcess {
+                name: process_name.to_string(),
+            })?;
     let process_program = Program {
         declarations: linked_program.declarations.clone(),
         main: process.body.clone(),
@@ -91,8 +92,8 @@ pub fn compile_linked_process(
         .artifact
         .process_ref(process_name)
         .cloned()
-        .ok_or_else(|| RuntimeError::ValueError {
-            message: format!("linked module does not export process `{process_name}`"),
+        .ok_or_else(|| RuntimeError::ProcessNotExported {
+            name: process_name.to_string(),
         })?;
     let (chunk, compile_stats) = Compiler::compile_linked_process_program(
         &process_program,
@@ -113,25 +114,18 @@ pub fn compile_module_artifact_process(
     artifact: &ModuleArtifact,
     process_ref: &ProcessRef,
 ) -> Result<CompiledProgram, RuntimeError> {
-    let process_name =
-        artifact
-            .process_name_for_ref(process_ref)
-            .ok_or_else(|| RuntimeError::ValueError {
-                message: format!(
-                    "module artifact `{}` does not export process ref {:?}",
-                    artifact.module_ref, process_ref
-                ),
-            })?;
-    let process =
-        artifact
-            .canonical_ir
-            .process(process_name)
-            .ok_or_else(|| RuntimeError::ValueError {
-                message: format!(
-                    "module artifact `{}` is missing process `{process_name}`",
-                    artifact.module_ref
-                ),
-            })?;
+    let process_name = artifact.process_name_for_ref(process_ref).ok_or_else(|| {
+        RuntimeError::ProcessRefNotExported {
+            module_ref: artifact.module_ref.clone(),
+            process_ref: process_ref.clone(),
+        }
+    })?;
+    let process = artifact.canonical_ir.process(process_name).ok_or_else(|| {
+        RuntimeError::ArtifactProcessMissing {
+            module_ref: artifact.module_ref.clone(),
+            name: process_name.to_string(),
+        }
+    })?;
     let process_program = Program {
         declarations: artifact.canonical_ir.declarations.clone(),
         main: process.body.clone(),

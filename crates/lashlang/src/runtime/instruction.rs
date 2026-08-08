@@ -16,7 +16,7 @@ use crate::tracking::LashlangExecutionSite;
 
 use super::record::{Symbol, intern_symbol, symbol_name};
 use super::schema::ValidationPlan;
-use super::{CompileStats, ProfileReport, ProfileStat, Value};
+use super::{CompileStats, FormatError, ProfileReport, ProfileStat, Value};
 
 #[derive(Clone)]
 pub(crate) struct Chunk {
@@ -45,7 +45,7 @@ pub(crate) struct CompiledFormatTemplate {
     pub(crate) parts: Box<[CompiledFormatPart]>,
     pub(crate) argc: usize,
     pub(crate) min_capacity: usize,
-    pub(crate) error: Option<String>,
+    pub(crate) error: Option<FormatError>,
     pub(crate) one_arg: Option<CompiledFormatOneArg>,
 }
 

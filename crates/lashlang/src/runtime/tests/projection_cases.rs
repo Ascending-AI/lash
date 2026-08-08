@@ -1118,9 +1118,7 @@ async fn image_values_are_immutable_and_len_is_unsupported() {
         .expect_err("image field assignment should fail");
     assert_eq!(
         err,
-        RuntimeError::TypeError {
-            message: "can't assign image fields; images are immutable".to_string()
-        }
+        RuntimeError::ImmutableImageFields
     );
 
     let err = exec_with_global("img", test_image(), "finish len(img)")
@@ -1128,11 +1126,7 @@ async fn image_values_are_immutable_and_len_is_unsupported() {
         .expect_err("len image should fail");
     assert_eq!(
         err,
-        RuntimeError::TypeError {
-            message:
-                "`len` requires a string, tuple, list, record, or null; use `.size` for images"
-                    .to_string()
-        }
+        RuntimeError::LenUnsupported
     );
 }
 

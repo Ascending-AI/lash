@@ -140,11 +140,8 @@ impl SlotState {
 
     fn ensure_assignable(&self, slot: usize, slot_names: &[Name]) -> Result<(), RuntimeError> {
         if self.projected.get(slot).copied().unwrap_or(false) {
-            return Err(RuntimeError::TypeError {
-                message: format!(
-                    "`{}` is a read-only projected binding",
-                    slot_names[slot].text
-                ),
+            return Err(RuntimeError::ReadOnlyProjectedBinding {
+                name: slot_names[slot].text.to_string(),
             });
         }
         Ok(())
@@ -446,9 +443,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             Instruction::ListAppend => {
                 if self.stack.len() < 2 {
-                    return Err(RuntimeError::ValueError {
-                        message: "vm stack underflow".to_string(),
-                    });
+                    return Err(RuntimeError::VmStackUnderflow);
                 }
                 let list_index = self.stack.len() - 2;
                 if self.stack[list_index..]
@@ -829,9 +824,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             Instruction::IterNext { jump_to } => {
                 let Some(iter_state) = self.iter_stack.last_mut() else {
-                    return Err(RuntimeError::ValueError {
-                        message: "missing loop state".to_string(),
-                    });
+                    return Err(RuntimeError::MissingLoopState);
                 };
                 let Some(value) = iter_state.cursor.next_value() else {
                     self.ip = jump_to;
@@ -1242,15 +1235,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         name: slot_name.text.to_string(),
                     }
                 })?;
-                let schema =
-                    unwrap_type_value(&value)
-                        .cloned()
-                        .ok_or_else(|| RuntimeError::TypeError {
-                            message: format!(
-                                "`{}` is not a Type value (missing `{LASH_TYPE_KEY}`)",
-                                slot_name.text
-                            ),
-                        })?;
+                let schema = unwrap_type_value(&value).cloned().ok_or_else(|| {
+                    RuntimeError::NotTypeValue {
+                        name: slot_name.text.to_string(),
+                    }
+                })?;
                 self.stack.push(schema);
             }
             Instruction::WrapTypeLiteral => {
@@ -1439,9 +1428,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     }
 
     fn pop_stack(&mut self) -> Result<Value, RuntimeError> {
-        self.stack.pop().ok_or_else(|| RuntimeError::ValueError {
-            message: "vm stack underflow".to_string(),
-        })
+        self.stack.pop().ok_or(RuntimeError::VmStackUnderflow)
     }
 
     fn load_slot(&self, slot: usize) -> Result<&Value, RuntimeError> {
@@ -1472,9 +1459,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
 
     fn pop_n(&mut self, len: usize) -> Result<Vec<Value>, RuntimeError> {
         if self.stack.len() < len {
-            return Err(RuntimeError::ValueError {
-                message: "vm stack underflow".to_string(),
-            });
+            return Err(RuntimeError::VmStackUnderflow);
         }
         let start = self.stack.len() - len;
         Ok(self.stack.split_off(start))
@@ -1482,9 +1467,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
 
     fn stack_tail(&self, len: usize) -> Result<&[Value], RuntimeError> {
         if self.stack.len() < len {
-            return Err(RuntimeError::ValueError {
-                message: "vm stack underflow".to_string(),
-            });
+            return Err(RuntimeError::VmStackUnderflow);
         }
         Ok(&self.stack[self.stack.len() - len..])
     }
@@ -1493,9 +1476,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         self.stack
             .len()
             .checked_sub(len)
-            .ok_or_else(|| RuntimeError::ValueError {
-                message: "vm stack underflow".to_string(),
-            })
+            .ok_or(RuntimeError::VmStackUnderflow)
     }
 
     fn unwind_iterators(&mut self) {

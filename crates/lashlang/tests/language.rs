@@ -159,6 +159,8 @@ enum ExecuteError {
     #[error(transparent)]
     Parse(#[from] lashlang::ParseError),
     #[error(transparent)]
+    Link(#[from] lashlang::LinkError),
+    #[error(transparent)]
     Runtime(#[from] RuntimeError),
 }
 
@@ -173,12 +175,7 @@ async fn execute<H: ExecutionHost>(
     {
         lashlang::compile_linked(&linked)
     } else if program_contains_start_process(&program.main) {
-        let linked =
-            lashlang::LinkedModule::link(program, test_host_environment()).map_err(|err| {
-                ExecuteError::Runtime(RuntimeError::ValueError {
-                    message: err.to_string(),
-                })
-            })?;
+        let linked = lashlang::LinkedModule::link(program, test_host_environment())?;
         lashlang::compile_linked(&linked)
     } else {
         lashlang::compile(source)?
@@ -259,6 +256,7 @@ async fn runtime_error(source: &str) -> RuntimeError {
     {
         ExecuteError::Runtime(error) => error,
         ExecuteError::Parse(error) => panic!("expected runtime error, got parse error: {error:?}"),
+        ExecuteError::Link(error) => panic!("expected runtime error, got link error: {error:?}"),
     }
 }
 
@@ -437,7 +435,13 @@ async fn numeric_helper_errors_are_rejected() {
         let err = runtime_error(source).await;
         assert!(matches!(
             err,
-            RuntimeError::TypeError { .. } | RuntimeError::ValueError { .. }
+            RuntimeError::ZeroRangeStep
+                | RuntimeError::InvalidRangeBound
+                | RuntimeError::InvalidRangeBoundType { .. }
+                | RuntimeError::RangeTooLarge { .. }
+                | RuntimeError::InvalidIntegerDivisionArgument { .. }
+                | RuntimeError::InvalidIntegerDivisionArgumentType { .. }
+                | RuntimeError::IntegerDivisionByZero { .. }
         ));
     }
 }
@@ -1951,9 +1955,7 @@ async fn format_rejects_mixed_placeholder_styles_end_to_end() {
 
     assert_eq!(
         error,
-        RuntimeError::ValueError {
-            message: "can't mix `{}` and indexed format placeholders".to_string()
-        }
+        RuntimeError::Format(lashlang::FormatError::MixedPlaceholderKinds)
     );
 }
 
@@ -1968,9 +1970,7 @@ async fn format_rejects_unused_args_end_to_end() {
 
     assert_eq!(
         error,
-        RuntimeError::ValueError {
-            message: "format argument `0` is unused".to_string()
-        }
+        RuntimeError::Format(lashlang::FormatError::UnusedArgument { index: 0 })
     );
 }
 
@@ -1984,9 +1984,7 @@ async fn format_rejects_unmatched_braces_end_to_end() {
     .await;
     assert_eq!(
         open_error,
-        RuntimeError::ValueError {
-            message: "unmatched `{` in format string".to_string()
-        }
+        RuntimeError::Format(lashlang::FormatError::UnmatchedOpenBrace)
     );
 
     let close_error = runtime_error(
@@ -1997,9 +1995,7 @@ async fn format_rejects_unmatched_braces_end_to_end() {
     .await;
     assert_eq!(
         close_error,
-        RuntimeError::ValueError {
-            message: "unmatched `}` in format string".to_string()
-        }
+        RuntimeError::Format(lashlang::FormatError::UnmatchedCloseBrace)
     );
 }
 
@@ -2419,27 +2415,27 @@ async fn path_assignment_preserves_alias_isolation() {
 async fn path_assignment_reports_invalid_targets() {
     assert!(matches!(
         runtime_error("items = [1]\nitems[2] = 2").await,
-        RuntimeError::ValueError { message } if message.contains("out of bounds")
+        RuntimeError::ListAssignmentIndexOutOfBounds
     ));
     assert!(matches!(
         runtime_error("items = [1]\nitems[0.5] = 2").await,
-        RuntimeError::TypeError { message } if message.contains("integer")
+        RuntimeError::InvalidListAssignmentIndex
     ));
     assert!(matches!(
         runtime_error("items = [1]\nitems[\"0\"] = 2").await,
-        RuntimeError::TypeError { message } if message.contains("integer")
+        RuntimeError::InvalidListAssignmentIndex
     ));
     assert!(matches!(
         runtime_error("text = \"abc\"\ntext[0] = \"x\"").await,
-        RuntimeError::TypeError { message } if message.contains("string")
+        RuntimeError::CannotAssignIndex { actual } if actual == "string"
     ));
     assert!(matches!(
         runtime_error("record = {}\nrecord.missing.value = 1").await,
-        RuntimeError::ValueError { message } if message.contains("missing field")
+        RuntimeError::MissingAssignmentField { field } if field == "missing"
     ));
     assert!(matches!(
         runtime_error("record = { item: 1 }\nrecord.item.value = 2").await,
-        RuntimeError::TypeError { message } if message.contains("number")
+        RuntimeError::CannotAssignField { actual, .. } if actual == "number"
     ));
 }
 

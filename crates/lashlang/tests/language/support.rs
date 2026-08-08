@@ -145,12 +145,12 @@ async fn validate_reuses_type_literals_for_intermediate_checks() {
     )
     .await
     .expect_err("validate should fail");
-    let ExecuteError::Runtime(RuntimeError::ValueError { message }) = err else {
+    let ExecuteError::Runtime(RuntimeError::ValidationFailed { reason }) = err else {
         panic!("expected validation runtime error");
     };
     assert!(
-        message.contains("$.labels[1]: expected string, got number"),
-        "{message}"
+        reason.contains("$.labels[1]: expected string, got number"),
+        "{reason}"
     );
 }
 

@@ -37,4 +37,5 @@ sha2 = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time", "rt", "macros"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
+thiserror = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }

@@ -17,6 +17,8 @@ mod cache;
 mod compiler;
 pub(crate) use compiler::is_pure_expr;
 mod entry_points;
+mod error;
+pub use error::{FormatError, RuntimeError};
 mod format;
 mod host;
 mod instruction;
@@ -85,24 +87,6 @@ pub use value::{
     ProjectedReadResponse, ProjectedValue, ResourceHandle, Value,
 };
 use vm::IterState;
-
-#[derive(Clone, Debug, Error, PartialEq)]
-pub enum RuntimeError {
-    #[error("unknown name `{name}`")]
-    UndefinedVariable { name: String },
-    #[error("`for` expects a list or tuple")]
-    NonListIteration,
-    #[error("`{keyword}` can only be used inside a process body")]
-    SessionProcessAdminOutsideProcess { keyword: &'static str },
-    #[error("`{keyword}` can't be used inside a process body")]
-    ForegroundControlInsideProcess { keyword: &'static str },
-    #[error("unknown builtin `{name}`")]
-    UnknownBuiltin { name: String },
-    #[error("{message}")]
-    TypeError { message: String },
-    #[error("{message}")]
-    ValueError { message: String },
-}
 
 #[derive(Clone, Debug, Error, PartialEq)]
 #[error("{error}")]
