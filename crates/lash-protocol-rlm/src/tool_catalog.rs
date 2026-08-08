@@ -184,7 +184,12 @@ mod tests {
         });
 
         let docs = rlm_prompt_tool_docs(&catalog);
+        assert!(docs.len() <= 768, "plan.update docs exceeded budget");
         assert!(docs.contains("plan.update("), "{docs}");
+        assert!(
+            docs.contains("plan: list[record{step: str, status: str}]"),
+            "{docs}"
+        );
         assert!(!docs.contains("update_plan("), "{docs}");
 
         let host_environment = LashlangSurface::default()

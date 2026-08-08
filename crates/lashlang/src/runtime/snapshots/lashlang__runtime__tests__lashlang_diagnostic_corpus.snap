@@ -1,6 +1,5 @@
 ---
 source: crates/lashlang/src/runtime/tests.rs
-assertion_line: 442
 expression: "cases.join(\"\\n\\n---\\n\\n\")"
 ---
 parse_inline_if
@@ -110,3 +109,21 @@ unknown builtin `nope`
 --> line 1, column 1
 finish nope()
 ^~~~~~~~~~~~~
+
+---
+
+link_unknown_resource_operation
+resource type `Tools` does not expose operation `does_not_exist`
+--> line 1, column 14
+finish await tools.does_not_exist({})?
+             ^~~~~~~~~~~~~~~~~~~~~~~~
+hint: available operations: `tools.echo`, `tools.err`, `tools.missing`, `tools.spawn`
+
+---
+
+link_unresolved_receiver
+receiver for operation `echo` is not a module authority
+--> line 2, column 14
+finish await value.echo({})?
+             ^~~~~~~~~~~~~~
+hint: use a module authority, e.g. `tools.echo`

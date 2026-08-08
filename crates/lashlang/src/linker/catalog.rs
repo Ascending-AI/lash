@@ -484,6 +484,40 @@ impl LashlangHostCatalog {
         suggestions
     }
 
+    pub(crate) fn operation_suggestions_for_operation(&self, operation: &str) -> Vec<String> {
+        let mut suggestions = self
+            .module_instances
+            .values()
+            .filter(|module| module.operations.contains_key(operation))
+            .map(|module| format!("{}.{}", module.alias, operation))
+            .collect::<Vec<_>>();
+        suggestions.sort();
+        suggestions.dedup();
+        suggestions
+    }
+
+    pub(crate) fn operation_suggestions_for_resource_type(&self, resource_type: &str) -> Vec<String> {
+        let mut suggestions = self
+            .module_instances
+            .values()
+            .filter(|module| module.resource_type == resource_type)
+            .flat_map(|module| {
+                module
+                    .operations
+                    .keys()
+                    .map(move |operation| format!("{}.{}", module.alias, operation))
+            })
+            .collect::<Vec<_>>();
+        if suggestions.is_empty()
+            && let Some(resource) = self.resource_types.get(resource_type)
+        {
+            suggestions.extend(resource.operations.keys().cloned());
+        }
+        suggestions.sort();
+        suggestions.dedup();
+        suggestions
+    }
+
     fn check_named_data_type(
         &self,
         data_type: &NamedDataType,

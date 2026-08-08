@@ -382,7 +382,7 @@ mod tests {
         let signature = tool.compact_contract().render_signature();
 
         assert!(
-            signature.contains("module?: str | list[str] | null"),
+            signature.contains("module?: list[str] | str | null"),
             "{signature}"
         );
         assert!(!signature.contains("module?: any"), "{signature}");

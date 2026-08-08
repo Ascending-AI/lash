@@ -444,6 +444,13 @@ impl ProjectedValue {
         &self.name
     }
 
+    /// Host descriptor vocabulary for prompt and linker metadata. Scalar
+    /// projections report the underlying runtime value type; custom
+    /// projections forward the descriptor's declared type name.
+    pub fn type_name(&self) -> &str {
+        self.value_type_name()
+    }
+
     pub fn projection_ref(&self) -> Option<&serde_json::Value> {
         self.projection_ref.as_ref()
     }

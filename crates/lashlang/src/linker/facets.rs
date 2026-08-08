@@ -11,11 +11,7 @@ pub(crate) fn analyze_workflow_program(
         let Declaration::Process(process) = declaration else {
             continue;
         };
-        let mut scope = Scope::new(
-            false,
-            true,
-            program.declaration_spans.get(index).copied(),
-        );
+        let mut scope = Scope::new(true, program.declaration_spans.get(index).copied());
         scope.expected_return = process.return_ty.clone();
         for param in &process.params {
             scope.bind(param.name.as_str(), linker.binding_for_type(&param.ty));
@@ -31,7 +27,10 @@ pub(crate) fn analyze_workflow_program(
         linker.analyze_workflow_block(&process.body, &mut scope, &spans, &mut analysis);
     }
 
-    let mut main_scope = Scope::new(true, false, None);
+    let mut main_scope = Scope::new(false, None);
+    for name in &surface.globals {
+        main_scope.bind(name, any_binding());
+    }
     linker.analyze_workflow_block(
         &program.main,
         &mut main_scope,

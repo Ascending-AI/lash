@@ -1234,11 +1234,10 @@ mod tests {
     }
 
     fn process_environment(resources: LashlangHostCatalog) -> crate::LashlangHostEnvironment {
-        crate::LashlangHostEnvironment {
+        crate::LashlangHostEnvironment::new(
             resources,
-            abilities: crate::LashlangAbilities::default().with_processes(),
-            ..crate::LashlangHostEnvironment::default()
-        }
+            crate::LashlangAbilities::default().with_processes(),
+        )
     }
 
     fn linked_artifact(source: &str, resources: LashlangHostCatalog) -> ModuleArtifact {

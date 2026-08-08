@@ -1500,11 +1500,43 @@ mod tests {
     }
 
     #[test]
+    fn unknown_top_level_name_on_line_40_fails_at_link() {
+        let mut lines = (1..40)
+            .map(|index| format!("value_{index} = {index}"))
+            .collect::<Vec<_>>();
+        lines.push("finish value_39_typo".to_string());
+        let source = lines.join("\n");
+        let program = crate::parse(&source).expect("parse");
+
+        let err = LinkedModule::link(program, full_host_environment())
+            .expect_err("top-level typo must fail before execution");
+        let LinkError::UnknownName { name, span } = err else {
+            panic!("expected UnknownName");
+        };
+        assert_eq!(name, "value_39_typo");
+        let diagnostic = crate::format_link_diagnostic(
+            &source,
+            &LinkError::UnknownName {
+                name,
+                span,
+            },
+        );
+        assert!(diagnostic.contains("--> line 40, column 8"), "{diagnostic}");
+    }
+
+    #[test]
+    fn live_host_globals_are_known_at_top_level() {
+        let program = crate::parse("finish { saved: persisted, payload: projected }")
+            .expect("parse");
+        let environment = full_host_environment().with_globals(["persisted", "projected"]);
+        LinkedModule::link(program, environment).expect("live host globals should link");
+    }
+
+    #[test]
     fn linker_reproduces_full_error_set() {
         // One representative source per error variant that the expression walk
         // is responsible for raising.
-        // Top-level scope allows unknown globals (they become runtime errors),
-        // so unknown-name checks must be exercised inside a process body.
+        // Unknown names are rejected in both declarations and the main block.
         type ErrorCase = (&'static str, fn(&LinkError) -> bool);
         let cases: &[ErrorCase] = &[
             (
@@ -1561,6 +1593,48 @@ mod tests {
             matches!(&err, LinkError::UnknownResourceOperation { operation, .. } if operation == "does_not_exist"),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn link_diagnostics_render_deduplicated_operation_hints() {
+        let unknown_source = "finish await tools.does_not_exist({})?";
+        let unknown = LinkedModule::link(
+            crate::parse(unknown_source).expect("parse unknown operation"),
+            full_host_environment(),
+        )
+        .expect_err("operation missing");
+        let LinkError::UnknownResourceOperation { suggestions, .. } = &unknown else {
+            panic!("expected UnknownResourceOperation, got {unknown:?}");
+        };
+        assert!(suggestions.contains(&"tools.echo".to_string()), "{suggestions:?}");
+        assert!(
+            suggestions.contains(&"tools.read_file".to_string()),
+            "{suggestions:?}"
+        );
+        let diagnostic = crate::format_link_diagnostic(unknown_source, &unknown);
+        assert!(
+            diagnostic.contains("hint: available operations:")
+                && diagnostic.contains("`tools.echo`")
+                && diagnostic.contains("`tools.read_file`"),
+            "{diagnostic}"
+        );
+
+        let receiver_source = "value = 1\nfinish await value.echo({})?";
+        let receiver = LinkedModule::link(
+            crate::parse(receiver_source).expect("parse unresolved receiver"),
+            full_host_environment(),
+        )
+        .expect_err("receiver is not an authority");
+        let LinkError::UnresolvedReceiver { suggestions, .. } = &receiver else {
+            panic!("expected UnresolvedReceiver, got {receiver:?}");
+        };
+        assert_eq!(suggestions, &["tools.echo"]);
+        let diagnostic = crate::format_link_diagnostic(receiver_source, &receiver);
+        assert!(
+            diagnostic.contains("hint: use a module authority, e.g. `tools.echo`"),
+            "{diagnostic}"
+        );
+        assert_eq!(diagnostic.matches("tools.echo").count(), 1, "{diagnostic}");
     }
 
     #[test]
@@ -1975,7 +2049,7 @@ mod tests {
               task: "inspect",
               output: { declared: "str", count: "int", tags: "list[str]" }
             }))?
-            [result.declared, result.count, result.tags]
+            values = [result.declared, result.count, result.tags]
             "#,
         )
         .expect("parse shorthand output");

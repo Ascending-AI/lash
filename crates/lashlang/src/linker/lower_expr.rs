@@ -13,6 +13,21 @@ impl<'module> Linker<'module> {
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
     ) -> Result<(Expr, Option<Binding>), LinkError> {
+        let previous_span = scope.span;
+        if let Some(span) = self.expression_spans.get(&(expr as *const Expr as usize)) {
+            scope.span = Some(*span);
+        }
+        let result = self.lower_expr_expected_inner(expr, scope, expected);
+        scope.span = previous_span;
+        result
+    }
+
+    fn lower_expr_expected_inner(
+        &self,
+        expr: &Expr,
+        scope: &mut Scope,
+        expected: Option<&TypeExpr>,
+    ) -> Result<(Expr, Option<Binding>), LinkError> {
         self.reject_trigger_event_special_form(expr, scope.span)?;
         self.validate_expected_literals(expr, expected, scope.span)?;
         if matches!(expr, Expr::Variable(_) | Expr::Field { .. })
@@ -65,13 +80,6 @@ impl<'module> Linker<'module> {
                             process: name.clone(),
                         },
                         Some(Binding::Value(process_ty.clone())),
-                    )
-                } else if scope.allow_unknown_globals {
-                    // Top-level unknown globals are permitted; they surface as
-                    // runtime errors rather than link errors.
-                    (
-                        Expr::Variable(name.clone()),
-                        Some(Binding::Value(TypeExpr::Any)),
                     )
                 } else {
                     return Err(LinkError::UnknownName {
@@ -457,6 +465,10 @@ impl<'module> Linker<'module> {
                     }
                     return Err(LinkError::UnresolvedReceiver {
                         operation: operation.to_string(),
+                        suggestions: self
+                            .surface
+                            .resources
+                            .operation_suggestions_for_operation(operation.as_str()),
                         span: scope.span,
                     });
                 };
@@ -470,6 +482,10 @@ impl<'module> Linker<'module> {
                     return Err(LinkError::UnknownResourceOperation {
                         resource_type: resource_type.clone(),
                         operation: operation.to_string(),
+                        suggestions: self
+                            .surface
+                            .resources
+                            .operation_suggestions_for_resource_type(&resource_type),
                         span: scope.span,
                     });
                 }
@@ -482,6 +498,10 @@ impl<'module> Linker<'module> {
                     return Err(LinkError::UnknownResourceOperation {
                         resource_type: resource_type.clone(),
                         operation: operation.to_string(),
+                        suggestions: self
+                            .surface
+                            .resources
+                            .operation_suggestions_for_resource_type(&resource_type),
                         span: scope.span,
                     });
                 };

@@ -438,6 +438,14 @@ async fn golden_lashlang_diagnostic_corpus_is_exact() {
         "runtime_unknown_builtin",
         runtime_diagnostic("finish nope()").await,
     ));
+    cases.push(diagnostic_case(
+        "link_unknown_resource_operation",
+        link_diagnostic("finish await tools.does_not_exist({})?"),
+    ));
+    cases.push(diagnostic_case(
+        "link_unresolved_receiver",
+        link_diagnostic("value = 1\nfinish await value.echo({})?"),
+    ));
 
     insta::assert_snapshot!("lashlang_diagnostic_corpus", cases.join("\n\n---\n\n"));
 }
@@ -525,6 +533,13 @@ finish Payload
 fn format_parse_diagnostic(source: &str) -> String {
     let err = crate::parse(source).expect_err("parse should fail");
     crate::format_parse_diagnostic(source, &err)
+}
+
+fn link_diagnostic(source: &str) -> String {
+    let program = crate::parse(source).expect("diagnostic source should parse");
+    let error = crate::LinkedModule::link(program, runtime_test_environment())
+        .expect_err("diagnostic source should fail to link");
+    crate::format_link_diagnostic(source, &error)
 }
 
 async fn runtime_diagnostic(source: &str) -> String {

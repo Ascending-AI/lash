@@ -14,6 +14,7 @@ struct Linker<'module> {
     process_types: BTreeMap<String, TypeExpr>,
     type_names: BTreeSet<String>,
     type_defs: BTreeMap<String, TypeExpr>,
+    expression_spans: BTreeMap<usize, Span>,
     expected_type_facts: Option<RefCell<ExpectedTypeFacts>>,
 }
 
@@ -26,6 +27,7 @@ impl<'module> Linker<'module> {
             process_types: BTreeMap::new(),
             type_names: BTreeSet::new(),
             type_defs: BTreeMap::new(),
+            expression_spans: expression_spans_by_pointer(program),
             expected_type_facts: None,
         }
     }
@@ -51,7 +53,10 @@ impl<'module> Linker<'module> {
                 self.lower_declaration(declaration, span)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let mut scope = Scope::new(true, false, None);
+        let mut scope = Scope::new(false, None);
+        for name in &self.surface.globals {
+            scope.bind(name, any_binding());
+        }
         let main = self.lower_expr(&self.program.main, &mut scope)?.0;
         Ok(Program {
             declarations,
@@ -596,7 +601,7 @@ impl<'module> Linker<'module> {
                         span,
                     )?;
                 }
-                let mut scope = Scope::new(false, true, span);
+                let mut scope = Scope::new(true, span);
                 scope.expected_return = process.return_ty.clone();
                 let mut seen = BTreeSet::new();
                 for param in &process.params {
