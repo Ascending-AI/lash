@@ -1,3 +1,7 @@
+//! Endpoint replay fixtures exercise both passes against the same binary by
+//! construction, so cross-version journal-shape safety comes from ADR 0043's
+//! immutable-deployment pin-and-drain rule rather than these tests.
+
 use bytes::{BufMut, Bytes, BytesMut};
 use http_body::{Body, Frame};
 use http_body_util::{BodyExt, Full, channel::Channel};
@@ -901,6 +905,176 @@ pub(super) async fn invoke_endpoint_with_scripted_responses<T: serde::Serialize>
     )
     .await
     .map_err(|_| TerminalError::new("scripted endpoint test timed out"))?
+}
+
+pub(super) async fn invoke_endpoint_with_named_call_responses<T: serde::Serialize>(
+    endpoint: &Endpoint,
+    service: &str,
+    handler: &str,
+    key: &str,
+    input: &T,
+    responses: Vec<(String, serde_json::Value)>,
+) -> Result<Bytes, TerminalError> {
+    tokio::time::timeout(
+        ENDPOINT_TEST_TIMEOUT,
+        invoke_endpoint_body_with_named_call_responses_unbounded(
+            endpoint,
+            service,
+            handler,
+            encode_invocation_body(key, input)?,
+            responses,
+        ),
+    )
+    .await
+    .map_err(|_| TerminalError::new("named-call endpoint test timed out"))?
+}
+
+async fn invoke_endpoint_body_with_named_call_responses_unbounded(
+    endpoint: &Endpoint,
+    service: &str,
+    handler: &str,
+    invocation_body: Bytes,
+    mut responses: Vec<(String, serde_json::Value)>,
+) -> Result<Bytes, TerminalError> {
+    let (input_sender, receiver) = tokio::sync::mpsc::channel(8);
+    input_sender
+        .send(invocation_body)
+        .await
+        .map_err(|err| TerminalError::new(format!("endpoint input failed: {err}")))?;
+    let mut input_sender = Some(input_sender);
+    let response = endpoint.handle(
+        http::Request::builder()
+            .uri(format!("/invoke/{service}/{handler}"))
+            .header(http::header::CONTENT_TYPE, RESTATE_INVOCATION_CONTENT_TYPE)
+            .body(FusedChannelBody { receiver })
+            .expect("endpoint invocation request"),
+    );
+    let status = response.status();
+    if !status.is_success() {
+        return Err(TerminalError::new_with_code(
+            status.as_u16(),
+            format!("endpoint invocation returned status {status}"),
+        ));
+    }
+    let mut response = response.into_body();
+    let mut output = BytesMut::new();
+    let mut decoded = 0;
+    while let Some(frame) = response.frame().await {
+        let frame =
+            frame.map_err(|err| TerminalError::new(format!("endpoint body failed: {err}")))?;
+        let Ok(data) = frame.into_data() else {
+            continue;
+        };
+        output.extend_from_slice(&data);
+        while output.len().saturating_sub(decoded) >= 8 {
+            let header = u64::from_be_bytes(
+                output[decoded..decoded + 8]
+                    .try_into()
+                    .expect("restate frame header"),
+            );
+            let message_type = (header >> 48) as u16;
+            let payload_len = usize::try_from(header & 0x0000_FFFF_FFFF_FFFF)
+                .expect("restate frame payload length");
+            let frame_end = decoded + 8 + payload_len;
+            if output.len() < frame_end {
+                break;
+            }
+            match message_type {
+                0x0005 => {
+                    let payload = &output[decoded + 8..frame_end];
+                    let (completion_id, value) =
+                        proposed_run_completion(payload).ok_or_else(|| {
+                            TerminalError::new("endpoint returned an invalid run completion")
+                        })?;
+                    input_sender
+                        .as_mut()
+                        .expect("endpoint input remains open for run completion")
+                        .send(encode_run_completion(completion_id, value))
+                        .await
+                        .map_err(|err| {
+                            TerminalError::new(format!("run completion input failed: {err}"))
+                        })?;
+                }
+                0x040D => {
+                    let call = decode_call_frame(&output[decoded..frame_end])
+                        .ok_or_else(|| TerminalError::new("invalid call command frame"))?;
+                    let response_index = responses
+                        .iter()
+                        .position(|(handler, _)| handler == &call.handler);
+                    if let Some(response_index) = response_index {
+                        let (_, response) = responses.remove(response_index);
+                        let response =
+                            serde_json::to_vec(&response).map_err(TerminalError::from_error)?;
+                        input_sender
+                            .as_mut()
+                            .expect("endpoint input remains open for named calls")
+                            .send(encode_call_completion(call.result_completion_id, &response))
+                            .await
+                            .map_err(|err| {
+                                TerminalError::new(format!("call completion input failed: {err}"))
+                            })?;
+                    } else {
+                        drop(input_sender.take());
+                    }
+                }
+                0x0001..=0x0003 => drop(input_sender.take()),
+                _ => {}
+            }
+            decoded = frame_end;
+        }
+    }
+    drop(input_sender);
+    Ok(output.freeze())
+}
+
+pub(super) fn encode_captured_run_and_call_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    suspended_output: &[u8],
+    call_completions: &[(String, serde_json::Value)],
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let run_command = restate_message_frame(suspended_output, 0x0411)
+        .ok_or_else(|| TerminalError::new("suspended attempt omitted its RunCommand"))?;
+    let proposed_completion = restate_message_frame(suspended_output, 0x0005).ok_or_else(|| {
+        TerminalError::new("suspended attempt omitted its run completion proposal")
+    })?;
+    let (run_completion_id, run_value) = proposed_run_completion(
+        proposed_completion
+            .get(8..)
+            .ok_or_else(|| TerminalError::new("run completion proposal omitted its payload"))?,
+    )
+    .ok_or_else(|| TerminalError::new("suspended attempt proposed an invalid run completion"))?;
+    let calls = restate_call_frames(suspended_output)
+        .ok_or_else(|| TerminalError::new("suspended attempt contained invalid call frames"))?;
+    let known_entries = u32::try_from(2 + calls.len())
+        .map_err(|_| TerminalError::new("too many commands in replay fixture"))?;
+
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, known_entries));
+    body.extend_from_slice(&encode_input_command(&input));
+    body.extend_from_slice(run_command);
+    for call in &calls {
+        body.extend_from_slice(&call.frame);
+    }
+    body.extend_from_slice(&encode_run_completion(run_completion_id, run_value));
+    for call in &calls {
+        let (_, completion) = call_completions
+            .iter()
+            .find(|(handler, _)| handler == &call.handler)
+            .ok_or_else(|| {
+                TerminalError::new(format!(
+                    "replay fixture omitted completion for `{}`",
+                    call.handler
+                ))
+            })?;
+        let completion = serde_json::to_vec(completion).map_err(TerminalError::from_error)?;
+        body.extend_from_slice(&encode_call_completion(
+            call.result_completion_id,
+            &completion,
+        ));
+    }
+    Ok(body.freeze())
 }
 
 async fn invoke_endpoint_body_with_scripted_responses_unbounded(

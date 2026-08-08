@@ -5,6 +5,14 @@
 //! too — `LashDurableWaitWorkflow` owns the promise and its deadline timer,
 //! `LashDurableWaitIndex` owns the session-to-wait index that cancellation,
 //! revocation, and session deletion resolve through.
+//!
+//! Handler-scoped key derivation is deliberately pure: it validates and derives
+//! identity without probing the session tombstone. The server-side durable-wait
+//! gates and the session lease fence enforce revocation, and the handler
+//! controller performs its defense-in-depth probe at the unconditional await
+//! boundary so journal shape is replay-deterministic. This intentionally differs
+//! from ingress-side `RestateEffectHostController::await_event_key`, which is not
+//! executing inside a Restate journal and still refuses revoked sessions eagerly.
 
 use std::time::Duration;
 
