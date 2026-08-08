@@ -21,6 +21,7 @@
 //! `docs/reporting.html`; for the attach-a-sink how-to, see `docs/tracing.html`.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -269,10 +270,34 @@ pub enum TraceEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_frame_switch: Option<TraceAgentFrameSwitch>,
     },
+    #[serde(rename = "session_execution_lease.frame_handoff_transferred")]
+    SessionExecutionLeaseFrameHandoffTransferred {
+        owner_id: String,
+        incarnation_id: String,
+        previous_fencing_token: u64,
+        transferred_fencing_token: u64,
+        trigger: TraceSessionExecutionLeaseTransferTrigger,
+    },
     Custom {
         name: String,
         payload: Value,
     },
+}
+
+/// Cause of a session-execution authority transfer at an Agent Frame handoff.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceSessionExecutionLeaseTransferTrigger {
+    /// A nested runtime-state commit released the lane retained by the outer turn.
+    NestedCommit,
+}
+
+impl fmt::Display for TraceSessionExecutionLeaseTransferTrigger {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NestedCommit => f.write_str("nested_commit"),
+        }
+    }
 }
 
 impl TraceEvent {
@@ -305,6 +330,9 @@ impl TraceEvent {
             Self::TokenUsage { .. } => "token_usage",
             Self::LashlangExecution { .. } => "lashlang_execution",
             Self::TurnCompleted { .. } => "turn_completed",
+            Self::SessionExecutionLeaseFrameHandoffTransferred { .. } => {
+                "session_execution_lease.frame_handoff_transferred"
+            }
             Self::Custom { .. } => "custom",
         }
     }

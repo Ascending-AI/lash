@@ -158,6 +158,7 @@ impl UsageCapability {
             &current.runtime_lease_owner,
             current.host.core.control.lease_timings,
             Arc::clone(&current.host.core.clock),
+            current.fresh_session_execution_lease_released.clone(),
         )
         .await
         .map_err(|err| crate::PluginError::Session(err.to_string()))?;

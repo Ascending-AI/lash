@@ -43,6 +43,12 @@ lock lifecycle.
   `claimed_at`. The nonce has no value-taking constructor and no `Display`
   implementation; hosts can clone a minted value for retry but cannot derive one
   from stable owner data.
+- Same-owner reentry therefore rotates the lock-lifecycle token, and releasing
+  that reentered claim clears the durable lane row. A logical Agent Frame chain
+  that retained the earlier guard uses the frame-handoff transfer boundary to
+  reacquire only when a nested commit proves that rotation occurred. A locally
+  expired or lost guard is never silently reacquired there. FIG-1063 owns the
+  complete nesting contract beyond this boundary mechanism.
 - Renewal never rotates the nonce. Renewal and standalone release require exact
   `(owner, lease token)` equality and return named refusals when the claim is no
   longer current. Backend implementations must serialize renewal against claim
@@ -64,7 +70,8 @@ lock lifecycle.
 The claim and renewal paths use the same per-session serialization discipline on
 each backend: one in-memory transaction lock, one SQLite writer transaction, and
 one PostgreSQL advisory lock plus row lock. Release remains one atomic
-owner-and-token-predicated write.
+owner-and-token-predicated write. FIG-1064 tracks the SQLite/PostgreSQL predicate
+divergence in those enforcement paths.
 
 A rolling deployment must not let two binaries with different token-rotation
 semantics share one incarnation identity. Incarnation identifies one compatible

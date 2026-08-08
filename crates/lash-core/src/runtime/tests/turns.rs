@@ -1253,6 +1253,11 @@ struct ExpireLeaseAfterRetainedCommit {
     expired: AtomicBool,
 }
 
+struct ExpireLeaseAfterRetainedCommitAndSignalNestedRelease {
+    expiry: ExpireLeaseAfterRetainedCommit,
+    nested_release: NestedLeaseReleaseSignal,
+}
+
 struct PauseAtPreparedTurn {
     entered: Arc<AtomicBool>,
     release: Arc<AtomicBool>,
@@ -1311,6 +1316,21 @@ impl crate::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAfterRetainedCommit {
     }
 
     fn end(&self, _phase: crate::runtime::RuntimeTurnPhase) {}
+}
+
+impl crate::runtime::RuntimeTurnPhaseProbe
+    for ExpireLeaseAfterRetainedCommitAndSignalNestedRelease
+{
+    fn begin(&self, phase: crate::runtime::RuntimeTurnPhase) {
+        self.expiry.begin(phase);
+        if phase == crate::runtime::RuntimeTurnPhase::PostCommitDelivery {
+            self.nested_release.mark_released();
+        }
+    }
+
+    fn end(&self, phase: crate::runtime::RuntimeTurnPhase) {
+        self.expiry.end(phase);
+    }
 }
 
 async fn standard_runtime_with_transport_and_queue_store(
@@ -3692,6 +3712,232 @@ async fn stream_prepared_turn_follows_agent_frame_switch() {
         "prepared follow-on complete"
     );
     assert_eq!(call_index.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff() {
+    let call_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let captured_call_index = Arc::clone(&call_index);
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |_| {
+            let call_index = Arc::clone(&captured_call_index);
+            async move {
+                match call_index.fetch_add(1, Ordering::SeqCst) {
+                    0 => Ok(LlmResponse {
+                        parts: vec![LlmOutputPart::ToolCall {
+                            call_id: "queued-lapsed-switch".to_string(),
+                            tool_name: "terminal_tool_0".to_string(),
+                            input_json: "{}".to_string(),
+                            replay: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    }),
+                    1 => Ok(LlmResponse {
+                        full_text: "must not silently reacquire".to_string(),
+                        parts: vec![LlmOutputPart::Text {
+                            text: "must not silently reacquire".to_string(),
+                            response_meta: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    }),
+                    index => panic!("unexpected provider call {index}"),
+                }
+            }
+        })
+        .build();
+    let clock = Arc::new(ManualClock::new(1_000));
+    let store_clock: Arc<dyn crate::Clock> = clock.clone();
+    let store = Arc::new(RecordingStore::with_clock(store_clock));
+    let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
+    let host_clock: Arc<dyn crate::Clock> = clock.clone();
+    let mut config = crate::RuntimeHostConfig::in_memory().with_clock(host_clock);
+    config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
+        transport.clone().into_handle(),
+    ));
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(TerminalControlTool {
+            controls: vec![crate::ToolControl::SwitchAgentFrame {
+                frame_id: "queued-lapsed-follow-frame".to_string(),
+                initial_nodes: Vec::new(),
+                task: Some("must retain the loud lease failure".to_string()),
+            }],
+        }),
+        transport,
+        crate::EmbeddedRuntimeHost::new(config),
+        runtime_store,
+    )
+    .await;
+    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
+    runtime.set_turn_phase_probe(Arc::new(
+        ExpireLeaseAfterRetainedCommitAndSignalNestedRelease {
+            expiry: ExpireLeaseAfterRetainedCommit::new(Arc::clone(&clock)),
+            nested_release: runtime.fresh_session_execution_lease_released.clone(),
+        },
+    ));
+    enqueue_idle_turn_input(store.as_ref(), "root", "start lapsed queued handoff").await;
+
+    let output = runtime
+        .stream_next_queued_work(TurnOptions::new(
+            CancellationToken::new(),
+            named_turn_scope("root", "queued-lapsed-handoff"),
+        ))
+        .await
+        .expect("the committed switch is returned with a loud follow-on failure")
+        .expect("queued turn should run");
+
+    assert!(matches!(
+        output.outcome,
+        TurnOutcome::AgentFrameSwitch { .. }
+    ));
+    let issue = output
+        .errors
+        .iter()
+        .find(|issue| {
+            issue.code.as_deref()
+                == Some(crate::RuntimeErrorCode::SessionExecutionLeaseLost.as_str())
+        })
+        .expect("the durable handoff reports the lapsed session lane");
+    assert_eq!(issue.retryable, Some(false));
+    assert_eq!(
+        call_index.load(Ordering::SeqCst),
+        1,
+        "a lapsed retained lane must not be silently reacquired for the follow-on turn"
+    );
+    let pending = crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        .await
+        .expect("list committed handoff batch");
+    assert!(
+        pending
+            .iter()
+            .any(|batch| batch.items.iter().any(|item| matches!(
+                item.payload,
+                crate::QueuedWorkPayload::AgentFrameTask { .. }
+            ))),
+        "the loud claim failure must leave the committed handoff batch claimable"
+    );
+    let final_lease = crate::store::SessionExecutionLeaseStore::get_session_execution_lease(
+        store.as_ref(),
+        "root",
+    )
+    .await
+    .expect("read final session lane state");
+    assert!(
+        final_lease.is_none(),
+        "settling the loud durable failure must clear the expired owner row"
+    );
+}
+
+#[tokio::test]
+async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff() {
+    let call_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let captured_call_index = Arc::clone(&call_index);
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |_| {
+            let call_index = Arc::clone(&captured_call_index);
+            async move {
+                match call_index.fetch_add(1, Ordering::SeqCst) {
+                    0 => Ok(LlmResponse {
+                        parts: vec![LlmOutputPart::ToolCall {
+                            call_id: "inprocess-lapsed-switch".to_string(),
+                            tool_name: "terminal_tool_0".to_string(),
+                            input_json: "{}".to_string(),
+                            replay: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    }),
+                    1 => Ok(LlmResponse {
+                        full_text: "must not reach the follow-on".to_string(),
+                        parts: vec![LlmOutputPart::Text {
+                            text: "must not reach the follow-on".to_string(),
+                            response_meta: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    }),
+                    index => panic!("unexpected provider call {index}"),
+                }
+            }
+        })
+        .build();
+    let clock = Arc::new(ManualClock::new(1_000));
+    let store_clock: Arc<dyn crate::Clock> = clock.clone();
+    let store = Arc::new(RecordingStore::with_clock(store_clock));
+    let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
+    let host_clock: Arc<dyn crate::Clock> = clock.clone();
+    let mut config = crate::RuntimeHostConfig::in_memory().with_clock(host_clock);
+    config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
+        transport.clone().into_handle(),
+    ));
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(TerminalControlTool {
+            controls: vec![crate::ToolControl::SwitchAgentFrame {
+                frame_id: "inprocess-lapsed-follow-frame".to_string(),
+                initial_nodes: Vec::new(),
+                task: Some("must retain the loud lease failure".to_string()),
+            }],
+        }),
+        transport,
+        crate::EmbeddedRuntimeHost::new(config),
+        runtime_store,
+    )
+    .await;
+    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
+    runtime.set_turn_phase_probe(Arc::new(
+        ExpireLeaseAfterRetainedCommitAndSignalNestedRelease {
+            expiry: ExpireLeaseAfterRetainedCommit::new(Arc::clone(&clock)),
+            nested_release: runtime.fresh_session_execution_lease_released.clone(),
+        },
+    ));
+
+    let run = runtime
+        .stream_turn_with_agent_frames(
+            TurnInput::text("start lapsed in-process handoff"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", "inprocess-lapsed-handoff"),
+            ),
+        )
+        .await
+        .expect("the committed switch is returned with a loud follow-on failure");
+
+    assert_eq!(run.turns.len(), 1);
+    assert!(matches!(
+        run.turns[0].outcome,
+        TurnOutcome::AgentFrameSwitch { .. }
+    ));
+    let issue = run.turns[0]
+        .errors
+        .iter()
+        .find(|issue| {
+            issue.code.as_deref()
+                == Some(crate::RuntimeErrorCode::SessionExecutionLeaseLost.as_str())
+        })
+        .expect("the in-process follow-on reports the lapsed session lane");
+    assert_eq!(issue.retryable, Some(false));
+    assert_eq!(
+        call_index.load(Ordering::SeqCst),
+        1,
+        "the follow-on provider call must not start under an expired lane"
+    );
+    let final_lease = crate::store::SessionExecutionLeaseStore::get_session_execution_lease(
+        store.as_ref(),
+        "root",
+    )
+    .await
+    .expect("read final session lane state");
+    assert!(
+        final_lease.is_none(),
+        "settling the loud in-process failure must clear the expired owner row"
+    );
 }
 
 #[tokio::test]

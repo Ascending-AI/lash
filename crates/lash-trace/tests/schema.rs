@@ -13,8 +13,8 @@ use lash_trace::{
     TraceEffectEnvelopeDiffValue, TraceError, TraceEvent, TraceLashlangExecutionEvent,
     TraceLashlangExecutionIdentity, TraceLashlangStatus, TraceLlmRequest, TraceLlmResponse,
     TraceProviderRequestEvent, TraceProviderStreamEvent, TraceRecord, TraceRuntimeScope,
-    TraceRuntimeStreamEvent, TraceRuntimeSubject, TraceTokenUsage, TraceToolCallOutcome,
-    TraceToolCallOutput,
+    TraceRuntimeStreamEvent, TraceRuntimeSubject, TraceSessionExecutionLeaseTransferTrigger,
+    TraceTokenUsage, TraceToolCallOutcome, TraceToolCallOutput,
 };
 use serde_json::json;
 
@@ -223,6 +223,13 @@ fn event_samples() -> Vec<TraceEvent> {
             done_reason: "modelstop".to_string(),
             agent_frame_switch: None,
         },
+        TraceEvent::SessionExecutionLeaseFrameHandoffTransferred {
+            owner_id: "worker-1".to_string(),
+            incarnation_id: "boot-1".to_string(),
+            previous_fencing_token: 7,
+            transferred_fencing_token: 8,
+            trigger: TraceSessionExecutionLeaseTransferTrigger::NestedCommit,
+        },
         TraceEvent::Custom {
             name: "x.event".to_string(),
             payload: json!({ "ok": true }),
@@ -251,6 +258,7 @@ const ALL_TRACE_EVENT_KINDS: &[&str] = &[
     "token_usage",
     "lashlang_execution",
     "turn_completed",
+    "session_execution_lease.frame_handoff_transferred",
     "custom",
 ];
 
@@ -323,6 +331,28 @@ fn rolling_history_events_pin_decision_payloads() {
                 "summary_nodes": 1,
             }),
         ]
+    );
+}
+
+#[test]
+fn session_execution_lease_frame_handoff_transfer_pins_payload() {
+    let event = TraceEvent::SessionExecutionLeaseFrameHandoffTransferred {
+        owner_id: "worker-1".to_string(),
+        incarnation_id: "boot-1".to_string(),
+        previous_fencing_token: 7,
+        transferred_fencing_token: 8,
+        trigger: TraceSessionExecutionLeaseTransferTrigger::NestedCommit,
+    };
+    assert_eq!(
+        serde_json::to_value(event).expect("serialize handoff transfer"),
+        json!({
+            "type": "session_execution_lease.frame_handoff_transferred",
+            "owner_id": "worker-1",
+            "incarnation_id": "boot-1",
+            "previous_fencing_token": 7,
+            "transferred_fencing_token": 8,
+            "trigger": "nested_commit",
+        })
     );
 }
 

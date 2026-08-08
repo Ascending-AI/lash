@@ -66,6 +66,7 @@ pub(in crate::runtime) struct CurrentSessionCapability {
     plugins: Arc<crate::PluginSession>,
     store: Option<Arc<dyn crate::store::RuntimePersistence>>,
     runtime_lease_owner: crate::LeaseOwnerIdentity,
+    fresh_session_execution_lease_released: NestedLeaseReleaseSignal,
     turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
 }
 
@@ -202,6 +203,9 @@ impl CurrentSessionCapability {
             plugins,
             store: runtime.services.store.clone(),
             runtime_lease_owner: runtime.runtime_lease_owner.clone(),
+            fresh_session_execution_lease_released: runtime
+                .fresh_session_execution_lease_released
+                .clone(),
             turn_phase_probe: runtime.turn_phase_probe.clone(),
         }
     }

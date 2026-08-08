@@ -158,6 +158,7 @@ impl LashRuntime {
                 &self.runtime_lease_owner,
                 self.host.core.control.lease_timings,
                 Arc::clone(&self.host.core.clock),
+                self.fresh_session_execution_lease_released.clone(),
             )
             .await
             {
@@ -705,6 +706,7 @@ impl LashRuntime {
                 &self.runtime_lease_owner,
                 self.host.core.control.lease_timings,
                 Arc::clone(&self.host.core.clock),
+                self.fresh_session_execution_lease_released.clone(),
             )
             .await
             {
@@ -759,6 +761,7 @@ impl LashRuntime {
             &self.runtime_lease_owner,
             self.host.core.control.lease_timings,
             Arc::clone(&self.host.core.clock),
+            self.fresh_session_execution_lease_released.clone(),
         )
         .await
         .map_err(|err| {

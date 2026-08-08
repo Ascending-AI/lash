@@ -100,6 +100,19 @@ pub(super) fn interpret_typed(event: &TraceEvent, raw: &Value) -> (String, Strin
             ),
             true,
         ),
+        TraceEvent::SessionExecutionLeaseFrameHandoffTransferred {
+            owner_id,
+            incarnation_id,
+            previous_fencing_token,
+            transferred_fencing_token,
+            trigger,
+        } => (
+            "session execution lease handoff".to_string(),
+            format!(
+                "{trigger}: {owner_id}/{incarnation_id}, fencing token {previous_fencing_token} -> {transferred_fencing_token}"
+            ),
+            false,
+        ),
         TraceEvent::Custom { name, payload } => (name.clone(), json_compact(payload), false),
         TraceEvent::PromptBuilt {
             prompt_chars,

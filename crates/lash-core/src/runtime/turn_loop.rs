@@ -710,6 +710,10 @@ impl LashRuntime {
         else {
             return Ok(None);
         };
+        // The signal means "the lane this turn holds was released underneath us". Any
+        // release predating this claim cannot invalidate the guard it returns.
+        self.fresh_session_execution_lease_released
+            .clear_before_claim();
         match SessionExecutionLeaseGuard::try_acquire(
             store,
             &self.state.session_id,
@@ -736,6 +740,92 @@ impl LashRuntime {
                 Ok(None)
             }
         }
+    }
+
+    /// Repair handoff authority after a nested fresh-lease commit.
+    ///
+    /// The shared trigger is set only when nested runtime-state persistence rotates and releases
+    /// the same owner's lease. At the physical-frame boundary, both in-process and durable
+    /// handoffs consume it before selecting their continuation path. A still-live retained guard
+    /// is transferred; a guard whose continuity is already lost or locally expired is deliberately
+    /// not reacquired, preserving the loud fenced failure, and a lane-less turn remains legal.
+    ///
+    /// The transfer cannot make the later claim atomic with asynchronous hooks. A hook that
+    /// invalidates the transferred token between this call and the durable claim still produces a
+    /// loud claim failure while leaving the committed handoff batch claimable. The resident graph
+    /// is invalidated whenever the trigger is consumed because same-owner guard rotation proves
+    /// nothing about whether the nested commit advanced the durable session head; explicit reload,
+    /// rather than guard-identity churn, is the graph-freshness authority (ADRs 0029 and 0045).
+    pub(super) async fn transfer_session_execution_lease_for_agent_frame_handoff(
+        &mut self,
+        guard: &mut Option<SessionExecutionLeaseGuard>,
+    ) -> Result<(), RuntimeError> {
+        if !self.fresh_session_execution_lease_released.consume() {
+            return Ok(());
+        }
+        self.graph_loaded_from_store = false;
+        self.last_committed_lease_continuity = None;
+        let Some(previous) = guard.as_ref() else {
+            return Ok(());
+        };
+        if previous.continuity().is_none() {
+            return Ok(());
+        }
+        let Some(store) = self
+            .session
+            .as_ref()
+            .and_then(|session| session.history_store())
+        else {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::StoreCommitFailed,
+                "agent-frame handoff authority transfer requires a runtime persistence store",
+            ));
+        };
+        let previous_fencing_token = previous.fence().fencing_token;
+        let Some(transferred) = SessionExecutionLeaseGuard::try_acquire(
+            store,
+            &self.state.session_id,
+            &self.runtime_lease_owner,
+            self.host.core.control.lease_timings,
+            Arc::clone(&self.host.core.clock),
+        )
+        .await
+        .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?
+        else {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::SessionExecutionLeaseLost,
+                format!(
+                    "session execution authority for agent-frame handoff in session `{}` is held by another executor",
+                    self.state.session_id
+                ),
+            ));
+        };
+        let transferred_fencing_token = transferred.fence().fencing_token;
+        *guard = Some(transferred);
+        crate::trace::emit_trace(
+            &self.host.core.tracing.trace_sink,
+            &self.host.core.tracing.trace_context,
+            lash_trace::TraceContext::default().for_session(self.state.session_id.clone()),
+            lash_trace::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred {
+                owner_id: self.runtime_lease_owner.owner_id.clone(),
+                incarnation_id: self.runtime_lease_owner.incarnation_id.clone(),
+                previous_fencing_token,
+                transferred_fencing_token,
+                trigger: lash_trace::TraceSessionExecutionLeaseTransferTrigger::NestedCommit,
+            },
+            self.host.core.clock.as_ref(),
+        );
+        tracing::info!(
+            session_id = %self.state.session_id,
+            owner_id = %self.runtime_lease_owner.owner_id,
+            incarnation_id = %self.runtime_lease_owner.incarnation_id,
+            previous_fencing_token,
+            transferred_fencing_token,
+            trigger = "nested_commit",
+            event = "session_execution_lease.frame_handoff_transferred",
+            "transferred session execution authority at the agent-frame handoff"
+        );
+        Ok(())
     }
 
     async fn settle_session_execution_lease<T>(
@@ -1382,7 +1472,7 @@ impl LashRuntime {
         }
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
         let cancel = opts.cancel.clone();
-        let session_execution_lease = self.claim_session_execution_lease().await?;
+        let mut session_execution_lease = self.claim_session_execution_lease().await?;
         let scoped_effect_controller = opts.scoped_effect_controller();
         let result = Box::pin(self.drive_logical_turn(
             LogicalTurnStart::Input(input),
@@ -1391,7 +1481,7 @@ impl LashRuntime {
             scoped_effect_controller,
             cancel,
             LogicalTurnClaims::new(Vec::new(), Vec::new()),
-            session_execution_lease.as_ref(),
+            &mut session_execution_lease,
             stopwatch,
         ))
         .await
@@ -1502,6 +1592,7 @@ impl LashRuntime {
                 );
                 let claim_for_abandon = input_claim.clone();
                 let scoped_effect_controller = opts.scoped_effect_controller();
+                let mut session_execution_lease = Some(session_execution_lease);
                 let result = Box::pin(self.drive_logical_turn(
                     LogicalTurnStart::Input(input),
                     opts.events_or_noop(),
@@ -1509,7 +1600,7 @@ impl LashRuntime {
                     scoped_effect_controller,
                     cancel,
                     LogicalTurnClaims::new(Vec::new(), vec![input_claim]),
-                    Some(&session_execution_lease),
+                    &mut session_execution_lease,
                     stopwatch,
                 ))
                 .await
@@ -1522,7 +1613,7 @@ impl LashRuntime {
                     .await;
                 }
                 return self
-                    .settle_session_execution_lease(Some(&session_execution_lease), result)
+                    .settle_session_execution_lease(session_execution_lease.as_ref(), result)
                     .await;
             }
         }
@@ -1602,6 +1693,7 @@ impl LashRuntime {
         );
         let claim_for_abandon = claim.clone();
         let scoped_effect_controller = opts.scoped_effect_controller();
+        let mut session_execution_lease = Some(session_execution_lease);
         let result = Box::pin(self.drive_logical_turn(
             LogicalTurnStart::Input(work.input),
             opts.events_or_noop(),
@@ -1609,7 +1701,7 @@ impl LashRuntime {
             scoped_effect_controller,
             cancel,
             LogicalTurnClaims::new(vec![claim], Vec::new()),
-            Some(&session_execution_lease),
+            &mut session_execution_lease,
             stopwatch,
         ))
         .await
@@ -1621,7 +1713,7 @@ impl LashRuntime {
             )
             .await;
         }
-        self.settle_session_execution_lease(Some(&session_execution_lease), result)
+        self.settle_session_execution_lease(session_execution_lease.as_ref(), result)
             .await
     }
 
@@ -1738,7 +1830,7 @@ impl LashRuntime {
         }
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
         let cancel = opts.cancel.clone();
-        let session_execution_lease = self.claim_session_execution_lease().await?;
+        let mut session_execution_lease = self.claim_session_execution_lease().await?;
         let scoped_effect_controller = opts.scoped_effect_controller();
         let result = Box::pin(self.drive_logical_turn(
             LogicalTurnStart::Input(input),
@@ -1747,7 +1839,7 @@ impl LashRuntime {
             scoped_effect_controller,
             cancel,
             LogicalTurnClaims::new(Vec::new(), Vec::new()),
-            session_execution_lease.as_ref(),
+            &mut session_execution_lease,
             stopwatch,
         ))
         .await;
@@ -1773,6 +1865,7 @@ impl LashRuntime {
         let lease_continuity =
             session_execution_lease.and_then(SessionExecutionLeaseGuard::continuity);
         let may_reuse_resident_graph = self.graph_loaded_from_store
+            && !self.fresh_session_execution_lease_released.is_set()
             && lease_continuity.is_some()
             && lease_continuity == self.last_committed_lease_continuity;
         if !may_reuse_resident_graph {
@@ -2159,7 +2252,7 @@ impl LashRuntime {
         initial_turn_input_claim: Option<crate::TurnInputClaim>,
     ) -> Result<AssembledTurn, RuntimeError> {
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
-        let session_execution_lease = self.claim_session_execution_lease().await?;
+        let mut session_execution_lease = self.claim_session_execution_lease().await?;
         let result = Box::pin(self.drive_logical_turn(
             LogicalTurnStart::Prepared(PreparedLogicalTurn {
                 messages,
@@ -2179,7 +2272,7 @@ impl LashRuntime {
                 initial_queue_claim.into_iter().collect(),
                 initial_turn_input_claim.into_iter().collect(),
             ),
-            session_execution_lease.as_ref(),
+            &mut session_execution_lease,
             stopwatch,
         ))
         .await

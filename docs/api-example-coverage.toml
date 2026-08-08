@@ -54746,6 +54746,78 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom observability sink implementers consuming structured trace events rather than bundled sinks."
 
 [[api]]
+symbol = "lash::tracing::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: operators and custom observability sinks reconstructing same-owner Agent Frame handoff authority changes from structured lease trace records."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::owner_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::owner_id"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: operators and custom observability sinks attributing an Agent Frame handoff transfer to the stable worker owner."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::incarnation_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::incarnation_id"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: operators and custom observability sinks attributing an Agent Frame handoff transfer to a specific worker incarnation."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::previous_fencing_token"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::previous_fencing_token"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: operators and custom observability sinks reconstructing the pre-transfer session lane generation."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::transferred_fencing_token"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::transferred_fencing_token"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: operators and custom observability sinks reconstructing the post-transfer session lane generation."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::trigger"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::SessionExecutionLeaseFrameHandoffTransferred::trigger"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: operators and custom observability sinks distinguishing nested-commit handoff repair from other lease transitions."
+
+[[api]]
+symbol = "lash::tracing::TraceSessionExecutionLeaseTransferTrigger"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::TraceSessionExecutionLeaseTransferTrigger"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sinks interpreting the typed cause of a session execution lease handoff transfer."
+
+[[api]]
+symbol = "lash::tracing::TraceSessionExecutionLeaseTransferTrigger::NestedCommit"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceSessionExecutionLeaseTransferTrigger::NestedCommit"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sinks recognizing the nested runtime-state commit transfer cause."
+
+[[api]]
 symbol = "lash::tracing::TraceEvent::SessionStarted"
 kind = "variant"
 availability = "default+all-features"
