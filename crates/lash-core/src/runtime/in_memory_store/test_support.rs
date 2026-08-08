@@ -145,6 +145,18 @@ impl InMemorySessionStore {
             .expect("lock injected renewal failure") = Some(error);
     }
 
+    /// Replace the next successful backend renewal response without changing
+    /// the durable row, emulating a corrupt or mis-targeted backend result.
+    pub(crate) fn respond_to_next_session_execution_lease_renewal_with(
+        &self,
+        response: crate::SessionExecutionLease,
+    ) {
+        *self
+            .next_session_execution_lease_renewal_response
+            .lock()
+            .expect("lock injected renewal response") = Some(response);
+    }
+
     /// Suspend every subsequent `release_session_execution_lease` at its
     /// backend await until the returned gate admits it.
     pub(crate) fn gate_session_execution_lease_release(

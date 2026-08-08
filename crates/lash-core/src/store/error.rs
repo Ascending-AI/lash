@@ -1,3 +1,32 @@
+/// The returned renewal field that made a resident lease unsafe to replace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SessionExecutionLeaseRenewalInstallMismatch {
+    Session,
+    OwnerIncarnation,
+    LeaseToken,
+    FencingToken,
+    ExpiryRegressed,
+}
+
+impl SessionExecutionLeaseRenewalInstallMismatch {
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Session => "session",
+            Self::OwnerIncarnation => "owner_incarnation",
+            Self::LeaseToken => "lease_token",
+            Self::FencingToken => "fencing_token",
+            Self::ExpiryRegressed => "expiry",
+        }
+    }
+}
+
+impl std::fmt::Display for SessionExecutionLeaseRenewalInstallMismatch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.label())
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum StoreError {
@@ -223,6 +252,13 @@ pub enum StoreError {
     )]
     SessionExecutionLeaseRenewalRefused { session_id: String },
     #[error(
+        "session execution lease renewal response for session `{session_id}` was refused because its {mismatch} field did not preserve the presented lease"
+    )]
+    SessionExecutionLeaseRenewalInstallRefused {
+        session_id: String,
+        mismatch: SessionExecutionLeaseRenewalInstallMismatch,
+    },
+    #[error(
         "session execution lease release for session `{session_id}` was refused because owner or lease token is no longer current"
     )]
     SessionExecutionLeaseReleaseRefused { session_id: String },
@@ -323,6 +359,9 @@ impl StoreError {
             Self::SessionExecutionLeaseExpired { .. } => "SessionExecutionLeaseExpired",
             Self::SessionExecutionLeaseRenewalRefused { .. } => {
                 "SessionExecutionLeaseRenewalRefused"
+            }
+            Self::SessionExecutionLeaseRenewalInstallRefused { .. } => {
+                "SessionExecutionLeaseRenewalInstallRefused"
             }
             Self::SessionExecutionLeaseReleaseRefused { .. } => {
                 "SessionExecutionLeaseReleaseRefused"
