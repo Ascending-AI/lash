@@ -18,6 +18,9 @@ use lash_rlm_types::{
 };
 use serde_json::Value;
 
+#[cfg(feature = "testing")]
+use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRole};
+
 use crate::projection::rlm_protocol_event;
 use crate::rlm_support::decode_rlm_termination_options;
 
@@ -60,27 +63,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             duration_ms: 0,
         })];
 
-        let mut assistant_text = String::new();
-        let mut reasoning_text = String::new();
-        for part in normalized_response_parts(&llm_response) {
-            match part {
-                LlmOutputPart::Text { text, .. } => {
-                    append_assistant_text_part(&mut assistant_text, &text);
-                }
-                LlmOutputPart::Reasoning { text, replay } => {
-                    let reasoning = if text.trim().is_empty() {
-                        replay
-                            .as_ref()
-                            .map(|meta| meta.summary.join("\n\n"))
-                            .unwrap_or_default()
-                    } else {
-                        text
-                    };
-                    append_assistant_text_part(&mut reasoning_text, &reasoning);
-                }
-                LlmOutputPart::ToolCall { .. } => {}
-            }
-        }
+        let (assistant_text, reasoning_text) =
+            project_response_texts(normalized_response_parts(&llm_response));
 
         if assistant_text.trim().is_empty() && reasoning_text.trim().is_empty() {
             actions.push(DriverAction::Emit(make_error_event(
@@ -335,6 +319,95 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         }
         actions
     }
+}
+
+fn project_response_texts(parts: Vec<LlmOutputPart>) -> (String, String) {
+    let mut assistant_text = String::new();
+    let mut reasoning_text = String::new();
+    for part in parts {
+        match part {
+            LlmOutputPart::Text { text, .. } => {
+                append_assistant_text_part(&mut assistant_text, &text);
+            }
+            LlmOutputPart::Reasoning { text, replay } => {
+                let reasoning = if text.trim().is_empty() {
+                    replay
+                        .as_ref()
+                        .map(|meta| meta.summary.join("\n\n"))
+                        .unwrap_or_default()
+                } else {
+                    text
+                };
+                append_assistant_text_part(&mut reasoning_text, &reasoning);
+            }
+            LlmOutputPart::ToolCall { .. } => {}
+        }
+    }
+    (assistant_text, reasoning_text)
+}
+
+/// Test support for exercising the production RLM response-to-history seam.
+/// Reasoning blocks traverse the same collapse used by `RlmDriver`, becoming
+/// bare text without provider replay metadata before the next provider request.
+#[cfg(feature = "testing")]
+pub fn project_conformance_messages_through_rlm_history(
+    messages: Vec<LlmMessage>,
+) -> Vec<LlmMessage> {
+    messages
+        .into_iter()
+        .map(|message| {
+            if !matches!(message.role, LlmRole::Assistant) {
+                return message;
+            }
+            let parts = message
+                .blocks
+                .iter()
+                .filter_map(|block| match block {
+                    LlmContentBlock::Text {
+                        text,
+                        response_meta,
+                        ..
+                    } => Some(LlmOutputPart::Text {
+                        text: text.to_string(),
+                        response_meta: response_meta.clone(),
+                    }),
+                    LlmContentBlock::Reasoning { text, replay } => Some(LlmOutputPart::Reasoning {
+                        text: text.clone(),
+                        replay: replay.clone(),
+                    }),
+                    LlmContentBlock::ToolCall {
+                        call_id,
+                        tool_name,
+                        input_json,
+                        replay,
+                    } => Some(LlmOutputPart::ToolCall {
+                        call_id: call_id.clone(),
+                        tool_name: tool_name.clone(),
+                        input_json: input_json.clone(),
+                        replay: replay.clone(),
+                    }),
+                    LlmContentBlock::Attachment { .. } | LlmContentBlock::ToolResult { .. } => None,
+                })
+                .collect();
+            let (assistant_text, reasoning_text) = project_response_texts(parts);
+            let mut blocks = Vec::new();
+            if !reasoning_text.is_empty() {
+                blocks.push(LlmContentBlock::Text {
+                    text: reasoning_text.into(),
+                    response_meta: None,
+                    cache_breakpoint: false,
+                });
+            }
+            if !assistant_text.is_empty() {
+                blocks.push(LlmContentBlock::Text {
+                    text: assistant_text.into(),
+                    response_meta: None,
+                    cache_breakpoint: false,
+                });
+            }
+            LlmMessage::new(LlmRole::Assistant, blocks)
+        })
+        .collect()
 }
 
 fn continue_or_stop_after_nonterminal(

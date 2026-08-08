@@ -732,6 +732,10 @@ mod tests {
                         Scenario::StreamingUsageMerge,
                         "Gemini usage events replace aggregate usage instead of incremental SSE deltas",
                     ),
+                    (
+                        Scenario::ReasoningReplayRoundTrip,
+                        "Gemini streaming drops thought parts and their thoughtSignature (FIG-1082)",
+                    ),
                 ])
             }
 
@@ -809,6 +813,7 @@ mod tests {
                         }]
                     }))
                     .with_reasoning_text("thinking about it"),
+                    Scenario::ReasoningReplayRoundTrip => return None,
                     Scenario::StreamingUsageMerge => return None,
                 };
                 Some(wire)
@@ -836,7 +841,11 @@ mod tests {
                 GoogleOAuthProvider::terminal_reason_from_value(body, parts)
             }
 
-            fn assemble_stream(&self, sse_events: &[String]) -> StreamAssembly {
+            fn assemble_stream(
+                &self,
+                _scenario: Scenario,
+                sse_events: &[String],
+            ) -> StreamAssembly {
                 let mut full = String::new();
                 let mut text_deltas = Vec::new();
                 let mut usage = LlmUsage::default();
@@ -862,6 +871,14 @@ mod tests {
                     .collect::<Vec<_>>();
                 parts.extend(tool_calls);
                 StreamAssembly { parts, usage }
+            }
+
+            fn build_next_request(&self, messages: Vec<LlmMessage>) -> Value {
+                let mut req = request(None);
+                req.messages = messages;
+                let provider = GoogleOAuthProvider::new("access", "refresh", 0);
+                let contents = GoogleOAuthProvider::build_contents_with_attachment_parts(&req, &[]);
+                GoogleOAuthProvider::build_request(&provider, &req, contents, None)
             }
         }
 

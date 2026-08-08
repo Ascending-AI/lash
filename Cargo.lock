@@ -2246,6 +2246,7 @@ dependencies = [
  "futures-util",
  "lash-core",
  "lash-llm-transport",
+ "lash-protocol-rlm",
  "lash-provider-auth",
  "lash-runtime",
  "reqwest 0.13.4",

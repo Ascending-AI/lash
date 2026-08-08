@@ -1640,10 +1640,11 @@ fn codex_stream_preserves_reasoning_message_and_tool_call_once() {
 #[cfg(feature = "testing")]
 mod conformance {
     use super::super::{PROVIDER, shared};
-    use lash_core::llm::types::{LlmOutputPart, LlmTerminalReason, LlmUsage};
+    use super::{CodexProvider, request};
+    use lash_core::llm::types::{LlmMessage, LlmOutputPart, LlmTerminalReason, LlmUsage};
     use lash_llm_transport::conformance::{
-        CanonicalUsage as U, ProviderNormalizer, ProviderWire, Scenario, StreamAssembly,
-        provider_conformance,
+        CanonicalUsage as U, ProviderConformanceSpec, ProviderNormalizer, ProviderWire, Scenario,
+        StreamAssembly, provider_conformance, strong_replay_payload,
     };
     use lash_llm_transport::{
         openai_terminal_reason_from_response_value, openai_usage_from_response_value,
@@ -1747,6 +1748,18 @@ mod conformance {
                         ]
                     }))
                     .with_reasoning_text("thinking about it"),
+                    Scenario::ReasoningReplayRoundTrip => {
+                        let payload = strong_replay_payload("codex-responses");
+                        ProviderWire::body(json!({})).with_reasoning_replay_round_trip(
+                            vec![
+                                json!({"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_conformance"}}).to_string(),
+                                json!({"type":"response.reasoning_summary_text.delta","output_index":0,"delta":"thinking about it"}).to_string(),
+                                json!({"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_conformance","summary":[{"type":"summary_text","text":"thinking about it"}],"encrypted_content":payload}}).to_string(),
+                            ],
+                            payload,
+                            "/input/0/encrypted_content",
+                        )
+                    }
                     Scenario::StreamingUsageMerge => {
                         ProviderWire::body(json!({})).with_usage_merge_stream(vec![
                             // input arrives on an early event
@@ -1777,7 +1790,7 @@ mod conformance {
             openai_terminal_reason_from_response_value(body, parts)
         }
 
-        fn assemble_stream(&self, sse_events: &[String]) -> StreamAssembly {
+        fn assemble_stream(&self, _scenario: Scenario, sse_events: &[String]) -> StreamAssembly {
             let mut state = shared::ResponsesStreamState::default();
             for raw in sse_events {
                 shared::process_sse_event(PROVIDER, raw, &mut state, None)
@@ -1788,10 +1801,66 @@ mod conformance {
                 usage: state.usage.clone(),
             }
         }
+
+        fn build_next_request(&self, messages: Vec<LlmMessage>) -> Value {
+            CodexProvider::new("access", "refresh", 0)
+                .build_request_body(&request(messages), false)
+                .expect("codex next request serializes")
+        }
+    }
+
+    struct CodexRlmHistoryNormalizer;
+
+    impl ProviderNormalizer for CodexRlmHistoryNormalizer {
+        fn name(&self) -> &str {
+            "codex-rlm-history"
+        }
+
+        fn conformance_spec(&self) -> ProviderConformanceSpec {
+            ProviderConformanceSpec::with_unsupported(&[(
+                Scenario::ReasoningReplayRoundTrip,
+                "RLM history drops Codex reasoning replay metadata (FIG-1081)",
+            )])
+        }
+
+        fn wire_for(&self, scenario: Scenario) -> Option<ProviderWire> {
+            if matches!(scenario, Scenario::ReasoningReplayRoundTrip) {
+                None
+            } else {
+                CodexNormalizer.wire_for(scenario)
+            }
+        }
+
+        fn parts_from_wire(&self, body: &Value) -> Vec<LlmOutputPart> {
+            CodexNormalizer.parts_from_wire(body)
+        }
+
+        fn usage_from_wire(&self, body: &Value) -> LlmUsage {
+            CodexNormalizer.usage_from_wire(body)
+        }
+
+        fn terminal_from_wire(&self, body: &Value, parts: &[LlmOutputPart]) -> LlmTerminalReason {
+            CodexNormalizer.terminal_from_wire(body, parts)
+        }
+
+        fn assemble_stream(&self, scenario: Scenario, sse_events: &[String]) -> StreamAssembly {
+            CodexNormalizer.assemble_stream(scenario, sse_events)
+        }
+
+        fn build_next_request(&self, messages: Vec<LlmMessage>) -> Value {
+            let messages =
+                lash_protocol_rlm::project_conformance_messages_through_rlm_history(messages);
+            CodexNormalizer.build_next_request(messages)
+        }
     }
 
     #[test]
     fn codex_satisfies_provider_conformance() {
         provider_conformance(&CodexNormalizer);
+    }
+
+    #[test]
+    fn codex_rlm_history_satisfies_provider_conformance() {
+        provider_conformance(&CodexRlmHistoryNormalizer);
     }
 }

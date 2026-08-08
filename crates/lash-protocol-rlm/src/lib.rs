@@ -35,6 +35,8 @@ pub use projection::{
     RlmHistoryProjection, RlmSeed, decode_rlm_protocol_event, rlm_history_projection,
     rlm_protocol_event, rlm_seed_initial_nodes,
 };
+#[cfg(feature = "testing")]
+pub use protocol::project_conformance_messages_through_rlm_history;
 pub use protocol::{
     RlmDriver, RlmPromptFeatures, contains_lashlang_cell,
     rlm_execution_section_for_host_environment,
