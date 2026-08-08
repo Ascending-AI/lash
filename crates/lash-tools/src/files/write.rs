@@ -6,7 +6,7 @@ use lash_core::{ToolCall, ToolDefinition, ToolResult};
 
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, display_relative,
-    execute_typed_tool_result, non_empty_string, resolve_under, run_blocking,
+    execute_typed_tool_result, io_failure, non_empty_string, resolve_under, run_blocking,
 };
 
 const WRITE_DESCRIPTION: &str = "Write content to a file. Creates the file if it does not exist, overwrites if it does. Automatically creates parent directories. Use write only for new files or complete rewrites.";
@@ -63,16 +63,27 @@ fn write_tool_definition() -> ToolDefinition {
 fn write_file(args: WriteArgs) -> ToolResult {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
-        Err(err) => return ToolResult::err_fmt(format_args!("Failed to determine cwd: {err}")),
+        Err(err) => {
+            return io_failure(
+                "current_dir_failed",
+                format!("Failed to determine cwd: {err}"),
+            );
+        }
     };
     let absolute_path = resolve_under(&cwd, Path::new(&args.path));
     if let Some(parent) = absolute_path.parent()
         && let Err(err) = std::fs::create_dir_all(parent)
     {
-        return ToolResult::err_fmt(format_args!("Could not write file: {}. {err}.", args.path));
+        return io_failure(
+            "create_parent_directories_failed",
+            format!("Could not write file: {}. {err}.", args.path),
+        );
     }
     if let Err(err) = std::fs::write(&absolute_path, &args.content) {
-        return ToolResult::err_fmt(format_args!("Could not write file: {}. {err}.", args.path));
+        return io_failure(
+            "write_file_failed",
+            format!("Could not write file: {}. {err}.", args.path),
+        );
     }
 
     let display_path = display_relative(&cwd, &absolute_path);
@@ -139,5 +150,24 @@ mod tests {
             std::fs::read_to_string(dir.path().join("hello.txt")).unwrap(),
             "new\n"
         );
+    }
+
+    #[test]
+    fn write_failure_is_structured_io_with_the_path() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("target");
+        std::fs::create_dir(&target).unwrap();
+
+        let result = write_file(WriteArgs {
+            path: target.to_string_lossy().to_string(),
+            content: "content".to_string(),
+        });
+        let lash_core::ToolCallOutcome::Failure(failure) = &result.as_output().outcome else {
+            panic!("writing a directory must fail");
+        };
+        assert_eq!(failure.class, lash_core::ToolFailureClass::Io);
+        assert_eq!(failure.code, "write_file_failed");
+        assert!(failure.message.contains(target.to_string_lossy().as_ref()));
+        assert_eq!(failure.retry, lash_core::ToolRetryDisposition::Never);
     }
 }

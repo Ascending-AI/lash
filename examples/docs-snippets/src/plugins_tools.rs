@@ -492,6 +492,7 @@ mod asserted_examples {
 
         let failure_classes = [
             ToolFailureClass::InvalidRequest,
+            ToolFailureClass::Io,
             ToolFailureClass::Unavailable,
             ToolFailureClass::PermissionDenied,
             ToolFailureClass::Timeout,
@@ -504,6 +505,7 @@ mod asserted_examples {
             serde_json::to_value(failure_classes).expect("failure classes must serialize"),
             serde_json::json!([
                 "invalid_request",
+                "io",
                 "unavailable",
                 "permission_denied",
                 "timeout",
@@ -632,5 +634,21 @@ mod asserted_examples {
         let customized = catalogue_preview_contribution_with_options(&records, options)
             .expect("customized records must render");
         assert_eq!(customized.title.as_deref(), Some("Remote capabilities"));
+    }
+
+    #[test]
+    fn typed_io_and_invalid_request_failures_are_stable_host_contract() {
+        use lash::tools::{ToolFailure, ToolFailureClass};
+
+        let invalid = ToolFailure::invalid_request("invalid_glob", "bad pattern");
+        assert_eq!(invalid.class, ToolFailureClass::InvalidRequest);
+        assert_eq!(invalid.code, "invalid_glob");
+        assert_eq!(invalid.retry, lash::tools::ToolRetryDisposition::Never);
+
+        let io = ToolFailure::io("read_failed", "could not read config.toml");
+        assert_eq!(io.class, ToolFailureClass::Io);
+        assert_eq!(io.code, "read_failed");
+        assert_eq!(io.retry, lash::tools::ToolRetryDisposition::Never);
+        assert_eq!(serde_json::to_value(ToolFailureClass::Io).unwrap(), "io");
     }
 }

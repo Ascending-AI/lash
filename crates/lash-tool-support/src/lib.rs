@@ -1,3 +1,9 @@
+//! Shared implementation support for Lash tools.
+//!
+//! Filesystem path resolution in this crate exists to make tool behavior
+//! predictable. It is not a security boundary: tools decide which files they
+//! should expose, while sandboxing and filesystem isolation belong to the host.
+
 use lash_core::{ToolDefinition, ToolFailure, ToolFailureClass, ToolResult};
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -61,7 +67,9 @@ impl ToolDefinitionLashlangExt for ToolDefinition {
 }
 
 /// Resolve a possibly-relative `path` against `base`, returning a lexically
-/// normalized [`PathBuf`].
+/// normalized [`PathBuf`]. File tools pass the process current working
+/// directory as `base`, so relative tool paths consistently resolve from that
+/// directory.
 ///
 /// Behavior:
 /// - Absolute `path` passes through unchanged (only normalized).
@@ -70,12 +78,12 @@ impl ToolDefinitionLashlangExt for ToolDefinition {
 ///   manipulation, without touching the filesystem and without requiring the
 ///   path (or its parents) to exist.
 ///
-/// Lexical (rather than `std::fs::canonicalize`) resolution is the deliberate
-/// choice for tool path handling: write/patch tools must resolve targets that
-/// do not yet exist on disk, and canonicalization both fails for missing paths
-/// and silently rewrites symlinks. Tools that genuinely need symlink-real-path
-/// resolution for an existence/scope check should use [`canonicalize_under`]
-/// instead and accept that it requires the path to exist.
+/// Lexical resolution is deliberate: missing targets and missing parents are
+/// accepted, and symlink components remain exactly as named rather than being
+/// rewritten to their real paths. This convention provides predictable path
+/// handling only; it does not scope access or enforce a sandbox. A tool remains
+/// responsible for deciding whether a file should be accessible, and the host
+/// owns any security isolation or sandboxing policy.
 pub fn resolve_under(base: &Path, path: &Path) -> PathBuf {
     let joined = if path.is_absolute() {
         path.to_path_buf()
@@ -93,26 +101,24 @@ pub fn normalize_lexical(path: &Path) -> PathBuf {
     for component in path.components() {
         match component {
             Component::CurDir => {}
-            Component::ParentDir => {
-                if !normalized.pop() {
+            Component::ParentDir => match normalized.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    normalized.pop();
+                }
+                Some(Component::ParentDir) | None if !path.has_root() => {
                     normalized.push(component.as_os_str());
                 }
-            }
+                Some(Component::Prefix(_) | Component::RootDir)
+                | Some(Component::ParentDir)
+                | None => {}
+                Some(Component::CurDir) => unreachable!("current-directory components are removed"),
+            },
             Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
                 normalized.push(component.as_os_str());
             }
         }
     }
     normalized
-}
-
-/// Resolve `path` against `base` (via [`resolve_under`]) and then canonicalize
-/// it on disk, resolving symlinks to their real path. Fails if the path does
-/// not exist. Use this only when a tool needs a real, existence-checked path
-/// (e.g. a security/scope decision or distinguishing a file from a directory);
-/// prefer [`resolve_under`] for write/patch targets that may not exist yet.
-pub fn canonicalize_under(base: &Path, path: &Path) -> std::io::Result<PathBuf> {
-    std::fs::canonicalize(resolve_under(base, path))
 }
 
 /// Render `path` relative to `base` for display, falling back to the file name
@@ -145,12 +151,32 @@ pub struct TruncationMeta {
     pub omitted: usize,
 }
 
-pub fn invalid_tool_args(message: impl Into<String>) -> ToolResult {
+pub fn invalid_request_failure(code: impl Into<String>, message: impl Into<String>) -> ToolResult {
+    ToolResult::failure(ToolFailure::invalid_request(code, message))
+}
+
+pub fn io_failure(code: impl Into<String>, message: impl Into<String>) -> ToolResult {
+    ToolResult::failure(ToolFailure::io(code, message))
+}
+
+pub fn retryable_io_failure(
+    code: impl Into<String>,
+    message: impl Into<String>,
+    after_ms: Option<u64>,
+) -> ToolResult {
+    ToolResult::retryable_failure(ToolFailureClass::Io, code, message, after_ms)
+}
+
+pub fn execution_failure(code: impl Into<String>, message: impl Into<String>) -> ToolResult {
     ToolResult::failure(ToolFailure::tool(
-        ToolFailureClass::InvalidRequest,
-        "invalid_tool_args",
-        message.into(),
+        ToolFailureClass::Execution,
+        code,
+        message,
     ))
+}
+
+pub fn invalid_tool_args(message: impl Into<String>) -> ToolResult {
+    invalid_request_failure("invalid_tool_args", message)
 }
 
 pub fn typed_tool_args<Args>(args: &serde_json::Value) -> Result<Args, ToolResult>
@@ -167,7 +193,10 @@ where
 {
     match serde_json::to_value(output) {
         Ok(value) => ToolResult::ok(value),
-        Err(err) => ToolResult::err_fmt(format_args!("Failed to serialize tool result: {err}")),
+        Err(err) => execution_failure(
+            "tool_result_serialization_failed",
+            format!("Failed to serialize tool result: {err}"),
+        ),
     }
 }
 
@@ -271,12 +300,12 @@ pub fn default_glob_limit() -> OptionalUsizeArg {
     OptionalUsizeArg::Value(100)
 }
 
-/// Extract a required non-empty string arg, or return ToolResult::err.
+/// Extract a required non-empty string arg, or return a structured invalid request.
 pub fn require_str<'a>(args: &'a serde_json::Value, key: &str) -> Result<&'a str, ToolResult> {
     args.get(key)
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| ToolResult::err_fmt(format_args!("Missing required parameter: {key}")))
+        .ok_or_else(|| invalid_tool_args(format!("Missing required parameter: {key}")))
 }
 
 /// Parse optional bool arg with a default.
@@ -290,9 +319,7 @@ pub fn parse_optional_bool(
         Some(v) if v.is_null() => Ok(default),
         Some(v) => match v.as_bool() {
             Some(b) => Ok(b),
-            None => Err(ToolResult::err_fmt(format_args!(
-                "Invalid {key}: expected bool"
-            ))),
+            None => Err(invalid_tool_args(format!("Invalid {key}: expected bool"))),
         },
     }
 }
@@ -312,7 +339,7 @@ pub fn parse_optional_usize_arg(
             if allow_none {
                 Ok(None)
             } else {
-                Err(ToolResult::err_fmt(format_args!(
+                Err(invalid_tool_args(format!(
                     "Invalid {key}: expected int >= {min}"
                 )))
             }
@@ -322,7 +349,7 @@ pub fn parse_optional_usize_arg(
                 if allow_none && s.eq_ignore_ascii_case("none") {
                     return Ok(None);
                 }
-                return Err(ToolResult::err_fmt(format_args!(
+                return Err(invalid_tool_args(format!(
                     "Invalid {key}: expected int{}",
                     if allow_none {
                         ", null, or \"none\""
@@ -332,7 +359,7 @@ pub fn parse_optional_usize_arg(
                 )));
             }
             let n = v.as_u64().ok_or_else(|| {
-                ToolResult::err_fmt(format_args!(
+                invalid_tool_args(format!(
                     "Invalid {key}: expected int{}",
                     if allow_none {
                         ", null, or \"none\""
@@ -342,7 +369,7 @@ pub fn parse_optional_usize_arg(
                 ))
             })? as usize;
             if n < min {
-                return Err(ToolResult::err_fmt(format_args!(
+                return Err(invalid_tool_args(format!(
                     "Invalid {key}: must be >= {min}{}",
                     if allow_none {
                         ", or use null/\"none\" for no cap"
@@ -380,19 +407,25 @@ where
 {
     match tokio::task::spawn_blocking(f).await {
         Ok(result) => result,
-        Err(e) => ToolResult::err_fmt(format_args!("blocking task failed: {e}")),
+        Err(err) => execution_failure(
+            "blocking_task_failed",
+            format!("blocking task failed: {err}"),
+        ),
     }
 }
 
 /// Run blocking work off the async runtime and return a typed value.
-pub async fn run_blocking_value<F, T>(f: F) -> Result<T, String>
+pub async fn run_blocking_value<F, T>(f: F) -> Result<T, ToolResult>
 where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|err| format!("blocking task failed: {err}"))
+    tokio::task::spawn_blocking(f).await.map_err(|err| {
+        execution_failure(
+            "blocking_task_failed",
+            format!("blocking task failed: {err}"),
+        )
+    })
 }
 
 pub fn rg_file_list(
@@ -429,18 +462,18 @@ pub fn rg_file_list(
         let mut override_builder = ignore::overrides::OverrideBuilder::new(base);
         for glob in globs {
             override_builder.add(glob).map_err(|err| {
-                ToolResult::err_fmt(format_args!(
-                    "invalid ignore glob for {}: {err}",
-                    base.display()
-                ))
+                invalid_request_failure(
+                    "invalid_ignore_glob",
+                    format!("invalid ignore glob for {}: {err}", base.display()),
+                )
             })?;
         }
 
         let overrides = override_builder.build().map_err(|err| {
-            ToolResult::err_fmt(format_args!(
-                "failed to build ignore globs for {}: {err}",
-                base.display()
-            ))
+            execution_failure(
+                "ignore_glob_build_failed",
+                format!("failed to build ignore globs for {}: {err}", base.display()),
+            )
         })?;
         builder.overrides(overrides);
     }
@@ -480,5 +513,79 @@ pub fn compact_diff(old: &str, new: &str, path: &str, max_lines: usize) -> Strin
         let mut truncated: String = lines[..max_lines].join("\n");
         truncated.push_str(&format!("\n... ({} more lines)", lines.len() - max_lines));
         truncated
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::{normalize_lexical, resolve_under};
+    use std::path::{Path, PathBuf};
+    use tempfile::TempDir;
+
+    #[test]
+    fn absolute_paths_are_normalized_without_using_the_base() {
+        assert_eq!(
+            resolve_under(Path::new("/ignored"), Path::new("/tmp/./alpha/../beta")),
+            PathBuf::from("/tmp/beta")
+        );
+    }
+
+    #[test]
+    fn relative_paths_resolve_under_the_supplied_base() {
+        assert_eq!(
+            resolve_under(Path::new("/workspace/project"), Path::new("src/lib.rs")),
+            PathBuf::from("/workspace/project/src/lib.rs")
+        );
+    }
+
+    #[test]
+    fn dot_segments_are_collapsed_lexically() {
+        assert_eq!(
+            resolve_under(
+                Path::new("/workspace/project"),
+                Path::new("./src/../Cargo.toml")
+            ),
+            PathBuf::from("/workspace/project/Cargo.toml")
+        );
+        assert_eq!(
+            normalize_lexical(Path::new("../../src")),
+            PathBuf::from("../../src")
+        );
+        assert_eq!(
+            normalize_lexical(Path::new("/../../src")),
+            PathBuf::from("/src")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_are_not_resolved() {
+        use std::os::unix::fs::symlink;
+
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("real")).unwrap();
+        symlink(dir.path().join("real"), dir.path().join("link")).unwrap();
+
+        assert_eq!(
+            resolve_under(dir.path(), Path::new("link/file.txt")),
+            dir.path().join("link/file.txt")
+        );
+    }
+
+    #[test]
+    fn missing_paths_and_parents_are_allowed() {
+        let dir = TempDir::new().unwrap();
+        let resolved = resolve_under(dir.path(), Path::new("missing/parents/file.txt"));
+
+        assert_eq!(resolved, dir.path().join("missing/parents/file.txt"));
+        assert!(!resolved.exists());
+    }
+
+    #[test]
+    fn unicode_components_are_preserved() {
+        assert_eq!(
+            resolve_under(Path::new("/workspace"), Path::new("données/日本語.txt")),
+            PathBuf::from("/workspace/données/日本語.txt")
+        );
     }
 }

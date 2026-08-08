@@ -3,7 +3,8 @@ use serde_json::{Value, json};
 use lash_core::{ToolCall, ToolDefinition, ToolResult};
 
 use lash_tool_support::{
-    StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, object_schema,
+    StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, execution_failure,
+    object_schema, require_str, retryable_io_failure,
 };
 
 /// Web search via Tavily API.
@@ -33,10 +34,10 @@ pub fn web_search_provider(api_key: impl Into<String>) -> StaticToolProvider<Web
 impl StaticToolExecute for WebSearch {
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
         let args = call.args;
-        let query = args
-            .get("query")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
+        let query = match require_str(args, "query") {
+            Ok(query) => query,
+            Err(err) => return err,
+        };
         let limit = args
             .get("limit")
             .and_then(|v| v.as_u64())
@@ -44,7 +45,10 @@ impl StaticToolExecute for WebSearch {
             .clamp(1, 20);
 
         if self.api_key.trim().is_empty() {
-            return ToolResult::err(json!("Tavily API key is required for web.search"));
+            return execution_failure(
+                "tavily_api_key_missing",
+                "Tavily API key is required for web.search",
+            );
         }
 
         let body = json!({
@@ -64,14 +68,24 @@ impl StaticToolExecute for WebSearch {
                 Ok(data) => ToolResult::ok(json!({
                     "results": sanitize_results(data.get("results")),
                 })),
-                Err(e) => ToolResult::err_fmt(format_args!("Failed to parse response: {e}")),
+                Err(err) => execution_failure(
+                    "web_search_response_decode_failed",
+                    format!("Failed to parse response: {err}"),
+                ),
             },
             Ok(r) => {
                 let status = r.status();
                 let body = r.text().await.unwrap_or_default();
-                ToolResult::err_fmt(format_args!("Tavily API error ({status}): {body}"))
+                execution_failure(
+                    "tavily_api_error",
+                    format!("Tavily API error ({status}): {body}"),
+                )
             }
-            Err(e) => ToolResult::err_fmt(format_args!("Request failed: {e}")),
+            Err(err) => retryable_io_failure(
+                "web_search_request_failed",
+                format!("Request failed: {err}"),
+                Some(250),
+            ),
         }
     }
 }
@@ -136,6 +150,7 @@ fn web_search_tool_definition() -> ToolDefinition {
             .with_examples(vec![
                 "await web.search({ query: \"latest Rust release notes\", limit: 5 })?".into(),
             ])
+            .with_retry_policy(lash_core::ToolRetryPolicy::safe(2, 250, 1000))
             .with_lashlang_binding(lash_tool_support::lashlang_binding(
                 ["web"],
                 "search",
@@ -210,5 +225,22 @@ mod tests {
                 "content": "Snippet"
             })]
         );
+    }
+
+    #[tokio::test]
+    async fn missing_query_is_a_structured_invalid_request() {
+        let result = lash_core::testing::run_tool(
+            &web_search_provider("unused"),
+            "search_web",
+            &serde_json::json!({}),
+        )
+        .await;
+
+        let lash_core::ToolCallOutcome::Failure(failure) = &result.as_output().outcome else {
+            panic!("missing query must fail");
+        };
+        assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
+        assert_eq!(failure.code, "invalid_tool_args");
+        assert_eq!(failure.retry, lash_core::ToolRetryDisposition::Never);
     }
 }

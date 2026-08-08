@@ -30389,8 +30389,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1193#let RemoteProtocolError::InvalidToolGrant { tool_name, message } = invalid"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1200#assert!(message.contains(\"id cannot be empty\"));"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1195#let RemoteProtocolError::InvalidToolGrant { tool_name, message } = invalid"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1202#assert!(message.contains(\"id cannot be empty\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1193; the assertion at examples/docs-snippets/src/remote_protocol.rs:1200 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `message.contains(\"id cannot be empty\")` holds."
 
 [[api]]
@@ -30399,8 +30399,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1193#let RemoteProtocolError::InvalidToolGrant { tool_name, message } = invalid"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1200#assert!(message.contains(\"id cannot be empty\"));"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1195#let RemoteProtocolError::InvalidToolGrant { tool_name, message } = invalid"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1202#assert!(message.contains(\"id cannot be empty\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1193; the assertion at examples/docs-snippets/src/remote_protocol.rs:1200 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `message.contains(\"id cannot be empty\")` holds."
 
 [[api]]
@@ -30409,8 +30409,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1193#let RemoteProtocolError::InvalidToolGrant { tool_name, message } = invalid"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1200#assert!(message.contains(\"id cannot be empty\"));"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1195#let RemoteProtocolError::InvalidToolGrant { tool_name, message } = invalid"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1202#assert!(message.contains(\"id cannot be empty\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1193; the assertion at examples/docs-snippets/src/remote_protocol.rs:1200 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `message.contains(\"id cannot be empty\")` holds."
 
 [[api]]
@@ -30483,8 +30483,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1185#let RemoteProtocolError::MissingToolBinding { tool_name, binding } = missing else {"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1189#assert_eq!(binding, \"missing.binding\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1187#let RemoteProtocolError::MissingToolBinding { tool_name, binding } = missing else {"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1191#assert_eq!(binding, \"missing.binding\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1185; the assertion at examples/docs-snippets/src/remote_protocol.rs:1189 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `binding` equals `\"missing.binding\"`."
 
 [[api]]
@@ -30493,8 +30493,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1183#.binding_call_path(\"missing.binding\")"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1189#assert_eq!(binding, \"missing.binding\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1185#.binding_call_path(\"missing.binding\")"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1191#assert_eq!(binding, \"missing.binding\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1183; the assertion at examples/docs-snippets/src/remote_protocol.rs:1189 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `binding` equals `\"missing.binding\"`."
 
 [[api]]
@@ -30503,8 +30503,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1185#let RemoteProtocolError::MissingToolBinding { tool_name, binding } = missing else {"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1189#assert_eq!(binding, \"missing.binding\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1187#let RemoteProtocolError::MissingToolBinding { tool_name, binding } = missing else {"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1191#assert_eq!(binding, \"missing.binding\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1185; the assertion at examples/docs-snippets/src/remote_protocol.rs:1189 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `binding` equals `\"missing.binding\"`."
 
 [[api]]
@@ -30529,8 +30529,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1172#let RemoteProtocolError::RemoteToolRegistryReopenMismatch {"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1180#assert_eq!(after_call_paths, [\"knowledge.docs.lookup\"]);"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1174#let RemoteProtocolError::RemoteToolRegistryReopenMismatch {"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1182#assert_eq!(after_call_paths, [\"knowledge.docs.lookup\"]);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1172; the assertion at examples/docs-snippets/src/remote_protocol.rs:1180 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `after_call_paths` equals `[\"knowledge.docs.lookup\"]`."
 
 [[api]]
@@ -30539,8 +30539,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1174#after_call_paths,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1180#assert_eq!(after_call_paths, [\"knowledge.docs.lookup\"]);"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1176#after_call_paths,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1182#assert_eq!(after_call_paths, [\"knowledge.docs.lookup\"]);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1174; the assertion at examples/docs-snippets/src/remote_protocol.rs:1180 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `after_call_paths` equals `[\"knowledge.docs.lookup\"]`."
 
 [[api]]
@@ -30549,8 +30549,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1173#before_call_paths,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1180#assert_eq!(after_call_paths, [\"knowledge.docs.lookup\"]);"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1175#before_call_paths,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1182#assert_eq!(after_call_paths, [\"knowledge.docs.lookup\"]);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1173; the assertion at examples/docs-snippets/src/remote_protocol.rs:1180 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `after_call_paths` equals `[\"knowledge.docs.lookup\"]`."
 
 [[api]]
@@ -35223,8 +35223,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:996#RemoteProcessStatus::Abandoned,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1001#.filter(|status| status.is_terminal())"
+usage = "examples/docs-snippets/src/remote_protocol.rs:998#RemoteProcessStatus::Abandoned,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1003#.filter(|status| status.is_terminal())"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:996; the assertion at examples/docs-snippets/src/remote_protocol.rs:1001 in `remote_process_vocabularies_serialize_stable_wire_labels` observes that `statuses .iter() .filter(|status| status.is_terminal()) .count()` equals `4`."
 
 [[api]]
@@ -35263,8 +35263,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:991#RemoteProcessStatus::Running,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1001#.filter(|status| status.is_terminal())"
+usage = "examples/docs-snippets/src/remote_protocol.rs:993#RemoteProcessStatus::Running,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1003#.filter(|status| status.is_terminal())"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:991; the assertion at examples/docs-snippets/src/remote_protocol.rs:1001 in `remote_process_vocabularies_serialize_stable_wire_labels` observes that `statuses .iter() .filter(|status| status.is_terminal()) .count()` equals `4`."
 
 [[api]]
@@ -35303,8 +35303,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1022#RemoteProcessStatusFilter::Abandoned,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1033#\"abandoned\","
+usage = "examples/docs-snippets/src/remote_protocol.rs:1024#RemoteProcessStatusFilter::Abandoned,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1035#\"abandoned\","
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1022; the assertion at examples/docs-snippets/src/remote_protocol.rs:1033 in `remote_process_vocabularies_serialize_stable_wire_labels` observes that `serde_json::to_value(filters).expect(\"process filters serialize\")` equals `json!([ \"running\", \"waiting\", \"completed\", \"failed\", \"cancelled\", \"abandoned\", \"any\" ])`."
 
 [[api]]
@@ -35313,8 +35313,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1023#RemoteProcessStatusFilter::Any,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1034#\"any\""
+usage = "examples/docs-snippets/src/remote_protocol.rs:1025#RemoteProcessStatusFilter::Any,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1036#\"any\""
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1023; the assertion at examples/docs-snippets/src/remote_protocol.rs:1034 in `remote_process_vocabularies_serialize_stable_wire_labels` observes that `serde_json::to_value(filters).expect(\"process filters serialize\")` equals `json!([ \"running\", \"waiting\", \"completed\", \"failed\", \"cancelled\", \"abandoned\", \"any\" ])`."
 
 [[api]]
@@ -35323,8 +35323,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1021#RemoteProcessStatusFilter::Cancelled,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1032#\"cancelled\","
+usage = "examples/docs-snippets/src/remote_protocol.rs:1023#RemoteProcessStatusFilter::Cancelled,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1014#\"cancelled\","
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1021; the assertion at examples/docs-snippets/src/remote_protocol.rs:1032 in `remote_process_vocabularies_serialize_stable_wire_labels` observes that `serde_json::to_value(filters).expect(\"process filters serialize\")` equals `json!([ \"running\", \"waiting\", \"completed\", \"failed\", \"cancelled\", \"abandoned\", \"any\" ])`."
 
 [[api]]
@@ -35333,8 +35333,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1019#RemoteProcessStatusFilter::Completed,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1030#\"completed\","
+usage = "examples/docs-snippets/src/remote_protocol.rs:1021#RemoteProcessStatusFilter::Completed,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1012#\"completed\","
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1019; the assertion at examples/docs-snippets/src/remote_protocol.rs:1030 in `remote_process_vocabularies_serialize_stable_wire_labels` observes that `serde_json::to_value(filters).expect(\"process filters serialize\")` equals `json!([ \"running\", \"waiting\", \"completed\", \"failed\", \"cancelled\", \"abandoned\", \"any\" ])`."
 
 [[api]]
@@ -35343,8 +35343,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1020#RemoteProcessStatusFilter::Failed,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1031#\"failed\","
+usage = "examples/docs-snippets/src/remote_protocol.rs:1022#RemoteProcessStatusFilter::Failed,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1013#\"failed\","
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1020; the assertion at examples/docs-snippets/src/remote_protocol.rs:1031 in `remote_process_vocabularies_serialize_stable_wire_labels` observes that `serde_json::to_value(filters).expect(\"process filters serialize\")` equals `json!([ \"running\", \"waiting\", \"completed\", \"failed\", \"cancelled\", \"abandoned\", \"any\" ])`."
 
 [[api]]
@@ -35353,8 +35353,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1017#RemoteProcessStatusFilter::Running,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1028#\"running\","
+usage = "examples/docs-snippets/src/remote_protocol.rs:1019#RemoteProcessStatusFilter::Running,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1010#\"running\","
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1017; the assertion at examples/docs-snippets/src/remote_protocol.rs:1028 in `remote_process_vocabularies_serialize_stable_wire_labels` observes that `serde_json::to_value(filters).expect(\"process filters serialize\")` equals `json!([ \"running\", \"waiting\", \"completed\", \"failed\", \"cancelled\", \"abandoned\", \"any\" ])`."
 
 [[api]]
@@ -36448,8 +36448,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:971#RemoteToolFailureClass::Execution,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:983#\"execution\","
+usage = "examples/docs-snippets/src/remote_protocol.rs:972#RemoteToolFailureClass::Execution,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:985#\"execution\","
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:971; the assertion at examples/docs-snippets/src/remote_protocol.rs:983 in `remote_process_vocabularies_serialize_stable_wire_labels` observes that `serde_json::to_value(failure_classes).expect(\"failure classes serialize\")` equals `json!([ \"invalid_request\", \"unavailable\", \"permission_denied\", \"timeout\", \"execution\",...`."
 
 [[api]]
@@ -36468,8 +36468,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:974#RemoteToolFailureClass::Internal,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:986#\"internal\""
+usage = "examples/docs-snippets/src/remote_protocol.rs:975#RemoteToolFailureClass::Internal,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:988#\"internal\""
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:974; the assertion at examples/docs-snippets/src/remote_protocol.rs:986 in `remote_process_vocabularies_serialize_stable_wire_labels` observes that `serde_json::to_value(failure_classes).expect(\"failure classes serialize\")` equals `json!([ \"invalid_request\", \"unavailable\", \"permission_denied\", \"timeout\", \"execution\",...`."
 
 [[api]]
@@ -36479,8 +36479,18 @@ availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/remote_protocol.rs:967#RemoteToolFailureClass::InvalidRequest,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:979#\"invalid_request\","
+assertion = "examples/docs-snippets/src/remote_protocol.rs:980#\"invalid_request\","
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:967; the assertion at examples/docs-snippets/src/remote_protocol.rs:979 in `remote_process_vocabularies_serialize_stable_wire_labels` observes that `serde_json::to_value(failure_classes).expect(\"failure classes serialize\")` equals `json!([ \"invalid_request\", \"unavailable\", \"permission_denied\", \"timeout\", \"execution\",...`."
+
+[[api]]
+symbol = "lash::remote::processes::RemoteToolFailureClass::Io"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1294#lash::remote::processes::RemoteToolFailureClass::Io"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1295#assert_eq!(serde_json::to_value(class).unwrap(), \"io\");"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1292; the assertion at line 1293 in `remote_io_failure_class_has_a_stable_wire_label` observes the stable `io` wire label."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteToolFailureClass::PermissionDenied"
@@ -36488,8 +36498,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:969#RemoteToolFailureClass::PermissionDenied,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:981#\"permission_denied\","
+usage = "examples/docs-snippets/src/remote_protocol.rs:970#RemoteToolFailureClass::PermissionDenied,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:983#\"permission_denied\","
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:969; the assertion at examples/docs-snippets/src/remote_protocol.rs:981 in `remote_process_vocabularies_serialize_stable_wire_labels` observes that `serde_json::to_value(failure_classes).expect(\"failure classes serialize\")` equals `json!([ \"invalid_request\", \"unavailable\", \"permission_denied\", \"timeout\", \"execution\",...`."
 
 [[api]]
@@ -36498,8 +36508,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:973#RemoteToolFailureClass::ResourceLimit,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:985#\"resource_limit\","
+usage = "examples/docs-snippets/src/remote_protocol.rs:974#RemoteToolFailureClass::ResourceLimit,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:987#\"resource_limit\","
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:973; the assertion at examples/docs-snippets/src/remote_protocol.rs:985 in `remote_process_vocabularies_serialize_stable_wire_labels` observes that `serde_json::to_value(failure_classes).expect(\"failure classes serialize\")` equals `json!([ \"invalid_request\", \"unavailable\", \"permission_denied\", \"timeout\", \"execution\",...`."
 
 [[api]]
@@ -36508,8 +36518,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:970#RemoteToolFailureClass::Timeout,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:982#\"timeout\","
+usage = "examples/docs-snippets/src/remote_protocol.rs:971#RemoteToolFailureClass::Timeout,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:984#\"timeout\","
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:970; the assertion at examples/docs-snippets/src/remote_protocol.rs:982 in `remote_process_vocabularies_serialize_stable_wire_labels` observes that `serde_json::to_value(failure_classes).expect(\"failure classes serialize\")` equals `json!([ \"invalid_request\", \"unavailable\", \"permission_denied\", \"timeout\", \"execution\",...`."
 
 [[api]]
@@ -36518,8 +36528,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:968#RemoteToolFailureClass::Unavailable,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:980#\"unavailable\","
+usage = "examples/docs-snippets/src/remote_protocol.rs:969#RemoteToolFailureClass::Unavailable,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:982#\"unavailable\","
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:968; the assertion at examples/docs-snippets/src/remote_protocol.rs:980 in `remote_process_vocabularies_serialize_stable_wire_labels` observes that `serde_json::to_value(failure_classes).expect(\"failure classes serialize\")` equals `json!([ \"invalid_request\", \"unavailable\", \"permission_denied\", \"timeout\", \"execution\",...`."
 
 [[api]]
@@ -36928,8 +36938,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1043#RemoteToolActivation, RemoteToolArgumentProjectionPolicy, RemoteToolGrant,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1045#RemoteToolActivation, RemoteToolArgumentProjectionPolicy, RemoteToolGrant,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1043; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -36938,8 +36948,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1235#serde_json::to_value([RemoteToolActivation::Always, RemoteToolActivation::Internal,])"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1237#serde_json::to_value([RemoteToolActivation::Always, RemoteToolActivation::Internal,])"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1235; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -36948,8 +36958,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1116#assert_eq!(grant.activation, Some(RemoteToolActivation::Internal));"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1118#assert_eq!(grant.activation, Some(RemoteToolActivation::Internal));"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1116; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -36958,8 +36968,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1043#RemoteToolActivation, RemoteToolArgumentProjectionPolicy, RemoteToolGrant,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1045#RemoteToolActivation, RemoteToolArgumentProjectionPolicy, RemoteToolGrant,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1043; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -36968,8 +36978,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1241#RemoteToolArgumentProjectionPolicy::MaterializeProjectedValues,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1243#RemoteToolArgumentProjectionPolicy::MaterializeProjectedValues,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1241; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -36978,8 +36988,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1120#RemoteToolArgumentProjectionPolicy::PreserveProjectedRefsInField {"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1122#RemoteToolArgumentProjectionPolicy::PreserveProjectedRefsInField {"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1120; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -36988,8 +36998,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1121#field: \"query\".to_string(),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1123#field: \"query\".to_string(),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1121; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -36998,8 +37008,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1043#RemoteToolActivation, RemoteToolArgumentProjectionPolicy, RemoteToolGrant,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1045#RemoteToolActivation, RemoteToolArgumentProjectionPolicy, RemoteToolGrant,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1043; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37008,8 +37018,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1116#assert_eq!(grant.activation, Some(RemoteToolActivation::Internal));"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1118#assert_eq!(grant.activation, Some(RemoteToolActivation::Internal));"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1116; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37018,8 +37028,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1118#grant.argument_projection,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1120#grant.argument_projection,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1118; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37028,8 +37038,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1149#grant.binding_call_path(LASHLANG_TOOL_BINDING_KEY).unwrap(),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1151#grant.binding_call_path(LASHLANG_TOOL_BINDING_KEY).unwrap(),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1149; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37038,8 +37048,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1142#assert!(grant.bindings.contains_key(LASHLANG_TOOL_BINDING_KEY));"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1144#assert!(grant.bindings.contains_key(LASHLANG_TOOL_BINDING_KEY));"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1142; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37048,8 +37058,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1153#grant.call_path_bindings().unwrap(),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1155#grant.call_path_bindings().unwrap(),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1153; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37058,8 +37068,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1112#assert_eq!(grant.description, \"Search the host knowledge base.\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1114#assert_eq!(grant.description, \"Search the host knowledge base.\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1112; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37068,8 +37078,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1115#assert_eq!(grant.examples.len(), 1);"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1117#assert_eq!(grant.examples.len(), 1);"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1115; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37078,8 +37088,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1110#assert_eq!(grant.id, \"remote-tool:search_docs\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1112#assert_eq!(grant.id, \"remote-tool:search_docs\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1110; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37088,8 +37098,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1113#assert_eq!(grant.input_schema.canonical[\"required\"][0], \"query\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1115#assert_eq!(grant.input_schema.canonical[\"required\"][0], \"query\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1113; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37098,8 +37108,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1111#assert_eq!(grant.name, \"search_docs\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1113#assert_eq!(grant.name, \"search_docs\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1111; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37108,8 +37118,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1136#} = &grant.output_contract"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1138#} = &grant.output_contract"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1136; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37118,8 +37128,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1114#assert_eq!(grant.output_schema.canonical[\"required\"][0], \"matches\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1116#assert_eq!(grant.output_schema.canonical[\"required\"][0], \"matches\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1114; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37128,8 +37138,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1109#assert_eq!(grant.protocol_version, REMOTE_PROTOCOL_VERSION);"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1111#assert_eq!(grant.protocol_version, REMOTE_PROTOCOL_VERSION);"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1109; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37138,8 +37148,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1126#grant.retry_policy,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1128#grant.retry_policy,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1126; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37148,8 +37158,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1157#RemoteToolGrant::validate_all(std::slice::from_ref(&grant))"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1159#RemoteToolGrant::validate_all(std::slice::from_ref(&grant))"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1157; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37158,8 +37168,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1157#RemoteToolGrant::validate_all(std::slice::from_ref(&grant))"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1159#RemoteToolGrant::validate_all(std::slice::from_ref(&grant))"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1157; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37168,8 +37178,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1044#RemoteToolOutputContract, RemoteToolRegistry, RemoteToolRetryPolicy,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1046#RemoteToolOutputContract, RemoteToolRegistry, RemoteToolRetryPolicy,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1044; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37178,8 +37188,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1133#let RemoteToolOutputContract::FromInputSchema {"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1135#let RemoteToolOutputContract::FromInputSchema {"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1133; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37188,8 +37198,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1135#default_schema,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1137#default_schema,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1135; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37198,8 +37208,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1134#input_field,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1136#input_field,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1134; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37208,8 +37218,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1254#RemoteToolOutputContract::Static,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1256#RemoteToolOutputContract::Static,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1254; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37218,8 +37228,8 @@ kind = "trait"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1044#RemoteToolOutputContract, RemoteToolRegistry, RemoteToolRetryPolicy,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1046#RemoteToolOutputContract, RemoteToolRegistry, RemoteToolRetryPolicy,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1044; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37228,8 +37238,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1162#assert_eq!(RemoteToolRegistry::grants(&registry).len(), 1);"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1164#assert_eq!(RemoteToolRegistry::grants(&registry).len(), 1);"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1162; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37238,8 +37248,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1161#RemoteToolRegistry::validate_registry(&registry).expect(\"the registry must validate\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1163#RemoteToolRegistry::validate_registry(&registry).expect(\"the registry must validate\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1161; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37248,8 +37258,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1044#RemoteToolOutputContract, RemoteToolRegistry, RemoteToolRetryPolicy,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1046#RemoteToolOutputContract, RemoteToolRegistry, RemoteToolRetryPolicy,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1044; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37258,8 +37268,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1274#RemoteToolRetryPolicy::Idempotent {"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1276#RemoteToolRetryPolicy::Idempotent {"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1274; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37268,8 +37278,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1276#base_delay_ms: 20,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1278#base_delay_ms: 20,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1276; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37278,8 +37288,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1275#max_attempts: 4,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1277#max_attempts: 4,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1275; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37288,8 +37298,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1277#max_delay_ms: 200,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1279#max_delay_ms: 200,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1277; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37298,8 +37308,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1268#RemoteToolRetryPolicy::Never,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1270#RemoteToolRetryPolicy::Never,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1268; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37308,8 +37318,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1127#Some(RemoteToolRetryPolicy::Safe {"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1129#Some(RemoteToolRetryPolicy::Safe {"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1127; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37318,8 +37328,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1271#base_delay_ms: 10,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1273#base_delay_ms: 10,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1271; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37328,8 +37338,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1270#max_attempts: 2,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1272#max_attempts: 2,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1270; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37338,8 +37348,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1272#max_delay_ms: 100,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1274#max_delay_ms: 100,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1272; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -37348,8 +37358,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1163#assert_remote_tool_registry_reopenable(&registry, &registry)"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1165#assert_remote_tool_registry_reopenable(&registry, &registry)"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1163; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -50230,8 +50240,8 @@ kind = "struct"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:531#CataloguePreviewEntry, CataloguePreviewOptions,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:533#CataloguePreviewEntry, CataloguePreviewOptions,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:531; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -50240,8 +50250,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:562#assert_eq!(direct.call, \"read\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:564#assert_eq!(direct.call, \"read\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:562; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -50250,8 +50260,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:567#let executable_entry = CataloguePreviewEntry::from_lashlang_executable(executable);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:569#let executable_entry = CataloguePreviewEntry::from_lashlang_executable(executable);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:567; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -50260,8 +50270,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:561#assert_eq!(direct.module_path, [\"workspace\", \"files\"]);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:563#assert_eq!(direct.module_path, [\"workspace\", \"files\"]);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:561; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -50270,8 +50280,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:563#assert_eq!(direct.module_path_string(), \"workspace.files\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:565#assert_eq!(direct.module_path_string(), \"workspace.files\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:563; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -50280,8 +50290,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:560#let direct = CataloguePreviewEntry::new([\"workspace\", \"files\"], \"read\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:562#let direct = CataloguePreviewEntry::new([\"workspace\", \"files\"], \"read\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:560; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -50290,8 +50300,8 @@ kind = "struct"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:531#CataloguePreviewEntry, CataloguePreviewOptions,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:533#CataloguePreviewEntry, CataloguePreviewOptions,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:531; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -50300,8 +50310,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:602#defaults.call_name_limit,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:604#defaults.call_name_limit,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:602; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -50310,8 +50320,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:598#defaults.module_limit,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:600#defaults.module_limit,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:598; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -50320,8 +50330,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:596#assert_eq!(defaults.search_call_path, \"tools.search\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:598#assert_eq!(defaults.search_call_path, \"tools.search\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:596; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -50330,8 +50340,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:595#assert_eq!(defaults.search_tool_name, \"search_tools\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:597#assert_eq!(defaults.search_tool_name, \"search_tools\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:595; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -50340,8 +50350,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:594#assert_eq!(defaults.title, \"Catalogued Capabilities\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:596#assert_eq!(defaults.title, \"Catalogued Capabilities\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:594; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -50350,8 +50360,8 @@ kind = "constant"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:532#DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT, DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:534#DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT, DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:532; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -50360,8 +50370,8 @@ kind = "constant"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:532#DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT, DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:534#DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT, DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:532; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -50528,8 +50538,8 @@ kind = "constant"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1049#DeferredToolGrant as ToolGrant, LASHLANG_TOOL_BINDING_KEY, LashlangToolBinding,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1051#DeferredToolGrant as ToolGrant, LASHLANG_TOOL_BINDING_KEY, LashlangToolBinding,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1049; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -50646,8 +50656,8 @@ kind = "constant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1050#PLUGIN_TOOL_SOURCE_ID, RemoteToolGrantLashlangExt, ToolDefinition, ToolExecutionGrant,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1052#PLUGIN_TOOL_SOURCE_ID, RemoteToolGrantLashlangExt, ToolDefinition, ToolExecutionGrant,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1050; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -50814,8 +50824,8 @@ kind = "trait"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1050#PLUGIN_TOOL_SOURCE_ID, RemoteToolGrantLashlangExt, ToolDefinition, ToolExecutionGrant,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1052#PLUGIN_TOOL_SOURCE_ID, RemoteToolGrantLashlangExt, ToolDefinition, ToolExecutionGrant,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1050; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -50824,8 +50834,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1143#let decoded_binding = RemoteToolGrantLashlangExt::lashlang_binding(&grant)"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1145#let decoded_binding = RemoteToolGrantLashlangExt::lashlang_binding(&grant)"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1143; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -50834,8 +50844,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1108#let grant = remote_grant(\"search_docs\", \"search\").with_lashlang_binding(binding);"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1204#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1110#let grant = remote_grant(\"search_docs\", \"search\").with_lashlang_binding(binding);"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1206#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1108; the assertion at examples/docs-snippets/src/remote_protocol.rs:1204 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -52155,8 +52165,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1222#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1232#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1224#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1234#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1222; the assertion at examples/docs-snippets/src/remote_protocol.rs:1232 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `execution_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -52166,8 +52176,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::contract"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1222#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1232#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1224#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1234#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1222; the assertion at examples/docs-snippets/src/remote_protocol.rs:1232 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `execution_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -52177,8 +52187,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::execution_binding"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1232#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1232#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1234#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1234#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1232; the assertion at examples/docs-snippets/src/remote_protocol.rs:1232 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `execution_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -52188,8 +52198,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::from_definition"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1225#let execution_grant = ToolExecutionGrant::from_definition(definition)"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1232#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1227#let execution_grant = ToolExecutionGrant::from_definition(definition)"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1234#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1225; the assertion at examples/docs-snippets/src/remote_protocol.rs:1232 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `execution_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -52199,8 +52209,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::manifest"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1222#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1232#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1224#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1234#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1222; the assertion at examples/docs-snippets/src/remote_protocol.rs:1232 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `execution_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -52210,8 +52220,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::new"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1222#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1232#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1224#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1234#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1222; the assertion at examples/docs-snippets/src/remote_protocol.rs:1232 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `execution_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -52221,8 +52231,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::source_id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1229#execution_grant.source_id.as_deref(),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1232#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1231#execution_grant.source_id.as_deref(),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1234#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1229; the assertion at examples/docs-snippets/src/remote_protocol.rs:1232 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `execution_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -52232,8 +52242,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::with_execution_binding"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1216#.with_execution_binding(serde_json::json!({ \"tenant\": \"acme\" }));"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1232#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1218#.with_execution_binding(serde_json::json!({ \"tenant\": \"acme\" }));"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1234#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1216; the assertion at examples/docs-snippets/src/remote_protocol.rs:1232 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `execution_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -52243,8 +52253,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::with_source_id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1215#.with_source_id(PLUGIN_TOOL_SOURCE_ID)"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1232#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1217#.with_source_id(PLUGIN_TOOL_SOURCE_ID)"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1234#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1215; the assertion at examples/docs-snippets/src/remote_protocol.rs:1232 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `execution_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -52312,6 +52322,28 @@ usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:30#fai
 assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:30#failure.retry,"
 
 [[api]]
+symbol = "lash::tools::ToolFailure::invalid_request"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ToolFailure::invalid_request"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_tools.rs:643#ToolFailure::invalid_request(\"invalid_glob\", \"bad pattern\")"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:644#assert_eq!(invalid.class, ToolFailureClass::InvalidRequest);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:641; the assertion at line 642 in `typed_io_and_invalid_request_failures_are_stable_host_contract` observes the InvalidRequest class."
+
+[[api]]
+symbol = "lash::tools::ToolFailure::io"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ToolFailure::io"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_tools.rs:648#ToolFailure::io(\"read_failed\", \"could not read config.toml\")"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:649#assert_eq!(io.class, ToolFailureClass::Io);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:646; the assertion at line 647 in `typed_io_and_invalid_request_failures_are_stable_host_contract` observes the Io class."
+
+[[api]]
 symbol = "lash::tools::ToolFailure::runtime"
 kind = "function"
 availability = "default+all-features"
@@ -52372,7 +52404,7 @@ aliases = ["lash_core::ToolFailureClass"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/plugins_tools.rs:357#ToolFailureClass, ToolFailureSource, ToolResult, ToolValue,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:504#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:505#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:357; the assertion at examples/docs-snippets/src/plugins_tools.rs:504 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(failure_classes).expect(\"failure classes must serialize\")` equals `serde_json::json!([ \"invalid_request\", \"unavailable\", \"permission_denied\", \"timeout\", \"...`."
 
 [[api]]
@@ -52382,8 +52414,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureClass::Execution"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:498#ToolFailureClass::Execution,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:504#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:499#ToolFailureClass::Execution,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:505#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:498; the assertion at examples/docs-snippets/src/plugins_tools.rs:504 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(failure_classes).expect(\"failure classes must serialize\")` equals `serde_json::json!([ \"invalid_request\", \"unavailable\", \"permission_denied\", \"timeout\", \"...`."
 
 [[api]]
@@ -52393,8 +52425,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureClass::External"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:499#ToolFailureClass::External,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:504#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:500#ToolFailureClass::External,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:505#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:499; the assertion at examples/docs-snippets/src/plugins_tools.rs:504 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(failure_classes).expect(\"failure classes must serialize\")` equals `serde_json::json!([ \"invalid_request\", \"unavailable\", \"permission_denied\", \"timeout\", \"...`."
 
 [[api]]
@@ -52405,7 +52437,7 @@ aliases = ["lash_core::ToolFailureClass::Internal"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/plugins_tools.rs:440#ToolFailureClass::Internal,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:504#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:505#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:440; the assertion at examples/docs-snippets/src/plugins_tools.rs:504 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(failure_classes).expect(\"failure classes must serialize\")` equals `serde_json::json!([ \"invalid_request\", \"unavailable\", \"permission_denied\", \"timeout\", \"...`."
 
 [[api]]
@@ -52416,8 +52448,19 @@ aliases = ["lash_core::ToolFailureClass::InvalidRequest"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/plugins_tools.rs:414#ToolFailureClass::InvalidRequest,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:504#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:505#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:414; the assertion at examples/docs-snippets/src/plugins_tools.rs:504 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(failure_classes).expect(\"failure classes must serialize\")` equals `serde_json::json!([ \"invalid_request\", \"unavailable\", \"permission_denied\", \"timeout\", \"...`."
+
+[[api]]
+symbol = "lash::tools::ToolFailureClass::Io"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::ToolFailureClass::Io"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_tools.rs:495#ToolFailureClass::Io"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:652#assert_eq!(serde_json::to_value(ToolFailureClass::Io).unwrap(), \"io\");"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:650; the assertion on the same line in `typed_io_and_invalid_request_failures_are_stable_host_contract` observes the stable `io` wire label."
 
 [[api]]
 symbol = "lash::tools::ToolFailureClass::PermissionDenied"
@@ -52426,8 +52469,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureClass::PermissionDenied"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:496#ToolFailureClass::PermissionDenied,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:504#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:497#ToolFailureClass::PermissionDenied,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:505#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:496; the assertion at examples/docs-snippets/src/plugins_tools.rs:504 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(failure_classes).expect(\"failure classes must serialize\")` equals `serde_json::json!([ \"invalid_request\", \"unavailable\", \"permission_denied\", \"timeout\", \"...`."
 
 [[api]]
@@ -52437,8 +52480,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureClass::ResourceLimit"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:500#ToolFailureClass::ResourceLimit,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:504#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:501#ToolFailureClass::ResourceLimit,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:505#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:500; the assertion at examples/docs-snippets/src/plugins_tools.rs:504 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(failure_classes).expect(\"failure classes must serialize\")` equals `serde_json::json!([ \"invalid_request\", \"unavailable\", \"permission_denied\", \"timeout\", \"...`."
 
 [[api]]
@@ -52448,8 +52491,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureClass::Timeout"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:497#ToolFailureClass::Timeout,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:504#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:498#ToolFailureClass::Timeout,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:505#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:497; the assertion at examples/docs-snippets/src/plugins_tools.rs:504 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(failure_classes).expect(\"failure classes must serialize\")` equals `serde_json::json!([ \"invalid_request\", \"unavailable\", \"permission_denied\", \"timeout\", \"...`."
 
 [[api]]
@@ -52460,7 +52503,7 @@ aliases = ["lash_core::ToolFailureClass::Unavailable"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/plugins_tools.rs:449#ToolFailureClass::Unavailable,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:504#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:505#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:449; the assertion at examples/docs-snippets/src/plugins_tools.rs:504 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(failure_classes).expect(\"failure classes must serialize\")` equals `serde_json::json!([ \"invalid_request\", \"unavailable\", \"permission_denied\", \"timeout\", \"...`."
 
 [[api]]
@@ -52480,8 +52523,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureSource::Cancellation"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:520#ToolFailureSource::Cancellation,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:523#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:522#ToolFailureSource::Cancellation,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:525#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:520; the assertion at examples/docs-snippets/src/plugins_tools.rs:523 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\")` equals `serde_json::json!([\"runtime\", \"plugin\", \"policy\", \"cancellation\"])`."
 
 [[api]]
@@ -52491,8 +52534,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureSource::Plugin"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:518#ToolFailureSource::Plugin,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:523#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:520#ToolFailureSource::Plugin,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:525#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:518; the assertion at examples/docs-snippets/src/plugins_tools.rs:523 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\")` equals `serde_json::json!([\"runtime\", \"plugin\", \"policy\", \"cancellation\"])`."
 
 [[api]]
@@ -52502,8 +52545,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureSource::Policy"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:519#ToolFailureSource::Policy,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:523#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:521#ToolFailureSource::Policy,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:525#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:519; the assertion at examples/docs-snippets/src/plugins_tools.rs:523 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\")` equals `serde_json::json!([\"runtime\", \"plugin\", \"policy\", \"cancellation\"])`."
 
 [[api]]
@@ -52513,8 +52556,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureSource::Runtime"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:517#ToolFailureSource::Runtime,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:523#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:519#ToolFailureSource::Runtime,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:525#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:517; the assertion at examples/docs-snippets/src/plugins_tools.rs:523 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\")` equals `serde_json::json!([\"runtime\", \"plugin\", \"policy\", \"cancellation\"])`."
 
 [[api]]
@@ -52533,8 +52576,8 @@ kind = "struct"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1214#let tool_grant = ToolGrant::new(definition.clone())"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1219#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1216#let tool_grant = ToolGrant::new(definition.clone())"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1221#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1214; the assertion at examples/docs-snippets/src/remote_protocol.rs:1219 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `tool_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -52543,8 +52586,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1217#assert_eq!(tool_grant.definition.name(), \"search_docs\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1219#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1219#assert_eq!(tool_grant.definition.name(), \"search_docs\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1221#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1217; the assertion at examples/docs-snippets/src/remote_protocol.rs:1219 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `tool_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -52553,8 +52596,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1219#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1219#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1221#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1221#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1219; the assertion at examples/docs-snippets/src/remote_protocol.rs:1219 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `tool_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -52563,8 +52606,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1214#let tool_grant = ToolGrant::new(definition.clone())"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1219#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1216#let tool_grant = ToolGrant::new(definition.clone())"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1221#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1214; the assertion at examples/docs-snippets/src/remote_protocol.rs:1219 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `tool_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -52573,8 +52616,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1218#assert_eq!(tool_grant.source_id.as_deref(), Some(PLUGIN_TOOL_SOURCE_ID));"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1219#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1220#assert_eq!(tool_grant.source_id.as_deref(), Some(PLUGIN_TOOL_SOURCE_ID));"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1221#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1218; the assertion at examples/docs-snippets/src/remote_protocol.rs:1219 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `tool_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -52583,8 +52626,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1216#.with_execution_binding(serde_json::json!({ \"tenant\": \"acme\" }));"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1219#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1218#.with_execution_binding(serde_json::json!({ \"tenant\": \"acme\" }));"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1221#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1216; the assertion at examples/docs-snippets/src/remote_protocol.rs:1219 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `tool_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -52593,8 +52636,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1215#.with_source_id(PLUGIN_TOOL_SOURCE_ID)"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1219#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1217#.with_source_id(PLUGIN_TOOL_SOURCE_ID)"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1221#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1215; the assertion at examples/docs-snippets/src/remote_protocol.rs:1219 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `tool_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -52604,8 +52647,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolId"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1212#let tool_id = ToolId::new(\"remote-tool:search_docs\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1213#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1214#let tool_id = ToolId::new(\"remote-tool:search_docs\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1215#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1212; the assertion at examples/docs-snippets/src/remote_protocol.rs:1213 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `ToolId::as_str(&tool_id)` equals `definition.id().as_str()`."
 
 [[api]]
@@ -52615,8 +52658,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolId::as_str"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1213#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1213#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1215#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1215#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1213; the assertion at examples/docs-snippets/src/remote_protocol.rs:1213 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `ToolId::as_str(&tool_id)` equals `definition.id().as_str()`."
 
 [[api]]
@@ -52626,8 +52669,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolId::new"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1212#let tool_id = ToolId::new(\"remote-tool:search_docs\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1213#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1214#let tool_id = ToolId::new(\"remote-tool:search_docs\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1215#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs:1212; the assertion at examples/docs-snippets/src/remote_protocol.rs:1213 in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `ToolId::as_str(&tool_id)` equals `definition.id().as_str()`."
 
 [[api]]
@@ -53746,8 +53789,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:629#let from_records = catalogue_preview_contribution(&records).expect(\"records must render\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:631#let from_records = catalogue_preview_contribution(&records).expect(\"records must render\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:629; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -53756,8 +53799,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:625#let from_entries = catalogue_preview_contribution_for_entries(manifest_entries.clone())"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:627#let from_entries = catalogue_preview_contribution_for_entries(manifest_entries.clone())"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:625; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -53766,8 +53809,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:613#let contribution = catalogue_preview_contribution_for_entries_with_options("
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:615#let contribution = catalogue_preview_contribution_for_entries_with_options("
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:613; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -53776,8 +53819,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:627#let from_manifests = catalogue_preview_contribution_for_manifests(&manifests)"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:629#let from_manifests = catalogue_preview_contribution_for_manifests(&manifests)"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:627; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -53786,8 +53829,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:632#let customized = catalogue_preview_contribution_with_options(&records, options)"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:634#let customized = catalogue_preview_contribution_with_options(&records, options)"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:632; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -53796,8 +53839,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:590#let record_entries = catalogue_preview_entries_from_catalog_records(&records);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:592#let record_entries = catalogue_preview_entries_from_catalog_records(&records);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:590; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -53806,8 +53849,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:574#let manifest_entries = catalogue_preview_entries_from_manifests(&manifests);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:576#let manifest_entries = catalogue_preview_entries_from_manifests(&manifests);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:574; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -53816,8 +53859,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:586#let record_entry = catalogue_preview_entry_from_catalog_record(&records[1])"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:588#let record_entry = catalogue_preview_entry_from_catalog_record(&records[1])"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:586; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -53826,8 +53869,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:570#let manifest_entry = catalogue_preview_entry_from_manifest(&manifests[0])"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:621#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:572#let manifest_entry = catalogue_preview_entry_from_manifest(&manifests[0])"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:623#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:570; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]

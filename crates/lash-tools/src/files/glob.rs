@@ -1,12 +1,13 @@
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use lash_core::{ToolCall, ToolDefinition, ToolResult, ToolRetryPolicy};
 
 use lash_tool_support::{
     FS_DEFAULTS_PREAMBLE, OptionalUsizeArg, StaticToolExecute, StaticToolProvider,
     ToolDefinitionLashlangExt, TruncationMeta, default_glob_limit, default_path_dot,
-    execute_typed_tool, invalid_tool_args, non_empty_string, rg_file_list, run_blocking_value,
+    execute_typed_tool, execution_failure, invalid_request_failure, io_failure, non_empty_string,
+    resolve_under, rg_file_list, run_blocking_value,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -46,7 +47,7 @@ impl StaticToolExecute for Glob {
         execute_typed_tool::<GlobArgs, GlobOutput, _, _>(call.args, |args| async move {
             match run_blocking_value(move || execute_glob_sync(args)).await {
                 Ok(result) => result,
-                Err(err) => Err(ToolResult::err_fmt(format_args!("{err}"))),
+                Err(err) => Err(err),
             }
         })
         .await
@@ -56,28 +57,47 @@ impl StaticToolExecute for Glob {
 fn execute_glob_sync(args: GlobArgs) -> Result<GlobOutput, ToolResult> {
     non_empty_string(&args.pattern, "pattern")?;
     let limit = args.limit.into_option("limit", 1)?;
-    let base = PathBuf::from(args.path);
+    let cwd = std::env::current_dir().map_err(|err| {
+        io_failure(
+            "current_dir_failed",
+            format!("Failed to determine cwd: {err}"),
+        )
+    })?;
+    let base = resolve_under(&cwd, Path::new(&args.path));
     if !base.exists() {
-        return Err(ToolResult::err_fmt(format_args!(
-            "Path does not exist: {}",
-            base.display()
-        )));
+        return Err(io_failure(
+            "path_not_found",
+            format!("Path does not exist: {}", base.display()),
+        ));
     }
     if !base.is_dir() {
-        return Err(ToolResult::err_fmt(format_args!(
-            "{} is a file, not a directory. Pass the parent directory as path and use the pattern to match files.",
-            base.display()
-        )));
+        return Err(invalid_request_failure(
+            "path_not_directory",
+            format!(
+                "{} is a file, not a directory. Pass the parent directory as path and use the pattern to match files.",
+                base.display()
+            ),
+        ));
     }
 
     let glob = globset::GlobBuilder::new(&args.pattern)
         .literal_separator(false)
         .build()
-        .map_err(|err| invalid_tool_args(format!("Invalid glob pattern: {err}")))?;
+        .map_err(|err| {
+            invalid_request_failure(
+                "invalid_glob_pattern",
+                format!("Invalid glob pattern: {err}"),
+            )
+        })?;
     let matcher = globset::GlobSetBuilder::new()
         .add(glob)
         .build()
-        .map_err(|err| ToolResult::err_fmt(format_args!("Failed to build glob matcher: {err}")))?;
+        .map_err(|err| {
+            execution_failure(
+                "glob_matcher_build_failed",
+                format!("Failed to build glob matcher: {err}"),
+            )
+        })?;
 
     let files = rg_file_list(&base, false, true, None, &[])?;
 
@@ -208,6 +228,25 @@ mod tests {
         .await;
         assert!(result.is_success());
         assert!(paths(&result).is_empty());
+    }
+
+    #[tokio::test]
+    async fn invalid_glob_pattern_is_a_structured_invalid_request() {
+        let dir = TempDir::new().unwrap();
+        let result = lash_core::testing::run_tool(
+            &glob_provider(),
+            "glob",
+            &json!({"pattern": "[", "path": dir.path()}),
+        )
+        .await;
+
+        let lash_core::ToolCallOutcome::Failure(failure) = &result.as_output().outcome else {
+            panic!("invalid glob must fail");
+        };
+        assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
+        assert_eq!(failure.code, "invalid_glob_pattern");
+        assert!(failure.message.contains("Invalid glob pattern"));
+        assert_eq!(failure.retry, lash_core::ToolRetryDisposition::Never);
     }
 
     #[tokio::test]

@@ -965,6 +965,7 @@ mod asserted_process_examples {
 
         let failure_classes = [
             RemoteToolFailureClass::InvalidRequest,
+            RemoteToolFailureClass::Io,
             RemoteToolFailureClass::Unavailable,
             RemoteToolFailureClass::PermissionDenied,
             RemoteToolFailureClass::Timeout,
@@ -977,6 +978,7 @@ mod asserted_process_examples {
             serde_json::to_value(failure_classes).expect("failure classes serialize"),
             json!([
                 "invalid_request",
+                "io",
                 "unavailable",
                 "permission_denied",
                 "timeout",
@@ -1285,5 +1287,11 @@ mod asserted_tool_examples {
                 "max_delay_ms": 200
             })
         );
+    }
+
+    #[test]
+    fn remote_io_failure_class_has_a_stable_wire_label() {
+        let class = lash::remote::processes::RemoteToolFailureClass::Io;
+        assert_eq!(serde_json::to_value(class).unwrap(), "io");
     }
 }

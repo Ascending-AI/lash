@@ -35,6 +35,38 @@ mod tests {
             .await
     }
 
+    #[tokio::test]
+    async fn missing_command_is_a_structured_invalid_request() {
+        let shell = test_shell();
+        let result = run(&shell, "exec_command", &json!({})).await;
+
+        let lash_core::ToolCallOutcome::Failure(failure) = &result.as_output().outcome else {
+            panic!("missing command must fail");
+        };
+        assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
+        assert_eq!(failure.code, "invalid_tool_args");
+        assert!(failure.message.contains("cmd"));
+        assert_eq!(failure.retry, lash_core::ToolRetryDisposition::Never);
+    }
+
+    #[tokio::test]
+    async fn shell_spawn_failure_is_structured_io() {
+        let shell = test_shell();
+        let result = run(
+            &shell,
+            "exec_command",
+            &json!({"cmd": "true", "shell": "/definitely/not/a/shell"}),
+        )
+        .await;
+
+        let lash_core::ToolCallOutcome::Failure(failure) = &result.as_output().outcome else {
+            panic!("missing shell executable must fail");
+        };
+        assert_eq!(failure.class, lash_core::ToolFailureClass::Io);
+        assert_eq!(failure.code, "spawn_shell_command_failed");
+        assert_eq!(failure.retry, lash_core::ToolRetryDisposition::Never);
+    }
+
     fn async_process_context(
         process_id: &str,
         cancel: CancellationToken,

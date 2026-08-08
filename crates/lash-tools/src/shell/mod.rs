@@ -26,8 +26,9 @@ use lash_core::{
 };
 
 use lash_tool_support::{
-    StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, object_schema,
-    parse_optional_bool, parse_optional_usize_arg, require_str,
+    StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, execution_failure,
+    invalid_request_failure, object_schema, parse_optional_bool, parse_optional_usize_arg,
+    require_str,
 };
 
 use crate::shell::output::{PollOutcome, shell_io_result, timed_out_shell_io_result};
@@ -204,7 +205,7 @@ impl StandardShell {
                 started.elapsed().as_secs_f64(),
             ),
             Ok(PollOutcome::Cancelled) => ToolResult::cancelled("tool call cancelled"),
-            Err(err) => ToolResult::err(json!(err)),
+            Err(failure) => ToolResult::failure(*failure),
         }
     }
 
@@ -248,7 +249,7 @@ impl StandardShell {
             &params.shell_path,
         ) {
             Ok(launch) => launch,
-            Err(err) => return ToolResult::err(json!(err)),
+            Err(failure) => return ToolResult::failure(*failure),
         };
         let started_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -279,7 +280,7 @@ impl StandardShell {
             lash_core::ProcessIdentity::new("shell").with_label(Some(params.cmd.clone())),
         );
         if let Err(err) = context.processes().start(request).await {
-            return ToolResult::err_fmt(err.to_string());
+            return execution_failure("detached_process_registration_failed", err.to_string());
         }
         if let Err(err) = context
             .processes()
@@ -292,7 +293,7 @@ impl StandardShell {
             )
             .await
         {
-            return ToolResult::err_fmt(err.to_string());
+            return execution_failure("detached_process_completion_failed", err.to_string());
         }
         let mut record = launch_value.as_object().cloned().unwrap_or_default();
         record.insert("__handle__".to_string(), json!("process"));
@@ -348,7 +349,7 @@ impl StandardShell {
                 }
                 ToolResult::ok(handle)
             }
-            Err(err) => ToolResult::err_fmt(err.to_string()),
+            Err(err) => execution_failure("shell_process_registration_failed", err.to_string()),
         }
     }
 
@@ -369,7 +370,7 @@ impl StandardShell {
             params.login,
             &params.shell_path,
         ) {
-            return ToolResult::err(json!(err));
+            return ToolResult::failure(*err);
         }
 
         let signal_done = CancellationToken::new();
@@ -384,7 +385,10 @@ impl StandardShell {
                 signal_done.cancel();
                 let _ = signal_forwarder.await;
                 self.runtime.remove_process(&handle_id);
-                ToolResult::err_fmt("background shell process returned running without a timeout")
+                execution_failure(
+                    "unexpected_running_shell_process",
+                    "background shell process returned running without a timeout",
+                )
             }
             Ok(PollOutcome::Exited {
                 output,
@@ -410,11 +414,11 @@ impl StandardShell {
                 self.runtime.remove_process(&handle_id);
                 ToolResult::cancelled("tool call cancelled")
             }
-            Err(err) => {
+            Err(failure) => {
                 signal_done.cancel();
                 let _ = signal_forwarder.await;
                 self.runtime.remove_process(&handle_id);
-                ToolResult::err(json!(err))
+                ToolResult::failure(*failure)
             }
         }
     }
@@ -487,7 +491,7 @@ impl StandardShell {
                 "status": "signalled",
                 "sequence": event.sequence,
             })),
-            Err(err) => ToolResult::err_fmt(err.to_string()),
+            Err(err) => execution_failure("shell_process_signal_failed", err.to_string()),
         }
     }
 }
@@ -677,7 +681,7 @@ finish probe.exit_code == 0"#.into(),
                 self.start_command(&params, context, cancel).await
             }
             "write_stdin" => self.write_stdin_call(args, context).await,
-            _ => ToolResult::err_fmt(format_args!("Unknown tool: {name}")),
+            _ => invalid_request_failure("unknown_shell_tool", format!("Unknown tool: {name}")),
         }
     }
 }

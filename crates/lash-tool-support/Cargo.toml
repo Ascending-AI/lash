@@ -30,3 +30,6 @@ serde_json = { workspace = true }
 schemars = { workspace = true }
 ignore = "0.4"
 similar = "2"
+
+[dev-dependencies]
+tempfile = { workspace = true }

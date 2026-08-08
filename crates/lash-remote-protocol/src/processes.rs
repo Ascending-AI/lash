@@ -318,6 +318,7 @@ impl RemoteProcessAwaitOutput {
 #[serde(rename_all = "snake_case")]
 pub enum RemoteToolFailureClass {
     InvalidRequest,
+    Io,
     Unavailable,
     PermissionDenied,
     Timeout,

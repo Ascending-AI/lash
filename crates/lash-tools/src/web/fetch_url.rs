@@ -1,9 +1,10 @@
 use serde_json::json;
 
-use lash_core::{ToolCall, ToolDefinition, ToolResult};
+use lash_core::{ToolCall, ToolDefinition, ToolFailure, ToolFailureClass, ToolResult, ToolValue};
 
 use lash_tool_support::{
-    StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, object_schema, require_str,
+    StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, execution_failure,
+    object_schema, require_str, retryable_io_failure,
 };
 
 /// Fetch a URL and return its content as text.
@@ -45,7 +46,10 @@ impl StaticToolExecute for FetchUrl {
         };
 
         if self.api_key.trim().is_empty() {
-            return ToolResult::err(json!("Tavily API key is required for web.fetch"));
+            return execution_failure(
+                "tavily_api_key_missing",
+                "Tavily API key is required for web.fetch",
+            );
         }
 
         let body = json!({
@@ -61,15 +65,33 @@ impl StaticToolExecute for FetchUrl {
             .await;
         let resp = match resp {
             Ok(resp) => resp,
-            Err(err) => return ToolResult::err(json!(format!("web.fetch request failed: {err}"))),
+            Err(err) => {
+                return retryable_io_failure(
+                    "web_fetch_request_failed",
+                    format!("web.fetch request failed: {err}"),
+                    Some(250),
+                );
+            }
         };
         let status = resp.status();
         let value: serde_json::Value = match resp.json().await {
             Ok(value) => value,
-            Err(err) => return ToolResult::err(json!(format!("web.fetch response failed: {err}"))),
+            Err(err) => {
+                return execution_failure(
+                    "web_fetch_response_decode_failed",
+                    format!("web.fetch response failed: {err}"),
+                );
+            }
         };
         if !status.is_success() {
-            return ToolResult::err(value);
+            let body = ToolValue::from(value.clone());
+            let mut failure = ToolFailure::tool(
+                ToolFailureClass::Execution,
+                "tavily_api_error",
+                format!("Tavily API error ({status}): {value}"),
+            );
+            failure.raw = Some(body);
+            return ToolResult::failure(failure);
         }
         let content = value
             .get("results")
@@ -113,6 +135,7 @@ fn fetch_url_tool_definition() -> ToolDefinition {
                 }),
             )
             .with_examples(vec!["await web.fetch({ url: \"https://www.rust-lang.org/\" })?".into()])
+            .with_retry_policy(lash_core::ToolRetryPolicy::safe(2, 250, 1000))
             .with_lashlang_binding(lash_tool_support::lashlang_binding(
                 ["web"],
                 "fetch",
@@ -123,6 +146,7 @@ fn fetch_url_tool_definition() -> ToolDefinition {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn fetch_url_returns_minimal_typed_record() {
@@ -144,5 +168,22 @@ mod tests {
             definition.manifest.activation,
             lash_core::ToolActivation::Always
         );
+    }
+
+    #[tokio::test]
+    async fn missing_api_key_is_a_structured_execution_failure() {
+        let result = lash_core::testing::run_tool(
+            &fetch_url_provider(""),
+            "fetch_url",
+            &json!({"url": "https://example.com"}),
+        )
+        .await;
+
+        let lash_core::ToolCallOutcome::Failure(failure) = &result.as_output().outcome else {
+            panic!("missing API key must fail");
+        };
+        assert_eq!(failure.class, lash_core::ToolFailureClass::Execution);
+        assert_eq!(failure.code, "tavily_api_key_missing");
+        assert_eq!(failure.retry, lash_core::ToolRetryDisposition::Never);
     }
 }
