@@ -141,21 +141,26 @@ impl<R> LashProcessWorkflowImpl<R> {
             process_id: process_id.to_string(),
         };
         Box::pin(async move {
-            match ingress
-                .call_workflow_json::<_, RestateProcessCancelSignal>(
-                    "LashProcessWorkflow",
-                    &workflow_key,
-                    "await_cancel",
-                    &request,
-                )
-                .await
-                .map_err(HandlerError::from)
-            {
-                Ok(RestateProcessCancelSignal::CancelRequested) => Ok(()),
-                Ok(RestateProcessCancelSignal::SegmentFinished) => {
-                    std::future::pending::<Result<(), HandlerError>>().await
+            loop {
+                match ingress
+                    .call_workflow_json::<_, RestateProcessCancelSignal>(
+                        "LashProcessWorkflow",
+                        &workflow_key,
+                        "await_cancel",
+                        &request,
+                    )
+                    .await
+                {
+                    Ok(RestateProcessCancelSignal::CancelRequested) => return Ok(()),
+                    Ok(RestateProcessCancelSignal::SegmentFinished) => {
+                        return std::future::pending::<Result<(), HandlerError>>().await;
+                    }
+                    Err(error) if error.is_timeout() => {
+                        // The attach ceiling bounds one transport connection, not the
+                        // durable watch. Re-attach to heal a dead or aged connection.
+                    }
+                    Err(error) => return Err(HandlerError::from(error)),
                 }
-                Err(error) => Err(error),
             }
         })
     }
@@ -225,9 +230,7 @@ where
             signal = &mut cancellation_signal => {
                 signal?;
                 cancellation.cancel();
-                self.confirm_process_cancel_requested(&process_id)
-                    .await
-                    .map_err(retryable_registry_error)?;
+                self.confirm_process_cancel_requested(&process_id).await?;
                 let _ = runner.await;
                 Ok(lash_core::ProcessRunOutcome::Terminal(Box::new(
                     ProcessAwaitOutput::Cancelled {
@@ -318,25 +321,41 @@ where
             .any(|event| event.event_type == "process.cancel_requested"))
     }
 
-    async fn confirm_process_cancel_requested(&self, process_id: &str) -> Result<(), PluginError> {
-        let mut last_error = None;
-        for attempt in 0..=PROCESS_CANCEL_CONFIRM_RETRIES {
+    async fn confirm_process_cancel_requested(&self, process_id: &str) -> Result<(), HandlerError> {
+        let mut attempt = 0;
+        loop {
             match self.process_cancel_requested(process_id).await {
                 Ok(true) => return Ok(()),
                 Ok(false) => {
-                    return Err(PluginError::Session(format!(
+                    // With Restate's single-primary registry topology this is a
+                    // deterministic contract violation. On a replica-read topology
+                    // the same observation would instead be read lag and retryable.
+                    return Err(TerminalError::new(format!(
                         "process `{process_id}` cancellation promise resolved without a durable process.cancel_requested event"
-                    )));
+                    ))
+                    .into());
                 }
                 Err(error) => {
-                    last_error = Some(error);
                     if attempt < PROCESS_CANCEL_CONFIRM_RETRIES {
+                        attempt += 1;
                         tokio::time::sleep(PROCESS_CANCEL_CONFIRM_RETRY_DELAY).await;
+                    } else {
+                        return Err(retryable_registry_error(PluginError::Session(format!(
+                            "process `{process_id}` cancellation confirmation failed after {} attempts: {error}",
+                            PROCESS_CANCEL_CONFIRM_RETRIES + 1
+                        ))));
                     }
                 }
             }
         }
-        Err(last_error.expect("cancel confirmation attempted at least once"))
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn confirm_process_cancel_requested_for_test(
+        &self,
+        process_id: &str,
+    ) -> Result<(), HandlerError> {
+        self.confirm_process_cancel_requested(process_id).await
     }
 
     async fn record_cancel_requested(
@@ -441,16 +460,20 @@ where
                     }));
                 }
                 if missing_segment_is_superseded(input.segment_ordinal, latest.as_ref()) {
+                    let latest = latest.as_ref().ok_or_else(|| {
+                        HandlerError::from(TerminalError::new(format!(
+                            "process `{process_id}` segment {} was classified as superseded without a latest handover",
+                            input.segment_ordinal
+                        )))
+                    })?;
                     tracing::debug!(
                         process_id,
                         segment_ordinal = input.segment_ordinal,
-                        latest_segment_ordinal = latest.as_ref().map(|value| value.segment_ordinal),
+                        latest_segment_ordinal = latest.segment_ordinal,
                         "ignoring retried superseded process segment"
                     );
                     return Ok(Json(RestateProcessWorkflowOutput::SegmentChained {
-                        next_segment_ordinal: latest
-                            .expect("superseded classification requires latest handover")
-                            .segment_ordinal,
+                        next_segment_ordinal: latest.segment_ordinal,
                     }));
                 }
                 return Err(HandlerError::from(TerminalError::new(format!(

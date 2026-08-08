@@ -336,14 +336,15 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         # The server-side lint gate is a first-class CI job.
         self.assertIn("  lint:\n", workflow)
 
-        # The lint job runs the same four checks the local push gate runs, so a
+        # The lint job runs the same checks the local push gate runs, so a
         # green local gate implies a green CI lint job (and vice versa): fmt
-        # --check, the `-D warnings` all-targets clippy gate, and the two
-        # boundary guards that otherwise gate nothing.
+        # --check, the `-D warnings` all-targets clippy gate, and the boundary
+        # guards that otherwise gate nothing.
         lint = workflow_job_block(workflow, "lint")
         self.assertIn("cargo fmt --all --check", lint)
         self.assertIn("cargo clippy --workspace --all-targets --locked", lint)
         self.assertIn("-- -D warnings", lint)
+        self.assertIn("python3 scripts/check-restate-handler-panics.py", lint)
         self.assertIn("bash scripts/check-core-ui-boundary.sh", lint)
         self.assertIn("bash scripts/check-workflow-graph-model.sh", lint)
         self.assertIn("bash scripts/check-production-file-size.sh", lint)

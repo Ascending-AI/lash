@@ -476,37 +476,33 @@ where
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        match restate_effect_execution(&envelope.command) {
-            RestateEffectExecution::DirectProcess => {
-                let RuntimeEffectEnvelope {
-                    invocation,
-                    command: RuntimeEffectCommand::Process { command },
-                } = envelope
-                else {
-                    unreachable!("direct process execution is only selected for process effects");
-                };
-                execute_restate_process_command(
-                    &self.context,
-                    &invocation,
-                    *command,
-                    local_executor,
-                )
-                .await
-                .map(|result| RuntimeEffectOutcome::Process { result })
+        match restate_effect_execution(envelope) {
+            RestateEffectExecution::DirectProcess {
+                invocation,
+                command,
+            } => execute_restate_process_command(
+                &self.context,
+                &invocation,
+                *command,
+                local_executor,
+            )
+            .await
+            .map(|result| RuntimeEffectOutcome::Process { result }),
+            RestateEffectExecution::DirectLocal { envelope } => {
+                local_executor.execute(envelope).await
             }
-            RestateEffectExecution::DirectLocal => local_executor.execute(envelope).await,
-            RestateEffectExecution::Timer => {
-                let RuntimeEffectCommand::Sleep { duration_ms } = &envelope.command else {
-                    unreachable!("timer execution is only selected for sleep effects");
-                };
-                let duration = Duration::from_millis(*duration_ms);
+            RestateEffectExecution::Timer {
+                invocation,
+                duration_ms,
+            } => {
+                let duration = Duration::from_millis(duration_ms);
                 let RuntimeSleepOptions {
                     cancellation,
                     observe_turn_cancel,
                     turn_cancel_scope,
                 } = local_executor.into_sleep_options();
                 let turn_cancel = restate_timer_turn_cancel_wait_request(
-                    &envelope.invocation,
+                    &invocation,
                     observe_turn_cancel,
                     turn_cancel_scope.as_ref(),
                 )?;
@@ -524,7 +520,7 @@ where
                         ));
                     }
                     Err(err) => {
-                        tracing_sleep_error(&envelope.invocation, &err);
+                        tracing_sleep_error(&invocation, &err);
                         return Err(RuntimeEffectControllerError::new(
                             "restate_effect_controller",
                             err.to_string(),
@@ -533,10 +529,7 @@ where
                 }
                 Ok(RuntimeEffectOutcome::Sleep)
             }
-            RestateEffectExecution::AwaitEvent => {
-                let RuntimeEffectCommand::AwaitEvent { key } = envelope.command else {
-                    unreachable!("await-event execution is only selected for event waits");
-                };
+            RestateEffectExecution::AwaitEvent { invocation, key } => {
                 let RuntimeAwaitEventOptions {
                     cancellation,
                     deadline,
@@ -545,7 +538,7 @@ where
                     turn_cancel_scope,
                 } = local_executor.into_await_event_options()?;
                 let turn_cancel = restate_await_event_turn_cancel_wait_request(
-                    &envelope.invocation,
+                    &invocation,
                     observe_turn_cancel,
                     turn_cancel_scope.as_ref(),
                 )?;
@@ -573,16 +566,12 @@ where
                     )),
                 }
             }
-            RestateEffectExecution::PeekAwaitEvent => {
-                let RuntimeEffectCommand::PeekAwaitEvent { key } = envelope.command else {
-                    unreachable!("peek execution is only selected for await-event reads");
-                };
-                self.peek_await_event(&key)
-                    .await
-                    .map(|resolution| RuntimeEffectOutcome::PeekAwaitEvent { resolution })
-                    .map_err(RuntimeEffectControllerError::from)
-            }
-            RestateEffectExecution::JournaledRun => {
+            RestateEffectExecution::PeekAwaitEvent { key } => self
+                .peek_await_event(&key)
+                .await
+                .map(|resolution| RuntimeEffectOutcome::PeekAwaitEvent { resolution })
+                .map_err(RuntimeEffectControllerError::from),
+            RestateEffectExecution::JournaledRun { envelope } => {
                 let reconstructed_envelope = envelope.canonical_form()?;
                 let replay_trace = local_executor.replay_validation_trace().cloned();
                 let invocation = envelope.invocation.clone();
@@ -878,14 +867,29 @@ where
         .await
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum RestateEffectExecution {
-    DirectProcess,
-    DirectLocal,
-    Timer,
-    AwaitEvent,
-    PeekAwaitEvent,
-    JournaledRun,
+    DirectProcess {
+        invocation: RuntimeInvocation,
+        command: Box<ProcessCommand>,
+    },
+    DirectLocal {
+        envelope: RuntimeEffectEnvelope,
+    },
+    Timer {
+        invocation: RuntimeInvocation,
+        duration_ms: u64,
+    },
+    AwaitEvent {
+        invocation: RuntimeInvocation,
+        key: AwaitEventKey,
+    },
+    PeekAwaitEvent {
+        key: AwaitEventKey,
+    },
+    JournaledRun {
+        envelope: RuntimeEffectEnvelope,
+    },
 }
 
 /// Selects the Restate journal-command mapping for a Lash runtime effect.
@@ -907,22 +911,45 @@ pub(crate) enum RestateEffectExecution {
 /// it also names the command this attempt was trying to write, not the
 /// journal's contents. FIG-790 was the incident that exposed this SDK
 /// diagnostic inversion.
-pub(crate) fn restate_effect_execution(command: &RuntimeEffectCommand) -> RestateEffectExecution {
+pub(crate) fn restate_effect_execution(envelope: RuntimeEffectEnvelope) -> RestateEffectExecution {
+    let RuntimeEffectEnvelope {
+        invocation,
+        command,
+    } = envelope;
     match command {
-        RuntimeEffectCommand::Process { .. } => RestateEffectExecution::DirectProcess,
-        RuntimeEffectCommand::ToolBatch { .. } | RuntimeEffectCommand::ExecCode { .. } => {
-            RestateEffectExecution::DirectLocal
+        RuntimeEffectCommand::Process { command } => RestateEffectExecution::DirectProcess {
+            invocation,
+            command,
+        },
+        command @ (RuntimeEffectCommand::ToolBatch { .. }
+        | RuntimeEffectCommand::ExecCode { .. }) => RestateEffectExecution::DirectLocal {
+            envelope: RuntimeEffectEnvelope {
+                invocation,
+                command,
+            },
+        },
+        RuntimeEffectCommand::Sleep { duration_ms } => RestateEffectExecution::Timer {
+            invocation,
+            duration_ms,
+        },
+        RuntimeEffectCommand::AwaitEvent { key } => {
+            RestateEffectExecution::AwaitEvent { invocation, key }
         }
-        RuntimeEffectCommand::Sleep { .. } => RestateEffectExecution::Timer,
-        RuntimeEffectCommand::AwaitEvent { .. } => RestateEffectExecution::AwaitEvent,
-        RuntimeEffectCommand::PeekAwaitEvent { .. } => RestateEffectExecution::PeekAwaitEvent,
-        RuntimeEffectCommand::LlmCall { .. }
+        RuntimeEffectCommand::PeekAwaitEvent { key } => {
+            RestateEffectExecution::PeekAwaitEvent { key }
+        }
+        command @ (RuntimeEffectCommand::LlmCall { .. }
         | RuntimeEffectCommand::Direct { .. }
         | RuntimeEffectCommand::ToolAttempt { .. }
         | RuntimeEffectCommand::Trigger { .. }
         | RuntimeEffectCommand::Checkpoint { .. }
-        | RuntimeEffectCommand::SyncExecutionEnvironment { .. } => {
-            RestateEffectExecution::JournaledRun
+        | RuntimeEffectCommand::SyncExecutionEnvironment { .. }) => {
+            RestateEffectExecution::JournaledRun {
+                envelope: RuntimeEffectEnvelope {
+                    invocation,
+                    command,
+                },
+            }
         }
     }
 }

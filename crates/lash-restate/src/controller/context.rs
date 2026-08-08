@@ -63,10 +63,6 @@ where
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let Some(future) = self.future.as_mut() else {
-            debug_assert!(
-                self.future.is_some(),
-                "Restate context future was polled after it was fused"
-            );
             return Poll::Pending;
         };
         let tracker = Arc::new(SynchronousWakeTracker {

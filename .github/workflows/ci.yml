@@ -268,6 +268,9 @@ jobs:
           # shellcheck disable=SC2086
           cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
 
+      - name: Check Restate handler panic boundary
+        run: python3 scripts/check-restate-handler-panics.py
+
       - name: Surface durable transcript changes
         run: python3 scripts/check-transcript-diff.py
 

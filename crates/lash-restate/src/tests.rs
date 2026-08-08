@@ -29,7 +29,7 @@ use lash_core::{
     RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectKind,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, ScopedEffectController,
     facade_support::DurableProcessWorker, facade_support::ProcessAttach,
-    facade_support::ProcessRunHandle,
+    facade_support::ProcessRunHandle, facade_support::TurnAddress, facade_support::TurnAttach,
 };
 use lash_core::{ProcessInput, ProcessRegistration, RuntimeScope, TriggerStore};
 use lash_http_transport::HttpRequest;
@@ -119,23 +119,8 @@ impl<F: Future> Future for CancelOnWakeFuture<F> {
     }
 }
 
-#[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "Restate context future was polled after it was fused")]
-fn restate_context_future_repoll_after_ready_trips_debug_assertion() {
-    let mut future = Box::pin(guard_restate_context_future(PanicsWhenPolledAfterReady {
-        completed: false,
-    }));
-    let waker = Waker::noop();
-    let mut context = Context::from_waker(waker);
-
-    assert_eq!(future.as_mut().poll(&mut context), Poll::Ready(()));
-    assert_eq!(future.as_mut().poll(&mut context), Poll::Pending);
-}
-
-#[cfg(not(debug_assertions))]
-#[test]
-fn restate_context_future_repoll_after_ready_stays_pending_in_release() {
+fn restate_context_future_repoll_after_ready_stays_pending() {
     let mut future = Box::pin(guard_restate_context_future(PanicsWhenPolledAfterReady {
         completed: false,
     }));
@@ -1714,39 +1699,30 @@ async fn fig793_pre_fix_suspended_llm_run_redrives_to_cancelled_boundary() {
 }
 
 /// PR #78's synthetic re-poll defense is re-scoped to the fused-state boundary.
-/// In debug builds a manual second poll trips the assertion before reaching the
-/// SDK future; release builds return `Pending` so an SDK reordering cannot turn
-/// this guard back into a production outage.
-#[cfg(debug_assertions)]
+/// A manual second poll stays pending without reaching the fused SDK future or
+/// introducing a panic-capable branch in the production handler boundary.
 #[tokio::test]
-async fn fig779_real_restate_timer_repoll_hits_debug_assertion() {
+async fn fig779_real_restate_timer_repoll_stays_pending_without_panic() {
     let endpoint = Endpoint::builder()
         .bind(Fig779TimerGuardReproImpl.serve())
         .build();
-    let attempt = tokio::spawn(async move {
-        invoke_endpoint(
-            &endpoint,
-            "Fig779TimerGuardRepro",
-            "repoll_fused_timer",
-            "fig779-repoll-fused-timer",
-            &Fig779TimerGuardReproInput { duration_ms: 2_000 },
-        )
-        .await
-    });
+    let output = invoke_endpoint(
+        &endpoint,
+        "Fig779TimerGuardRepro",
+        "repoll_fused_timer",
+        "fig779-repoll-fused-timer",
+        &Fig779TimerGuardReproInput { duration_ms: 2_000 },
+    )
+    .await
+    .expect("re-polling the fused wrapper must not panic");
 
-    let error = attempt
-        .await
-        .expect_err("re-polling the real fused wrapper must trip the debug assertion");
-    assert!(error.is_panic(), "expected a panic join error: {error:?}");
-    let payload = error.into_panic();
-    let message = payload
-        .downcast_ref::<&str>()
-        .copied()
-        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-        .expect("debug assertion panic payload should be text");
-    assert!(
-        message.contains("Restate context future was polled after it was fused"),
-        "the guard assertion must be the panic source: {message}"
+    assert_eq!(
+        restate_message_types(&output).expect("decode re-poll response frames"),
+        vec![
+            RESTATE_SLEEP_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ],
+        "the fused timer must preserve the SDK suspension"
     );
 }
 
@@ -3557,16 +3533,13 @@ impl lash_core::StoreMaintenance for CommitRetryStore {
 #[test]
 fn restate_command_execution_plan_is_explicit_for_every_command() {
     let cases = vec![
-        (
-            RuntimeEffectCommand::Sleep { duration_ms: 1 },
-            RestateEffectExecution::Timer,
-        ),
+        (RuntimeEffectCommand::Sleep { duration_ms: 1 }, "timer"),
         (
             RuntimeEffectCommand::process(ProcessCommand::List {
                 session_scope: lash_core::SessionScope::new("session"),
                 mode: lash_core::ProcessListMode::Live,
             }),
-            RestateEffectExecution::DirectProcess,
+            "direct_process",
         ),
         (
             RuntimeEffectCommand::AwaitEvent {
@@ -3578,20 +3551,32 @@ fn restate_command_execution_plan_is_explicit_for_every_command() {
                 )
                 .expect("await-event key"),
             },
-            RestateEffectExecution::AwaitEvent,
+            "await_event",
+        ),
+        (
+            RuntimeEffectCommand::PeekAwaitEvent {
+                key: restate_await_event_key(
+                    &durable_turn_scope("session", "turn"),
+                    AwaitEventWaitIdentity::Custom {
+                        key: "peek-event".to_string(),
+                    },
+                )
+                .expect("peek-await-event key"),
+            },
+            "peek_await_event",
         ),
         (
             RuntimeEffectCommand::LlmCall {
                 request: Box::new(llm_spec()),
             },
-            RestateEffectExecution::JournaledRun,
+            "journaled_run",
         ),
         (
             RuntimeEffectCommand::Direct {
                 request: Box::new(llm_spec()),
                 usage_source: "test".to_string(),
             },
-            RestateEffectExecution::JournaledRun,
+            "journaled_run",
         ),
         (
             RuntimeEffectCommand::ToolAttempt {
@@ -3600,13 +3585,13 @@ fn restate_command_execution_plan_is_explicit_for_every_command() {
                 attempt: 1,
                 max_attempts: 1,
             },
-            RestateEffectExecution::JournaledRun,
+            "journaled_run",
         ),
         (
             RuntimeEffectCommand::ToolBatch {
                 batch: lash_core::PreparedToolBatch::new("batch", vec![prepared_tool_call()]),
             },
-            RestateEffectExecution::DirectLocal,
+            "direct_local",
         ),
         (
             RuntimeEffectCommand::ExecCode {
@@ -3616,24 +3601,46 @@ fn restate_command_execution_plan_is_explicit_for_every_command() {
             // The interpreter is composite: it can issue nested timers,
             // waits, tools, and model calls. Rebuild it on handler replay and
             // let those child effects use their own stable journal keys.
-            RestateEffectExecution::DirectLocal,
+            "direct_local",
         ),
         (
             RuntimeEffectCommand::Checkpoint {
                 checkpoint: lash_core::CheckpointKind::AfterWork,
             },
-            RestateEffectExecution::JournaledRun,
+            "journaled_run",
         ),
         (
             RuntimeEffectCommand::SyncExecutionEnvironment {
                 update_machine_config: true,
             },
-            RestateEffectExecution::JournaledRun,
+            "journaled_run",
+        ),
+        (
+            RuntimeEffectCommand::Trigger {
+                command: Box::new(lash_core::TriggerCommand::List {
+                    owner_scope: lash_core::TriggerOwnerScope::session("session"),
+                    filter: lash_core::TriggerSubscriptionFilter::default(),
+                }),
+            },
+            "journaled_run",
         ),
     ];
 
     for (command, expected) in cases {
-        assert_eq!(restate_effect_execution(&command), expected);
+        let kind = command.kind();
+        let execution = restate_effect_execution(RuntimeEffectEnvelope {
+            invocation: runtime_invocation(kind, "classification"),
+            command,
+        });
+        let actual = match execution {
+            RestateEffectExecution::DirectProcess { .. } => "direct_process",
+            RestateEffectExecution::DirectLocal { .. } => "direct_local",
+            RestateEffectExecution::Timer { .. } => "timer",
+            RestateEffectExecution::AwaitEvent { .. } => "await_event",
+            RestateEffectExecution::PeekAwaitEvent { .. } => "peek_await_event",
+            RestateEffectExecution::JournaledRun { .. } => "journaled_run",
+        };
+        assert_eq!(actual, expected);
     }
 }
 
@@ -6706,6 +6713,43 @@ struct BlockingCancelSignalTransport {
     release: tokio::sync::Notify,
 }
 
+#[derive(Debug, Default)]
+struct CeilingCancelWatchTransport {
+    requests: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl HttpTransport for CeilingCancelWatchTransport {
+    async fn send(
+        &self,
+        _request: HttpRequest,
+        timeout: Option<Duration>,
+    ) -> Result<HttpResponse, HttpTransportError> {
+        self.requests.fetch_add(1, Ordering::SeqCst);
+        tokio::time::sleep(timeout.unwrap_or(Duration::ZERO)).await;
+        Err(
+            HttpTransportError::new("cancel watch attach ceiling elapsed")
+                .with_kind(lash_core::ProviderFailureKind::Timeout)
+                .with_code("timeout")
+                .retryable(true),
+        )
+    }
+}
+
+#[derive(Debug, Default)]
+struct BrokenCancelWatchTransport;
+
+#[async_trait::async_trait]
+impl HttpTransport for BrokenCancelWatchTransport {
+    async fn send(
+        &self,
+        _request: HttpRequest,
+        _timeout: Option<Duration>,
+    ) -> Result<HttpResponse, HttpTransportError> {
+        Err(HttpTransportError::new("cancel watch transport failed"))
+    }
+}
+
 #[async_trait::async_trait]
 impl HttpTransport for BlockingCancelSignalTransport {
     async fn send(
@@ -6870,6 +6914,89 @@ async fn running_process_cancel_uses_native_signal_without_poll_delay() {
 }
 
 #[tokio::test]
+async fn cancel_watch_reissues_after_attach_ceiling_until_segment_completes() {
+    let runner = Arc::new(CancellationAwareRunner::default());
+    let registry = process_registry();
+    let transport = Arc::new(CeilingCancelWatchTransport::default());
+    let connection = RestateConnection::with_transport_and_config(
+        "https://restate.invalid",
+        transport.clone(),
+        short_restate_timeouts(100, 10),
+    );
+    let workflow = LashProcessWorkflowImpl::new(
+        Arc::clone(&runner),
+        Arc::clone(&registry),
+        continuation_store(),
+        RestateIngressClient::new(connection),
+    );
+    let registration = rerunnable_registration("ceiling-reissues");
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register process");
+    let finish = Arc::clone(&runner);
+    let finisher = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(55)).await;
+        finish.finish_successfully.notify_one();
+    });
+
+    let outcome = workflow
+        .run_registration(
+            registration,
+            ProcessExecutionContext::default(),
+            inline_process_scope("ceiling-reissues"),
+            0,
+            None,
+            workflow.cancellation_signal("ceiling-reissues", 0),
+        )
+        .await
+        .expect("attach ceiling expiry must not fail the segment");
+    finisher.await.expect("finish segment");
+
+    assert!(matches!(
+        outcome,
+        lash_core::ProcessRunOutcome::Terminal(output)
+            if matches!(*output, ProcessAwaitOutput::Success { .. })
+    ));
+    assert!(
+        transport.requests.load(Ordering::SeqCst) >= 3,
+        "the cancel watch must re-attach across several ceilings"
+    );
+}
+
+#[tokio::test]
+async fn non_timeout_cancel_watch_error_fails_the_segment() {
+    let runner = Arc::new(CancellationAwareRunner::default());
+    let workflow = LashProcessWorkflowImpl::new(
+        Arc::clone(&runner),
+        process_registry(),
+        continuation_store(),
+        RestateIngressClient::new(RestateConnection::with_transport(
+            "https://restate.invalid",
+            Arc::new(BrokenCancelWatchTransport),
+        )),
+    );
+
+    let error = workflow
+        .run_registration(
+            rerunnable_registration("broken-cancel-watch"),
+            ProcessExecutionContext::default(),
+            inline_process_scope("broken-cancel-watch"),
+            0,
+            None,
+            workflow.cancellation_signal("broken-cancel-watch", 0),
+        )
+        .await
+        .expect_err("a non-timeout cancel watch failure must fail the segment");
+    let source: &(dyn std::error::Error + Send + Sync) = error.as_ref();
+
+    assert!(
+        source.to_string().contains("cancel watch transport failed"),
+        "unexpected handler error: {error:?}"
+    );
+}
+
+#[tokio::test]
 async fn transient_cancel_registry_read_error_cannot_fall_through_to_success() {
     let runner = Arc::new(CancellationAwareRunner::default());
     let registry = process_registry();
@@ -6923,7 +7050,7 @@ async fn transient_cancel_registry_read_error_cannot_fall_through_to_success() {
         .expect("resolve process cancellation signal");
     runner.finish_successfully.notify_one();
 
-    let outcome = tokio::time::timeout(Duration::from_millis(100), run)
+    let outcome = tokio::time::timeout(Duration::from_secs(2), run)
         .await
         .expect("transient registry error must be retried")
         .expect("join running process")
@@ -6933,6 +7060,57 @@ async fn transient_cancel_registry_read_error_cannot_fall_through_to_success() {
         lash_core::ProcessRunOutcome::Terminal(output)
             if matches!(*output, ProcessAwaitOutput::Cancelled { .. })
     ));
+}
+
+#[tokio::test]
+async fn exhausted_cancel_confirmation_is_a_retryable_handler_error() {
+    let workflow = LashProcessWorkflowImpl::new_for_test(
+        Arc::new(CancellationAwareRunner::default()),
+        process_registry(),
+        continuation_store(),
+    );
+    workflow.fail_next_cancel_reads(6);
+
+    let error = workflow
+        .confirm_process_cancel_requested_for_test("cancel-confirmation")
+        .await
+        .expect_err("exhausted confirmation must stay retryable");
+    let source: &(dyn std::error::Error + Send + Sync) = error.as_ref();
+    let rendered = source.to_string();
+
+    assert!(
+        format!("{error:?}").contains("Retryable"),
+        "unexpected handler error: {error:?}"
+    );
+    assert!(
+        rendered.contains("cancellation confirmation failed after 6 attempts"),
+        "unexpected handler error: {error:?}"
+    );
+}
+
+#[tokio::test]
+async fn absent_event_after_cancel_promise_is_a_terminal_handler_error() {
+    let registry = process_registry();
+    registry
+        .register_process(rerunnable_registration("missing-cancel-event"))
+        .await
+        .expect("register process");
+    let workflow = LashProcessWorkflowImpl::new_for_test(
+        Arc::new(CancellationAwareRunner::default()),
+        registry,
+        continuation_store(),
+    );
+
+    let error = workflow
+        .confirm_process_cancel_requested_for_test("missing-cancel-event")
+        .await
+        .expect_err("a resolved promise without its durable event must be terminal");
+    let source: &(dyn std::error::Error + Send + Sync) = error.as_ref();
+
+    assert!(
+        source.to_string().starts_with("Terminal error [500]:"),
+        "unexpected handler error: {error:?}"
+    );
 }
 
 #[tokio::test]
@@ -9528,6 +9706,249 @@ async fn spawn_restate_http_capture(
     (format!("http://{addr}"), captured, server)
 }
 
+async fn spawn_restate_http_black_hole() -> (String, tokio::task::JoinHandle<()>) {
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("accept");
+        let _request = read_http_request(&mut socket).await;
+        std::future::pending::<()>().await;
+    });
+    (format!("http://{addr}"), server)
+}
+
+async fn spawn_restate_http_stalled_body(
+    status: &'static str,
+    body: &'static str,
+) -> (String, tokio::task::JoinHandle<()>) {
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("accept");
+        let _request = read_http_request(&mut socket).await;
+        let header = format!(
+            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            body.len()
+        );
+        socket
+            .write_all(header.as_bytes())
+            .await
+            .expect("write response headers");
+        socket.flush().await.expect("flush response headers");
+        std::future::pending::<()>().await;
+    });
+    (format!("http://{addr}"), server)
+}
+
+fn short_restate_timeouts(
+    control_timeout_ms: u64,
+    attach_ceiling_ms: u64,
+) -> RestateConnectionConfig {
+    RestateConnectionConfig {
+        control_timeout_ms,
+        attach_ceiling_ms,
+    }
+}
+
+fn assert_retryable_timeout(error: RestateHttpError, expected_message: &str) {
+    let RestateHttpError::Request { source, .. } = error else {
+        panic!("expected typed Restate request timeout, got {error}");
+    };
+    assert_eq!(source.kind, lash_core::ProviderFailureKind::Timeout);
+    assert_eq!(source.code.as_deref(), Some("timeout"));
+    assert!(source.retryable);
+    assert!(source.message.contains(expected_message), "{source}");
+}
+
+#[test]
+fn restate_connection_timeout_config_has_serde_defaults() {
+    let defaults: RestateConnectionConfig = serde_json::from_str("{}").expect("default config");
+    assert_eq!(defaults.control_timeout_ms, 30_000);
+    assert_eq!(defaults.attach_ceiling_ms, 6 * 60 * 60 * 1_000);
+
+    let configured: RestateConnectionConfig = serde_json::from_value(serde_json::json!({
+        "control_timeout_ms": 125,
+        "attach_ceiling_ms": 9_000,
+    }))
+    .expect("configured timeouts");
+    assert_eq!(configured.control_timeout_ms, 125);
+    assert_eq!(configured.attach_ceiling_ms, 9_000);
+
+    let unknown = serde_json::from_value::<RestateConnectionConfig>(serde_json::json!({
+        "control_timeout_ms": 125,
+        "attach_ceiling_ms": 9_000,
+        "control_timout_ms": 10,
+    }))
+    .expect_err("unknown timeout fields must be rejected");
+    assert!(
+        unknown
+            .to_string()
+            .contains("unknown field `control_timout_ms`")
+    );
+
+    for (field, value) in [
+        (
+            "control_timeout_ms",
+            serde_json::json!({"control_timeout_ms": 0}),
+        ),
+        (
+            "attach_ceiling_ms",
+            serde_json::json!({"attach_ceiling_ms": 0}),
+        ),
+    ] {
+        let error = serde_json::from_value::<RestateConnectionConfig>(value)
+            .expect_err("zero timeout must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("{field} must be greater than zero")),
+            "unexpected config error: {error}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn restate_control_operation_times_out_against_black_hole() {
+    let (base_url, server) = spawn_restate_http_black_hole().await;
+    let client = RestateIngressClient::new(RestateConnection::with_config(
+        base_url,
+        short_restate_timeouts(500, 2_000),
+    ));
+    let started = std::time::Instant::now();
+
+    let error = client
+        .send_service_json("LashService", "run", &serde_json::json!({}))
+        .await
+        .expect_err("control submit must time out");
+    let elapsed = started.elapsed();
+    server.abort();
+    let _ = server.await;
+
+    assert_retryable_timeout(error, "control deadline");
+    assert!(elapsed >= Duration::from_millis(400), "elapsed {elapsed:?}");
+    assert!(elapsed < Duration::from_secs(2), "elapsed {elapsed:?}");
+}
+
+#[tokio::test]
+async fn restate_attach_survives_control_timeout_and_honors_ceiling() {
+    let control_timeout = Duration::from_millis(20);
+    let response_delay = Duration::from_millis(80);
+    let attach_ceiling = Duration::from_secs(2);
+    let (base_url, _captured, server) = spawn_restate_http_capture_delayed(
+        vec![MockHttpResponse {
+            status: "200 OK",
+            body: r#"{"type":"success","value":"attached"}"#,
+        }],
+        response_delay,
+    )
+    .await;
+    let client = RestateIngressClient::new(RestateConnection::with_config(
+        base_url,
+        short_restate_timeouts(
+            control_timeout.as_millis() as u64,
+            attach_ceiling.as_millis() as u64,
+        ),
+    ));
+    let started = std::time::Instant::now();
+
+    let output: ProcessAwaitOutput = client
+        .call_workflow_json(
+            "LashProcessWorkflow",
+            "process-1",
+            "await_terminal",
+            &RestateProcessAwaitRequest {
+                process_id: "process-1".to_string(),
+            },
+        )
+        .await
+        .expect("attach must use its ceiling rather than the control timeout");
+    let elapsed = started.elapsed();
+    server.await.expect("delayed response server");
+
+    assert_eq!(
+        output,
+        ProcessAwaitOutput::Success {
+            value: serde_json::json!("attached"),
+            control: None,
+        }
+    );
+    assert!(elapsed > control_timeout, "elapsed {elapsed:?}");
+    assert!(elapsed < attach_ceiling, "elapsed {elapsed:?}");
+
+    let (base_url, black_hole) = spawn_restate_http_black_hole().await;
+    let client = RestateIngressClient::new(RestateConnection::with_config(
+        base_url,
+        short_restate_timeouts(100, 500),
+    ));
+    let started = std::time::Instant::now();
+    let error = client
+        .call_workflow_json::<_, serde_json::Value>(
+            "LashWorkflow",
+            "key",
+            "await",
+            &serde_json::json!({}),
+        )
+        .await
+        .expect_err("attach ceiling must bound a black hole");
+    let elapsed = started.elapsed();
+    black_hole.abort();
+    let _ = black_hole.await;
+
+    assert_retryable_timeout(error, "attach ceiling");
+    assert!(elapsed >= Duration::from_millis(400), "elapsed {elapsed:?}");
+    assert!(elapsed < Duration::from_secs(2), "elapsed {elapsed:?}");
+}
+
+#[tokio::test]
+async fn restate_attach_body_read_is_clamped_to_control_timeout() {
+    let (base_url, server) = spawn_restate_http_stalled_body("200 OK", "{}").await;
+    let client = RestateIngressClient::new(RestateConnection::with_config(
+        base_url,
+        short_restate_timeouts(100, 2_000),
+    ));
+    let started = std::time::Instant::now();
+
+    let error = client
+        .call_workflow_json::<_, serde_json::Value>(
+            "LashWorkflow",
+            "key",
+            "await",
+            &serde_json::json!({}),
+        )
+        .await
+        .expect_err("an attach body is no longer a durable park");
+    let elapsed = started.elapsed();
+    server.abort();
+    let _ = server.await;
+
+    assert_retryable_timeout(error, "attach ceiling response body");
+    assert!(elapsed >= Duration::from_millis(75), "elapsed {elapsed:?}");
+    assert!(elapsed < Duration::from_millis(500), "elapsed {elapsed:?}");
+}
+
+#[tokio::test]
+async fn restate_success_and_error_body_reads_share_the_request_deadline() {
+    for status in ["202 Accepted", "500 Internal Server Error"] {
+        let (base_url, server) = spawn_restate_http_stalled_body(status, "{}").await;
+        let client = RestateIngressClient::new(RestateConnection::with_config(
+            base_url,
+            short_restate_timeouts(30, 500),
+        ));
+        let error = client
+            .send_service_json("LashService", "run", &serde_json::json!({}))
+            .await
+            .expect_err("stalled response body must time out");
+        server.abort();
+        let _ = server.await;
+        assert_retryable_timeout(error, "control deadline response body");
+    }
+}
+
 #[tokio::test]
 async fn restate_ingress_client_parses_send_invocation_id() {
     let (base_url, captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
@@ -9886,6 +10307,51 @@ async fn restate_process_attach_maps_ingress_error_to_plugin_error() {
     );
     assert!(err.to_string().contains("status 500"));
     assert!(err.to_string().contains("boom"));
+}
+
+#[tokio::test]
+async fn restate_process_attach_preserves_re_attach_signal_on_ceiling() {
+    let (base_url, black_hole) = spawn_restate_http_black_hole().await;
+    let runner = RestateProcessIngressRunner::new(
+        RestateConnection::with_config(base_url, short_restate_timeouts(100, 25)),
+        process_registry(),
+        continuation_store(),
+    );
+
+    let error = runner
+        .await_terminal("process-1")
+        .await
+        .expect_err("attach ceiling must be typed for host re-attachment");
+    black_hole.abort();
+    let _ = black_hole.await;
+
+    assert!(matches!(
+        error,
+        PluginError::ProcessAttachCeilingElapsed { ref process_id }
+            if process_id == "process-1"
+    ));
+}
+
+#[tokio::test]
+async fn restate_turn_attach_preserves_re_attach_code_on_ceiling() {
+    let (base_url, black_hole) = spawn_restate_http_black_hole().await;
+    let attach = RestateTurnAttach::new(RestateConnection::with_config(
+        base_url,
+        short_restate_timeouts(100, 25),
+    ));
+
+    let error = attach
+        .await_terminal(&TurnAddress::new("session-1", "turn-1"))
+        .await
+        .expect_err("attach ceiling must be coded for host re-attachment");
+    black_hole.abort();
+    let _ = black_hole.await;
+
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RestateTurnTerminalAttachCeilingElapsed
+    );
+    assert!(error.is_retryable());
 }
 
 /// Like [`spawn_restate_http_capture`], but holds each accepted connection open

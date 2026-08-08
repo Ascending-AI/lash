@@ -130,7 +130,7 @@ async fn async_main() -> AnyhowResult<()> {
     let session_ids = WorkbenchSessionIds::persistent(data_dir.join("session-id"))?;
     let event_tx =
         SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)?;
-    let restate_http = reqwest::Client::new();
+    let restate_http = lash_http_transport::build_http_client();
     let active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))?;
     // Best-effort freshness feed for appended process events (ADR 0017). The
     // sink is a freshness overlay on the durable event log, never truth: no
@@ -151,7 +151,13 @@ async fn async_main() -> AnyhowResult<()> {
     let process_event_sink = Arc::new(ChannelProcessEventSink::new(process_event_tx))
         as Arc<dyn lash::process::ProcessEventSink>;
     let process_deployment = lash_restate::RestateProcessDeployment::new_with_sink(
-        restate_ingress_url.clone(),
+        lash_restate::RestateConnection::with_config(
+            restate_ingress_url.clone(),
+            lash_restate::RestateConnectionConfig {
+                control_timeout_ms: 30_000,
+                attach_ceiling_ms: 6 * 60 * 60 * 1_000,
+            },
+        ),
         process_registry,
         process_continuations,
         Some(process_event_sink),

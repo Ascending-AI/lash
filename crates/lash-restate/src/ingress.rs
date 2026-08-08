@@ -7,12 +7,81 @@
 
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 
 use lash_http_transport::{
     HttpMethod, HttpRequest, HttpResponse, HttpTransport, HttpTransportError, ReqwestClient,
     ReqwestHttpTransport, read_http_body_bytes,
 };
 use serde::{Serialize, de::DeserializeOwned};
+
+const DEFAULT_CONTROL_TIMEOUT_MS: u64 = 30_000;
+const DEFAULT_ATTACH_CEILING_MS: u64 = 6 * 60 * 60 * 1_000;
+
+const fn default_control_timeout_ms() -> u64 {
+    DEFAULT_CONTROL_TIMEOUT_MS
+}
+
+const fn default_attach_ceiling_ms() -> u64 {
+    DEFAULT_ATTACH_CEILING_MS
+}
+
+/// Deadline classes for HTTP operations issued through a [`RestateConnection`].
+///
+/// Control operations should fail quickly so callers can retry or report a
+/// degraded substrate. Attach operations can legitimately remain parked for a
+/// durable workflow's lifetime, so they receive a separate generous ceiling.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RestateConnectionConfig {
+    /// Submit, cancel, status, query, and patch deadline. Default 30 seconds.
+    #[serde(
+        default = "default_control_timeout_ms",
+        deserialize_with = "deserialize_control_timeout_ms"
+    )]
+    pub control_timeout_ms: u64,
+    /// Await/attach request ceiling. Default 6 hours.
+    #[serde(
+        default = "default_attach_ceiling_ms",
+        deserialize_with = "deserialize_attach_ceiling_ms"
+    )]
+    pub attach_ceiling_ms: u64,
+}
+
+fn deserialize_control_timeout_ms<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = <u64 as serde::Deserialize>::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(serde::de::Error::custom(
+            "control_timeout_ms must be greater than zero",
+        ));
+    }
+    Ok(value)
+}
+
+fn deserialize_attach_ceiling_ms<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = <u64 as serde::Deserialize>::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(serde::de::Error::custom(
+            "attach_ceiling_ms must be greater than zero",
+        ));
+    }
+    Ok(value)
+}
+
+impl Default for RestateConnectionConfig {
+    fn default() -> Self {
+        Self {
+            control_timeout_ms: default_control_timeout_ms(),
+            attach_ceiling_ms: default_attach_ceiling_ms(),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
 pub struct RestateInvocationId(String);
@@ -79,6 +148,17 @@ pub enum RestateHttpError {
     #[error("Restate /send returned unexpected status `{status}` for {url}")]
     UnexpectedSendStatus { url: String, status: String },
 }
+
+impl RestateHttpError {
+    /// Whether this failure elapsed a configured transport deadline.
+    pub fn is_timeout(&self) -> bool {
+        matches!(
+            self,
+            Self::Request { source, .. }
+                if source.kind == lash_core::ProviderFailureKind::Timeout
+        )
+    }
+}
 /// Host-owned Restate ingress connectivity.
 ///
 /// Authentication, mTLS, proxying, and credential rotation are operational
@@ -94,7 +174,7 @@ pub enum RestateHttpError {
 /// let mut authorization = HeaderValue::from_static("Bearer restate-cloud-token");
 /// authorization.set_sensitive(true);
 /// headers.insert(AUTHORIZATION, authorization);
-/// let client = lash_http_transport::ReqwestClient::builder()
+/// let client = lash_http_transport::http_client_builder()
 ///     .default_headers(headers)
 ///     .build()?;
 /// let connection = RestateConnection::with_client(
@@ -107,32 +187,59 @@ pub enum RestateHttpError {
 pub struct RestateConnection {
     ingress_url: String,
     transport: Arc<dyn HttpTransport>,
+    config: RestateConnectionConfig,
 }
 
 impl RestateConnection {
     pub fn new(ingress_url: impl Into<String>) -> Self {
-        Self::with_transport(ingress_url, Arc::new(ReqwestHttpTransport::new()))
+        Self::with_config(ingress_url, RestateConnectionConfig::default())
+    }
+
+    pub fn with_config(ingress_url: impl Into<String>, config: RestateConnectionConfig) -> Self {
+        Self::with_transport_and_config(ingress_url, Arc::new(ReqwestHttpTransport::new()), config)
     }
 
     pub fn with_transport(
         ingress_url: impl Into<String>,
         transport: Arc<dyn HttpTransport>,
     ) -> Self {
+        Self::with_transport_and_config(ingress_url, transport, RestateConnectionConfig::default())
+    }
+
+    pub fn with_transport_and_config(
+        ingress_url: impl Into<String>,
+        transport: Arc<dyn HttpTransport>,
+        config: RestateConnectionConfig,
+    ) -> Self {
         Self {
             ingress_url: ingress_url.into(),
             transport,
+            config,
         }
     }
 
     pub fn with_client(ingress_url: impl Into<String>, client: ReqwestClient) -> Self {
-        Self::with_transport(
+        Self::with_client_and_config(ingress_url, client, RestateConnectionConfig::default())
+    }
+
+    pub fn with_client_and_config(
+        ingress_url: impl Into<String>,
+        client: ReqwestClient,
+        config: RestateConnectionConfig,
+    ) -> Self {
+        Self::with_transport_and_config(
             ingress_url,
             Arc::new(ReqwestHttpTransport::from_client(client)),
+            config,
         )
     }
 
     pub fn ingress_url(&self) -> &str {
         &self.ingress_url
+    }
+
+    pub fn config(&self) -> &RestateConnectionConfig {
+        &self.config
     }
 }
 
@@ -253,7 +360,13 @@ impl RestateIngressClient {
         if let Some(idempotency_key) = idempotency_key {
             request = request.with_header("idempotency-key", idempotency_key);
         }
-        let response = send_request(&self.connection, "Restate workflow call", request).await?;
+        let response = send_request(
+            &self.connection,
+            RestateRequestClass::Attach,
+            "Restate workflow call",
+            request,
+        )
+        .await?;
         if !response.is_success() {
             return Err(status_error("Restate workflow call", url, response).await);
         }
@@ -275,6 +388,7 @@ impl RestateIngressClient {
         let url = format_restate_url(self.connection.ingress_url(), &path);
         let response = send_request(
             &self.connection,
+            RestateRequestClass::Control,
             "Restate workflow call",
             HttpRequest::post(&url, ""),
         )
@@ -318,6 +432,7 @@ impl RestateIngressClient {
         let url = format_restate_url(self.connection.ingress_url(), &path);
         let response = send_request(
             &self.connection,
+            RestateRequestClass::Control,
             "Restate object call",
             HttpRequest::post(&url, ""),
         )
@@ -354,7 +469,7 @@ impl RestateIngressClient {
         operation: &'static str,
         url: &str,
         body: &T,
-    ) -> Result<HttpResponse, RestateHttpError> {
+    ) -> Result<RestateHttpResponse, RestateHttpError> {
         let body = serde_json::to_vec(body).map_err(|source| RestateHttpError::Encode {
             operation,
             url: url.to_string(),
@@ -362,6 +477,7 @@ impl RestateIngressClient {
         })?;
         send_request(
             &self.connection,
+            RestateRequestClass::Control,
             operation,
             HttpRequest::post(url, body).with_header("content-type", "application/json"),
         )
@@ -502,7 +618,13 @@ impl RestateAdminClient {
             ("accept", "application/json"),
             ("content-type", "application/json"),
         ]);
-        let response = send_request(&self.connection, "Restate SQL query", request).await?;
+        let response = send_request(
+            &self.connection,
+            RestateRequestClass::Control,
+            "Restate SQL query",
+            request,
+        )
+        .await?;
         if !response.is_success() {
             return Err(status_error("Restate SQL query", url, response).await);
         }
@@ -523,6 +645,7 @@ impl RestateAdminClient {
         );
         let response = send_request(
             &self.connection,
+            RestateRequestClass::Control,
             operation,
             HttpRequest::new(HttpMethod::Patch, &url, ""),
         )
@@ -577,55 +700,145 @@ fn format_restate_url(base_url: &str, path: &str) -> String {
 async fn status_error(
     operation: &'static str,
     url: String,
-    response: HttpResponse,
+    response: RestateHttpResponse,
 ) -> RestateHttpError {
-    let status = response.status;
-    let body = read_http_body_bytes(response.body, None, "Restate response body timed out")
-        .await
-        .map(|body| String::from_utf8_lossy(&body).into_owned())
-        .unwrap_or_default();
-    RestateHttpError::Status {
-        operation,
-        url,
-        status,
-        body,
+    let status = response.response.status;
+    let timeout_message = format!(
+        "{operation} {} response body timed out",
+        response.deadline.class.name()
+    );
+    match read_http_body_bytes(
+        response.response.body,
+        Some(response.body_timeout),
+        &timeout_message,
+    )
+    .await
+    {
+        Ok(body) => RestateHttpError::Status {
+            operation,
+            url,
+            status,
+            body: String::from_utf8_lossy(&body).into_owned(),
+        },
+        Err(source) => RestateHttpError::Request {
+            operation,
+            url,
+            source,
+        },
     }
 }
 
 async fn send_request(
     connection: &RestateConnection,
+    class: RestateRequestClass,
     operation: &'static str,
     request: HttpRequest,
-) -> Result<HttpResponse, RestateHttpError> {
+) -> Result<RestateHttpResponse, RestateHttpError> {
     let url = request.url.clone();
-    connection
+    let deadline = RestateRequestDeadline::new(class, class.timeout(&connection.config));
+    let request = request.with_response_start_timeout_message(format!(
+        "{operation} {} response start timed out",
+        class.name()
+    ));
+    let response = connection
         .transport
-        .send(request, None)
+        .send(request, Some(deadline.remaining()))
         .await
         .map_err(|source| RestateHttpError::Request {
             operation,
             url,
             source,
-        })
+        })?;
+    let body_timeout = deadline
+        .remaining()
+        .min(Duration::from_millis(connection.config.control_timeout_ms));
+    Ok(RestateHttpResponse {
+        response,
+        deadline,
+        body_timeout,
+    })
 }
 
 async fn decode_response<T: DeserializeOwned>(
     operation: &'static str,
     url: &str,
-    response: HttpResponse,
+    response: RestateHttpResponse,
 ) -> Result<T, RestateHttpError> {
-    let body = read_http_body_bytes(response.body, None, "Restate response body timed out")
-        .await
-        .map_err(|source| RestateHttpError::Request {
-            operation,
-            url: url.to_string(),
-            source,
-        })?;
+    let timeout_message = format!(
+        "{operation} {} response body timed out",
+        response.deadline.class.name()
+    );
+    let body = read_http_body_bytes(
+        response.response.body,
+        Some(response.body_timeout),
+        &timeout_message,
+    )
+    .await
+    .map_err(|source| RestateHttpError::Request {
+        operation,
+        url: url.to_string(),
+        source,
+    })?;
     serde_json::from_slice(&body).map_err(|source| RestateHttpError::Decode {
         operation,
         url: url.to_string(),
         source,
     })
+}
+
+#[derive(Clone, Copy, Debug)]
+enum RestateRequestClass {
+    Control,
+    Attach,
+}
+
+impl RestateRequestClass {
+    fn timeout(self, config: &RestateConnectionConfig) -> Duration {
+        match self {
+            Self::Control => Duration::from_millis(config.control_timeout_ms),
+            Self::Attach => Duration::from_millis(config.attach_ceiling_ms),
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Control => "control deadline",
+            Self::Attach => "attach ceiling",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RestateRequestDeadline {
+    class: RestateRequestClass,
+    expires_at: tokio::time::Instant,
+}
+
+impl RestateRequestDeadline {
+    fn new(class: RestateRequestClass, timeout: Duration) -> Self {
+        Self {
+            class,
+            expires_at: tokio::time::Instant::now() + timeout,
+        }
+    }
+
+    fn remaining(self) -> Duration {
+        self.expires_at
+            .saturating_duration_since(tokio::time::Instant::now())
+    }
+}
+
+#[derive(Debug)]
+struct RestateHttpResponse {
+    response: HttpResponse,
+    deadline: RestateRequestDeadline,
+    body_timeout: Duration,
+}
+
+impl RestateHttpResponse {
+    fn is_success(&self) -> bool {
+        self.response.is_success()
+    }
 }
 
 fn sql_string_literal(value: &str) -> String {
