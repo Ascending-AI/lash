@@ -125,7 +125,10 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
   ancestry and both frame-scoped read models rather than treating all raw nodes as visible.
 - **Layer 3 — trace:** filter `trace.jsonl` by `context.session_id == <S>`. Preserve full
   records for rolling-history events, tool calls, and `turn_completed`, including graph and
-  parent ids.
+  parent ids. The browser's work rail calls `/api/work` during hydration and on its polling
+  interval; those reads legitimately emit session-scoped `agent_workbench.api.work.response`
+  custom records even before the first turn. Preserve them, but do not count them as runtime
+  conversation activity or require a literally empty session-scoped trace at baseline.
 - Restart with the same exported data/run directories via
   `bash scripts/agent-workbench-dev.sh restart --port 3200`. Teardown is
   `bash scripts/agent-workbench-dev.sh down --port 3200`, followed by removal of
@@ -136,8 +139,13 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
 Start from a nonexistent data directory. Boot with the exact environment above, gate
 `/healthz`, and open the scoped URL. Require the composer, empty transcript, rendered session
 id `<S>`, `/api/state.settings.session_id == <S>`, idle, and no active turns. Require zero
-session-scoped graph rows and trace records. Record the workbench PID, Restate container id
-and `StartedAt`, model, and context-window boot log. Screenshot `00-scoped-empty.png`; save
+session-scoped graph rows and zero session-scoped turn, rolling-history, or tool-call trace
+records. Passive `agent_workbench.api.work.response` records with an empty result are expected
+from the rendered browser surface and must be recorded separately from that activity gate.
+Record the workbench PID, Restate container id and `StartedAt`, model, and exact
+`AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS` launch value; the first Phase 1
+`rolling_history_compaction_needed.max_context_tokens` is the runtime proof that the session
+policy delivered that value to the hook. Screenshot `00-scoped-empty.png`; save
 `00-identities.json`, `00-state.json`, and `00-trace.json`.
 
 ## Phase 1 — Build distinctive context and reach compaction pressure
@@ -242,7 +250,7 @@ extracts first, then remove `/workspace/tmp/fig992a-run/data` and confirm it is 
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
-| Boot/scope | `/healthz` 200; exact 41,000-token boot; rendered/API session `<S>`; all three layers empty | | `00-scoped-empty.png`, `00-identities.json`, `00-state.json` |
+| Boot/scope | `/healthz` 200; exact 41,000-token launch; rendered/API session `<S>`; DOM/API/graph and runtime-activity trace empty (passive empty work-poll records allowed and retained) | | `00-scoped-empty.png`, `00-identities.json`, `00-state.json`, `00-trace.json` |
 | Bounded pressure | 2–6 marker turns; `rolling_history_compaction_needed` has 41000/21000 budget fields | | `01-pressure-ready.png`, `01-rolling-history.json` |
 | Rolling-history scope | needed/pruned are turn-scoped; started/completed are session-parented; typed payloads retained | | `01-rolling-history.json` |
 | Real tool turn | paired successful tool start/completion with one call id | | `01-tool-call.json` |
