@@ -43,6 +43,7 @@ uuid = { workspace = true, features = ["v4"] }
 # a normal `LashCore` turn in `tests/codex_websocket_runtime.rs`.
 lash = { workspace = true }
 lash-llm-transport = { workspace = true, features = ["testing"] }
+lash-protocol-rlm = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 
 [[test]]
