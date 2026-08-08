@@ -32,6 +32,11 @@ pub use ast::{
     ProcessStartExpr, Program, ResourceRefExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
     fold_expr_children, format_type_expr, walk_expr,
 };
+
+/// Names of every builtin accepted by the linker and runtime, in registry order.
+pub fn builtin_names() -> impl ExactSizeIterator<Item = &'static str> + Clone {
+    builtins::names()
+}
 pub use compile::{
     ModuleCompileDiagnostic, ModuleCompileError, ModuleCompileOutput, ModuleCompileRequest,
     ModuleCompileStage, compile_module,

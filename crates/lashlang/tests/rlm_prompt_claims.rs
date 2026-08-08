@@ -1282,6 +1282,56 @@ if check.exit_code != 0 {
     );
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn prompt_claim_shaping_semantics_are_exact() {
+    let host = MockHost::default();
+    let value = run(
+        &host,
+        r#"
+rows = [{ id: "first", rank: 2 }, { id: "second", rank: 1 }, { id: "third", rank: 2 }]
+finish {
+  stable: sort_by(rows, "rank"),
+  first_unique: unique([2, 1, 2, 3, 1]),
+  literal_replace: replace("a.b.a", ".", "-"),
+  empty_replace: replace("ab", "", "-"),
+  empty_sum: sum([])
+}
+"#,
+    );
+    let record = value.as_record().expect("shaping result record");
+    let Value::List(stable) = &record["stable"] else {
+        panic!("stable rows must be a list");
+    };
+    let ids = stable
+        .iter()
+        .map(|row| row.as_record().expect("row")["id"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ids,
+        vec![
+            Value::String("second".into()),
+            Value::String("first".into()),
+            Value::String("third".into()),
+        ]
+    );
+    assert_eq!(
+        record["first_unique"],
+        Value::List(vec![Value::Number(2.0), Value::Number(1.0), Value::Number(3.0)].into())
+    );
+    assert_eq!(record["literal_replace"], Value::String("a-b-a".into()));
+    assert_eq!(record["empty_replace"], Value::String("-a-b-".into()));
+    assert_eq!(record["empty_sum"], Value::Number(0.0));
+
+    let mut state = State::new();
+    let error = execute("finish min([])", &mut state, &host)
+        .await
+        .expect_err("empty extrema are typed errors");
+    assert!(matches!(
+        error,
+        ExecuteError::Runtime(lashlang::RuntimeError::ShapingEmptyList { builtin: "min" })
+    ));
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Meta-claim guard: the prompt still references every builtin we've
 // implemented — no silent drift. If someone adds/removes a builtin
@@ -1290,44 +1340,6 @@ if check.exit_code != 0 {
 
 #[tokio::test(flavor = "current_thread")]
 async fn prompt_mentions_every_builtin_we_document() {
-    // Source: `crates/lash-protocol-rlm/src/protocol.rs::RLM_EXECUTION_SECTION`. We don't
-    // pull the const directly (cross-crate visibility) — instead keep the
-    // expected list here. If you add a builtin, update both places.
-    const DOCUMENTED: &[&str] = &[
-        "len",
-        "empty",
-        "slice",
-        "split",
-        "join",
-        "trim",
-        "find",
-        "grep_text",
-        "starts_with",
-        "ends_with",
-        "contains",
-        "keys",
-        "values",
-        "to_string",
-        "to_int",
-        "to_float",
-        "json_parse",
-        "format",
-        "validate",
-        "range",
-        "ceil_div",
-        "floor_div",
-        "push",
-        "sort",
-        "sort_by",
-        "sum",
-        "min",
-        "max",
-        "replace",
-        "lower",
-        "upper",
-        "unique",
-        "reverse",
-    ];
     // Call each builtin with a shape guaranteed to succeed — we don't
     // check results here (covered by the per-builtin tests above), only
     // that the runtime recognises the name.
@@ -1370,7 +1382,11 @@ async fn prompt_mentions_every_builtin_we_document() {
         (r#"finish unique([1, 1])"#, "unique"),
         (r#"finish reverse([1, 2])"#, "reverse"),
     ];
-    assert_eq!(smoke.len(), DOCUMENTED.len());
+    let mut smoke_names = smoke.iter().map(|(_, name)| *name).collect::<Vec<_>>();
+    smoke_names.sort_unstable();
+    let mut registry_names = lashlang::builtin_names().collect::<Vec<_>>();
+    registry_names.sort_unstable();
+    assert_eq!(smoke_names, registry_names);
     for (code, name) in smoke {
         let mut state = State::new();
         let outcome = execute(code, &mut state, &host)

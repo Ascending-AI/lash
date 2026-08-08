@@ -194,6 +194,7 @@ fn render_language_section(
     let mut bullets = Vec::new();
     push_value_language_bullets(&mut bullets, images);
     bullets.push(strings_language_bullet());
+    bullets.push(operator_language_bullet());
     bullets.push(assignment_language_bullet());
     bullets.push(list_comprehension_language_bullet());
     if has_operations {
@@ -229,6 +230,10 @@ fn push_value_language_bullets(bullets: &mut Vec<String>, images: bool) {
 
 fn strings_language_bullet() -> String {
     "- Strings: `\"...\"` and `'...'` support `\\n`, `\\r`, `\\t`, escaped matching quotes, and `\\\\`; `\"\"\"...\"\"\"` and `'''...'''` are multiline with the same escapes. Raw strings `r\"...\"`, `r'...'`, `r\"\"\"...\"\"\"`, and `r'''...'''` preserve content exactly. Use raw strings for JSON, Markdown, patches, shell scripts, and other payloads with braces, backslashes, quotes, heredocs, or `@@` hunk markers. Use `format(...)` for interpolation; there are no f-strings.".to_string()
+}
+
+fn operator_language_bullet() -> String {
+    "- Operators, tightest to loosest: postfix calls/fields/indexing/result `?`; unary `-`/`!`/`not`; `*`/`/`/`%`; `+`/`-`; comparisons `== != < <= > >= in`; `and`/`&&`; `or`/`||`; ternary `? :`. `x in y` tests list/tuple membership, record keys, and string substrings like Python; negate with `!(x in y)` — there is no `not in`. When an `any`-typed operand resolves to an unsupported membership pair at runtime, Lashlang reports a typed error (except `null` haystacks, which return false).".to_string()
 }
 
 fn assignment_language_bullet() -> String {
@@ -314,39 +319,93 @@ fn base_tail_language_bullets() -> [String; 3] {
 }
 
 fn render_builtins_section(images: bool) -> String {
-    let len_detail = if images {
-        "length of string/list/record (0 for null); use `image.size` for images"
-    } else {
-        "length of string/list/record (0 for null)"
-    };
-    let bullets = [
-        format!("- `len(x)` — {len_detail}"),
-        "- `empty(x)` — true if length is 0".to_string(),
-        "- `slice(s, start, end)` — substring or sublist".to_string(),
-        "- `range(end)` / `range(start, end)` / `range(start, end, step)` — integer list, end-exclusive; positive or negative `step`, never `0`".to_string(),
-        "- `ceil_div(a, b)` / `floor_div(a, b)` — integer division helpers for chunk/count math; divisor must not be `0`".to_string(),
-        "- `push(list, item)` — new list with one item appended".to_string(),
-        "- `sort(list)` — stable ascending sort; items must share one comparable type. `sort_by(list, \"field.path\")` stably sorts records by a required nested field".to_string(),
-        "- `sum(list)` / `min(list)` / `max(list)` — numeric total or comparable extrema; `sum([])` is `0`, while extrema of an empty list are `null`".to_string(),
-        "- `unique(list)` / `reverse(list)` — stable deduplication or reversal, returning a new list".to_string(),
-        "- `split(s, sep)` / `join(list, sep)` — string split/join".to_string(),
-        "- `replace(s, from, to)` / `lower(s)` / `upper(s)` — literal text rewriting and Unicode case conversion".to_string(),
-        "- `find(s, needle, start?)` — zero-based character index of the first literal match, or `null`; `start` defaults to `0` and is a non-negative character index; an empty `needle` returns `start` when it is in bounds".to_string(),
-        "- `grep_text(s, needle)` — literal in-memory line search; `needle` must be non-empty; returns one record per matching line: `{ line: int, text: str, match: str, start: int, end: int }`, where `line` is 1-based, `text` is the line without its line ending, and `start`/`end` are zero-based character offsets within that line's `text` with `end` exclusive".to_string(),
-        "- `trim(s)` — strip whitespace".to_string(),
-        "- `starts_with(s, prefix)` / `ends_with(s, suffix)` / `contains(haystack, needle)`".to_string(),
-        "- `keys(record)` / `values(record)`".to_string(),
-        "- `to_string(x)` / `to_int(x)` / `to_float(x)`".to_string(),
-        "- `json_parse(s)` — parse a JSON string into a value".to_string(),
-        "- `format(template, arg0, arg1, ...)` — positional interpolation: `{}` auto-numbers, `{0}` / `{1}` pick a specific arg, `{{` / `}}` escape literal braces. Do not wrap args in a list: use `format(\"It is {}.\", trim(now.output))`, not `format(\"It is {}.\", [trim(now.output)])`.".to_string(),
-        "- `validate(value, Type { ... })` — check an intermediate value against a Type literal and return it unchanged, or abort with a validation error".to_string(),
-        "- Regex and date/time operations are deliberately host tools, not builtins".to_string(),
-    ];
+    let builtins = lashlang::builtin_names()
+        .map(|name| format!("`{name}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let bullets = lashlang::builtin_names()
+        .map(|name| builtin_prompt_bullet(name, images))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     format!(
-        "### Builtins\n\nCall as functions (e.g. `len(x)`, `slice(s, 0, 200)`). For `slice`, `null` bounds mean start/end; negative bounds count from the end.\n\n{}\n",
-        bullets.join("\n")
+        "### Builtins\n\nAvailable builtins (generated from the runtime registry): {builtins}.\n\nCall them as functions.\n\n{bullets}\n\nRegex and date/time operations are deliberately host tools, not builtins.\n\nExample using stable record sorting and membership:\n\n<lashlang>\nrows = [{{ name: \"first\", score: 2 }}, {{ name: \"second\", score: 1 }}]\nranked = sort_by(rows, \"score\")\nfinish ranked[0].name in [\"second\", \"third\"] ? ranked : reverse(ranked)\n</lashlang>\n"
     )
+}
+
+fn builtin_prompt_bullet(name: &str, images: bool) -> String {
+    let detail = match name {
+        "len" if images => {
+            "`len(x)` — length of a string, tuple, list, or record (`0` for `null`); invalid for images, so use `image.size`"
+        }
+        "len" => "`len(x)` — length of a string, tuple, list, or record (`0` for `null`)",
+        "empty" => "`empty(x)` — true when a string, tuple, list, record, or `null` has length `0`",
+        "keys" => "`keys(record)` — record keys as a new list (`[]` for `null`)",
+        "values" => "`values(record)` — record values as a new list (`[]` for `null`)",
+        "trim" => "`trim(s)` — strip surrounding whitespace",
+        "to_string" => "`to_string(x)` — convert a value to text",
+        "to_int" => "`to_int(x)` — convert a numeric value or numeric string to an integer",
+        "to_float" => "`to_float(x)` — convert a numeric value or numeric string to a float",
+        "json_parse" => "`json_parse(s)` — parse a JSON string into a value",
+        "contains" => {
+            "`contains(haystack, needle)` — substring, tuple/list item, or record-key membership"
+        }
+        "grep_text" => {
+            "`grep_text(s, needle)` — literal in-memory line search; `needle` must be non-empty; returns one record per matching line: `{ line: int, text: str, match: str, start: int, end: int }`, with 1-based lines and zero-based character offsets (`end` exclusive)"
+        }
+        "starts_with" => "`starts_with(s, prefix)` — true when text starts with the literal prefix",
+        "ends_with" => "`ends_with(s, suffix)` — true when text ends with the literal suffix",
+        "split" => "`split(s, sep)` — split text on a literal separator into a list",
+        "join" => "`join(list, sep)` — join a tuple/list of values with a text separator",
+        "validate" => {
+            "`validate(value, Type { ... })` — return a value unchanged when it matches the type literal, otherwise abort with a typed validation error"
+        }
+        "ceil_div" => {
+            "`ceil_div(a, b)` — ceiling integer division for chunk/count math; divisor must not be `0`"
+        }
+        "floor_div" => {
+            "`floor_div(a, b)` — floor integer division for chunk/count math; divisor must not be `0`"
+        }
+        "push" => {
+            "`push(list, item)` — return a new list with one item appended; the input is not mutated"
+        }
+        "slice" => {
+            "`slice(s, start, end)` — substring or sublist; `null` opens either bound and negative bounds count from the end"
+        }
+        "find" => {
+            "`find(s, needle, start?)` — zero-based character index of the first literal match, or `null`; `start` defaults to `0` and must be non-negative; an empty needle returns an in-bounds `start`"
+        }
+        "format" => {
+            "`format(template, arg0, arg1, ...)` — positional interpolation: `{}` auto-numbers, `{0}` selects an arg, and `{{`/`}}` escape braces. Do not wrap args in a list: use `format(\"It is {}.\", trim(value))`, not `format(\"It is {}.\", [trim(value)])`"
+        }
+        "range" => {
+            "`range(end)` / `range(start, end)` / `range(start, end, step)` — end-exclusive integer list; `step` may be positive or negative but never `0`"
+        }
+        "sort" => {
+            "`sort(list)` — stable ascending sort of one comparable item type, returning a new list"
+        }
+        "sort_by" => {
+            "`sort_by(list, \"field.path\")` — stable ascending record sort by a required non-empty dotted field path, returning a new list"
+        }
+        "sum" => "`sum(list)` — numeric total; `sum([])` is `0`",
+        "min" => {
+            "`min(list)` — least item from a non-empty list of one comparable type; an empty list is a typed runtime error"
+        }
+        "max" => {
+            "`max(list)` — greatest item from a non-empty list of one comparable type; an empty list is a typed runtime error"
+        }
+        "replace" => {
+            "`replace(s, from, to)` — literal Rust-style text replacement; an empty `from` inserts `to` at every UTF-8 boundary, including both ends"
+        }
+        "lower" => "`lower(s)` — Unicode lowercase conversion",
+        "upper" => "`upper(s)` — Unicode uppercase conversion",
+        "unique" => {
+            "`unique(list)` — stable typed-equality deduplication that keeps first occurrences, returning a new list"
+        }
+        "reverse" => "`reverse(list)` — reverse a list or tuple into a new list",
+        _ => panic!("builtin `{name}` is missing its prompt contract"),
+    };
+    format!("- {detail}")
 }
 
 fn render_decomposition_section(has_operations: bool, processes: bool) -> String {

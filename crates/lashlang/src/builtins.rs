@@ -187,3 +187,7 @@ pub(crate) fn lookup(name: &str) -> Option<Builtin> {
 pub(crate) fn is_builtin(name: &str) -> bool {
     lookup(name).is_some()
 }
+
+pub(crate) fn names() -> impl ExactSizeIterator<Item = &'static str> + Clone {
+    BUILTINS.iter().map(|builtin| builtin.name)
+}
