@@ -171,9 +171,9 @@ impl RuntimeSessionState {
         self.ensure_agent_frame_initialized();
         if let Some(frame_node_id) = self.current_frame_node_id.as_deref() {
             self.session_graph
-                .replace_active_read_state_for_frame(frame_node_id, messages);
+                .rewrite_active_read_tail_for_frame(frame_node_id, messages);
         } else {
-            self.session_graph.replace_active_read_state(messages);
+            self.session_graph.rewrite_active_read_tail(messages);
         }
         self.refresh_current_frame_projection();
     }

@@ -2079,6 +2079,7 @@ mod plugin_stack;
 mod processes_endstate;
 #[cfg(feature = "rlm")]
 mod rebuild_conformance;
+mod rolling_history_persistence;
 #[cfg(feature = "rlm")]
 mod stack_budget;
 mod turn_streaming;

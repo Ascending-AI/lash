@@ -206,12 +206,12 @@ impl SessionReadView {
                 if let Some(frame_node_id) =
                     base_graph.nearest_frame_node_id(base_graph.leaf_node_id.as_deref())
                 {
-                    graph.replace_active_read_state_for_frame(
+                    graph.rewrite_active_read_tail_for_frame(
                         frame_node_id,
                         self.0.read_model.messages.as_slice(),
                     );
                 } else {
-                    graph.replace_active_read_state(self.0.read_model.messages.as_slice());
+                    graph.rewrite_active_read_tail(self.0.read_model.messages.as_slice());
                 }
                 graph
             }),

@@ -2351,6 +2351,7 @@ dependencies = [
  "lash-remote-protocol",
  "lash-rlm-types",
  "lash-sqlite-store",
+ "lash-standard-plugins",
  "lash-subagents",
  "lash-tool-support",
  "lash-tools",

@@ -905,6 +905,25 @@ impl LashRuntime {
         let interrupted = cancellation.is_some();
 
         turn_pipeline.finalize_turn_read_state(new_messages, interrupted);
+        for diagnostic in turn_pipeline.take_projection_diagnostics() {
+            crate::trace::emit_trace(
+                &self.host.core.tracing.trace_sink,
+                &self.host.core.tracing.trace_context,
+                lash_trace::TraceContext::default()
+                    .for_session(self.state.session_id.clone())
+                    .for_turn_index(turn_index)
+                    .for_turn(trace_turn_id.clone()),
+                lash_trace::TraceEvent::Custom {
+                    name: "session_graph.read_projection".to_string(),
+                    payload: serde_json::json!({
+                        "durably_appended_messages": diagnostic.durably_appended_messages,
+                        "observation_only_messages": diagnostic.observation_only_messages,
+                        "id_mismatch_message_ids": diagnostic.id_mismatches,
+                    }),
+                },
+                self.host.core.clock.as_ref(),
+            );
+        }
         if !assembler.token_usage.is_zero() {
             turn_pipeline.state_mut().token_usage = assembler.token_usage.clone();
         }
@@ -968,6 +987,7 @@ impl LashRuntime {
                 manager.lifecycle_service(),
                 manager.graph_service(),
                 self.turn_phase_probe.clone(),
+                &trace_turn_id,
             )
             .await
         {
@@ -2180,6 +2200,7 @@ impl LashRuntime {
         turn_policy: &crate::SessionPolicy,
         effective_protocol_turn_options: &crate::ProtocolTurnOptions,
         turn_context: &crate::TurnContext,
+        turn_scope_id: &str,
         event_rx: &mut mpsc::Receiver<RuntimeStreamEvent>,
         assembler: &mut TurnAssembler,
         events: &dyn EventSink,
@@ -2201,6 +2222,7 @@ impl LashRuntime {
                 turn_context: turn_context.clone(),
             },
             self.turn_phase_probe.clone(),
+            turn_scope_id,
         );
         let mut prepare_turn = Box::pin(prepare_turn);
 
@@ -2375,6 +2397,7 @@ impl LashRuntime {
                 &turn_policy,
                 &effective_protocol_turn_options,
                 &turn_context,
+                &trace_turn_id,
                 &mut event_rx,
                 &mut assembler,
                 events,

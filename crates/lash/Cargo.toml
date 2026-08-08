@@ -64,6 +64,7 @@ lash-llm-tools = { workspace = true }
 lash-subagents = { workspace = true }
 lash-tools = { workspace = true }
 lash-sqlite-store = { workspace = true }
+lash-standard-plugins = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 rusqlite = { version = "0.37", features = ["bundled"] }

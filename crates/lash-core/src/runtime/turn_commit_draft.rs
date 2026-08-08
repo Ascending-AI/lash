@@ -55,6 +55,12 @@ impl TurnCommitDraft {
         self.graph.message_sequence()
     }
 
+    pub(super) fn take_projection_diagnostics(
+        &mut self,
+    ) -> Vec<super::turn_graph_editor::ReadProjectionDiagnostic> {
+        self.graph.take_projection_diagnostics()
+    }
+
     pub(super) fn apply_prepared_messages(&mut self, messages: &MessageSequence) {
         self.apply_message_projection(messages);
     }
@@ -106,7 +112,7 @@ impl TurnCommitDraft {
 
         let projected_messages = projected_messages.unwrap_or_else(|| new_messages.shared());
         self.graph
-            .replace_active_read_state(projected_messages.as_slice());
+            .project_active_read_state(projected_messages.as_slice());
     }
 
     pub(super) fn into_final_state(mut self) -> RuntimeSessionState {
@@ -147,7 +153,7 @@ impl TurnCommitDraft {
         } else {
             let read_messages = messages.shared();
             self.graph
-                .replace_active_read_state(read_messages.as_slice());
+                .project_active_read_state(read_messages.as_slice());
         }
     }
 }
@@ -183,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    fn replacement_cannot_move_the_leaf_behind_the_current_frame() {
+    fn prompt_projection_appends_new_messages_from_the_durable_leaf() {
         let clock = crate::SystemClock;
         let mut state = RuntimeSessionState {
             session_id: "frame-replacement".to_string(),
@@ -204,13 +210,43 @@ mod tests {
             &[text_message("seed", "frame seed")],
             &clock,
         );
+        let durable_leaf = state
+            .session_graph
+            .leaf_node_id
+            .clone()
+            .expect("durable frame leaf");
+        state.persisted_node_ids.extend(
+            state
+                .session_graph
+                .nodes
+                .iter()
+                .map(|node| node.node_id.clone()),
+        );
 
         let mut draft =
             TurnCommitDraft::from_state_with_clock(state, Arc::new(clock), "replacement");
         draft.finalize_turn_read_state(
-            MessageSequence::from_owned(vec![text_message("replacement", "replacement")]),
+            MessageSequence::from_owned(vec![
+                text_message("replacement", "replacement"),
+                text_message("seed", "frame seed"),
+            ]),
             false,
         );
+        let commit = draft.graph_commit();
+        assert_eq!(commit.nodes.len(), 1);
+        assert_eq!(
+            commit.nodes[0].parent_node_id.as_deref(),
+            Some(durable_leaf.as_str())
+        );
+        assert_eq!(
+            draft
+                .message_sequence()
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["replacement", "seed"]
+        );
+
         let state = draft.into_final_state();
 
         assert_eq!(
@@ -224,7 +260,12 @@ mod tests {
             Some(opened.frame_node_id.as_str())
         );
         let read = state.read_model();
-        assert_eq!(read.messages.len(), 1);
-        assert_eq!(read.messages[0].id, "replacement");
+        assert_eq!(
+            read.messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["seed", "replacement"]
+        );
     }
 }

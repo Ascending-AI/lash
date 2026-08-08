@@ -93,9 +93,9 @@ impl SessionSnapshot {
     pub fn replace_active_read_state(&mut self, messages: &[crate::Message]) {
         if let Some(frame_node_id) = self.current_frame_node_id.as_deref() {
             self.session_graph
-                .replace_active_read_state_for_frame(frame_node_id, messages);
+                .rewrite_active_read_tail_for_frame(frame_node_id, messages);
         } else {
-            self.session_graph.replace_active_read_state(messages);
+            self.session_graph.rewrite_active_read_tail(messages);
         }
         self.current_frame_node_id = self
             .session_graph

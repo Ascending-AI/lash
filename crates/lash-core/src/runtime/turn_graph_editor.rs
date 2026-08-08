@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::facade_support::{SessionGraphFacadeOps, SessionNodeRecordFacadeOps};
 use crate::session_graph::SessionReadModel;
-use crate::session_graph::build_active_read_replacement;
+use crate::session_graph::build_active_read_projection;
 use crate::session_model::SessionHistoryRecord;
 #[cfg(test)]
 use crate::store::GraphAppend;
@@ -17,10 +17,20 @@ pub(super) struct TurnGraphEditor {
     active_messages: MessageSequence,
     current_frame_node_id: Option<String>,
     append_builder: crate::session_graph::SessionGraphAppendBuilder,
+    pre_turn_append_leaf: Option<String>,
+    append_builder_minted_node_ids: HashSet<String>,
     appended_nodes: Vec<SessionNodeRecord>,
     appended_node_indices: HashMap<String, usize>,
     committed_node_ids: HashSet<String>,
     clock: Arc<dyn crate::Clock>,
+    projection_diagnostics: Vec<ReadProjectionDiagnostic>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ReadProjectionDiagnostic {
+    pub(super) durably_appended_messages: usize,
+    pub(super) observation_only_messages: usize,
+    pub(super) id_mismatches: Vec<String>,
 }
 
 impl TurnGraphEditor {
@@ -33,6 +43,7 @@ impl TurnGraphEditor {
         persisted_node_ids: HashSet<String>,
     ) -> Self {
         let append_builder = base_graph.append_builder_in_namespace(draft_namespace);
+        let pre_turn_append_leaf = append_builder.leaf_node_id().cloned();
         let active_messages = MessageSequence::from_base(base_read_model.messages);
         Self {
             committed_node_ids: persisted_node_ids,
@@ -41,9 +52,12 @@ impl TurnGraphEditor {
             active_messages,
             current_frame_node_id,
             append_builder,
+            pre_turn_append_leaf,
+            append_builder_minted_node_ids: HashSet::new(),
             appended_nodes: Vec::new(),
             appended_node_indices: HashMap::new(),
             clock,
+            projection_diagnostics: Vec::new(),
         }
     }
 
@@ -87,7 +101,7 @@ impl TurnGraphEditor {
             .extend(nodes.iter().filter_map(|node| node.event().cloned()));
         self.active_messages
             .extend(nodes.iter().filter_map(|node| node.message()).collect());
-        self.append_appended_nodes(nodes);
+        self.record_append_builder_nodes(nodes);
     }
 
     pub(super) fn message_delta_if_current_preserved<'a>(
@@ -124,30 +138,56 @@ impl TurnGraphEditor {
             .append_messages_at(appendable_messages.clone(), self.clock.timestamp_rfc3339());
         Arc::make_mut(&mut self.active_events)
             .extend(nodes.iter().filter_map(|node| node.event().cloned()));
-        self.append_appended_nodes(nodes);
+        self.record_append_builder_nodes(nodes);
         self.active_messages.extend(appendable_messages);
     }
 
-    pub(super) fn replace_active_read_state(&mut self, messages: &[Message]) {
+    pub(super) fn project_active_read_state(&mut self, messages: &[Message]) {
         let active_path = self.active_path_nodes();
-        let replacement = build_active_read_replacement(
-            active_path,
-            self.append_builder.existing_node_ids(),
-            self.append_builder.draft_namespace(),
-            messages,
-            self.clock.timestamp_rfc3339(),
-        );
-        self.append_builder.register_existing_node_ids(
-            replacement
-                .new_tail_nodes
-                .iter()
-                .map(|node| node.node_id.as_str()),
-        );
-        self.append_appended_nodes(replacement.new_tail_nodes);
-        self.append_builder
-            .set_leaf_node_id(replacement.leaf_node_id.clone());
-        self.active_events = Arc::new(replacement.active_events);
-        self.active_messages = MessageSequence::from_owned(replacement.active_messages);
+        let projection = build_active_read_projection(active_path.iter().copied(), messages);
+
+        // Prompt projections may omit or rewrite any part of the readable
+        // history. Durable ancestry is independent: only messages that are not
+        // already on the active graph path are appended, always through the
+        // graph builder's current (durable) leaf.
+        //
+        // Durable append selection keys on `Message.id`; ids must be unique
+        // within a frame for the frame's lifetime.
+        let mut durable_messages = active_path
+            .iter()
+            .filter_map(|node| node.message())
+            .map(|message| (message.id.clone(), message))
+            .collect::<HashMap<_, _>>();
+        let mut appended_messages = Vec::new();
+        let mut observation_only_messages = 0usize;
+        let mut id_mismatches = Vec::new();
+        for message in messages.iter().filter(|message| !message.is_transient()) {
+            if let Some(durable_message) = durable_messages.get(&message.id) {
+                observation_only_messages += 1;
+                if !messages_structurally_equal(durable_message, message) {
+                    id_mismatches.push(message.id.clone());
+                }
+                continue;
+            }
+            durable_messages.insert(message.id.clone(), message.clone());
+            appended_messages.push(message.clone());
+        }
+        let durably_appended_messages = appended_messages.len();
+        self.append_active_conversation_messages(&appended_messages);
+        self.projection_diagnostics.push(ReadProjectionDiagnostic {
+            durably_appended_messages,
+            observation_only_messages,
+            id_mismatches,
+        });
+
+        // Keep the turn-facing read state projected without allowing that
+        // projection's synthetic tail to select the durable commit parent.
+        self.active_events = Arc::new(projection.active_events);
+        self.active_messages = MessageSequence::from_owned(projection.active_messages);
+    }
+
+    pub(super) fn take_projection_diagnostics(&mut self) -> Vec<ReadProjectionDiagnostic> {
+        std::mem::take(&mut self.projection_diagnostics)
     }
 
     #[cfg(test)]
@@ -209,6 +249,23 @@ impl TurnGraphEditor {
     }
 
     pub(super) fn into_session_graph(self) -> SessionGraph {
+        // Commit-draft append invariant: every node staged by this editor was
+        // minted by its append builder, and the first one extends the leaf that
+        // builder captured before the turn. Projection-only tail nodes must
+        // never enter this collection or choose its parent.
+        debug_assert!(
+            self.appended_nodes
+                .iter()
+                .all(|node| self.append_builder_minted_node_ids.contains(&node.node_id))
+        );
+        debug_assert_eq!(
+            self.appended_nodes
+                .first()
+                .and_then(|node| node.parent_node_id.as_ref()),
+            self.appended_nodes
+                .first()
+                .and(self.pre_turn_append_leaf.as_ref())
+        );
         let leaf_node_id = self.leaf_node_id();
         if self.appended_nodes.is_empty() {
             return Arc::try_unwrap(self.base_graph).unwrap_or_else(|graph| graph.as_ref().clone());
@@ -264,7 +321,22 @@ impl TurnGraphEditor {
         path
     }
 
-    fn append_appended_nodes(&mut self, nodes: Vec<SessionNodeRecord>) {
+    /// Accept only nodes returned by `SessionGraphAppendBuilder`; this is the
+    /// seam that keeps pending durable commits anchored to the pre-turn leaf.
+    fn record_append_builder_nodes(&mut self, nodes: Vec<SessionNodeRecord>) {
+        self.appended_node_indices.reserve(nodes.len());
+        self.appended_nodes.reserve(nodes.len());
+        for node in nodes {
+            self.append_builder_minted_node_ids
+                .insert(node.node_id.clone());
+            self.appended_node_indices
+                .insert(node.node_id.clone(), self.appended_nodes.len());
+            self.appended_nodes.push(node);
+        }
+    }
+
+    #[cfg(test)]
+    fn append_unchecked_nodes(&mut self, nodes: Vec<SessionNodeRecord>) {
         self.appended_node_indices.reserve(nodes.len());
         self.appended_nodes.reserve(nodes.len());
         for node in nodes {
@@ -273,6 +345,10 @@ impl TurnGraphEditor {
             self.appended_nodes.push(node);
         }
     }
+}
+
+fn messages_structurally_equal(left: &Message, right: &Message) -> bool {
+    serde_json::to_value(left).ok() == serde_json::to_value(right).ok()
 }
 
 #[cfg(test)]
@@ -352,6 +428,33 @@ mod tests {
     }
 
     #[test]
+    fn projected_content_mismatch_for_a_durable_id_stays_observation_only() {
+        let mut editor = editor();
+        let durable = message("durable", "original");
+        editor.append_active_conversation_messages(std::slice::from_ref(&durable));
+        let pending = editor.graph_commit();
+        editor.mark_node_ids_persisted(pending.nodes.iter().map(|node| node.node_id.clone()));
+
+        editor.project_active_read_state(&[message("durable", "projected")]);
+
+        assert!(editor.graph_commit().nodes.is_empty());
+        assert_eq!(editor.message_sequence()[0].parts[0].content, "projected");
+        assert_eq!(
+            editor.take_projection_diagnostics(),
+            vec![ReadProjectionDiagnostic {
+                durably_appended_messages: 0,
+                observation_only_messages: 1,
+                id_mismatches: vec!["durable".to_string()],
+            }]
+        );
+        let durable_graph = editor.into_session_graph();
+        assert_eq!(
+            durable_graph.read_model().messages[0].parts[0].content,
+            "original"
+        );
+    }
+
+    #[test]
     fn active_path_walk_is_bounded_on_a_parent_cycle() {
         const CHILD_ENV: &str = "LASH_FIG843_TURN_GRAPH_PATH_CHILD";
         if std::env::var_os(CHILD_ENV).is_some() {
@@ -379,7 +482,7 @@ mod tests {
             },
         };
         let mut editor = editor();
-        editor.append_appended_nodes(vec![
+        editor.append_unchecked_nodes(vec![
             plugin_node("turn-cycle-a", "turn-cycle-b"),
             plugin_node("turn-cycle-b", "turn-cycle-a"),
         ]);
