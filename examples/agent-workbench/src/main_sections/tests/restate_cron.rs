@@ -1,3 +1,32 @@
+const LIVE_RESTATE_CRON_SCHEDULE_INTERVAL: Duration = Duration::from_secs(2);
+const LIVE_RESTATE_CRON_JITTER_MARGIN: Duration = Duration::from_secs(60);
+
+fn live_restate_cron_tick_wait() -> Duration {
+    LIVE_RESTATE_CRON_SCHEDULE_INTERVAL
+        .saturating_mul(2)
+        .saturating_add(LIVE_RESTATE_CRON_JITTER_MARGIN)
+}
+
+fn test_cron_trigger_source() -> String {
+    format!(
+        r#"
+        process remember_tick(tick: cron.Tick) {{
+          wake {{ kind: "cron_tick", fired_at: tick.fired_at }}
+          finish {{ fired_at: tick.fired_at }}
+        }}
+
+        handle = await triggers.register({{
+          source: cron.Schedule({{ expr: "*/{} * * * * *", tz: "UTC" }}),
+          target: remember_tick,
+          inputs: {{ tick: trigger.event }},
+          name: "cron smoke"
+        }})?
+        finish "cron registered"
+        "#,
+        LIVE_RESTATE_CRON_SCHEDULE_INTERVAL.as_secs()
+    )
+}
+
 fn rotate_cron_session_out_of_current(state: &AppState) -> String {
     let cron_session_id = state.current_session_id();
     let (rotated_session_id, new_current_session_id) = state.session_ids.rotate();
@@ -46,6 +75,76 @@ fn cron_trace_records_for_job(
         .collect()
 }
 
+fn cron_trace_timeline_for_job(
+    trace_path: &std::path::Path,
+    session_id: &str,
+    job_key: &str,
+) -> String {
+    let timeline = std::fs::read_to_string(trace_path)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|record| {
+            record
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| name.starts_with("agent_workbench.cron.restate."))
+                && record
+                    .pointer("/context/session_id")
+                    .and_then(Value::as_str)
+                    == Some(session_id)
+                && record.pointer("/payload/job_key").and_then(Value::as_str) == Some(job_key)
+        })
+        .map(|record| {
+            let timestamp = record
+                .get("timestamp")
+                .and_then(Value::as_str)
+                .unwrap_or("<missing trace timestamp>");
+            let name = record
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("<missing trace name>");
+            let payload = record.get("payload").cloned().unwrap_or(Value::Null);
+            format!("{timestamp} {name} payload={payload}")
+        })
+        .collect::<Vec<_>>();
+    if timeline.is_empty() {
+        format!(
+            "<no cron records for session `{session_id}` and job `{job_key}` at {}>",
+            trace_path.display()
+        )
+    } else {
+        timeline.join("\n")
+    }
+}
+
+async fn wait_for_cron_workbench_message(
+    state: &AppState,
+    trace_path: &std::path::Path,
+    session_id: &str,
+    job_key: &str,
+    needle: &str,
+    timeout: Duration,
+) {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let messages = state.messages_snapshot();
+        if messages
+            .iter()
+            .any(|message| message.role == "assistant" && message.text.contains(needle))
+        {
+            return;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!(
+                "expected workbench message containing `{needle}` within {timeout:?}; messages={messages:#?}; observed cron tick timeline:\n{}",
+                cron_trace_timeline_for_job(trace_path, session_id, job_key)
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
 async fn wait_for_cron_trace_record_count(
     trace_path: &std::path::Path,
     name: &str,
@@ -60,10 +159,12 @@ async fn wait_for_cron_trace_record_count(
         if seen >= count {
             return;
         }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "expected {count}+ `{name}` records for session `{session_id}` and job `{job_key}` within {timeout:?}, saw {seen}"
-        );
+        if tokio::time::Instant::now() >= deadline {
+            panic!(
+                "expected {count}+ `{name}` records for session `{session_id}` and job `{job_key}` within {timeout:?}, saw {seen}; observed cron tick timeline:\n{}",
+                cron_trace_timeline_for_job(trace_path, session_id, job_key)
+            );
+        }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
@@ -127,7 +228,7 @@ async fn retire_cron_session_and_assert_zombie(
         cron_session_id,
         job_key,
         1,
-        Duration::from_secs(30),
+        live_restate_cron_tick_wait(),
     )
     .await;
     let info_url = format!(
@@ -180,7 +281,7 @@ async fn assert_two_live_ticks_then_retire(
         cron_session_id,
         job_key,
         2,
-        Duration::from_secs(30),
+        live_restate_cron_tick_wait(),
     )
     .await;
     assert_live_non_current_cron_trace(trace_path, cron_session_id, job_key);
