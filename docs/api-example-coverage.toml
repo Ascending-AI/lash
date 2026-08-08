@@ -29738,6 +29738,24 @@ assertion = "examples/docs-snippets/src/architecture_providers.rs:293#assert_eq!
 reason = "Exercised by the docs-snippets provider-policy example; the assertion observes the exact response-header allowlist exposed to hosts."
 
 [[api]]
+symbol = "lash::provider::ProviderOptions::sse_event_bytes"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::provider::options::ProviderOptions::sse_event_bytes"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Facade contract surface used by provider operators to bound the bytes retained for one server-sent event or unterminated line; first-party provider adapters consume it through lash-llm-transport, while no example configures a non-default cap."
+
+[[api]]
+symbol = "lash::provider::ProviderOptions::sse_total_bytes"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::provider::options::ProviderOptions::sse_total_bytes"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Facade contract surface used by provider operators to bound total raw bytes accepted from one server-sent-event response; first-party provider adapters consume it through lash-llm-transport, while no example configures a non-default cap."
+
+[[api]]
 symbol = "lash::provider::ProviderRateLimitPolicy"
 kind = "struct"
 availability = "default+all-features"

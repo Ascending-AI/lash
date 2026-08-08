@@ -5,7 +5,7 @@ use lash_llm_transport::LlmHttpBody;
 use lash_llm_transport::proptest_support::{
     ScriptedByteStream, chunk_partitions, sse_data_payload, sse_stream,
 };
-use lash_llm_transport::streaming::drive_sse_response;
+use lash_llm_transport::streaming::{SseStreamBounds, drive_sse_response};
 use proptest::prelude::*;
 
 fn frame_events(body: LlmHttpBody) -> Vec<String> {
@@ -17,7 +17,9 @@ fn frame_events(body: LlmHttpBody) -> Vec<String> {
         .block_on(drive_sse_response(
             body,
             Duration::from_secs(5),
+            SseStreamBounds::new(None, &lash_core::provider::ProviderOptions::default()),
             "test stream chunk timed out",
+            "test request timed out",
             &mut lash_llm_transport::ResponseMetadataCapture::default(),
             |event| {
                 events.push(event.to_string());

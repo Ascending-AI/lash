@@ -445,6 +445,33 @@ fn provider_options_roundtrip_output_limit_and_cache_retention() {
 }
 
 #[test]
+fn provider_options_roundtrip_sse_buffer_caps() {
+    let options = ProviderOptions {
+        sse_event_bytes: Some(1_048_576),
+        sse_total_bytes: Some(8_388_608),
+        ..ProviderOptions::default()
+    };
+
+    let value = serde_json::to_value(&options).expect("serialize options");
+    assert_eq!(value["sse_event_bytes"], serde_json::json!(1_048_576));
+    assert_eq!(value["sse_total_bytes"], serde_json::json!(8_388_608));
+    assert_eq!(
+        serde_json::from_value::<ProviderOptions>(value).expect("deserialize options"),
+        options
+    );
+
+    let zero_caps = ProviderOptions {
+        sse_event_bytes: Some(0),
+        sse_total_bytes: Some(0),
+        ..ProviderOptions::default()
+    };
+    assert!(
+        zero_caps.is_default(),
+        "zero selects both transport defaults"
+    );
+}
+
+#[test]
 fn provider_options_default_omits_and_restores_shared_output_fields() {
     let value = serde_json::to_value(ProviderOptions::default()).expect("serialize");
     assert!(value.get("max_output_tokens").is_none());

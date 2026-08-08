@@ -144,6 +144,14 @@ pub struct ProviderOptions {
     /// are never retained.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub response_metadata_body_paths: Vec<String>,
+    /// Maximum bytes retained for one SSE event or an unterminated SSE line.
+    /// `None` (or `0`) applies the transport default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sse_event_bytes: Option<u64>,
+    /// Maximum raw bytes accepted across one SSE response. `None` (or `0`)
+    /// applies the transport default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sse_total_bytes: Option<u64>,
 }
 
 impl ProviderOptions {
@@ -154,6 +162,8 @@ impl ProviderOptions {
             && self.cache_retention.is_default()
             && self.response_metadata_headers.is_empty()
             && self.response_metadata_body_paths.is_empty()
+            && self.sse_event_bytes.is_none_or(|bytes| bytes == 0)
+            && self.sse_total_bytes.is_none_or(|bytes| bytes == 0)
     }
 
     pub fn llm_timeouts(&self) -> LlmTimeouts {

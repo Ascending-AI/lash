@@ -27,7 +27,9 @@ pub(crate) use lash_core::provider::{
     CacheControlDialect, CacheRetention, Provider, ProviderComponents, ProviderFactory,
     ProviderOptions, StreamTermination, resolve_generation_policy,
 };
-pub(crate) use lash_llm_transport::streaming::{drive_sse_response, emit_stream_progress};
+pub(crate) use lash_llm_transport::streaming::{
+    SseStreamBounds, drive_sse_response, emit_stream_progress,
+};
 pub(crate) use lash_llm_transport::timeouts::response_start_timeout;
 pub(crate) use lash_llm_transport::util::{emit_provider_request_trace, emit_provider_trace};
 pub(crate) use lash_llm_transport::{

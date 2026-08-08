@@ -89,6 +89,7 @@ impl Provider for AnthropicProvider {
             .with_header("Accept", "text/event-stream")
             .with_body_for_error(request_body.clone().unwrap_or_default())
             .with_response_start_timeout_message("Anthropic response start timed out");
+        let stream_bounds = SseStreamBounds::new(timeouts.request_timeout, &self.options);
 
         let resp = self
             .transport
@@ -124,7 +125,9 @@ impl Provider for AnthropicProvider {
         let stream_result = drive_sse_response(
             resp.body,
             timeouts.chunk_timeout,
+            stream_bounds,
             "Anthropic stream chunk timed out",
+            "Anthropic request timed out",
             &mut response_metadata,
             |raw| {
                 emit_provider_trace(provider_trace.as_ref(), "anthropic", raw);
