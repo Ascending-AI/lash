@@ -388,6 +388,8 @@ pub(crate) struct WorkbenchCronJobImpl {
     state: AppState,
 }
 
+include!("restate_cron.rs");
+
 impl WorkbenchCronJobImpl {
     pub(crate) fn new(state: AppState) -> Self {
         Self { state }
@@ -424,23 +426,42 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
         let Some(Json(state)) = ctx.get::<Json<WorkbenchCronState>>(CRON_STATE_KEY).await? else {
             return Ok(Json(()));
         };
-        // Zombie guard: a job whose session is no longer the live workbench
-        // session terminates itself instead of firing into a deleted session.
-        // (Jobs armed by a previous process run are invisible to the
-        // in-memory cancel bookkeeping, so reset alone cannot reach them.)
-        let current_session = self.state.session_ids.current();
-        if state.request.session_id != current_session {
-            self.state.trace_for_session(
-                &state.request.session_id,
-                "cron.restate.zombie_cancelled",
-                json!({
-                    "job_key": ctx.key(),
-                    "job_session_id": state.request.session_id,
-                    "current_session_id": current_session,
-                }),
-            );
-            ctx.clear(CRON_STATE_KEY);
-            return Ok(Json(()));
+        // Orphan guard: cancel jobs whose session is permanently retired or
+        // whose store metadata is absent, while allowing every live session
+        // (current or non-current) to tick. This also catches jobs armed by a
+        // previous process run that in-memory cancel bookkeeping cannot see.
+        let disposition = {
+            let app_state = self.state.clone();
+            let session_id = state.request.session_id.clone();
+            let journal_value = ctx
+                .run(move || {
+                    let app_state = app_state.clone();
+                    let session_id = session_id.clone();
+                    async move {
+                        cron_session_disposition(&app_state.core, &session_id)
+                            .await
+                            .map(|disposition| disposition.journal_value().to_string())
+                    }
+                })
+                .name("workbench-cron:session-disposition")
+                .await?;
+            CronSessionDisposition::from_journal_value(&journal_value)?
+        };
+        match cron_tick_decision(disposition, &state, ctx.key()) {
+            CronTick::Cancel { trace } => {
+                journaled_workbench_trace(
+                    &ctx,
+                    self.state.clone(),
+                    state.request.session_id.clone(),
+                    "cron.restate.zombie_cancelled",
+                    trace,
+                    "workbench-cron:trace-cancelled",
+                )
+                .await?;
+                ctx.clear(CRON_STATE_KEY);
+                return Ok(Json(()));
+            }
+            CronTick::Run => {}
         }
         let controller = lash_restate::RestateRuntimeEffectController::new(ctx);
         let fired_at = journaled_now(controller.context(), "workbench-cron:fired-at").await?;
@@ -462,10 +483,13 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
             "cron.restate.run",
             json!({
                 "job_key": controller.context().key(),
+                "job_session_id": &state.request.session_id,
                 "source_key": &state.request.source_key,
                 "expr": &state.request.expr,
                 "tz": &state.request.tz,
                 "fired_at": fired_at.to_rfc3339(),
+                "decision_basis": "session_store_meta_present",
+                "session_state": "live",
             }),
             "workbench-cron:trace-run",
         )
@@ -1314,6 +1338,11 @@ async fn sync_cron_jobs_with_context(
             json!({
                 "reason": reason,
                 "job_key": job_key,
+                // The registration's own session, so every cron trace record can
+                // be gated on the same payload field (the run/cancel records
+                // carry it too) instead of splitting between payload and trace
+                // context (FIG-1018 review).
+                "job_session_id": session_id,
                 "next_execution_time": info.next_execution_time,
                 "next_execution_id": info.next_execution_id,
             }),

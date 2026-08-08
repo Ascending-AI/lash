@@ -1,6 +1,6 @@
 use super::{
-    WorkbenchCronRequest, classified_embed_handler_error, cron_occurrence_key,
-    emit_cron_occurrence_with_effect_controller,
+    CronSessionDisposition, WorkbenchCronRequest, classified_embed_handler_error,
+    cron_occurrence_key, cron_session_disposition, emit_cron_occurrence_with_effect_controller,
 };
 use crate::AppError;
 use std::sync::Arc;
@@ -554,3 +554,5 @@ async fn effect_replay_ownership_decides_who_may_drive_a_foreground_turn() {
     );
     session.close().await.expect("close the executed session");
 }
+
+include!("restate_cron_tests.rs");
