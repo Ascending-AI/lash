@@ -30,7 +30,7 @@ mod tests {
     use lash_core::provider::{
         ModelCapability, ProviderOptions, ReasoningCapability, ReasoningEncoding, StreamTermination,
     };
-    use lash_core::{Message, MessageRole, Part, PartKind, PruneState};
+    use lash_core::{Message, MessageRole, Part};
     use serde_json::{Value, json};
 
     #[derive(Debug)]
@@ -292,47 +292,28 @@ mod tests {
                 LlmOutputPart::Text {
                     text,
                     response_meta,
-                } => durable_parts.push(Part {
-                    id: format!("{assistant_id}.p{}", durable_parts.len()),
-                    kind: PartKind::Prose,
-                    content: text.clone(),
-                    attachment: None,
-                    tool_call_id: None,
-                    tool_name: None,
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: response_meta.clone(),
-                }),
-                LlmOutputPart::Reasoning { text, replay } => durable_parts.push(Part {
-                    id: format!("{assistant_id}.p{}", durable_parts.len()),
-                    kind: PartKind::Reasoning,
-                    content: text.clone(),
-                    attachment: None,
-                    tool_call_id: None,
-                    tool_name: None,
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: replay.clone(),
-                    response_meta: None,
-                }),
+                } => durable_parts.push(Part::prose(
+                    format!("{assistant_id}.p{}", durable_parts.len()),
+                    text.clone(),
+                    response_meta.clone(),
+                )),
+                LlmOutputPart::Reasoning { text, replay } => durable_parts.push(Part::reasoning(
+                    format!("{assistant_id}.p{}", durable_parts.len()),
+                    text.clone(),
+                    replay.clone(),
+                )),
                 LlmOutputPart::ToolCall {
                     call_id,
                     tool_name,
                     input_json,
                     replay,
-                } => durable_parts.push(Part {
-                    id: format!("{assistant_id}.p{}", durable_parts.len()),
-                    kind: PartKind::ToolCall,
-                    content: input_json.clone(),
-                    attachment: None,
-                    tool_call_id: Some(call_id.clone()),
-                    tool_name: Some(tool_name.clone()),
-                    tool_replay: replay.clone(),
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                }),
+                } => durable_parts.push(Part::tool_call(
+                    format!("{assistant_id}.p{}", durable_parts.len()),
+                    input_json.clone(),
+                    call_id.clone(),
+                    tool_name.clone(),
+                    replay.clone(),
+                )),
             }
         }
         let history = vec![
@@ -345,18 +326,11 @@ mod tests {
             Message {
                 id: "google-regression.user".to_string(),
                 role: MessageRole::User,
-                parts: Arc::new(vec![Part {
-                    id: "google-regression.user.p0".to_string(),
-                    kind: PartKind::Text,
-                    content: "continue".to_string(),
-                    attachment: None,
-                    tool_call_id: None,
-                    tool_name: None,
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                }]),
+                parts: Arc::new(vec![Part::text(
+                    "google-regression.user.p0".to_string(),
+                    "continue".to_string(),
+                    None,
+                )]),
                 origin: None,
             },
         ];

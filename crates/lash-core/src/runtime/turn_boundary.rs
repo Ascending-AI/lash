@@ -617,7 +617,7 @@ mod tests {
 
     use super::*;
     use crate::runtime::tests::helpers::RecordingStore;
-    use crate::session_model::{ConversationRecord, MessageRole, Part, PartKind, PruneState};
+    use crate::session_model::{ConversationRecord, MessageRole, Part};
     use crate::store::SessionExecutionLeaseStore;
     use crate::{Message, SessionGraph, TokenUsage, shared_parts};
     const UNBOUNDED: crate::TurnBudget = crate::TurnBudget::Unbounded;
@@ -641,18 +641,11 @@ mod tests {
         Message {
             id: id.to_string(),
             role,
-            parts: shared_parts(vec![Part {
-                id: format!("{id}.p0"),
-                kind: PartKind::Text,
-                content: content.to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]),
+            parts: shared_parts(vec![Part::text(
+                format!("{id}.p0"),
+                content.to_string(),
+                None,
+            )]),
             origin: None,
         }
     }
@@ -1205,20 +1198,13 @@ mod tests {
         let message = crate::Message {
             id: "message".to_string(),
             role: crate::MessageRole::User,
-            parts: std::sync::Arc::new(vec![crate::Part {
-                id: "message.p0".to_string(),
-                kind: crate::PartKind::Attachment,
-                content: String::new(),
-                attachment: Some(crate::session_model::message::PartAttachment {
+            parts: std::sync::Arc::new(vec![crate::Part::attachment_part(
+                "message.p0".to_string(),
+                String::new(),
+                Some(crate::session_model::message::PartAttachment {
                     source: crate::AttachmentSource::stored(attachment_ref("message-ref")),
                 }),
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: crate::PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]),
+            )]),
             origin: None,
         };
         state.session_graph = crate::SessionGraph::from_active_read_state(&[message]);

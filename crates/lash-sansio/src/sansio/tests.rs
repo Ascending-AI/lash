@@ -6,8 +6,7 @@ use crate::TurnFinish;
 use crate::llm::types::{LlmOutputPart, LlmRequest, LlmResponse, LlmTerminalReason};
 use crate::session_model::message::PartAttachment;
 use crate::session_model::{
-    ConversationRecord, Message, MessageRole, MessageSequence, Part, PartKind, PruneState,
-    SessionHistoryRecord,
+    ConversationRecord, Message, MessageRole, MessageSequence, Part, SessionHistoryRecord,
 };
 use crate::{ModelToolReturnPart, ToolCancellation, ToolFailure, ToolFailureClass};
 
@@ -46,18 +45,10 @@ fn test_turn_limit_final_message(message_id: String, max_turns: usize) -> Messag
     Message {
         id: message_id.clone(),
         role: MessageRole::System,
-        parts: crate::shared_parts(vec![Part {
-            id: format!("{message_id}.p0"),
-            kind: PartKind::Error,
-            content: format!("Turn limit reached ({max_turns}) before a final test response."),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]),
+        parts: crate::shared_parts(vec![Part::error(
+            format!("{message_id}.p0"),
+            format!("Turn limit reached ({max_turns}) before a final test response."),
+        )]),
         origin: None,
     }
 }
@@ -80,19 +71,7 @@ fn user_message(content: &str) -> Message {
     Message {
         id: "m0".to_string(),
         role: MessageRole::User,
-        parts: vec![Part {
-            id: "m0.p0".to_string(),
-            kind: PartKind::Text,
-            content: content.to_string(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]
-        .into(),
+        parts: vec![Part::text("m0.p0".to_string(), content.to_string(), None)].into(),
         origin: None,
     }
 }
@@ -106,19 +85,7 @@ fn text_message(role: MessageRole, content: impl Into<String>) -> Message {
     Message {
         id: id.clone(),
         role,
-        parts: vec![Part {
-            id: format!("{id}.p0"),
-            kind: PartKind::Text,
-            content: content.into(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]
-        .into(),
+        parts: vec![Part::text(format!("{id}.p0"), content.into(), None)].into(),
         origin: None,
     }
 }
@@ -612,32 +579,14 @@ fn llm_request_includes_image_prompt_parts_for_attached_images() {
         id: "m0".to_string(),
         role: MessageRole::User,
         parts: vec![
-            Part {
-                id: "m0.p0".to_string(),
-                kind: PartKind::Attachment,
-                content: String::new(),
-                attachment: Some(PartAttachment {
+            Part::attachment_part(
+                "m0.p0".to_string(),
+                String::new(),
+                Some(PartAttachment {
                     source: crate::llm::types::AttachmentSource::stored(test_attachment_ref(3)),
                 }),
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            },
-            Part {
-                id: "m0.p1".to_string(),
-                kind: PartKind::Text,
-                content: "explain this".to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            },
+            ),
+            Part::text("m0.p1".to_string(), "explain this".to_string(), None),
         ]
         .into(),
         origin: None,

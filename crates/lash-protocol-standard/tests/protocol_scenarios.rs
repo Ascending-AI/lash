@@ -6,9 +6,9 @@ use lash_core::testing::behavior_transcript::Transcript;
 use lash_core::testing::sansio_transcript::record_effects;
 use lash_core::{
     CheckpointKind, Effect, LlmCallError, LlmOutputPart, LlmRequest, LlmResponse,
-    LlmTerminalReason, Message, MessageRole, Part, PartKind, PruneState, ToolCallOutput,
-    ToolFailure, ToolFailureClass, TurnMachine, TurnMachineConfig,
-    facade_support::SessionStreamEvent, facade_support::TurnOutcome, facade_support::TurnStop,
+    LlmTerminalReason, Message, MessageRole, Part, ToolCallOutput, ToolFailure, ToolFailureClass,
+    TurnMachine, TurnMachineConfig, facade_support::SessionStreamEvent,
+    facade_support::TurnOutcome, facade_support::TurnStop,
 };
 use lash_protocol_standard::StandardDriver;
 
@@ -496,18 +496,10 @@ fn test_turn_limit_final_message(message_id: String, max_turns: usize) -> Messag
     Message {
         id: message_id.clone(),
         role: MessageRole::System,
-        parts: lash_core::facade_support::shared_parts(vec![Part {
-            id: format!("{message_id}.p0"),
-            kind: PartKind::Error,
-            content: format!("Turn limit reached ({max_turns}) before a final test response."),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]),
+        parts: lash_core::facade_support::shared_parts(vec![Part::error(
+            format!("{message_id}.p0"),
+            format!("Turn limit reached ({max_turns}) before a final test response."),
+        )]),
         origin: None,
     }
 }
@@ -516,19 +508,7 @@ fn user_message(content: &str) -> Message {
     Message {
         id: "m0".to_string(),
         role: MessageRole::User,
-        parts: vec![Part {
-            id: "m0.p0".to_string(),
-            kind: PartKind::Text,
-            content: content.to_string(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]
-        .into(),
+        parts: vec![Part::text("m0.p0".to_string(), content.to_string(), None)].into(),
         origin: None,
     }
 }

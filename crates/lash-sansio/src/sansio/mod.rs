@@ -18,9 +18,9 @@ use crate::llm::types::{
 };
 use crate::session_model::message::MessageOrigin;
 use crate::session_model::{
-    Message, MessageRole, MessageSequence, Part, PartKind, PruneState, SessionHistoryRecord,
-    SessionStreamEvent, TokenUsage, TokenUsageOverflow, TurnTerminationPolicyState,
-    make_error_event, reassign_part_ids, render_prompt,
+    Message, MessageRole, MessageSequence, Part, SessionHistoryRecord, SessionStreamEvent,
+    TokenUsage, TokenUsageOverflow, TurnTerminationPolicyState, make_error_event,
+    reassign_part_ids, render_prompt,
 };
 use crate::{
     CheckpointKind, ModelToolReturn, PluginMessage, ToolCallOutput, TurnOutcome, TurnStop,

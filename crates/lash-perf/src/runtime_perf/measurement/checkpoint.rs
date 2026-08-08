@@ -320,18 +320,7 @@ fn runtime_perf_turn_limit_final_message(message_id: String, max_turns: usize) -
     Message {
         id: message_id.clone(),
         role: MessageRole::System,
-        parts: shared_parts(vec![Part {
-            id: format!("{message_id}.p0"),
-            kind: PartKind::Error,
-            content: format!("Turn limit reached ({max_turns}) before runtime perf completion."),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]),
+        parts: shared_parts(vec![Part::error(format!("{message_id}.p0"), format!("Turn limit reached ({max_turns}) before runtime perf completion."))]),
         origin: None,
     }
 }
@@ -359,18 +348,7 @@ fn checkpoint_message(id: String, role: MessageRole, content: String) -> Message
     Message {
         id: id.clone(),
         role,
-        parts: shared_parts(vec![Part {
-            id: format!("{id}.p0"),
-            kind: PartKind::Text,
-            content,
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]),
+        parts: shared_parts(vec![Part::text(format!("{id}.p0"), content, None)]),
         origin: None,
     }
 }

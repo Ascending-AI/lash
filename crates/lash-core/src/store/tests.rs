@@ -43,18 +43,11 @@ fn intent_fixture() -> RuntimeCommit {
     let message = crate::Message {
         id: "payload-message-id".to_string(),
         role: crate::MessageRole::User,
-        parts: crate::shared_parts(vec![crate::Part {
-            id: "payload-message-id.p0".to_string(),
-            kind: crate::PartKind::Text,
-            content: "hello".to_string(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: crate::PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]),
+        parts: crate::shared_parts(vec![crate::Part::text(
+            "payload-message-id.p0".to_string(),
+            "hello".to_string(),
+            None,
+        )]),
         origin: None,
     };
     let graph = GraphAppend {

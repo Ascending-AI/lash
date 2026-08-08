@@ -164,26 +164,15 @@ mod tests {
 
     use super::*;
     use crate::{
-        AgentFrameReason, Message, MessageRole, OpenAgentFrameRequest, Part, PartKind, PruneState,
-        RuntimeSessionState, shared_parts,
+        AgentFrameReason, Message, MessageRole, OpenAgentFrameRequest, Part, RuntimeSessionState,
+        shared_parts,
     };
 
     fn text_message(id: &str, text: &str) -> Message {
         Message {
             id: id.to_string(),
             role: MessageRole::User,
-            parts: shared_parts(vec![Part {
-                id: format!("{id}.p0"),
-                kind: PartKind::Text,
-                content: text.to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]),
+            parts: shared_parts(vec![Part::text(format!("{id}.p0"), text.to_string(), None)]),
             origin: None,
         }
     }

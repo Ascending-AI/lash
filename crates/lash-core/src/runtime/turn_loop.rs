@@ -1971,48 +1971,23 @@ impl LashRuntime {
                     if text.is_empty() {
                         continue;
                     }
-                    user_parts.push(Part {
-                        id: format!("{}.p{}", user_id, user_parts.len()),
-                        kind: PartKind::Text,
-                        content: text,
-                        attachment: None,
-                        tool_call_id: None,
-                        tool_name: None,
-                        tool_replay: None,
-                        prune_state: PruneState::Intact,
-                        reasoning_meta: None,
-                        response_meta: None,
-                    });
+                    user_parts.push(Part::text(
+                        format!("{}.p{}", user_id, user_parts.len()),
+                        text,
+                        None,
+                    ));
                 }
                 NormalizedItem::Attachment(source) => {
-                    user_parts.push(Part {
-                        id: format!("{}.p{}", user_id, user_parts.len()),
-                        kind: PartKind::Attachment,
-                        content: String::new(),
-                        attachment: Some(crate::session_model::message::PartAttachment { source }),
-                        tool_call_id: None,
-                        tool_name: None,
-                        tool_replay: None,
-                        prune_state: PruneState::Intact,
-                        reasoning_meta: None,
-                        response_meta: None,
-                    });
+                    user_parts.push(Part::attachment_part(
+                        format!("{}.p{}", user_id, user_parts.len()),
+                        String::new(),
+                        Some(crate::session_model::message::PartAttachment { source }),
+                    ));
                 }
             }
         }
         if user_parts.is_empty() && initial_turn_causes.is_empty() {
-            user_parts.push(Part {
-                id: format!("{}.p0", user_id),
-                kind: PartKind::Text,
-                content: String::new(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            });
+            user_parts.push(Part::text(format!("{}.p0", user_id), String::new(), None));
         }
         if !user_parts.is_empty() {
             reassign_part_ids(&user_id, &mut user_parts);

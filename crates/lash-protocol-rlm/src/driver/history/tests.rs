@@ -1,5 +1,5 @@
 use lash_core::llm::types::{LlmContentBlock, ProviderReasoningReplay};
-use lash_core::session_model::{ConversationRecord, MessageRole, Part, PartKind, PruneState};
+use lash_core::session_model::{ConversationRecord, MessageRole, Part};
 use lash_core::{MessageOrigin, SessionHistoryRecord};
 
 use super::{RlmHistoryRenderInput, render_history_messages};
@@ -32,18 +32,11 @@ fn assistant_reasoning_event(
             )
         })
         .collect::<Vec<_>>();
-    parts.push(Part {
-        id: format!("{id}.p{}", parts.len()),
-        kind: PartKind::Prose,
-        content: prose.to_string(),
-        attachment: None,
-        tool_call_id: None,
-        tool_name: None,
-        tool_replay: None,
-        prune_state: PruneState::Intact,
-        reasoning_meta: None,
-        response_meta: None,
-    });
+    parts.push(Part::prose(
+        format!("{id}.p{}", parts.len()),
+        prose.to_string(),
+        None,
+    ));
     SessionHistoryRecord::Conversation(ConversationRecord {
         id: id.to_string(),
         role: MessageRole::Assistant,

@@ -37,3 +37,4 @@ proptest = { version = "1", optional = true }
 [dev-dependencies]
 lash-llm-transport = { path = ".", features = ["proptest-support"] }
 proptest = "1"
+tokio = { workspace = true, features = ["macros", "rt", "test-util", "time"] }

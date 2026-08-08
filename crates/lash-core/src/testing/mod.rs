@@ -1227,18 +1227,10 @@ mod test_protocol_fakes {
         crate::Message {
             id: message_id.clone(),
             role: crate::MessageRole::System,
-            parts: crate::shared_parts(vec![crate::Part {
-                id: format!("{message_id}.p0"),
-                kind: crate::PartKind::Error,
-                content: format!("Turn limit reached ({max_turns}) before a final test response."),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: crate::PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]),
+            parts: crate::shared_parts(vec![crate::Part::error(
+                format!("{message_id}.p0"),
+                format!("Turn limit reached ({max_turns}) before a final test response."),
+            )]),
             origin: None,
         }
     }
@@ -1268,10 +1260,7 @@ mod test_protocol_fakes {
             text_streamed: bool,
         ) -> Vec<DriverAction> {
             use crate::sansio::{CheckpointResumeAction, PendingToolCall};
-            use crate::{
-                CheckpointKind, Message, MessageRole, Part, PartKind, PruneState,
-                SessionStreamEvent,
-            };
+            use crate::{CheckpointKind, Message, MessageRole, Part, SessionStreamEvent};
             use lash_sansio::llm::types::LlmOutputPart;
             use lash_sansio::session_model::make_error_event;
 
@@ -1335,18 +1324,7 @@ mod test_protocol_fakes {
                     ctx.protocol_iteration()
                 );
                 let outcome_text = assistant_text.clone();
-                let parts_out = vec![Part {
-                    id: format!("{asst_id}.p0"),
-                    kind: PartKind::Prose,
-                    content: assistant_text,
-                    attachment: None,
-                    tool_call_id: None,
-                    tool_name: None,
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                }];
+                let parts_out = vec![Part::prose(format!("{asst_id}.p0"), assistant_text, None)];
                 actions.push(DriverAction::AppendEvents(vec![
                     SessionHistoryRecord::Conversation(ConversationRecord::from_message(Message {
                         id: asst_id,
@@ -1371,33 +1349,21 @@ mod test_protocol_fakes {
             );
             let mut assistant_parts = Vec::new();
             if !assistant_text.trim().is_empty() {
-                assistant_parts.push(Part {
-                    id: format!("{}.p{}", asst_id, assistant_parts.len()),
-                    kind: PartKind::Prose,
-                    content: assistant_text,
-                    attachment: None,
-                    tool_call_id: None,
-                    tool_name: None,
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                });
+                assistant_parts.push(Part::prose(
+                    format!("{}.p{}", asst_id, assistant_parts.len()),
+                    assistant_text,
+                    None,
+                ));
             }
             let mut calls = Vec::new();
             for (call_id, tool_name, input_json, replay) in tool_calls {
-                assistant_parts.push(Part {
-                    id: format!("{}.p{}", asst_id, assistant_parts.len()),
-                    kind: PartKind::ToolCall,
-                    content: input_json.clone(),
-                    attachment: None,
-                    tool_call_id: Some(call_id.clone()),
-                    tool_name: Some(tool_name.clone()),
-                    tool_replay: replay.clone(),
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                });
+                assistant_parts.push(Part::tool_call(
+                    format!("{}.p{}", asst_id, assistant_parts.len()),
+                    input_json.clone(),
+                    call_id.clone(),
+                    tool_name.clone(),
+                    replay.clone(),
+                ));
                 let args = serde_json::from_str::<serde_json::Value>(&input_json)
                     .unwrap_or_else(|_| serde_json::json!({}));
                 calls.push(PendingToolCall {
@@ -1427,10 +1393,7 @@ mod test_protocol_fakes {
             completed: Vec<CompletedToolCall>,
         ) -> Vec<DriverAction> {
             use crate::sansio::CheckpointResumeAction;
-            use crate::{
-                CheckpointKind, Message, MessageRole, Part, PartKind, PruneState,
-                SessionStreamEvent,
-            };
+            use crate::{CheckpointKind, Message, MessageRole, Part, SessionStreamEvent};
             use lash_sansio::session_model::reassign_part_ids;
             let mut actions = Vec::new();
             let mut result_parts = Vec::new();
@@ -1470,34 +1433,23 @@ mod test_protocol_fakes {
                             if text.is_empty() {
                                 continue;
                             }
-                            result_parts.push(Part {
-                                id: String::new(),
-                                kind: PartKind::ToolResult,
-                                content: text.clone(),
-                                attachment: None,
-                                tool_call_id: Some(outcome.call_id.clone()),
-                                tool_name: Some(outcome.tool_name.clone()),
-                                tool_replay: None,
-                                prune_state: PruneState::Intact,
-                                reasoning_meta: None,
-                                response_meta: None,
-                            });
+                            result_parts.push(Part::tool_result(
+                                String::new(),
+                                text.clone(),
+                                outcome.call_id.clone(),
+                                outcome.tool_name.clone(),
+                            ));
                         }
                         lash_sansio::ModelToolReturnPart::Attachment(source) => {
-                            result_parts.push(Part {
-                                id: String::new(),
-                                kind: PartKind::Attachment,
-                                content: String::new(),
-                                attachment: Some(lash_sansio::PartAttachment {
+                            result_parts.push(Part::tool_result_attachment(
+                                String::new(),
+                                String::new(),
+                                lash_sansio::PartAttachment {
                                     source: source.clone(),
-                                }),
-                                tool_call_id: Some(outcome.call_id.clone()),
-                                tool_name: Some(outcome.tool_name.clone()),
-                                tool_replay: None,
-                                prune_state: PruneState::Intact,
-                                reasoning_meta: None,
-                                response_meta: None,
-                            });
+                                },
+                                outcome.call_id.clone(),
+                                outcome.tool_name.clone(),
+                            ));
                         }
                     }
                 }

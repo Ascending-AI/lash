@@ -538,28 +538,14 @@ pub(crate) fn render_conformance_history_message(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::session_model::{
-        ConversationRecord, MessageRole, Part, PartKind, PruneState, SessionHistoryRecord,
-    };
+    use lash_core::session_model::{ConversationRecord, MessageRole, Part, SessionHistoryRecord};
     use lash_rlm_types::{RlmProtocolEvent, RlmTrajectoryEntry};
 
     fn user_event(id: &str, text: &str) -> SessionHistoryRecord {
         SessionHistoryRecord::Conversation(ConversationRecord {
             id: id.to_string(),
             role: MessageRole::User,
-            parts: vec![Part {
-                id: format!("{id}.p0"),
-                kind: PartKind::Text,
-                content: text.to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]
-            .into(),
+            parts: vec![Part::text(format!("{id}.p0"), text.to_string(), None)].into(),
             origin: None,
         })
     }
@@ -620,19 +606,7 @@ mod tests {
         SessionHistoryRecord::Conversation(ConversationRecord {
             id: id.to_string(),
             role: MessageRole::Assistant,
-            parts: vec![Part {
-                id: format!("{id}.p0"),
-                kind: PartKind::Text,
-                content: text.to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]
-            .into(),
+            parts: vec![Part::text(format!("{id}.p0"), text.to_string(), None)].into(),
             origin: None,
         })
     }
@@ -1104,18 +1078,11 @@ mod tests {
         let event = SessionHistoryRecord::Conversation(ConversationRecord {
             id: "plugin".to_string(),
             role: MessageRole::User,
-            parts: vec![Part {
-                id: "plugin.p0".to_string(),
-                kind: PartKind::Text,
-                content: "synthetic plugin message".to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]
+            parts: vec![Part::text(
+                "plugin.p0".to_string(),
+                "synthetic plugin message".to_string(),
+                None,
+            )]
             .into(),
             origin: Some(lash_core::MessageOrigin::Plugin {
                 plugin_id: "test".to_string(),
@@ -1136,18 +1103,7 @@ mod tests {
         let event = SessionHistoryRecord::Conversation(ConversationRecord {
             id: "wake:abc".to_string(),
             role: MessageRole::Event,
-            parts: vec![Part {
-                id: "wake:abc.p0".to_string(),
-                kind: PartKind::Text,
-                content: "Background process wake\nProcess: process-1\nEvent: process.wake #7\nWake input:\nblue button pressed".to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]
+            parts: vec![Part::text("wake:abc.p0".to_string(), "Background process wake\nProcess: process-1\nEvent: process.wake #7\nWake input:\nblue button pressed".to_string(), None)]
             .into(),
             origin: Some(lash_core::MessageOrigin::Process {
                 process_id: "process-1".to_string(),

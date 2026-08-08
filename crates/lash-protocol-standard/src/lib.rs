@@ -26,7 +26,7 @@ use lash_core::sansio::{
 };
 use lash_core::session_model::message::PartAttachment;
 use lash_core::session_model::{
-    ConversationRecord, Message, MessageRole, Part, PartKind, PruneState, SessionHistoryRecord,
+    ConversationRecord, Message, MessageRole, Part, PartKind, SessionHistoryRecord,
     SessionStreamEvent, make_error_event, reassign_part_ids, shared_parts,
 };
 
@@ -136,18 +136,10 @@ fn turn_limit_exhausted_message(message_id: String, max_turns: usize) -> Message
     Message {
         id: message_id.clone(),
         role: MessageRole::System,
-        parts: shared_parts(vec![Part {
-            id: format!("{message_id}.p0"),
-            kind: PartKind::Error,
-            content: format!("Turn limit reached ({max_turns}) before a final assistant response."),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]),
+        parts: shared_parts(vec![Part::error(
+            format!("{message_id}.p0"),
+            format!("Turn limit reached ({max_turns}) before a final assistant response."),
+        )]),
         origin: None,
     }
 }
@@ -465,15 +457,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                     });
                     return actions;
                 }
-                actions.push(DriverAction::Emit(make_error_event(
-                    "llm_provider",
-                    Some("empty_response"),
-                    "Model returned no assistant text or tool calls.",
-                    None,
-                )));
-                actions.push(DriverAction::Finish(TurnOutcome::Stopped(
-                    TurnStop::ProviderError,
-                )));
+                actions.extend(empty_response_actions());
                 return actions;
             }
 
@@ -482,33 +466,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
             for (_, meta, text) in reasoning_items {
                 parts_out.push(reasoning_part(&asst_id, parts_out.len(), text, meta));
             }
-            for (content, response_meta) in assistant_text_parts {
-                if content.trim().is_empty() {
-                    continue;
-                }
-                parts_out.push(Part {
-                    id: format!("{}.p{}", asst_id, parts_out.len()),
-                    kind: PartKind::Prose,
-                    content,
-                    attachment: None,
-                    tool_call_id: None,
-                    tool_name: None,
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta,
-                });
-            }
+            append_assistant_prose(&mut parts_out, &asst_id, assistant_text_parts);
             if parts_out.is_empty() {
-                actions.push(DriverAction::Emit(make_error_event(
-                    "llm_provider",
-                    Some("empty_response"),
-                    "Model returned no assistant text or tool calls.",
-                    None,
-                )));
-                actions.push(DriverAction::Finish(TurnOutcome::Stopped(
-                    TurnStop::ProviderError,
-                )));
+                actions.extend(empty_response_actions());
                 return actions;
             }
             actions.push(DriverAction::StartCheckpoint {
@@ -524,23 +484,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
 
         let asst_id = standard_message_id(ctx.turn_id(), ctx.protocol_iteration(), "assistant");
         let mut assistant_parts = Vec::new();
-        for (content, response_meta) in assistant_text_parts {
-            if content.trim().is_empty() {
-                continue;
-            }
-            assistant_parts.push(Part {
-                id: format!("{}.p{}", asst_id, assistant_parts.len()),
-                kind: PartKind::Prose,
-                content,
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta,
-            });
-        }
+        append_assistant_prose(&mut assistant_parts, &asst_id, assistant_text_parts);
 
         let mut calls = Vec::new();
         // Interleave reasoning items with tool calls to preserve the
@@ -556,18 +500,13 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 let (_, meta, text) = reasoning_iter.next().expect("peek ok");
                 assistant_parts.push(reasoning_part(&asst_id, assistant_parts.len(), text, meta));
             }
-            assistant_parts.push(Part {
-                id: format!("{}.p{}", asst_id, assistant_parts.len()),
-                kind: PartKind::ToolCall,
-                content: tool_call.input_json.clone(),
-                attachment: None,
-                tool_call_id: Some(tool_call.call_id.clone()),
-                tool_name: Some(tool_call.tool_name.clone()),
-                tool_replay: tool_call.replay.clone(),
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            });
+            assistant_parts.push(Part::tool_call(
+                format!("{}.p{}", asst_id, assistant_parts.len()),
+                tool_call.input_json.clone(),
+                tool_call.call_id.clone(),
+                tool_call.tool_name.clone(),
+                tool_call.replay.clone(),
+            ));
 
             let args = serde_json::from_str::<Value>(&tool_call.input_json)
                 .unwrap_or_else(|_| serde_json::json!({}));
@@ -682,35 +621,53 @@ fn append_model_return_parts(
                 if text.is_empty() {
                     continue;
                 }
-                parts.push(Part {
-                    id: String::new(),
-                    kind: PartKind::ToolResult,
-                    content: text,
-                    attachment: None,
-                    tool_call_id: Some(model_return.call_id.clone()),
-                    tool_name: Some(model_return.tool_name.clone()),
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                });
+                parts.push(Part::tool_result(
+                    String::new(),
+                    text,
+                    model_return.call_id.clone(),
+                    model_return.tool_name.clone(),
+                ));
             }
             lash_core::facade_support::ModelToolReturnPart::Attachment(source) => {
-                parts.push(Part {
-                    id: String::new(),
-                    kind: PartKind::Attachment,
-                    content: String::new(),
-                    attachment: Some(PartAttachment { source }),
-                    tool_call_id: Some(model_return.call_id.clone()),
-                    tool_name: Some(model_return.tool_name.clone()),
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                });
+                parts.push(Part::tool_result_attachment(
+                    String::new(),
+                    String::new(),
+                    PartAttachment { source },
+                    model_return.call_id.clone(),
+                    model_return.tool_name.clone(),
+                ));
             }
         }
     }
+}
+
+fn append_assistant_prose(
+    parts: &mut Vec<Part>,
+    assistant_id: &str,
+    prose: impl IntoIterator<Item = (String, Option<lash_core::llm::types::ResponseTextMeta>)>,
+) {
+    for (content, response_meta) in prose {
+        if content.trim().is_empty() {
+            continue;
+        }
+        parts.push(Part::prose(
+            format!("{assistant_id}.p{}", parts.len()),
+            content,
+            response_meta,
+        ));
+    }
+}
+
+fn empty_response_actions() -> [DriverAction; 2] {
+    [
+        DriverAction::Emit(make_error_event(
+            "llm_provider",
+            Some("empty_response"),
+            "Model returned no assistant text or tool calls.",
+            None,
+        )),
+        DriverAction::Finish(TurnOutcome::Stopped(TurnStop::ProviderError)),
+    ]
 }
 
 fn conversation_event(message: Message) -> SessionHistoryRecord {

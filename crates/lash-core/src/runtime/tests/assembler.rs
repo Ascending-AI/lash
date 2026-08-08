@@ -165,19 +165,7 @@ fn assembler_falls_back_to_last_assistant_message_when_stream_output_is_empty() 
         Message {
             id: "m0".to_string(),
             role: MessageRole::Assistant,
-            parts: vec![Part {
-                id: "m0.p0".to_string(),
-                kind: PartKind::Prose,
-                content: "stored".to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]
-            .into(),
+            parts: vec![Part::prose("m0.p0".to_string(), "stored".to_string(), None)].into(),
             origin: None,
         },
     );
@@ -210,18 +198,11 @@ fn interrupted_assembler_does_not_reuse_assistant_before_latest_user_message() {
         Message {
             id: "a0".to_string(),
             role: MessageRole::Assistant,
-            parts: vec![Part {
-                id: "a0.p0".to_string(),
-                kind: PartKind::Prose,
-                content: "previous assistant answer".to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]
+            parts: vec![Part::prose(
+                "a0.p0".to_string(),
+                "previous assistant answer".to_string(),
+                None,
+            )]
             .into(),
             origin: None,
         },
@@ -231,18 +212,11 @@ fn interrupted_assembler_does_not_reuse_assistant_before_latest_user_message() {
         Message {
             id: "u1".to_string(),
             role: MessageRole::User,
-            parts: vec![Part {
-                id: "u1.p0".to_string(),
-                kind: PartKind::Text,
-                content: "new prompt".to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]
+            parts: vec![Part::text(
+                "u1.p0".to_string(),
+                "new prompt".to_string(),
+                None,
+            )]
             .into(),
             origin: None,
         },
@@ -271,18 +245,11 @@ fn assembler_prefers_state_output_when_streamed_text_is_a_truncated_prefix() {
         Message {
             id: "m0".to_string(),
             role: MessageRole::Assistant,
-            parts: vec![Part {
-                id: "m0.p0".to_string(),
-                kind: PartKind::Prose,
-                content: "You graduated with a degree in Business Administration.".to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]
+            parts: vec![Part::prose(
+                "m0.p0".to_string(),
+                "You graduated with a degree in Business Administration.".to_string(),
+                None,
+            )]
             .into(),
             origin: None,
         },
@@ -325,32 +292,19 @@ fn assembler_state_output_excludes_tool_call_payload() {
             id: "m0".to_string(),
             role: MessageRole::Assistant,
             parts: vec![
-                Part {
-                    id: "m0.p0".to_string(),
-                    kind: PartKind::Prose,
-                    content: "Searching for the relevant code.".to_string(),
-                    attachment: None,
-                    tool_call_id: None,
-                    tool_name: None,
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                },
-                Part {
-                    id: "m0.p1".to_string(),
-                    kind: PartKind::ToolCall,
-                    content:
-                        "{\"tool_calls\":[{\"tool\":\"grep\",\"parameters\":{\"query\":\"x\"}}]}"
-                            .to_string(),
-                    attachment: None,
-                    tool_call_id: Some("tc1".to_string()),
-                    tool_name: Some("batch".to_string()),
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                },
+                Part::prose(
+                    "m0.p0".to_string(),
+                    "Searching for the relevant code.".to_string(),
+                    None,
+                ),
+                Part::tool_call(
+                    "m0.p1".to_string(),
+                    "{\"tool_calls\":[{\"tool\":\"grep\",\"parameters\":{\"query\":\"x\"}}]}"
+                        .to_string(),
+                    "tc1".to_string(),
+                    "batch".to_string(),
+                    None,
+                ),
             ]
             .into(),
             origin: None,
@@ -462,18 +416,11 @@ fn assembler_detects_max_turn_message() {
         Message {
             id: "m0".to_string(),
             role: MessageRole::System,
-            parts: vec![Part {
-                id: "m0.p0".to_string(),
-                kind: PartKind::Text,
-                content: "Turn limit reached (5).".to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]
+            parts: vec![Part::text(
+                "m0.p0".to_string(),
+                "Turn limit reached (5).".to_string(),
+                None,
+            )]
             .into(),
             origin: None,
         },

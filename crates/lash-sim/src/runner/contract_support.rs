@@ -580,18 +580,10 @@ pub(super) fn contract_turn_limit_final_message(
     lash_core::Message {
         id: message_id.clone(),
         role: lash_core::MessageRole::System,
-        parts: lash_core::facade_support::shared_parts(vec![lash_core::Part {
-            id: format!("{message_id}.p0"),
-            kind: lash_core::PartKind::Error,
-            content: format!("Turn limit reached ({max_turns}) before a final test response."),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: lash_core::PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]),
+        parts: lash_core::facade_support::shared_parts(vec![lash_core::Part::error(
+            format!("{message_id}.p0"),
+            format!("Turn limit reached ({max_turns}) before a final test response."),
+        )]),
         origin: None,
     }
 }
@@ -600,18 +592,11 @@ pub(super) fn contract_user_message(content: &str) -> lash_core::Message {
     lash_core::Message {
         id: "m0".to_string(),
         role: lash_core::MessageRole::User,
-        parts: vec![lash_core::Part {
-            id: "m0.p0".to_string(),
-            kind: lash_core::PartKind::Text,
-            content: content.to_string(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: lash_core::PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]
+        parts: vec![lash_core::Part::text(
+            "m0.p0".to_string(),
+            content.to_string(),
+            None,
+        )]
         .into(),
         origin: None,
     }

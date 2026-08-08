@@ -42,18 +42,7 @@ impl TurnCause {
         Message {
             id: self.id.clone(),
             role: MessageRole::Event,
-            parts: Arc::new(vec![Part {
-                id: format!("{}.p0", self.id),
-                kind: PartKind::Text,
-                content: self.text.clone(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]),
+            parts: Arc::new(vec![Part::text(format!("{}.p0", self.id), self.text.clone(), None)]),
             origin: Some(self.origin.clone()),
         }
     }

@@ -453,6 +453,7 @@ fn push_part(encoded: &mut Vec<u8>, part: &crate::Part) {
         prune_state,
         reasoning_meta,
         response_meta,
+        ..
     } = part;
     push_string(encoded, id);
     push_part_kind(encoded, *kind);
