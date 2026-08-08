@@ -166,7 +166,9 @@ impl CurrentSessionCapability {
         let receipt_replayed = result.receipt_replayed;
         let committed_leaf_node_id = result.committed_leaf_node_id.clone();
         if let Some(staged) = staged_usage.take() {
-            staged.confirm_identities(&result.committed_usage_delta_identities);
+            staged
+                .confirm_identities(&result.committed_usage_delta_identities)
+                .map_err(super::usage::plugin_error_from_usage_confirmation)?;
         }
         let node_ids = if receipt_replayed {
             super::super::state::receipt_append_node_ids(&result, requested_node_count)

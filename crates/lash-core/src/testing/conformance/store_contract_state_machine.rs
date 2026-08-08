@@ -1003,7 +1003,9 @@ async fn apply_operation(
                     available_at_ms: draft.available_at_ms,
                 },
             );
-            *sequence = sequence.saturating_add(1);
+            *sequence = sequence
+                .checked_add(1)
+                .expect("generated enqueue sequence must remain in range");
             shape.enqueues_committed = shape.enqueues_committed.saturating_add(1);
         }
         StoreContractOp::ConsumeWake {

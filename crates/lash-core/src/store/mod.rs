@@ -3,6 +3,7 @@
 use crate::facade_support::SessionGraphFacadeOps;
 
 mod attachment_manifest;
+mod claim_settlement;
 mod commit_budget;
 mod commit_identity;
 mod error;
@@ -701,29 +702,11 @@ impl RuntimeCommit {
         originating_queue_claims: &[crate::QueuedWorkCompletion],
         originating_turn_input_claims: &[crate::TurnInputCompletion],
     ) -> Result<(), StoreError> {
-        for originating in originating_queue_claims {
-            if !self.completed_queue_claims.iter().any(|completed| {
-                completed.session_id == originating.session_id
-                    && completed.claim_id == originating.claim_id
-            }) {
-                return Err(StoreError::UnsettledQueuedWorkClaim {
-                    session_id: originating.session_id.clone(),
-                    claim_id: originating.claim_id.clone(),
-                });
-            }
-        }
-        for originating in originating_turn_input_claims {
-            if !self.completed_turn_input_claims.iter().any(|completed| {
-                completed.session_id == originating.session_id
-                    && completed.claim_id == originating.claim_id
-            }) {
-                return Err(StoreError::UnsettledTurnInputClaim {
-                    session_id: originating.session_id.clone(),
-                    claim_id: originating.claim_id.clone(),
-                });
-            }
-        }
-        Ok(())
+        claim_settlement::validate_claim_settlement(
+            self,
+            originating_queue_claims,
+            originating_turn_input_claims,
+        )
     }
 
     /// Computes the canonical semantic commit hash store implementors use to distinguish idempotent

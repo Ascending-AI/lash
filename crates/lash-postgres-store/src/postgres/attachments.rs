@@ -68,22 +68,32 @@ impl AttachmentManifest for PostgresSessionStore {
             .fetch_all(&pool)
             .await
             .map_err(store_sqlx_error)?;
-            Ok(rows
-                .into_iter()
-                .map(|row| AttachmentManifestEntry {
-                    attachment_id: AttachmentId::new(row.get::<String, _>(0)),
-                    session_id: row.get(1),
-                    canonical_uri: row.get(2),
-                    intent_at_epoch_ms: row.get::<i64, _>(3) as u64,
-                    committed_at_epoch_ms: row.get::<Option<i64>, _>(4).map(|value| value as u64),
-                    owner_kind: match row.get::<Option<String>, _>(5).as_deref() {
-                        Some("turn") => Some(AttachmentOwnerKind::Turn),
-                        Some("process") => Some(AttachmentOwnerKind::Process),
-                        _ => None,
-                    },
-                    owner_id: row.get(6),
+            rows.into_iter()
+                .map(|row| {
+                    Ok(AttachmentManifestEntry {
+                        attachment_id: AttachmentId::new(row.get::<String, _>(0)),
+                        session_id: row.get(1),
+                        canonical_uri: row.get(2),
+                        intent_at_epoch_ms: u64_from_sql(
+                            "AttachmentManifest",
+                            "intent_at_ms",
+                            row.get(3),
+                        )?,
+                        committed_at_epoch_ms: row
+                            .get::<Option<i64>, _>(4)
+                            .map(|value| {
+                                u64_from_sql("AttachmentManifest", "committed_at_ms", value)
+                            })
+                            .transpose()?,
+                        owner_kind: match row.get::<Option<String>, _>(5).as_deref() {
+                            Some("turn") => Some(AttachmentOwnerKind::Turn),
+                            Some("process") => Some(AttachmentOwnerKind::Process),
+                            _ => None,
+                        },
+                        owner_id: row.get(6),
+                    })
                 })
-                .collect())
+                .collect()
         })
     }
 

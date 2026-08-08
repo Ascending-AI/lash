@@ -865,18 +865,34 @@ pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError>
         .ok_or_else(|| StoreError::Backend("invalid queued work slot policy".to_string()))?;
     let merge_json: String = row.get("merge_key_json");
     Ok(QueuedBatchRow {
-        enqueue_seq: row.get::<i64, _>("enqueue_seq") as u64,
+        enqueue_seq: u64_from_sql("QueuedWorkBatch", "enqueue_seq", row.get("enqueue_seq"))?,
         batch_id: row.get("batch_id"),
         session_id: row.get("session_id"),
         source_key: row.get("source_key"),
         delivery_policy,
         slot_policy,
         merge_key: store_decode_json(&merge_json, "queued work merge key")?,
-        available_at_ms: row.get::<i64, _>("available_at_ms") as u64,
-        enqueued_at_ms: row.get::<i64, _>("enqueued_at_ms") as u64,
-        claim_fencing_token: row.get::<i64, _>("claim_fencing_token") as u64,
+        available_at_ms: u64_from_sql(
+            "QueuedWorkBatch",
+            "available_at_ms",
+            row.get("available_at_ms"),
+        )?,
+        enqueued_at_ms: u64_from_sql(
+            "QueuedWorkBatch",
+            "enqueued_at_ms",
+            row.get("enqueued_at_ms"),
+        )?,
+        claim_fencing_token: u64_from_sql(
+            "QueuedWorkBatch",
+            "claim_fencing_token",
+            row.get("claim_fencing_token"),
+        )?,
         claim_token: row.get("claim_token"),
-        claim_session_lease_generation: row.get::<i64, _>("claim_session_lease_generation") as u64,
+        claim_session_lease_generation: u64_from_sql(
+            "QueuedWorkBatch",
+            "claim_session_lease_generation",
+            row.get("claim_session_lease_generation"),
+        )?,
     })
 }
 
@@ -957,6 +973,19 @@ pub(crate) async fn ensure_queued_work_completion_tx(
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
+        let authority = authority
+            .map(|(claim_id, claim_token, generation)| {
+                Ok((
+                    claim_id,
+                    claim_token,
+                    u64_from_sql(
+                        "QueuedWorkBatch",
+                        "claim_session_lease_generation",
+                        generation,
+                    )?,
+                ))
+            })
+            .transpose()?;
         let owns_row = authority
             .as_ref()
             .is_some_and(|(claim_id, claim_token, _)| {
@@ -973,9 +1002,7 @@ pub(crate) async fn ensure_queued_work_completion_tx(
                     .and_then(|(claim_id, _, _)| claim_id.clone())
                     .map(String::into_boxed_str),
                 superseding_session_lease_generation: authority.as_ref().and_then(
-                    |(claim_id, _, generation)| {
-                        claim_id.as_ref().map(|_| Box::new(*generation as u64))
-                    },
+                    |(claim_id, _, generation)| claim_id.as_ref().map(|_| Box::new(*generation)),
                 ),
             });
         }
@@ -994,7 +1021,7 @@ pub(crate) struct PendingTurnInputRow {
     input_json: String,
     enqueued_at_ms: u64,
     claim_id: Option<String>,
-    claim_fencing_token: u64,
+    pub(crate) claim_fencing_token: u64,
     claim_owner: Option<LeaseOwnerIdentity>,
     claim_token: Option<String>,
     claim_session_lease_generation: u64,
@@ -1004,23 +1031,35 @@ pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, 
     let state = lash_core::TurnInputState::from_wire_str(row.get::<String, _>("state").as_str())
         .ok_or_else(|| StoreError::Backend("invalid pending turn-input state".to_string()))?;
     Ok(PendingTurnInputRow {
-        enqueue_seq: row.get::<i64, _>("enqueue_seq") as u64,
+        enqueue_seq: u64_from_sql("PendingTurnInput", "enqueue_seq", row.get("enqueue_seq"))?,
         input_id: row.get("input_id"),
         session_id: row.get("session_id"),
         source_key: row.get("source_key"),
         ingress_json: row.get("ingress_json"),
         state,
         input_json: row.get("input_json"),
-        enqueued_at_ms: row.get::<i64, _>("enqueued_at_ms") as u64,
+        enqueued_at_ms: u64_from_sql(
+            "PendingTurnInput",
+            "enqueued_at_ms",
+            row.get("enqueued_at_ms"),
+        )?,
         claim_id: row.get("claim_id"),
-        claim_fencing_token: row.get::<i64, _>("claim_fencing_token") as u64,
+        claim_fencing_token: u64_from_sql(
+            "PendingTurnInput",
+            "claim_fencing_token",
+            row.get("claim_fencing_token"),
+        )?,
         claim_owner: lease_owner_from_columns(
             row.get("claim_owner_id"),
             row.get("claim_owner_incarnation_id"),
             row.get("claim_owner_liveness_json"),
         ),
         claim_token: row.get("claim_token"),
-        claim_session_lease_generation: row.get::<i64, _>("claim_session_lease_generation") as u64,
+        claim_session_lease_generation: u64_from_sql(
+            "PendingTurnInput",
+            "claim_session_lease_generation",
+            row.get("claim_session_lease_generation"),
+        )?,
     })
 }
 
@@ -1195,6 +1234,19 @@ pub(crate) async fn ensure_turn_input_completion_tx(
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
+        let authority = authority
+            .map(|(claim_id, claim_token, generation)| {
+                Ok((
+                    claim_id,
+                    claim_token,
+                    u64_from_sql(
+                        "PendingTurnInput",
+                        "claim_session_lease_generation",
+                        generation,
+                    )?,
+                ))
+            })
+            .transpose()?;
         let owns_row = authority
             .as_ref()
             .is_some_and(|(claim_id, claim_token, _)| {
@@ -1211,9 +1263,7 @@ pub(crate) async fn ensure_turn_input_completion_tx(
                     .and_then(|(claim_id, _, _)| claim_id.clone())
                     .map(String::into_boxed_str),
                 superseding_session_lease_generation: authority.as_ref().and_then(
-                    |(claim_id, _, generation)| {
-                        claim_id.as_ref().map(|_| Box::new(*generation as u64))
-                    },
+                    |(claim_id, _, generation)| claim_id.as_ref().map(|_| Box::new(*generation)),
                 ),
             });
         }
@@ -1236,7 +1286,7 @@ impl TurnInputClaimLease {
         owner: &LeaseOwnerIdentity,
         now_epoch_ms: u64,
         session_lease_generation: u64,
-    ) -> Self {
+    ) -> Result<Self, StoreError> {
         let lease = lash_core::store::queued_work::WorkClaimLease::derive(
             lash_core::store::queued_work::ClaimIdDialect::TurnInput,
             head.enqueue_seq,
@@ -1245,12 +1295,12 @@ impl TurnInputClaimLease {
             owner,
             now_epoch_ms,
             session_lease_generation,
-        );
-        Self {
+        )?;
+        Ok(Self {
             claim_id: lease.claim_id,
             lease_token: lease.lease_token,
             fencing_token: lease.fencing_token,
             session_lease_generation: lease.session_lease_generation,
-        }
+        })
     }
 }

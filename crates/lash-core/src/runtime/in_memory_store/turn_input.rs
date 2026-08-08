@@ -120,7 +120,10 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             .pending_turn_input_next_seq
             .lock()
             .expect("lock pending turn input seq");
-        *next_seq = next_seq.saturating_add(1);
+        *next_seq = crate::StoreError::checked_monotonic_increment(
+            "turn_input_enqueue_sequence",
+            *next_seq,
+        )?;
         let input_id = draft
             .input_id
             .unwrap_or_else(|| format!("recording-ti-{next_seq}"));

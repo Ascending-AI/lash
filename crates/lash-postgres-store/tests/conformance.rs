@@ -2,6 +2,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use lash_core::testing::conformance::{
+    FenceIntegrityHandles, FenceIntegrityInjector, FenceIntegrityObservation, FenceIntegrityTarget,
     ReopenableProcessRegistry, ReopenableRuntimePersistence, ReopenableTriggerStore,
 };
 use lash_core::{
@@ -75,6 +76,189 @@ async fn reset(storage: &PostgresStorage) {
     .execute(pool)
     .await
     .expect("reset postgres process change clock");
+}
+
+struct PostgresFenceIntegrityInjector {
+    _database_lock: SharedDatabaseLock,
+    storage: Arc<PostgresStorage>,
+}
+
+#[async_trait::async_trait]
+impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
+    async fn inject_raw_value(&self, target: &FenceIntegrityTarget, value: i64) {
+        let result = match target {
+            FenceIntegrityTarget::QueuedWorkClaimFence { batch_id } => {
+                sqlx::query(
+                    "UPDATE lash_queued_work_batches
+                 SET claim_fencing_token = $1 WHERE batch_id = $2",
+                )
+                .bind(value)
+                .bind(batch_id)
+                .execute(self.storage.pool())
+                .await
+            }
+            FenceIntegrityTarget::SessionHeadRevision { session_id } => {
+                sqlx::query("UPDATE lash_sessions SET head_revision = $1 WHERE session_id = $2")
+                    .bind(value)
+                    .bind(session_id)
+                    .execute(self.storage.pool())
+                    .await
+            }
+            FenceIntegrityTarget::SessionLeaseFencingToken { session_id } => {
+                sqlx::query(
+                    "UPDATE lash_session_execution_leases
+                 SET lease_fencing_token = $1 WHERE session_id = $2",
+                )
+                .bind(value)
+                .bind(session_id)
+                .execute(self.storage.pool())
+                .await
+            }
+            FenceIntegrityTarget::TriggerRevision { subscription_id } => {
+                sqlx::query(
+                    "UPDATE lash_trigger_subscriptions
+                 SET revision = $1,
+                     record_json = jsonb_set(
+                         record_json::jsonb,
+                         '{revision}',
+                         to_jsonb($1::bigint)
+                     )::text
+                 WHERE subscription_id = $2",
+                )
+                .bind(value)
+                .bind(subscription_id)
+                .execute(self.storage.pool())
+                .await
+            }
+        }
+        .expect("inject raw Postgres fence value");
+        assert_eq!(
+            result.rows_affected(),
+            1,
+            "raw Postgres fence injection must target one row"
+        );
+    }
+
+    async fn observe_raw_value(&self, target: &FenceIntegrityTarget) -> FenceIntegrityObservation {
+        match target {
+            FenceIntegrityTarget::QueuedWorkClaimFence { batch_id } => {
+                let (value, claim_id, claim_token, generation): (
+                    i64,
+                    Option<String>,
+                    Option<String>,
+                    i64,
+                ) = sqlx::query_as(
+                    "SELECT claim_fencing_token, claim_id, claim_token,
+                            claim_session_lease_generation
+                     FROM lash_queued_work_batches WHERE batch_id = $1",
+                )
+                .bind(batch_id)
+                .fetch_one(self.storage.pool())
+                .await
+                .expect("observe Postgres queued-work fence");
+                FenceIntegrityObservation {
+                    value,
+                    mutation_fingerprint: format!("{claim_id:?}:{claim_token:?}:{generation}"),
+                }
+            }
+            FenceIntegrityTarget::SessionHeadRevision { session_id } => {
+                let (value, head_json, leaf, checkpoint): (
+                    i64,
+                    String,
+                    Option<String>,
+                    Option<String>,
+                ) = sqlx::query_as(
+                    "SELECT head_revision, head_json, leaf_node_id, checkpoint_ref
+                     FROM lash_sessions WHERE session_id = $1",
+                )
+                .bind(session_id)
+                .fetch_one(self.storage.pool())
+                .await
+                .expect("observe Postgres session-head revision");
+                FenceIntegrityObservation {
+                    value,
+                    mutation_fingerprint: format!("{head_json}:{leaf:?}:{checkpoint:?}"),
+                }
+            }
+            FenceIntegrityTarget::SessionLeaseFencingToken { session_id } => {
+                let (value, owner, token, claimed, expires): (
+                    i64,
+                    Option<String>,
+                    Option<String>,
+                    i64,
+                    i64,
+                ) = sqlx::query_as(
+                    "SELECT lease_fencing_token, lease_owner_id, lease_token,
+                            lease_claimed_at_ms, lease_expires_at_ms
+                     FROM lash_session_execution_leases WHERE session_id = $1",
+                )
+                .bind(session_id)
+                .fetch_one(self.storage.pool())
+                .await
+                .expect("observe Postgres session-lease fence");
+                FenceIntegrityObservation {
+                    value,
+                    mutation_fingerprint: format!("{owner:?}:{token:?}:{claimed}:{expires}"),
+                }
+            }
+            FenceIntegrityTarget::TriggerRevision { subscription_id } => {
+                let (value, json, enabled, tombstoned): (i64, String, bool, bool) = sqlx::query_as(
+                    "SELECT revision, record_json, enabled, tombstoned
+                         FROM lash_trigger_subscriptions WHERE subscription_id = $1",
+                )
+                .bind(subscription_id)
+                .fetch_one(self.storage.pool())
+                .await
+                .expect("observe Postgres trigger revision");
+                FenceIntegrityObservation {
+                    value,
+                    mutation_fingerprint: format!("{json}:{enabled}:{tombstoned}"),
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_fence_integrity_conformance_when_configured() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping Postgres fence-integrity conformance: database is not configured");
+        return;
+    };
+    lash_core::testing::conformance::fence_integrity_conformance(|_| {
+        let database_url = database_url.clone();
+        async move {
+            let database_lock = SharedDatabaseLock::acquire(&database_url).await;
+            let storage = Arc::new(
+                PostgresStorage::connect(&database_url)
+                    .await
+                    .expect("open Postgres fence fixture"),
+            );
+            reset(&storage).await;
+            FenceIntegrityHandles {
+                runtime: Arc::new(storage.unbound_session_store()),
+                triggers: Arc::new(storage.trigger_store()),
+                injector: Arc::new(PostgresFenceIntegrityInjector {
+                    _database_lock: database_lock,
+                    storage,
+                }),
+            }
+        }
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_signed_counter_write_domain_conformance_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres signed-write conformance: database is not configured");
+        return;
+    };
+    reset(&storage).await;
+    lash_core::testing::conformance::signed_counter_write_domain_conformance(Arc::new(
+        storage.unbound_session_store(),
+    ))
+    .await;
 }
 
 async fn wait_for_session_lease_advisory_waiters(pool: &sqlx::PgPool, at_least: i64) {
@@ -163,6 +347,77 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
         lash_core::testing::conformance::RuntimePersistenceLeaseTiming::Realtime,
     )
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_negative_and_exhausted_queued_work_fences_are_typed_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres fence corruption test: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    let session_id = "postgres-fence-corrupt";
+    let store = storage.session_store(session_id);
+    let owner = lash_core::LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
+    let lease = store
+        .try_claim_session_execution_lease_with_token(
+            session_id,
+            &owner,
+            &lash_core::LeaseClaimNonce::new(),
+            120_000,
+        )
+        .await
+        .expect("claim session lease")
+        .acquired()
+        .expect("session lease acquired");
+    let batch = store
+        .enqueue_queued_work(lash_core::runtime::QueuedWorkBatchDraft::new(
+            session_id,
+            lash_core::DeliveryPolicy::EarliestSafeBoundary,
+            lash_core::SlotPolicy::Exclusive,
+            vec![lash_core::runtime::QueuedWorkPayload::session_command(
+                lash_core::runtime::SessionCommand::RefreshToolCatalog {
+                    reason: "fence test".to_string(),
+                },
+            )],
+        ))
+        .await
+        .expect("enqueue queued work");
+
+    sqlx::query("UPDATE lash_queued_work_batches SET claim_fencing_token = -1 WHERE batch_id = $1")
+        .bind(&batch.batch_id)
+        .execute(storage.pool())
+        .await
+        .expect("inject negative fence");
+    let corrupt = store
+        .list_queued_work(session_id)
+        .await
+        .expect_err("negative fence must refuse");
+    assert!(matches!(
+        corrupt,
+        StoreError::StoredDataCorrupt {
+            record_kind: "QueuedWorkBatch",
+            ..
+        }
+    ));
+
+    sqlx::query("UPDATE lash_queued_work_batches SET claim_fencing_token = $1 WHERE batch_id = $2")
+        .bind(i64::MAX)
+        .bind(&batch.batch_id)
+        .execute(storage.pool())
+        .await
+        .expect("seed exhausted fence");
+    let exhausted = store
+        .claim_leading_ready_session_command(session_id, &lease.authority(), &owner)
+        .await
+        .expect_err("exhausted SQL fence must refuse");
+    assert!(matches!(
+        exhausted,
+        StoreError::MonotonicCounterOverflow {
+            counter: "queued_work_claim_fencing_token",
+            current,
+        } if current == i64::MAX as u64
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

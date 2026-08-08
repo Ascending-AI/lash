@@ -92,7 +92,7 @@ impl SqliteTriggerStore {
             occurrence: Self::decode_occurrence(occurrence_json)?,
             subscription: Self::decode_subscription(subscription_json)?,
             process_id,
-            created_at_ms: created_at_ms as u64,
+            created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", created_at_ms)?,
             reservation_status,
         })
     }
@@ -282,6 +282,10 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         Ok(lash_core::TriggerCommandOutcome::List { .. }) | Err(_) => Vec::new(),
                     };
                     for record in records {
+                        let sql_revision = plugin_sql_counter_value(
+                            "trigger_subscription_revision",
+                            record.revision,
+                        )?;
                         tx.execute(
                             "INSERT INTO trigger_subscriptions (
                             subscription_id, owner_scope, subscription_key, incarnation, revision,
@@ -306,7 +310,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                                 record.owner_scope.namespace(),
                                 record.subscription_key.as_str(),
                                 record.incarnation.as_str(),
-                                record.revision as i64,
+                                sql_revision,
                                 record.definition_fingerprint.as_str(),
                                 record.source_type.as_str(),
                                 record.source_key.as_str(),
@@ -443,26 +447,31 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     drop(stmt);
                     let mut deleted = 0usize;
                     for (subscription_id, mut record) in subscriptions {
+                        let next_revision =
+                            lash_core::facade_support::next_trigger_store_revision(&record)?;
                         record.enabled = false;
                         record.tombstoned = true;
                         record.deleted_at_ms = Some(now);
-                        record.revision = record.revision.saturating_add(1);
+                        record.revision = next_revision;
                         record.updated_at_ms = now;
-                        deleted = deleted.saturating_add(
-                            tx.execute(
+                        let sql_revision = plugin_sql_counter_value(
+                            "trigger_subscription_revision",
+                            record.revision,
+                        )?;
+                        deleted += tx
+                            .execute(
                                 "UPDATE trigger_subscriptions
                                  SET enabled = 0, tombstoned = 1, revision = ?2,
                                      updated_at_ms = ?3, record_json = ?4
                                  WHERE subscription_id = ?1",
                                 params![
                                     subscription_id.as_str(),
-                                    record.revision as i64,
+                                    sql_revision,
                                     now as i64,
                                     Self::encode_json(&record)?,
                                 ],
                             )
-                            .map_err(process_sqlite_error)?,
-                        );
+                            .map_err(process_sqlite_error)?;
                     }
                     Ok(deleted)
                 })()))
@@ -780,6 +789,8 @@ fn reserve_sqlite_deliveries(
 
     let mut reservations = Vec::with_capacity(subscriptions.len());
     for subscription in subscriptions {
+        let sql_revision =
+            plugin_sql_counter_value("trigger_subscription_revision", subscription.revision)?;
         let process_id = lash_core::facade_support::deterministic_delivery_process_id(
             &occurrence.occurrence_id,
             &subscription.subscription_id,
@@ -796,7 +807,7 @@ fn reserve_sqlite_deliveries(
                 subscription.subscription_id.as_str(),
                 process_id.as_str(),
                 subscription.incarnation.as_str(),
-                subscription.revision as i64,
+                sql_revision,
                 SqliteTriggerStore::encode_json(&subscription)?,
                 created_at_ms as i64,
             ],
@@ -842,7 +853,7 @@ fn sqlite_delivery_snapshots(
             occurrence: occurrence.clone(),
             subscription: SqliteTriggerStore::decode_subscription(snapshot_json)?,
             process_id,
-            created_at_ms: created_at_ms as u64,
+            created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", created_at_ms)?,
             reservation_status: reservation_status.clone(),
         });
     }

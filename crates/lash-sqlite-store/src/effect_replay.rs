@@ -603,8 +603,15 @@ fn select_effect_row(
                 status: row.get(2)?,
                 outcome_json: row.get(3)?,
                 error_json: row.get(4)?,
-                lease_expires_at_ms: row.get::<_, i64>(7)? as u64,
-                due_at_ms: row.get::<_, Option<i64>>(8)?.map(|value| value as u64),
+                lease_expires_at_ms: u64_from_sql(
+                    "RuntimeEffectReplay",
+                    "lease_expires_at_ms",
+                    row.get(7)?,
+                )?,
+                due_at_ms: row
+                    .get::<_, Option<i64>>(8)?
+                    .map(|value| u64_from_sql("RuntimeEffectReplay", "due_at_ms", value))
+                    .transpose()?,
             })
         },
     )
@@ -669,4 +676,19 @@ fn take_over_expired_lease(
 
 fn effect_sqlite_error(err: rusqlite::Error) -> RuntimeEffectControllerError {
     RuntimeEffectControllerError::new(VOCABULARY.code("store"), err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stored_effect_corruption_is_non_retryable() {
+        let error = effect_sqlite_error(sqlite_conversion_error(StoreError::StoredDataCorrupt {
+            record_kind: "RuntimeEffectReplay",
+            message: "lease_expires_at_ms must be non-negative, got -1".to_string(),
+        }));
+        assert_eq!(error.code, "sqlite_effect_replay_store");
+        assert!(!lash_core::RuntimeErrorCode::from_wire_code(&error.code).is_retryable());
+    }
 }

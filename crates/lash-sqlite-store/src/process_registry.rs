@@ -772,7 +772,11 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         return Err(registry_transitions::process_no_longer_retained(
                             registry_transitions::ProcessTombstoneStamp {
                                 terminal_label,
-                                pruned_at_ms: pruned_at_ms as u64,
+                                pruned_at_ms: plugin_u64_from_sql(
+                                    "ProcessTombstone",
+                                    "pruned_at_ms",
+                                    pruned_at_ms,
+                                )?,
                             },
                         ));
                     }
@@ -1284,16 +1288,9 @@ impl ProcessRegistry for SqliteProcessRegistry {
                             // columns but retains the monotonically-increasing
                             // `lease_fencing_token`, so a re-claim never reuses
                             // a stale writer's token.
-                            let retained = tx
-                                .query_row(
-                                    "SELECT lease_fencing_token FROM process_leases WHERE process_id = ?1",
-                                    params![process_id],
-                                    |row| row.get::<_, i64>(0),
-                                )
-                                .optional()
-                                .map_err(process_sqlite_error)?
-                                .unwrap_or(0) as u64;
-                            registry_transitions::next_process_lease_fencing_token(retained)
+                            let retained =
+                                Self::retained_process_lease_fencing_token_conn(tx, &process_id)?;
+                            registry_transitions::next_process_lease_fencing_token(retained)?
                         }
                     };
                     Ok(ProcessLeaseClaimOutcome::Acquired(
@@ -1330,20 +1327,15 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     let fencing_token = match registry_transitions::decide_process_lease_reclaim(
                         current.as_ref(),
                         now,
-                    ) {
+                    )? {
                         registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence => {
                             // Free (or released) lease: acquire on the retained
                             // fencing token like a plain claim would.
-                            let retained = tx
-                                .query_row(
-                                    "SELECT lease_fencing_token FROM process_leases WHERE process_id = ?1",
-                                    params![process_id],
-                                    |row| row.get::<_, i64>(0),
-                                )
-                                .optional()
-                                .map_err(process_sqlite_error)?
-                                .unwrap_or(0) as u64;
-                            registry_transitions::next_process_lease_fencing_token(retained)
+                            let retained = Self::retained_process_lease_fencing_token_conn(
+                                tx,
+                                &process_id,
+                            )?;
+                            registry_transitions::next_process_lease_fencing_token(retained)?
                         }
                         registry_transitions::ProcessLeaseReclaimDecision::AcquireOnObservedFence {
                             fencing_token,

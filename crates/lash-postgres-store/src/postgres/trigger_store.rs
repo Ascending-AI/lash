@@ -125,6 +125,8 @@ impl TriggerStore for PostgresTriggerStore {
             Ok(lash_core::TriggerCommandOutcome::List { .. }) | Err(_) => Vec::new(),
         };
         for record in records {
+            let sql_revision =
+                plugin_sql_counter_value("trigger_subscription_revision", record.revision)?;
             sqlx::query(
                 "INSERT INTO lash_trigger_subscriptions (
                     subscription_id, owner_scope, subscription_key, incarnation, revision,
@@ -148,7 +150,7 @@ impl TriggerStore for PostgresTriggerStore {
             .bind(record.owner_scope.namespace())
             .bind(&record.subscription_key)
             .bind(&record.incarnation)
-            .bind(record.revision as i64)
+            .bind(sql_revision)
             .bind(&record.definition_fingerprint)
             .bind(&record.source_type)
             .bind(&record.source_key)
@@ -242,11 +244,14 @@ impl TriggerStore for PostgresTriggerStore {
             let json: String = row.get(1);
             let mut record: TriggerSubscriptionRecord =
                 serde_json::from_str(&json).map_err(process_decode_error)?;
+            let next_revision = lash_core::facade_support::next_trigger_store_revision(&record)?;
             record.enabled = false;
             record.tombstoned = true;
             record.deleted_at_ms = Some(now);
-            record.revision = record.revision.saturating_add(1);
+            record.revision = next_revision;
             record.updated_at_ms = now;
+            let sql_revision =
+                plugin_sql_counter_value("trigger_subscription_revision", record.revision)?;
             sqlx::query(
                 "UPDATE lash_trigger_subscriptions
                  SET enabled = FALSE, tombstoned = TRUE, revision = $2,
@@ -254,7 +259,7 @@ impl TriggerStore for PostgresTriggerStore {
                  WHERE subscription_id = $1",
             )
             .bind(subscription_id)
-            .bind(record.revision as i64)
+            .bind(sql_revision)
             .bind(now as i64)
             .bind(serde_json::to_string(&record).map_err(process_decode_error)?)
             .execute(&mut *tx)
@@ -542,6 +547,8 @@ async fn reserve_postgres_deliveries(
             &subscription.incarnation,
             subscription.revision,
         )?;
+        let sql_revision =
+            plugin_sql_counter_value("trigger_subscription_revision", subscription.revision)?;
         sqlx::query(
             "INSERT INTO lash_trigger_deliveries (
                 occurrence_id, subscription_id, process_id, subscription_incarnation,
@@ -552,7 +559,7 @@ async fn reserve_postgres_deliveries(
         .bind(&subscription.subscription_id)
         .bind(&process_id)
         .bind(&subscription.incarnation)
-        .bind(subscription.revision as i64)
+        .bind(sql_revision)
         .bind(serde_json::to_string(&subscription).map_err(process_decode_error)?)
         .bind(created_at_ms as i64)
         .execute(&mut **tx)
@@ -590,7 +597,7 @@ async fn postgres_delivery_snapshots(
                 occurrence: occurrence.clone(),
                 subscription: serde_json::from_str(&json).map_err(process_decode_error)?,
                 process_id: row.get(0),
-                created_at_ms: row.get::<i64, _>(1) as u64,
+                created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", row.get(1))?,
                 reservation_status: lash_core::TriggerDeliveryReservationStatus::AlreadyReserved,
             })
         })
@@ -626,7 +633,7 @@ async fn list_deliveries_where(
                 subscription: serde_json::from_str(&subscription_json)
                     .map_err(process_decode_error)?,
                 process_id: row.get(0),
-                created_at_ms: row.get::<i64, _>(1) as u64,
+                created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", row.get(1))?,
                 reservation_status: lash_core::TriggerDeliveryReservationStatus::AlreadyReserved,
             })
         })

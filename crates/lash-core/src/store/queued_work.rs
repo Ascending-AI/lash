@@ -12,7 +12,7 @@
 use sha2::{Digest, Sha256};
 
 use super::LeaseOwnerIdentity;
-use crate::{DeliveryPolicy, MergeKey, QueuedWorkClaimBoundary, SlotPolicy};
+use crate::{DeliveryPolicy, MergeKey, QueuedWorkClaimBoundary, SlotPolicy, StoreError};
 
 /// Whether a durable queued-work row carries a session command or turn work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -69,7 +69,10 @@ pub struct ClaimCandidate {
 /// `max_batches` claimable batches. Joinable groups are matched as a prefix,
 /// so scanning a bounded surplus keeps one round trip sufficient.
 pub fn claim_scan_limit(max_batches: usize) -> i64 {
-    (max_batches as i64).saturating_add(32)
+    i64::try_from(max_batches)
+        .unwrap_or(i64::MAX)
+        .min(i64::MAX - 32)
+        + 32
 }
 
 /// Select a leading session-command batch.
@@ -194,7 +197,7 @@ impl WorkClaimLease {
         owner: &LeaseOwnerIdentity,
         now_epoch_ms: u64,
         session_lease_generation: u64,
-    ) -> Self {
+    ) -> Result<Self, StoreError> {
         Self::derive(
             ClaimIdDialect::QueuedWork,
             head.enqueue_seq,
@@ -218,8 +221,11 @@ impl WorkClaimLease {
         owner: &LeaseOwnerIdentity,
         now_epoch_ms: u64,
         session_lease_generation: u64,
-    ) -> Self {
-        let fencing_token = claim_fencing_token.saturating_add(1);
+    ) -> Result<Self, StoreError> {
+        let fencing_token = StoreError::checked_monotonic_increment(
+            "queued_work_claim_fencing_token",
+            claim_fencing_token,
+        )?;
         let claim_id = derive_claim_id(dialect, enqueue_seq, fencing_token);
         let lease_token = format!(
             "{:x}",
@@ -231,12 +237,12 @@ impl WorkClaimLease {
                 .as_bytes(),
             )
         );
-        Self {
+        Ok(Self {
             claim_id,
             lease_token,
             fencing_token,
             session_lease_generation,
-        }
+        })
     }
 }
 
@@ -487,11 +493,13 @@ mod tests {
             merge_key: MergeKey::Never,
         };
         let owner = LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
-        let lease = WorkClaimLease::derive_queued_work(&head, "session", &owner, 1_000, 5);
+        let lease = WorkClaimLease::derive_queued_work(&head, "session", &owner, 1_000, 5)
+            .expect("derive lease");
         assert_eq!(lease.fencing_token, 3);
         assert_eq!(lease.claim_id, "qwc:7:3");
         assert_eq!(lease.session_lease_generation, 5);
-        let again = WorkClaimLease::derive_queued_work(&head, "session", &owner, 1_000, 5);
+        let again = WorkClaimLease::derive_queued_work(&head, "session", &owner, 1_000, 5)
+            .expect("derive lease again");
         assert_eq!(lease.lease_token, again.lease_token);
         assert_eq!(
             lease.lease_token,

@@ -51,19 +51,23 @@ pub(crate) fn pending_turn_input_row_from_sql(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<PendingTurnInputRow> {
     Ok(PendingTurnInputRow {
-        enqueue_seq: row.get::<_, i64>(0)? as u64,
+        enqueue_seq: u64_from_sql("PendingTurnInput", "enqueue_seq", row.get(0)?)?,
         input_id: row.get(1)?,
         session_id: row.get(2)?,
         source_key: row.get(3)?,
         ingress_json: row.get(4)?,
         state: row.get(5)?,
         input_json: row.get(6)?,
-        enqueued_at_ms: row.get::<_, i64>(7)? as u64,
+        enqueued_at_ms: u64_from_sql("PendingTurnInput", "enqueued_at_ms", row.get(7)?)?,
         claim_id: row.get(8)?,
-        claim_fencing_token: row.get::<_, i64>(9)? as u64,
+        claim_fencing_token: u64_from_sql("PendingTurnInput", "claim_fencing_token", row.get(9)?)?,
         claim_owner: lease_owner_from_columns(row.get(10)?, row.get(11)?, row.get(12)?),
         claim_token: row.get(13)?,
-        claim_session_lease_generation: row.get::<_, i64>(14)? as u64,
+        claim_session_lease_generation: u64_from_sql(
+            "PendingTurnInput",
+            "claim_session_lease_generation",
+            row.get(14)?,
+        )?,
     })
 }
 
@@ -171,7 +175,7 @@ impl TurnInputClaimLease {
         owner: &LeaseOwnerIdentity,
         now_epoch_ms: u64,
         session_lease_generation: u64,
-    ) -> Self {
+    ) -> Result<Self, StoreError> {
         let lease = lash_core::store::queued_work::WorkClaimLease::derive(
             lash_core::store::queued_work::ClaimIdDialect::TurnInput,
             head.enqueue_seq,
@@ -180,12 +184,12 @@ impl TurnInputClaimLease {
             owner,
             now_epoch_ms,
             session_lease_generation,
-        );
-        Self {
+        )?;
+        Ok(Self {
             claim_id: lease.claim_id,
             lease_token: lease.lease_token,
             fencing_token: lease.fencing_token,
             session_lease_generation: lease.session_lease_generation,
-        }
+        })
     }
 }

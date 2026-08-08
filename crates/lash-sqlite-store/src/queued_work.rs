@@ -143,18 +143,22 @@ pub(crate) fn queued_batch_row_from_sql(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<QueuedBatchRow> {
     Ok(QueuedBatchRow {
-        enqueue_seq: row.get::<_, i64>(0)? as u64,
+        enqueue_seq: u64_from_sql("QueuedWorkBatch", "enqueue_seq", row.get(0)?)?,
         batch_id: row.get(1)?,
         session_id: row.get(2)?,
         source_key: row.get(3)?,
         delivery_policy: row.get(4)?,
         slot_policy: row.get(5)?,
         merge_key_json: row.get(6)?,
-        available_at_ms: row.get::<_, i64>(7)? as u64,
-        enqueued_at_ms: row.get::<_, i64>(8)? as u64,
-        claim_fencing_token: row.get::<_, i64>(9)? as u64,
+        available_at_ms: u64_from_sql("QueuedWorkBatch", "available_at_ms", row.get(7)?)?,
+        enqueued_at_ms: u64_from_sql("QueuedWorkBatch", "enqueued_at_ms", row.get(8)?)?,
+        claim_fencing_token: u64_from_sql("QueuedWorkBatch", "claim_fencing_token", row.get(9)?)?,
         claim_token: row.get(13)?,
-        claim_session_lease_generation: row.get::<_, i64>(14)? as u64,
+        claim_session_lease_generation: u64_from_sql(
+            "QueuedWorkBatch",
+            "claim_session_lease_generation",
+            row.get(14)?,
+        )?,
     })
 }
 
@@ -195,6 +199,8 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
     now: u64,
     nonce: u64,
 ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
+    let sql_available_at_ms =
+        sql_counter_value("queued_work_available_at_ms", batch.available_at_ms)?;
     let allocation_floor = if let Some(wake_source) = batch.process_wake_source.as_ref() {
         conn.query_row(
             "SELECT allocation_floor FROM wake_redelivery_fences
@@ -224,15 +230,25 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
             return Ok(QueuedWorkEnqueueOutcome::Existing(existing));
         }
     }
+    let allocation_floor = allocation_floor
+        .map(|value| {
+            u64::try_from(value).map_err(|_| {
+                stored_data_corrupt(
+                    "WakeAllocationFloor",
+                    format!("allocation_floor must be non-negative, got {value}"),
+                )
+            })
+        })
+        .transpose()?;
     if let (Some(wake_source), Some(allocation_floor)) =
         (batch.process_wake_source.as_ref(), allocation_floor)
-        && wake_source.sequence <= allocation_floor as u64
+        && wake_source.sequence <= allocation_floor
     {
         return Err(StoreError::ProcessWakeSequenceRewound {
             session_id: batch.session_id.clone(),
             process_id: wake_source.process_id.clone(),
             sequence: wake_source.sequence,
-            allocation_floor: allocation_floor as u64,
+            allocation_floor,
         });
     }
     let batch_id = derive_batch_id(
@@ -254,7 +270,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
             batch.delivery_policy.as_str(),
             batch.slot_policy.as_str(),
             encode_json(&batch.merge_key),
-            batch.available_at_ms as i64,
+            sql_available_at_ms,
             now as i64,
         ],
     )
@@ -295,6 +311,22 @@ pub(crate) fn ensure_queued_work_completion_conn(
             )
             .optional()
             .map_err(sqlite_error)?;
+        let authority = authority
+            .map(|(claim_id, claim_token, generation)| {
+                Ok((
+                    claim_id,
+                    claim_token,
+                    u64::try_from(generation).map_err(|_| {
+                        stored_data_corrupt(
+                            "QueuedWorkBatch",
+                            format!(
+                                "claim_session_lease_generation must be non-negative, got {generation}"
+                            ),
+                        )
+                    })?,
+                ))
+            })
+            .transpose()?;
         let owns_row = authority
             .as_ref()
             .is_some_and(|(claim_id, claim_token, _)| {
@@ -311,9 +343,7 @@ pub(crate) fn ensure_queued_work_completion_conn(
                     .and_then(|(claim_id, _, _)| claim_id.clone())
                     .map(String::into_boxed_str),
                 superseding_session_lease_generation: authority.as_ref().and_then(
-                    |(claim_id, _, generation)| {
-                        claim_id.as_ref().map(|_| Box::new(*generation as u64))
-                    },
+                    |(claim_id, _, generation)| claim_id.as_ref().map(|_| Box::new(*generation)),
                 ),
             });
         }

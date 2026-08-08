@@ -605,11 +605,18 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
         "ordinal-reuse-model",
         &later_usage,
     );
-    ordinal_services
+    let replay_error = ordinal_services
         .graph_service()
         .append_session_nodes("root", ordinal_request)
         .await
-        .expect("operation A replay leaves U2 staged");
+        .expect_err("operation A replay must refuse U1 confirmation against staged U2");
+    assert!(matches!(
+        replay_error,
+        crate::PluginError::UnstagedUsageConfirmation {
+            confirmed_count: 1,
+            staged_count: 0,
+        }
+    ));
     {
         let ledger = ordinal_services
             .usage

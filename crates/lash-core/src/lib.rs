@@ -330,6 +330,8 @@ pub mod facade_support {
     pub use crate::triggers::evaluate_trigger_mutation;
     pub use crate::triggers::evaluate_trigger_mutation_with_incarnation;
     pub use crate::triggers::evaluate_trigger_prune;
+    pub use crate::triggers::next_trigger_revision;
+    pub use crate::triggers::next_trigger_store_revision;
     pub use crate::triggers::sort_trigger_delivery_reservations;
     pub use crate::triggers::trigger_command_fingerprint;
     pub use crate::triggers::trigger_occurrence_request_matches_record;

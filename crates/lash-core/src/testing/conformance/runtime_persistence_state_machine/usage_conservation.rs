@@ -120,17 +120,38 @@ pub(super) fn confirm_usage(
         .cloned()
         .collect::<HashSet<_>>();
     let expected = before
-        .into_iter()
+        .iter()
         .filter(|pending| {
             pending
                 .identity
                 .as_ref()
                 .is_none_or(|identity| !confirmed.contains(identity))
         })
+        .cloned()
         .collect::<Vec<_>>();
-    confirmation
+    let staged_count = before.len() - expected.len();
+    let result = confirmation
         .staged
         .confirm_identities(&confirmation.identities);
+    if staged_count != confirmed.len() {
+        match result {
+            Err(crate::StoreError::UnstagedUsageConfirmation {
+                confirmed_count,
+                staged_count: actual_staged_count,
+            }) if confirmed_count == confirmed.len() && actual_staged_count == staged_count => {}
+            other => {
+                return Err(format!(
+                    "usage confirmation mismatch must be typed with counts; got {other:?}"
+                ));
+            }
+        }
+        if json(&pending_usage_snapshot(model))? != json(&before)? {
+            return Err("refused usage confirmation changed the pending ledger".to_string());
+        }
+        shape.usage_confirmations += 1;
+        return Ok(());
+    }
+    result.map_err(|error| error.to_string())?;
     if json(&pending_usage_snapshot(model))? != json(&expected)? {
         return Err(
             "usage confirmation removed rows other than the store-returned identities".to_string(),

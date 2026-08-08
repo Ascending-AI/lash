@@ -226,26 +226,31 @@ pub fn decide_process_lease_claim(
 pub fn decide_process_lease_reclaim(
     stored: Option<&ProcessLease>,
     now_ms: u64,
-) -> ProcessLeaseReclaimDecision {
-    match stored {
+) -> Result<ProcessLeaseReclaimDecision, PluginError> {
+    Ok(match stored {
         None => ProcessLeaseReclaimDecision::AcquireOnRetainedFence,
         Some(stored) if stored.expires_at_epoch_ms <= now_ms => {
             ProcessLeaseReclaimDecision::AcquireOnObservedFence {
-                fencing_token: next_process_lease_fencing_token(stored.fencing_token),
+                fencing_token: next_process_lease_fencing_token(stored.fencing_token)?,
             }
         }
         Some(stored) => ProcessLeaseReclaimDecision::ReportBusy {
             holder: stored.clone(),
         },
-    }
+    })
 }
 
 /// Successor of a retained fencing token; `0` (no row ever written) yields `1`.
-///
-/// Saturating, so an exhausted counter stops advancing rather than wrapping
-/// back onto a token a live writer may still present.
-pub fn next_process_lease_fencing_token(retained: u64) -> u64 {
-    retained.saturating_add(1)
+/// Returns a typed monotonic-counter overflow once the signed durable-store
+/// ceiling (`i64::MAX`) has been reached.
+pub fn next_process_lease_fencing_token(retained: u64) -> Result<u64, PluginError> {
+    if retained >= i64::MAX as u64 {
+        return Err(PluginError::MonotonicCounterOverflow {
+            counter: "process_lease_fencing_token".to_string(),
+            current: retained,
+        });
+    }
+    Ok(retained + 1)
 }
 
 /// Mint the lease a successful claim acquires.
@@ -719,7 +724,7 @@ mod tests {
     #[test]
     fn reclaim_on_an_absent_lease_acquires_on_the_retained_fence() {
         assert_eq!(
-            reclaim_arm(&decide_process_lease_reclaim(None, 2_000)),
+            reclaim_arm(&decide_process_lease_reclaim(None, 2_000).expect("decide reclaim")),
             "acquire(retained)"
         );
     }
@@ -728,7 +733,9 @@ mod tests {
     fn reclaim_on_an_expired_lease_acquires_on_the_observed_successor() {
         let stored = lease(1_000, 5_000, 3);
         assert_eq!(
-            reclaim_arm(&decide_process_lease_reclaim(Some(&stored), 6_000)),
+            reclaim_arm(
+                &decide_process_lease_reclaim(Some(&stored), 6_000).expect("decide reclaim"),
+            ),
             "acquire(observed=4)"
         );
     }
@@ -737,7 +744,9 @@ mod tests {
     fn reclaim_reports_busy_on_a_live_lease_whoever_holds_it() {
         let stored = lease(1_000, 5_000, 3);
         assert_eq!(
-            reclaim_arm(&decide_process_lease_reclaim(Some(&stored), 2_000)),
+            reclaim_arm(
+                &decide_process_lease_reclaim(Some(&stored), 2_000).expect("decide reclaim"),
+            ),
             format!("busy(token={})", stored.lease_token),
             "reclaim has no same-incarnation extend arm"
         );
@@ -767,24 +776,30 @@ mod tests {
             "acquire(retained)"
         );
         assert_eq!(
-            reclaim_arm(&decide_process_lease_reclaim(Some(&stored), 5_999)),
+            reclaim_arm(
+                &decide_process_lease_reclaim(Some(&stored), 5_999).expect("decide reclaim"),
+            ),
             busy
         );
         assert_eq!(
-            reclaim_arm(&decide_process_lease_reclaim(Some(&stored), 6_000)),
+            reclaim_arm(
+                &decide_process_lease_reclaim(Some(&stored), 6_000).expect("decide reclaim"),
+            ),
             "acquire(observed=4)"
         );
     }
 
     #[test]
-    fn fencing_token_succession_starts_at_one_and_saturates() {
-        assert_eq!(next_process_lease_fencing_token(0), 1);
-        assert_eq!(next_process_lease_fencing_token(41), 42);
-        assert_eq!(
-            next_process_lease_fencing_token(u64::MAX),
-            u64::MAX,
-            "an exhausted counter must not wrap onto a live writer's token"
-        );
+    fn fencing_token_succession_starts_at_one_and_refuses_overflow() {
+        assert_eq!(next_process_lease_fencing_token(0).expect("advance"), 1);
+        assert_eq!(next_process_lease_fencing_token(41).expect("advance"), 42);
+        assert!(matches!(
+            next_process_lease_fencing_token(i64::MAX as u64),
+            Err(PluginError::MonotonicCounterOverflow {
+                ref counter,
+                current,
+            }) if counter == "process_lease_fencing_token" && current == i64::MAX as u64
+        ));
     }
 
     // --- A5: lease-row projection ------------------------------------------
@@ -865,7 +880,7 @@ mod tests {
             "a released lease is not a holder"
         );
         assert_eq!(
-            next_process_lease_fencing_token(retained),
+            next_process_lease_fencing_token(retained).expect("advance retained fence"),
             10,
             "the retained counter still fences the next holder"
         );

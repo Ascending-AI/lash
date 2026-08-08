@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use lash_core::runtime::RuntimeScope;
 use lash_core::testing::conformance::{
+    FenceIntegrityHandles, FenceIntegrityInjector, FenceIntegrityObservation, FenceIntegrityTarget,
     ReopenableProcessRegistry, ReopenableRuntimePersistence, ReopenableTriggerStore,
 };
 use lash_core::{
@@ -114,6 +115,175 @@ fn open_trigger_store(path: &Path) -> Arc<dyn TriggerStore> {
             .await
             .expect("file trigger store")
     })) as Arc<dyn TriggerStore>
+}
+
+struct SqliteFenceIntegrityInjector {
+    _dir: TempDir,
+    runtime_path: PathBuf,
+    trigger_path: PathBuf,
+}
+
+impl SqliteFenceIntegrityInjector {
+    fn connection(&self, target: &FenceIntegrityTarget) -> rusqlite::Connection {
+        let path = match target {
+            FenceIntegrityTarget::TriggerRevision { .. } => &self.trigger_path,
+            _ => &self.runtime_path,
+        };
+        rusqlite::Connection::open(path).expect("open raw SQLite fence fixture")
+    }
+}
+
+#[async_trait::async_trait]
+impl FenceIntegrityInjector for SqliteFenceIntegrityInjector {
+    async fn inject_raw_value(&self, target: &FenceIntegrityTarget, value: i64) {
+        let conn = self.connection(target);
+        let changed = match target {
+            FenceIntegrityTarget::QueuedWorkClaimFence { batch_id } => conn.execute(
+                "UPDATE queued_work_batches SET claim_fencing_token = ?1 WHERE batch_id = ?2",
+                rusqlite::params![value, batch_id],
+            ),
+            FenceIntegrityTarget::SessionHeadRevision { session_id } => conn.execute(
+                "UPDATE session_head SET head_revision = ?1 WHERE session_id = ?2",
+                rusqlite::params![value, session_id],
+            ),
+            FenceIntegrityTarget::SessionLeaseFencingToken { session_id } => conn.execute(
+                "UPDATE session_execution_leases SET lease_fencing_token = ?1 WHERE session_id = ?2",
+                rusqlite::params![value, session_id],
+            ),
+            FenceIntegrityTarget::TriggerRevision { subscription_id } => conn.execute(
+                "UPDATE trigger_subscriptions
+                 SET revision = ?1,
+                     record_json = json_set(record_json, '$.revision', ?1)
+                 WHERE subscription_id = ?2",
+                rusqlite::params![value, subscription_id],
+            ),
+        }
+        .expect("inject raw SQLite fence value");
+        assert_eq!(
+            changed, 1,
+            "raw SQLite fence injection must target one row: {target:?}"
+        );
+    }
+
+    async fn observe_raw_value(&self, target: &FenceIntegrityTarget) -> FenceIntegrityObservation {
+        let conn = self.connection(target);
+        match target {
+            FenceIntegrityTarget::QueuedWorkClaimFence { batch_id } => conn
+                .query_row(
+                    "SELECT claim_fencing_token, claim_id, claim_token,
+                            claim_session_lease_generation
+                     FROM queued_work_batches WHERE batch_id = ?1",
+                    [batch_id],
+                    |row| {
+                        let value: i64 = row.get(0)?;
+                        let claim_id: Option<String> = row.get(1)?;
+                        let claim_token: Option<String> = row.get(2)?;
+                        let generation: i64 = row.get(3)?;
+                        Ok(FenceIntegrityObservation {
+                            value,
+                            mutation_fingerprint: format!(
+                                "{claim_id:?}:{claim_token:?}:{generation}"
+                            ),
+                        })
+                    },
+                )
+                .expect("observe SQLite queued-work fence"),
+            FenceIntegrityTarget::SessionHeadRevision { session_id } => conn
+                .query_row(
+                    "SELECT head_revision, head_json, leaf_node_id, checkpoint_ref
+                     FROM session_head WHERE session_id = ?1",
+                    [session_id],
+                    |row| {
+                        let value: i64 = row.get(0)?;
+                        let head_json: String = row.get(1)?;
+                        let leaf: Option<String> = row.get(2)?;
+                        let checkpoint: Option<String> = row.get(3)?;
+                        Ok(FenceIntegrityObservation {
+                            value,
+                            mutation_fingerprint: format!("{head_json}:{leaf:?}:{checkpoint:?}"),
+                        })
+                    },
+                )
+                .expect("observe SQLite session-head revision"),
+            FenceIntegrityTarget::SessionLeaseFencingToken { session_id } => conn
+                .query_row(
+                    "SELECT lease_fencing_token, lease_owner_id, lease_token,
+                            lease_claimed_at_ms, lease_expires_at_ms
+                     FROM session_execution_leases WHERE session_id = ?1",
+                    [session_id],
+                    |row| {
+                        let value: i64 = row.get(0)?;
+                        let owner: Option<String> = row.get(1)?;
+                        let token: Option<String> = row.get(2)?;
+                        let claimed: i64 = row.get(3)?;
+                        let expires: i64 = row.get(4)?;
+                        Ok(FenceIntegrityObservation {
+                            value,
+                            mutation_fingerprint: format!(
+                                "{owner:?}:{token:?}:{claimed}:{expires}"
+                            ),
+                        })
+                    },
+                )
+                .expect("observe SQLite session-lease fence"),
+            FenceIntegrityTarget::TriggerRevision { subscription_id } => conn
+                .query_row(
+                    "SELECT revision, record_json, enabled, tombstoned
+                     FROM trigger_subscriptions WHERE subscription_id = ?1",
+                    [subscription_id],
+                    |row| {
+                        let value: i64 = row.get(0)?;
+                        let json: String = row.get(1)?;
+                        let enabled: i64 = row.get(2)?;
+                        let tombstoned: i64 = row.get(3)?;
+                        Ok(FenceIntegrityObservation {
+                            value,
+                            mutation_fingerprint: format!("{json}:{enabled}:{tombstoned}"),
+                        })
+                    },
+                )
+                .expect("observe SQLite trigger revision"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn sqlite_fence_integrity_conformance() {
+    lash_core::testing::conformance::fence_integrity_conformance(|case| async move {
+        let dir = tempfile::tempdir().expect("SQLite fence fixture tempdir");
+        let runtime_path = dir.path().join(format!("{case}-runtime.db"));
+        let trigger_path = dir.path().join(format!("{case}-triggers.db"));
+        let runtime = Arc::new(
+            Store::open(&runtime_path)
+                .await
+                .expect("open SQLite runtime fixture"),
+        );
+        let triggers = Arc::new(
+            SqliteTriggerStore::open(&trigger_path)
+                .await
+                .expect("open SQLite trigger fixture"),
+        );
+        FenceIntegrityHandles {
+            runtime,
+            triggers,
+            injector: Arc::new(SqliteFenceIntegrityInjector {
+                _dir: dir,
+                runtime_path,
+                trigger_path,
+            }),
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn sqlite_signed_counter_write_domain_conformance() {
+    let store = Arc::new(
+        Store::memory()
+            .await
+            .expect("open SQLite signed-write fixture"),
+    );
+    lash_core::testing::conformance::signed_counter_write_domain_conformance(store).await;
 }
 
 #[tokio::test]

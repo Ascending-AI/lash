@@ -62,7 +62,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
             current,
             now,
             lease_ttl_ms,
-        );
+        )?;
         Ok(crate::SessionExecutionLeaseClaimOutcome::Acquired(
             match displaced {
                 Some((previous, generation, expired_at_epoch_ms)) => {
@@ -196,6 +196,8 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
         &self,
         session_id: &str,
     ) -> Result<Option<crate::SessionExecutionLease>, crate::store::StoreError> {
+        #[cfg(test)]
+        self.refuse_injected_counter_defect("session_lease_fencing_token")?;
         let leases = self
             .session_execution_leases
             .lock()

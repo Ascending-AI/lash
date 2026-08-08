@@ -16075,6 +16075,60 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store implementors carry the local capture diagnostic without conflating it with backend commit failure."
 
 [[api]]
+symbol = "lash::persistence::StoreError::ForeignQueuedWorkCompletion"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::ForeignQueuedWorkCompletion"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: custom commit backends reject a queued-work completion that was not among the claims originating the turn."
+
+[[api]]
+symbol = "lash::persistence::StoreError::ForeignQueuedWorkCompletion::claim_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::ForeignQueuedWorkCompletion::claim_id"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: structured settlement diagnostics identify the foreign queued-work claim without string matching."
+
+[[api]]
+symbol = "lash::persistence::StoreError::ForeignQueuedWorkCompletion::session_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::ForeignQueuedWorkCompletion::session_id"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: structured settlement diagnostics identify the session that attempted the foreign queued-work completion."
+
+[[api]]
+symbol = "lash::persistence::StoreError::ForeignTurnInputCompletion"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::ForeignTurnInputCompletion"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: custom commit backends reject a turn-input completion that was not among the claims originating the turn."
+
+[[api]]
+symbol = "lash::persistence::StoreError::ForeignTurnInputCompletion::claim_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::ForeignTurnInputCompletion::claim_id"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: structured settlement diagnostics identify the foreign turn-input claim without string matching."
+
+[[api]]
+symbol = "lash::persistence::StoreError::ForeignTurnInputCompletion::session_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::ForeignTurnInputCompletion::session_id"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: structured settlement diagnostics identify the session that attempted the foreign turn-input completion."
+
+[[api]]
 symbol = "lash::persistence::StoreError::ForkPointNotRetained"
 kind = "variant"
 availability = "default+all-features"
@@ -16289,6 +16343,33 @@ aliases = ["lash_core::StoreError::MissingRecordSchemaVersion::record_kind"]
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
+
+[[api]]
+symbol = "lash::persistence::StoreError::MonotonicCounterOverflow"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::MonotonicCounterOverflow"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: backends refuse an exhausted fence, generation, sequence, or revision with one typed failure instead of wrapping or returning a substrate error."
+
+[[api]]
+symbol = "lash::persistence::StoreError::MonotonicCounterOverflow::counter"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::MonotonicCounterOverflow::counter"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: overflow diagnostics identify which monotonic authority counter was exhausted."
+
+[[api]]
+symbol = "lash::persistence::StoreError::MonotonicCounterOverflow::current"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::MonotonicCounterOverflow::current"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: overflow diagnostics retain the last valid monotonic authority value."
 
 [[api]]
 symbol = "lash::persistence::StoreError::NodeIdCollision"
@@ -16912,6 +16993,33 @@ aliases = ["lash_core::StoreError::UnsettledTurnInputClaim::session_id"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash::persistence::StoreError::UnstagedUsageConfirmation"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::UnstagedUsageConfirmation"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: runtime usage settlement rejects identities a backend confirms without the host staging them."
+
+[[api]]
+symbol = "lash::persistence::StoreError::UnstagedUsageConfirmation::confirmed_count"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::UnstagedUsageConfirmation::confirmed_count"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: usage-settlement diagnostics report how many identities the backend claimed to confirm."
+
+[[api]]
+symbol = "lash::persistence::StoreError::UnstagedUsageConfirmation::staged_count"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::UnstagedUsageConfirmation::staged_count"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: usage-settlement diagnostics report how many confirmed identities were actually staged."
 
 [[api]]
 symbol = "lash::persistence::StoreError::UnsupportedRecordSchemaVersion"
@@ -18688,6 +18796,33 @@ aliases = ["lash_core::PluginError::Invoke::0"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+
+[[api]]
+symbol = "lash::plugins::PluginError::MonotonicCounterOverflow"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::MonotonicCounterOverflow"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete process-store and trigger-store integrator class: plugin-facing persistence traits preserve typed refusal when their monotonic lease fence or revision cannot advance."
+
+[[api]]
+symbol = "lash::plugins::PluginError::MonotonicCounterOverflow::counter"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::MonotonicCounterOverflow::counter"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete process-store and trigger-store integrator class: plugin-facing overflow diagnostics identify the exhausted counter."
+
+[[api]]
+symbol = "lash::plugins::PluginError::MonotonicCounterOverflow::current"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::MonotonicCounterOverflow::current"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete process-store and trigger-store integrator class: plugin-facing overflow diagnostics retain the last valid counter value."
 
 [[api]]
 symbol = "lash::plugins::PluginError::ProcessAttachCeilingElapsed"
@@ -58904,6 +59039,33 @@ disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerOperationError::Invalid::message. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
+symbol = "lash::triggers::TriggerOperationError::RevisionOverflow"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TriggerOperationError::RevisionOverflow"]
+area = "triggers"
+disposition = "unused-remove"
+reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerOperationError::RevisionOverflow. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+
+[[api]]
+symbol = "lash::triggers::TriggerOperationError::RevisionOverflow::current_revision"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TriggerOperationError::RevisionOverflow::current_revision"]
+area = "triggers"
+disposition = "unused-remove"
+reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerOperationError::RevisionOverflow::current_revision. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+
+[[api]]
+symbol = "lash::triggers::TriggerOperationError::RevisionOverflow::subscription_key"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TriggerOperationError::RevisionOverflow::subscription_key"]
+area = "triggers"
+disposition = "unused-remove"
+reason = "No example or concrete unrepresented host class establishes a need for lash_core::TriggerOperationError::RevisionOverflow::subscription_key. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+
+[[api]]
 symbol = "lash::triggers::TriggerOperationError::Store"
 kind = "variant"
 availability = "default+all-features"
@@ -67862,3 +68024,297 @@ aliases = ["lash::prelude::PromptLayerSink::instructions"]
 area = "plugins"
 disposition = "used-unasserted"
 usage = "examples/docs-snippets/src/index.rs:30#.instructions(\"Answer in one short sentence. Skip preamble.\")"
+
+[[api]]
+symbol = "lash::persistence::StoreError::ClaimSettlementCountMismatch"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::ClaimSettlementCountMismatch"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: settlement validation reports duplicate or missing claim completions as a typed invariant failure."
+
+[[api]]
+symbol = "lash::persistence::StoreError::ClaimSettlementCountMismatch::claim_kind"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::ClaimSettlementCountMismatch::claim_kind"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Settlement diagnostics identify which durable claim family violated the count law."
+
+[[api]]
+symbol = "lash::persistence::StoreError::ClaimSettlementCountMismatch::completed_count"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::ClaimSettlementCountMismatch::completed_count"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Settlement diagnostics expose the observed completion count."
+
+[[api]]
+symbol = "lash::persistence::StoreError::ClaimSettlementCountMismatch::originating_count"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::ClaimSettlementCountMismatch::originating_count"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Settlement diagnostics expose the originating claim count."
+
+[[api]]
+symbol = "lash::plugins::PluginError::ClockBeforeUnixEpoch"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::ClockBeforeUnixEpoch"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete store-plugin integrator class: database clocks before the Unix epoch are distinguished from corrupt durable records."
+
+[[api]]
+symbol = "lash::plugins::PluginError::ClockBeforeUnixEpoch::clock"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::ClockBeforeUnixEpoch::clock"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Clock-domain diagnostics identify the clock source that violated the epoch boundary."
+
+[[api]]
+symbol = "lash::plugins::PluginError::ClockBeforeUnixEpoch::epoch_ms"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::ClockBeforeUnixEpoch::epoch_ms"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Clock-domain diagnostics retain the signed database epoch value."
+
+[[api]]
+symbol = "lash::plugins::PluginError::StoredDataCorrupt"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::StoredDataCorrupt"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete store-plugin integrator class: malformed durable plugin records surface as typed corruption instead of message matching."
+
+[[api]]
+symbol = "lash::plugins::PluginError::StoredDataCorrupt::message"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::StoredDataCorrupt::message"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Plugin corruption diagnostics carry the field-level refusal detail."
+
+[[api]]
+symbol = "lash::plugins::PluginError::StoredDataCorrupt::record_kind"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::StoredDataCorrupt::record_kind"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Plugin corruption diagnostics identify the durable record family."
+
+[[api]]
+symbol = "lash::plugins::PluginError::UnstagedUsageConfirmation"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::UnstagedUsageConfirmation"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete plugin-host integrator class: usage settlement refuses confirmations outside the staged identity set with a typed invariant error."
+
+[[api]]
+symbol = "lash::plugins::PluginError::UnstagedUsageConfirmation::confirmed_count"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::UnstagedUsageConfirmation::confirmed_count"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Usage-settlement diagnostics expose the confirmed identity count."
+
+[[api]]
+symbol = "lash::plugins::PluginError::UnstagedUsageConfirmation::staged_count"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::UnstagedUsageConfirmation::staged_count"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Usage-settlement diagnostics expose the staged identity count."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeStoreCorrupt"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeStoreCorrupt"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete runtime-host integrator class: permanent durable corruption is terminal and never scheduled as transient retry work."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityHandles"
+kind = "struct"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance seam exercised by the in-memory, SQLite, and PostgreSQL store test suites."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityHandles::injector"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance seam supplies the raw corruption injector used by store implementations."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityHandles::runtime"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance seam supplies the runtime persistence under test."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityHandles::triggers"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance seam supplies the trigger store under test."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityInjector"
+kind = "trait"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance seam implemented by in-memory, SQLite, and PostgreSQL raw-row test adapters."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityInjector::inject_raw_value"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance seam injects otherwise unrepresentable corrupt or exhausted counter values."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityInjector::observe_raw_value"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance seam verifies refusal paths leave durable state unchanged."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityObservation"
+kind = "struct"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance seam captures raw counter and mutation fingerprint observations."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityObservation::mutation_fingerprint"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance observations detect writes beyond the counter field itself."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityObservation::value"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance observations retain the raw signed counter value."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityTarget"
+kind = "enum"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance seam names each durable counter family covered by corruption and exhaustion tests."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityTarget::QueuedWorkClaimFence"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance target selects a queued-work claim fence."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityTarget::QueuedWorkClaimFence::batch_id"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance target identifies the queued-work batch row."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityTarget::SessionHeadRevision"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance target selects a session-head revision."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityTarget::SessionHeadRevision::session_id"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance target identifies the session-head row."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityTarget::SessionLeaseFencingToken"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance target selects a session lease fencing token."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityTarget::SessionLeaseFencingToken::session_id"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance target identifies the session lease row."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityTarget::TriggerRevision"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance target selects a trigger subscription revision."
+
+[[api]]
+symbol = "lash::testing::conformance::FenceIntegrityTarget::TriggerRevision::subscription_id"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance target identifies the trigger subscription row."
+
+[[api]]
+symbol = "lash::testing::conformance::fence_integrity_conformance"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Shared backend conformance fixture exercised by all three durable runtime implementations."
+
+[[api]]
+symbol = "lash::testing::conformance::signed_counter_write_domain_conformance"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Shared SQL backend fixture verifies host-supplied unsigned values are refused before signed-domain writes."
