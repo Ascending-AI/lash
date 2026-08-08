@@ -310,6 +310,8 @@ pub enum LashlangProcessFailureCode {
     ProcessFailed,
     /// Lashlang execution raised a runtime error.
     ProcessRuntimeError,
+    /// Lashlang exhausted its configured instruction or active-time bound.
+    ProcessExecutionBoundExhausted,
 }
 
 impl LashlangProcessFailureCode {
@@ -327,6 +329,7 @@ impl LashlangProcessFailureCode {
             Self::ProcessSegmentResumeFailed => "process_segment_resume_failed",
             Self::ProcessFailed => "process_failed",
             Self::ProcessRuntimeError => "process_runtime_error",
+            Self::ProcessExecutionBoundExhausted => "process_execution_bound_exhausted",
         }
     }
 }
@@ -416,5 +419,10 @@ mod tests {
         process_runtime_error,
         ProcessRuntimeError,
         "process_runtime_error"
+    );
+    failure_code_test!(
+        process_execution_bound_exhausted,
+        ProcessExecutionBoundExhausted,
+        "process_execution_bound_exhausted"
     );
 }

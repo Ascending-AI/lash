@@ -213,7 +213,10 @@ fn process_test_core(
 ) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::rlm_builder(
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::default(),
+            lash_protocol_rlm::RlmProtocolPluginConfig::new(
+                lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+                lash_protocol_rlm::ExecutionBound::secs(30),
+            ),
             artifact_store,
         ),
     ))
@@ -1055,7 +1058,10 @@ fn process_test_core_with_sink(
 ) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::rlm_builder(
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::default(),
+            lash_protocol_rlm::RlmProtocolPluginConfig::new(
+                lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+                lash_protocol_rlm::ExecutionBound::secs(30),
+            ),
             artifact_store,
         ),
     ))

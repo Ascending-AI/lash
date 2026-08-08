@@ -99,7 +99,10 @@ let session = core.session("chat-1").open().await?;</code></pre>
       </div>
 <pre data-lang="rust" data-snippet="execution_modes#rlm-core"><code>// Build an RLM core for Lashlang-driven turns.
 let factory = lash::rlm::RlmProtocolPluginFactory::new(
-    lash::rlm::RlmProtocolPluginConfig::default(),
+    lash::rlm::RlmProtocolPluginConfig::new(
+        lash::rlm::ExecutionBound::instructions(1_000_000),
+        lash::rlm::ExecutionBound::secs(30),
+    ),
     Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 );
 let core = lash::LashCore::rlm_builder(factory)

@@ -44,7 +44,10 @@
           <pre data-lang="rust" data-snippet="embedding_advanced#inmemory-core"><code>use std::sync::Arc;
 
 let factory = lash::rlm::RlmProtocolPluginFactory::new(
-    lash::rlm::RlmProtocolPluginConfig::default(),
+    lash::rlm::RlmProtocolPluginConfig::new(
+        lash::rlm::ExecutionBound::instructions(1_000_000),
+        lash::rlm::ExecutionBound::secs(30),
+    ),
     Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 );
 let core = lash::LashCore::rlm_builder(factory)
@@ -62,7 +65,10 @@ let store_factory = Arc::new(SqliteSessionStoreFactory::new(data_dir.join("sessi
 let artifact_store = Arc::new(Store::open(&amp;data_dir.join("artifacts.db")).await?);
 
 let factory = lash::rlm::RlmProtocolPluginFactory::new(
-    lash::rlm::RlmProtocolPluginConfig::default(),
+    lash::rlm::RlmProtocolPluginConfig::new(
+        lash::rlm::ExecutionBound::instructions(1_000_000),
+        lash::rlm::ExecutionBound::secs(30),
+    ),
     artifact_store,
 );
 let core = lash::LashCore::rlm_builder(factory)
@@ -111,7 +117,10 @@ let core = lash::LashCore::rlm_builder(factory)
             </div>
           </div>
           <pre data-lang="rust" data-snippet="embedding_advanced#process-registry-core"><code>let factory = lash::rlm::RlmProtocolPluginFactory::new(
-    lash::rlm::RlmProtocolPluginConfig::default(),
+    lash::rlm::RlmProtocolPluginConfig::new(
+        lash::rlm::ExecutionBound::instructions(1_000_000),
+        lash::rlm::ExecutionBound::secs(30),
+    ),
     artifact_store,
 );
 let core = lash::LashCore::rlm_builder(factory)
@@ -220,7 +229,10 @@ let subagents = SubagentsPluginFactory::new(registry)
     .with_session_spec(SessionSpec::inherit().max_turns(8));
 
 let factory = lash::rlm::RlmProtocolPluginFactory::new(
-    lash::rlm::RlmProtocolPluginConfig::default(),
+    lash::rlm::RlmProtocolPluginConfig::new(
+        lash::rlm::ExecutionBound::instructions(1_000_000),
+        lash::rlm::ExecutionBound::secs(30),
+    ),
     Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 );
 let core = lash::LashCore::rlm_builder(factory)
@@ -277,7 +289,10 @@ servers.insert(
 let mcp = McpPluginFactory::new(servers).await?;
 
 let factory = lash::rlm::RlmProtocolPluginFactory::new(
-    lash::rlm::RlmProtocolPluginConfig::default(),
+    lash::rlm::RlmProtocolPluginConfig::new(
+        lash::rlm::ExecutionBound::instructions(1_000_000),
+        lash::rlm::ExecutionBound::secs(30),
+    ),
     std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 );
 let core = lash::LashCore::rlm_builder(factory)
@@ -317,7 +332,10 @@ mcp.detach_server("old-tool").await?;</code></pre>
             <p><code>.advanced()</code> is reserved for low-level overrides: a custom <code>PluginHost</code> or a replaceable <code>RuntimeHostConfig</code>. Durable embedding concerns such as effect hosts, process registries, process work drivers, residency policy, and termination policy live on the normal <code>LashCoreBuilder</code>. The registry trait itself lives under <code>lash::process::ProcessRegistry</code> and stores state only; process waits live on the work driver. RLM/Lashlang turns that generic process plane into authored process/lifecycle abilities when the Lashlang runtime pieces are installed.</p>
           </div>
           <pre data-lang="rust" data-snippet="embedding_advanced#durable-stores-core"><code>let factory = lash::rlm::RlmProtocolPluginFactory::new(
-    lash::rlm::RlmProtocolPluginConfig::default(),
+    lash::rlm::RlmProtocolPluginConfig::new(
+        lash::rlm::ExecutionBound::instructions(1_000_000),
+        lash::rlm::ExecutionBound::secs(30),
+    ),
     std::sync::Arc::new(lash_sqlite_store::Store::open(&amp;data_dir.join("artifacts.db")).await?),
 );
 let core = lash::LashCore::rlm_builder(factory)

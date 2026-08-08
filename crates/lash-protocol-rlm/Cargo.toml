@@ -15,7 +15,7 @@ categories = ["asynchronous", "api-bindings"]
 
 [features]
 default = []
-testing = []
+testing = ["lashlang/testing"]
 
 [lints]
 workspace = true

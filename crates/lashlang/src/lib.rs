@@ -63,26 +63,26 @@ pub use runtime::{
     AbilityOp, AbilityResult, BudgetedJsonProjectionConfig, BudgetedJsonProjector, CompileStats,
     CompiledLinkedProgram, CompiledProcessCache, CompiledProcessCacheKey, CompiledProgram,
     CompiledProgramCache, CompiledProgramCacheStats, ContinuationError, ExecutableProgram,
-    ExecutionEnvironment, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
-    ExecutionScratch, FormatError, ImageValue, LASH_HOST_DESCRIPTOR_TYPE_KEY,
-    LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY,
-    LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY,
-    LinkedProgramCache, LinkedProgramCacheError, ListValue, ProcessEvent, ProcessEventKind,
-    ProcessSignal, ProcessStart, ProfileReport, ProfileStat, ProjectedBindingError,
-    ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest,
-    ProjectedReadResponse, ProjectedValue, Record, ResourceHandle, ResourceOperation,
-    ResourceOperationBatch, ResourceOperationBatchResult, ResourceOperationResult, RuntimeError,
-    RuntimeFailure, Sleep, SleepKind, Snapshot, State, Value, ValueProjectionContext,
-    ValueProjector, Vm, VmContinuation, VmIteratorContinuation, VmIteratorCursor,
-    VmProfileContinuation, VmRunOutcome, compile, compile_linked, compile_linked_process,
-    compile_module_artifact_process, compile_process, execute, from_json, prewarm,
-    unwrap_type_value,
+    ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
+    ExecutionMode, ExecutionOutcome, ExecutionScratch, FormatError, ImageValue,
+    LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY,
+    LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY,
+    LASH_TYPE_KEY, LinkedProgramCache, LinkedProgramCacheError, ListValue, ProcessEvent,
+    ProcessEventKind, ProcessSignal, ProcessStart, ProfileReport, ProfileStat,
+    ProjectedBindingError, ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor,
+    ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record, ResourceHandle,
+    ResourceOperation, ResourceOperationBatch, ResourceOperationBatchResult,
+    ResourceOperationResult, RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot, State,
+    Value, ValueProjectionContext, ValueProjector, Vm, VmContinuation, VmIteratorContinuation,
+    VmIteratorCursor, VmProfileContinuation, VmRunOutcome, compile, compile_linked,
+    compile_linked_process, compile_module_artifact_process, compile_process, execute, from_json,
+    prewarm, unwrap_type_value,
 };
 
 /// Version of the compiled bytecode contract used for durable continuations.
 /// Increment whenever identical source/artifact identities may compile to a
 /// continuation-incompatible instruction stream.
-pub const BYTECODE_FORMAT_VERSION: u32 = 1;
+pub const BYTECODE_FORMAT_VERSION: u32 = 2;
 pub use source::{
     CanonicalSourceError, canonical_assign_target_source, canonical_expression_source,
     canonical_process_source, canonical_process_source_with_requirements, canonical_program_source,

@@ -20,7 +20,9 @@ pub use driver::{RlmProjectorConfig, build_rlm_preamble};
 pub use lash_lashlang_runtime::{
     LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures,
 };
-pub use lashlang::{NamedDataType, TypeExpr, TypeField, format_type_expr};
+pub use lashlang::{
+    ExecutionBound, ExecutionBounds, NamedDataType, TypeExpr, TypeField, format_type_expr,
+};
 pub use plugin::{
     LashlangCompileSurface, LashlangCompileSurfaceRequest, LashlangModuleCompileError,
     LashlangModuleCompileRequest, ModuleCompileOutput, RLM_PROTOCOL_PLUGIN_ID,

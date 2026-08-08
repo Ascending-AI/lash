@@ -10,7 +10,7 @@
 //! Stage 6.
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::ast::{BinaryOp, UnaryOp};
 use crate::lexer::Span;
@@ -226,6 +226,8 @@ pub struct Vm<'a, H> {
     profile: Option<ProfileAccumulator>,
     validation_plans: FxHashMap<usize, (Arc<Record>, ValidationPlan)>,
     pending_error_span: Option<Span>,
+    instructions_executed: u64,
+    active_execution_elapsed: Duration,
     #[cfg(test)]
     test_suspension: TestSuspension,
 }

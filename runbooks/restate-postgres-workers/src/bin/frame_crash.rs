@@ -70,7 +70,10 @@ async fn run(mode: &str) -> Result<()> {
         .into_components(),
     );
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::default(),
+        lash_protocol_rlm::RlmProtocolPluginConfig::new(
+            lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+            lash_protocol_rlm::ExecutionBound::secs(30),
+        ),
         Arc::new(storage.lashlang_artifact_store()),
     );
     let lease_timings = LeaseTimings::new(RECOVERY_LEASE_TTL, RECOVERY_LEASE_RENEW_INTERVAL)

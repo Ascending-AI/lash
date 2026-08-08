@@ -53,7 +53,7 @@ rlm = [
     "lash-protocol-standard/lashlang",
 ]
 # Exposes `lash::testing` (e.g. `TestProvider`) for embedder integration tests.
-testing = ["lash-core/testing"]
+testing = ["lash-core/testing", "lash-protocol-rlm?/testing"]
 # Exposes the OpenTelemetry trace sink (`lash::tracing::OtelTraceSink`).
 otel-trace = ["lash-core/otel-trace"]
 

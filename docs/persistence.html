@@ -84,7 +84,10 @@ let store_factory = Arc::new(SqliteSessionStoreFactory::new(data_dir.join("sessi
 let artifact_store = Arc::new(Store::open(&amp;data_dir.join("artifacts.db")).await?);
 
 let factory = lash::rlm::RlmProtocolPluginFactory::new(
-    lash::rlm::RlmProtocolPluginConfig::default(),
+    lash::rlm::RlmProtocolPluginConfig::new(
+        lash::rlm::ExecutionBound::instructions(1_000_000),
+        lash::rlm::ExecutionBound::secs(30),
+    ),
     artifact_store,
 );
 let core = lash::LashCore::rlm_builder(factory)
@@ -138,7 +141,10 @@ let attachments = S3AttachmentStore::builder("lash-attachments", "us-east-1")
     .build()?;
 
 let factory = lash::rlm::RlmProtocolPluginFactory::new(
-    lash::rlm::RlmProtocolPluginConfig::default(),
+    lash::rlm::RlmProtocolPluginConfig::new(
+        lash::rlm::ExecutionBound::instructions(1_000_000),
+        lash::rlm::ExecutionBound::secs(30),
+    ),
     Arc::new(storage.lashlang_artifact_store()),
 );
 let core = lash::LashCore::rlm_builder(factory)
@@ -368,7 +374,10 @@ let artifact_store =
     Arc::new(lash_sqlite_store::Store::open(&amp;data_dir.join("lash-artifacts.db")).await?);
 
 let factory = lash::rlm::RlmProtocolPluginFactory::new(
-    lash::rlm::RlmProtocolPluginConfig::default(),
+    lash::rlm::RlmProtocolPluginConfig::new(
+        lash::rlm::ExecutionBound::instructions(1_000_000),
+        lash::rlm::ExecutionBound::secs(30),
+    ),
     artifact_store,
 );
 let core = lash::LashCore::rlm_builder(factory)

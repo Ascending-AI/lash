@@ -40,7 +40,10 @@ async fn lashlang_execution_jsonl(
 ) -> anyhow::Result<()> {
     // docs:start:lashlang-execution-jsonl
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::default(),
+        lash::rlm::RlmProtocolPluginConfig::new(
+            lash::rlm::ExecutionBound::instructions(1_000_000),
+            lash::rlm::ExecutionBound::secs(30),
+        ),
         std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     )
     .with_lashlang_execution_jsonl_path("./.lash-data/lashlang-execution.jsonl");
@@ -72,7 +75,10 @@ async fn lashlang_graph_store(provider: ProviderHandle, model: ModelSpec) -> any
     ]));
 
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::default(),
+        lash::rlm::RlmProtocolPluginConfig::new(
+            lash::rlm::ExecutionBound::instructions(1_000_000),
+            lash::rlm::ExecutionBound::secs(30),
+        ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     )
     .with_lashlang_execution_sink(lashlang_execution_sink);

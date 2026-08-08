@@ -10,7 +10,7 @@ async fn durable_core_without_advanced(
         .expect("valid model metadata");
 
     lash::LashCore::rlm_builder(lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::default(),
+        lash_protocol_rlm::RlmProtocolPluginConfig::new(lash_protocol_rlm::ExecutionBound::instructions(1_000_000), lash_protocol_rlm::ExecutionBound::secs(30)),
         Arc::new(
             lash_sqlite_store::Store::open(&data_dir.join("artifacts.db"))
                 .await

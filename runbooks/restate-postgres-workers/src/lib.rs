@@ -629,7 +629,11 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         .into_components(),
     );
     let mut factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        RlmProtocolPluginConfig::default().with_lashlang_abilities(
+        RlmProtocolPluginConfig::new(
+            lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+            lash_protocol_rlm::ExecutionBound::secs(30),
+        )
+        .with_lashlang_abilities(
             LashlangAbilities::default()
                 .with_processes()
                 .with_sleep()

@@ -781,6 +781,7 @@ pub struct LashlangProcessEngine {
     surface: LashlangSurface,
     execution_sink: Option<Arc<dyn lash_trace::TraceSink>>,
     trace_context: lash_trace::TraceContext,
+    execution_bounds: lashlang::ExecutionBounds,
 }
 
 impl LashlangProcessEngine {
@@ -791,6 +792,7 @@ impl LashlangProcessEngine {
             surface,
             execution_sink: None,
             trace_context: lash_trace::TraceContext::default(),
+            execution_bounds: lashlang::ExecutionBounds::unbounded(),
         }
     }
 
@@ -808,6 +810,11 @@ impl LashlangProcessEngine {
     ) -> Self {
         self.execution_sink = sink;
         self.trace_context = trace_context;
+        self
+    }
+
+    pub fn with_execution_bounds(mut self, execution_bounds: lashlang::ExecutionBounds) -> Self {
+        self.execution_bounds = execution_bounds;
         self
     }
 

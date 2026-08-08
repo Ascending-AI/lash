@@ -76,6 +76,17 @@ impl ExecutionHost for RejectingAwaitHost {
     }
 }
 
+struct SlowToolHost;
+
+impl ExecutionHost for SlowToolHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        if matches!(op, AbilityOp::ResourceOperation(_)) {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        Host.perform(op).await
+    }
+}
+
 #[derive(Default)]
 struct RecordingProcessHost {
     starts: Mutex<Vec<ProcessStart>>,
@@ -136,6 +147,111 @@ async fn exec_outcome(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn instruction_budget_exhaustion_is_typed_and_caret_rendered() {
+    let source = "i = 0\nwhile i < 5000 { i = i + 1 }\nfinish i";
+    let program = crate::parse(source).expect("program should parse");
+    let env = ExecutionEnvironment::new(&Host)
+        .traced()
+        .with_execution_bounds(ExecutionBounds::new(
+            ExecutionBound::instructions(1),
+            ExecutionBound::Unbounded,
+        ));
+    let mut state = State::new();
+    let error = execute_program(&program, &mut state, &env)
+        .await
+        .expect_err("long loop must exhaust its instruction budget");
+    assert!(matches!(
+        error,
+        RuntimeError::InstructionBudgetExceeded { limit: 1 }
+    ));
+    let failure = env.take_runtime_failure().expect("traced runtime failure");
+    let diagnostic = crate::format_runtime_diagnostic(source, &failure.error, failure.span);
+    assert!(diagnostic.contains("instruction budget of 1 instructions exceeded"));
+    assert!(diagnostic.contains('^'), "{diagnostic}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn effect_free_terminal_segment_enforces_tiny_instruction_budget() {
+    let program = crate::parse("value = 1").expect("program should parse");
+    let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
+        ExecutionBound::instructions(1),
+        ExecutionBound::Unbounded,
+    ));
+    let mut state = State::new();
+    assert!(matches!(
+        execute_program(&program, &mut state, &env).await,
+        Err(RuntimeError::InstructionBudgetExceeded { limit: 1 })
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn effect_free_intrinsic_dispatch_enforces_bounds_before_later_runtime_errors() {
+    let program = crate::parse("values = unique(range(0, 4000))\nfinish values.missing")
+        .expect("program should parse");
+    let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
+        ExecutionBound::instructions(10),
+        ExecutionBound::Unbounded,
+    ));
+    let mut state = State::new();
+    assert!(matches!(
+        execute_program(&program, &mut state, &env).await,
+        Err(RuntimeError::InstructionBudgetExceeded { limit: 10 })
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn shaping_collection_work_consumes_instruction_budget() {
+    let program = crate::parse("finish unique(range(0, 4000))").expect("program should parse");
+    let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
+        ExecutionBound::instructions(10),
+        ExecutionBound::Unbounded,
+    ));
+    let mut state = State::new();
+    assert!(matches!(
+        execute_program(&program, &mut state, &env).await,
+        Err(RuntimeError::InstructionBudgetExceeded { limit: 10 })
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn deadline_excludes_awaited_tool_time() {
+    let source = r#"
+value = tools.echo({ value: 1 })
+i = 0
+while i < 5000 { i = i + 1 }
+finish value
+"#;
+    let program = crate::parse(source).expect("program should parse");
+    let env = ExecutionEnvironment::new(&SlowToolHost).with_execution_bounds(ExecutionBounds::new(
+        ExecutionBound::Unbounded,
+        ExecutionBound::millis(20),
+    ));
+    let mut state = State::new();
+    let outcome = execute_program(&program, &mut state, &env)
+        .await
+        .expect("the tool's 50ms wait must not consume the 20ms VM deadline");
+    assert!(matches!(outcome, ExecutionOutcome::Finished(_)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn deadline_exhaustion_is_a_typed_runtime_error() {
+    let source = "i = 0\nwhile i < 5000 { i = i + 1 }\nfinish i";
+    let program = crate::parse(source).expect("program should parse");
+    let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
+        ExecutionBound::Unbounded,
+        ExecutionBound::Bounded(std::time::Duration::from_nanos(1)),
+    ));
+    let mut state = State::new();
+    let error = execute_program(&program, &mut state, &env)
+        .await
+        .expect_err("loop must exhaust its VM deadline");
+    assert!(matches!(
+        error,
+        RuntimeError::ExecutionDeadlineExceeded { .. }
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn string_membership_rejects_non_string_needles_without_coercion() {
     let compiled = crate::compile("finish 1 in \"123\"").expect("source should compile");
     let mut state = State::new();
@@ -144,6 +260,7 @@ async fn string_membership_rejects_non_string_needles_without_coercion() {
         .expect_err("numeric string needles must not be coerced");
     assert_eq!(error, RuntimeError::InUnsupported);
 }
+
 fn compile_source(source: &str) -> Result<CompiledProgram, crate::ParseError> {
     let program = crate::parse(source)?;
     if source.contains("tools.")

@@ -499,7 +499,10 @@ pub(super) async fn prove_final_value_semantic_channel()
 -> Result<FinalValueSemanticProof, FixedScriptRunnerError> {
     let events = Arc::new(RuntimeProofRecordingEvents::default());
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::default(),
+        lash_protocol_rlm::RlmProtocolPluginConfig::new(
+            lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+            lash_protocol_rlm::ExecutionBound::secs(30),
+        ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(factory)

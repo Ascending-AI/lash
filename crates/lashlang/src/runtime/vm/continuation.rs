@@ -1,6 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
+use super::super::ExecutionBound;
 use super::*;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -66,6 +67,8 @@ pub struct VmContinuation {
     pub mode: ExecutionMode,
     pub profile: Option<VmProfileContinuation>,
     pub pending_error_span: Option<Span>,
+    pub instructions_executed: u64,
+    pub active_execution_elapsed: std::time::Duration,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -132,6 +135,19 @@ pub enum ContinuationError {
     ZeroRangeStep { iterator: usize },
     #[error("continuation profile shape is incompatible with this VM")]
     ProfileShapeMismatch,
+    #[error("lashlang instruction budget of {limit} instructions was already exceeded")]
+    InstructionBudgetExceeded { limit: u64 },
+    #[error("lashlang active-execution deadline of {limit_ms}ms was already exceeded")]
+    ExecutionDeadlineExceeded { limit_ms: u128 },
+}
+
+impl ContinuationError {
+    pub fn is_execution_bound_exhausted(&self) -> bool {
+        matches!(
+            self,
+            Self::InstructionBudgetExceeded { .. } | Self::ExecutionDeadlineExceeded { .. }
+        )
+    }
 }
 
 mod continuation_serde {
@@ -426,6 +442,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             profile: None,
             validation_plans: FxHashMap::default(),
             pending_error_span: None,
+            instructions_executed: 0,
+            active_execution_elapsed: std::time::Duration::ZERO,
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
         }
@@ -451,6 +469,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             profile: None,
             validation_plans: FxHashMap::default(),
             pending_error_span: None,
+            instructions_executed: 0,
+            active_execution_elapsed: std::time::Duration::ZERO,
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
         }
@@ -520,6 +540,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 builtin_times: profile.builtin_times.to_vec(),
             }),
             pending_error_span: self.pending_error_span,
+            instructions_executed: self.instructions_executed,
+            active_execution_elapsed: self.active_execution_elapsed,
         };
         validate_continuation(&continuation)?;
         Ok(continuation)
@@ -559,6 +581,19 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
         }
         validate_continuation(&continuation)?;
+        let bounds = host.execution_bounds();
+        if let ExecutionBound::Bounded(limit) = bounds.instruction_budget
+            && continuation.instructions_executed > limit.get()
+        {
+            return Err(ContinuationError::InstructionBudgetExceeded { limit: limit.get() });
+        }
+        if let ExecutionBound::Bounded(limit) = bounds.deadline
+            && continuation.active_execution_elapsed > limit
+        {
+            return Err(ContinuationError::ExecutionDeadlineExceeded {
+                limit_ms: limit.as_millis(),
+            });
+        }
         let profile = continuation
             .profile
             .map(profile_from_continuation)
@@ -599,6 +634,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             profile,
             validation_plans: FxHashMap::default(),
             pending_error_span: continuation.pending_error_span,
+            instructions_executed: continuation.instructions_executed,
+            active_execution_elapsed: continuation.active_execution_elapsed,
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
         })

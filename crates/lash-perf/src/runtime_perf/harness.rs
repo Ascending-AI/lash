@@ -604,7 +604,10 @@ pub(crate) fn build_embed_core(
             .map_err(anyhow::Error::from),
         RuntimePerfScenario::EmbedRlm => {
             let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-                lash_protocol_rlm::RlmProtocolPluginConfig::default(),
+                lash_protocol_rlm::RlmProtocolPluginConfig::new(
+                    lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+                    lash_protocol_rlm::ExecutionBound::secs(30),
+                ),
                 Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
             );
             lash::LashCore::rlm_builder(factory)
@@ -747,7 +750,10 @@ pub(crate) async fn build_runtime_with_store(
         }
         ExecutionMode::Rlm => {
             let mut factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-                lash_protocol_rlm::RlmProtocolPluginConfig::default(),
+                lash_protocol_rlm::RlmProtocolPluginConfig::new(
+                    lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+                    lash_protocol_rlm::ExecutionBound::secs(30),
+                ),
                 Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
             );
             if let Some(path) = trace_config
@@ -1047,7 +1053,10 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                     .map_err(|err| anyhow::anyhow!(err.to_string()))?,
             );
             let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-                lash_protocol_rlm::RlmProtocolPluginConfig::default(),
+                lash_protocol_rlm::RlmProtocolPluginConfig::new(
+                    lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+                    lash_protocol_rlm::ExecutionBound::secs(30),
+                ),
                 artifact_store,
             );
             BenchmarkCore::Rlm(

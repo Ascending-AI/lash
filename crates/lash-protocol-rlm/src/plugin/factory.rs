@@ -265,15 +265,6 @@ impl RlmProtocolPluginFactory {
     }
 }
 
-impl Default for RlmProtocolPluginFactory {
-    fn default() -> Self {
-        Self::new(
-            RlmProtocolPluginConfig::default(),
-            lashlang::global_in_memory_lashlang_artifact_store(),
-        )
-    }
-}
-
 impl PluginFactory for RlmProtocolPluginFactory {
     fn id(&self) -> &'static str {
         RLM_PROTOCOL_PLUGIN_ID
@@ -293,6 +284,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
             .with_plugin_extensions(ctx.extensions())
             .map_err(|err| PluginError::Registration(err.to_string()))?;
         let engine = LashlangProcessEngine::new(Arc::clone(&self.artifact_store), surface)
+            .with_execution_bounds(config.execution_bounds())
             .with_execution_trace(
                 self.lashlang_execution_trace_config.sink.clone(),
                 ctx.trace_context().clone(),

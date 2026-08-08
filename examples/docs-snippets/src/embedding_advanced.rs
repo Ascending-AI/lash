@@ -15,7 +15,10 @@ async fn inmemory_core(provider: ProviderHandle, model: ModelSpec) -> anyhow::Re
     use std::sync::Arc;
 
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::default(),
+        lash::rlm::RlmProtocolPluginConfig::new(
+            lash::rlm::ExecutionBound::instructions(1_000_000),
+            lash::rlm::ExecutionBound::secs(30),
+        ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(factory)
@@ -43,7 +46,10 @@ async fn sqlite_core(
     let artifact_store = Arc::new(Store::open(&data_dir.join("artifacts.db")).await?);
 
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::default(),
+        lash::rlm::RlmProtocolPluginConfig::new(
+            lash::rlm::ExecutionBound::instructions(1_000_000),
+            lash::rlm::ExecutionBound::secs(30),
+        ),
         artifact_store,
     );
     let core = lash::LashCore::rlm_builder(factory)
@@ -143,7 +149,10 @@ async fn process_registry_core(
 ) -> anyhow::Result<()> {
     // docs:start:process-registry-core
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::default(),
+        lash::rlm::RlmProtocolPluginConfig::new(
+            lash::rlm::ExecutionBound::instructions(1_000_000),
+            lash::rlm::ExecutionBound::secs(30),
+        ),
         artifact_store,
     );
     let core = lash::LashCore::rlm_builder(factory)
@@ -175,7 +184,10 @@ async fn subagents_core(
         .with_session_spec(SessionSpec::inherit().max_turns(8));
 
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::default(),
+        lash::rlm::RlmProtocolPluginConfig::new(
+            lash::rlm::ExecutionBound::instructions(1_000_000),
+            lash::rlm::ExecutionBound::secs(30),
+        ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(factory)
@@ -213,7 +225,10 @@ async fn mcp_core(provider: ProviderHandle, model: String) -> anyhow::Result<()>
     let mcp = McpPluginFactory::new(servers).await?;
 
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::default(),
+        lash::rlm::RlmProtocolPluginConfig::new(
+            lash::rlm::ExecutionBound::instructions(1_000_000),
+            lash::rlm::ExecutionBound::secs(30),
+        ),
         std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(factory)
@@ -258,7 +273,10 @@ async fn durable_stores_core(
 ) -> anyhow::Result<()> {
     // docs:start:durable-stores-core
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::default(),
+        lash::rlm::RlmProtocolPluginConfig::new(
+            lash::rlm::ExecutionBound::instructions(1_000_000),
+            lash::rlm::ExecutionBound::secs(30),
+        ),
         std::sync::Arc::new(lash_sqlite_store::Store::open(&data_dir.join("artifacts.db")).await?),
     );
     let core = lash::LashCore::rlm_builder(factory)

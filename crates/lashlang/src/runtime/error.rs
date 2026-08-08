@@ -34,6 +34,12 @@ pub enum FormatError {
 #[non_exhaustive]
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum RuntimeError {
+    /// Active VM execution exceeded its explicit instruction budget.
+    #[error("lashlang instruction budget of {limit} instructions exceeded")]
+    InstructionBudgetExceeded { limit: u64 },
+    /// Active VM execution exceeded its explicit deadline.
+    #[error("lashlang execution deadline of {limit_ms}ms exceeded")]
+    ExecutionDeadlineExceeded { limit_ms: u128 },
     /// Execution referenced a binding that is not defined.
     #[error("unknown name `{name}`")]
     UndefinedVariable { name: String },
@@ -351,6 +357,15 @@ pub enum RuntimeError {
     CompiledProcessCacheUnavailable,
 }
 
+impl RuntimeError {
+    pub fn is_execution_bound_exhausted(&self) -> bool {
+        matches!(
+            self,
+            Self::InstructionBudgetExceeded { .. } | Self::ExecutionDeadlineExceeded { .. }
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,6 +377,8 @@ mod tests {
     #[test]
     fn every_runtime_error_display_is_exact() {
         let errors = vec![
+            RuntimeError::InstructionBudgetExceeded { limit: 10 },
+            RuntimeError::ExecutionDeadlineExceeded { limit_ms: 20 },
             RuntimeError::UndefinedVariable {
                 name: "name".into(),
             },
@@ -581,6 +598,12 @@ mod tests {
 
         for error in errors {
             let expected = match &error {
+                RuntimeError::InstructionBudgetExceeded { .. } => {
+                    "lashlang instruction budget of 10 instructions exceeded"
+                }
+                RuntimeError::ExecutionDeadlineExceeded { .. } => {
+                    "lashlang execution deadline of 20ms exceeded"
+                }
                 RuntimeError::UndefinedVariable { .. } => "unknown name `name`",
                 RuntimeError::NonListIteration => "`for` expects a list or tuple",
                 RuntimeError::SessionProcessAdminOutsideProcess { .. } => {

@@ -318,8 +318,11 @@ finish "registered"
         artifact_store: Arc<dyn LashlangArtifactStore>,
     ) -> LashCoreBuilder {
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            crate::rlm::RlmProtocolPluginConfig::default()
-                .with_lashlang_abilities(rebuild_abilities()),
+            crate::rlm::RlmProtocolPluginConfig::new(
+                crate::rlm::ExecutionBound::instructions(1_000_000),
+                crate::rlm::ExecutionBound::secs(30),
+            )
+            .with_lashlang_abilities(rebuild_abilities()),
             artifact_store,
         );
         LashCore::rlm_builder(factory)

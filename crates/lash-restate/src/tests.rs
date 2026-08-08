@@ -5978,7 +5978,10 @@ async fn restate_replay_does_not_reexecute_scalar_lashlang_tool_before_pending_w
         Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
     let rlm_plugin: Arc<dyn lash_core::facade_support::PluginFactory> = Arc::new(
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::default(),
+            lash_protocol_rlm::RlmProtocolPluginConfig::new(
+                lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+                lash_protocol_rlm::ExecutionBound::secs(30),
+            ),
             Arc::clone(&artifact_store),
         )
         .with_process_lifecycle(true),

@@ -63,7 +63,10 @@ async fn lazy_projection() -> anyhow::Result<()> {
 
     let registry = Arc::new(ProjectionRegistry::new());
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::default(),
+        lash::rlm::RlmProtocolPluginConfig::new(
+            lash::rlm::ExecutionBound::instructions(1_000_000),
+            lash::rlm::ExecutionBound::secs(30),
+        ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     )
     .with_projection_resolver(registry.clone());
@@ -290,7 +293,10 @@ async fn tone_session(
 ) -> anyhow::Result<()> {
     // docs:start:tone-session
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::default(),
+        lash::rlm::RlmProtocolPluginConfig::new(
+            lash::rlm::ExecutionBound::instructions(1_000_000),
+            lash::rlm::ExecutionBound::secs(30),
+        ),
         std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(factory)

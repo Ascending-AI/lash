@@ -185,7 +185,10 @@ async fn async_main() -> anyhow_like::Result<()> {
         .map_err(|err| format!("invalid OPENROUTER_MODEL metadata: {err}"))?
         .with_capability(default_openrouter_model_capability());
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::default(),
+        lash_protocol_rlm::RlmProtocolPluginConfig::new(
+            lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+            lash_protocol_rlm::ExecutionBound::secs(30),
+        ),
         artifact_store,
     );
     let core_builder = lash::LashCore::rlm_builder(factory)

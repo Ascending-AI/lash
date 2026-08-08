@@ -574,7 +574,10 @@ finish "done via Restate E2E"
         );
         let turn_deployment = lash_restate::RestateTurnDeployment::new(ingress_url);
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::default(),
+            lash_protocol_rlm::RlmProtocolPluginConfig::new(
+                lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+                lash_protocol_rlm::ExecutionBound::secs(30),
+            ),
             artifact_store,
         );
         let core = LashCore::rlm_builder(factory)

@@ -9,6 +9,8 @@ pub use state::RlmExecutionState;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+#[cfg(any(test, feature = "testing"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use lash_core::{
     ExecRequest, ExecResponse, RuntimeEffectKind, RuntimeExecutionContext, SessionError,
@@ -28,6 +30,14 @@ use crate::projection::{
     rehydrate_projected_globals,
 };
 
+#[cfg(any(test, feature = "testing"))]
+static EXECUTION_BOUND_EXHAUSTION_LOUD: AtomicBool = AtomicBool::new(true);
+
+#[cfg(test)]
+fn set_execution_bound_exhaustion_loud(loud: bool) -> bool {
+    EXECUTION_BOUND_EXHAUSTION_LOUD.swap(loud, Ordering::SeqCst)
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct RlmLashlangExecutionTraceConfig {
     pub(crate) sink: Option<Arc<dyn TraceSink>>,
@@ -35,7 +45,35 @@ pub(crate) struct RlmLashlangExecutionTraceConfig {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn execute_code(
+#[cfg(test)]
+async fn execute_code_unbounded_for_tests(
+    state: RlmExecutionState,
+    ctx: RuntimeExecutionContext<'_>,
+    request: ExecRequest,
+    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
+    lashlang_surface: LashlangSurface,
+    deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+    session_projected_bindings: RlmProjectedBindings,
+    projection_resolver: Arc<dyn ProjectionResolver>,
+    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
+) -> Result<(RlmExecutionState, ExecResponse), SessionError> {
+    execute_code_with_bounds(
+        state,
+        ctx,
+        request,
+        artifact_store,
+        lashlang_surface,
+        deferred_tool_resolver,
+        session_projected_bindings,
+        projection_resolver,
+        lashlang_execution_trace_config,
+        lashlang::ExecutionBounds::unbounded(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn execute_code_with_bounds(
     mut state: RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
@@ -45,6 +83,7 @@ pub async fn execute_code(
     session_projected_bindings: RlmProjectedBindings,
     projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
+    execution_bounds: lashlang::ExecutionBounds,
 ) -> Result<(RlmExecutionState, ExecResponse), SessionError> {
     let start = std::time::Instant::now();
     let clean_code = clean_model_code(&request.code);
@@ -59,6 +98,7 @@ pub async fn execute_code(
         session_projected_bindings,
         projection_resolver,
         lashlang_execution_trace_config,
+        execution_bounds,
     ))
     .await;
     Ok((state, response))
@@ -90,6 +130,7 @@ async fn execute_code_inner(
     session_projected_bindings: RlmProjectedBindings,
     projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
+    execution_bounds: lashlang::ExecutionBounds,
 ) -> ExecResponse {
     state.dirty = true;
     select_deferred_resolution_link(state, &ctx);
@@ -319,6 +360,7 @@ async fn execute_code_inner(
     });
     let env = lashlang::ExecutionEnvironment::new(&host)
         .traced()
+        .with_execution_bounds(execution_bounds)
         .with_scratch(std::mem::take(&mut state.scratch))
         .with_projected_bindings(projected);
     let result = {
@@ -348,6 +390,12 @@ async fn execute_code_inner(
             };
         }
         Err(error) => {
+            #[cfg(any(test, feature = "testing"))]
+            assert!(
+                !EXECUTION_BOUND_EXHAUSTION_LOUD.load(Ordering::SeqCst)
+                    || !error.is_execution_bound_exhausted(),
+                "confidence execution exhausted a required Lashlang bound: {error}"
+            );
             let failure = runtime_failure.unwrap_or(lashlang::RuntimeFailure { error, span: None });
             let collected = host.into_collected();
             return ExecResponse {
@@ -717,7 +765,7 @@ mod tests {
             lashlang::LashlangLanguageFeatures::default(),
             resources,
         );
-        let (_, response) = execute_code(
+        let (_, response) = execute_code_with_bounds(
             state,
             ctx,
             ExecRequest {
@@ -731,10 +779,77 @@ mod tests {
             RlmProjectedBindings::default(),
             Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
+            lashlang::ExecutionBounds::new(
+                lashlang::ExecutionBound::instructions(1_000_000),
+                lashlang::ExecutionBound::secs(30),
+            ),
         )
         .await
         .expect("execute code");
         response
+    }
+
+    #[test]
+    #[should_panic(expected = "confidence execution exhausted a required Lashlang bound")]
+    fn confidence_execution_fails_loudly_on_bound_exhaustion() {
+        block_on(async {
+            let _ = execute_code_with_bounds(
+                RlmExecutionState::new().expect("state"),
+                lash_core::testing::code_execution_context(),
+                ExecRequest {
+                    language: "lashlang".to_string(),
+                    code: "i = 0\nwhile i < 5000 { i = i + 1 }\nfinish i".to_string(),
+                    accept_finish: true,
+                },
+                lashlang::global_in_memory_lashlang_artifact_store(),
+                LashlangSurface::default(),
+                None,
+                RlmProjectedBindings::default(),
+                Arc::new(ProjectionRegistry::new()),
+                RlmLashlangExecutionTraceConfig::default(),
+                lashlang::ExecutionBounds::new(
+                    lashlang::ExecutionBound::instructions(1),
+                    lashlang::ExecutionBound::Unbounded,
+                ),
+            )
+            .await;
+        });
+    }
+
+    #[test]
+    fn exhaustion_response_remains_testable_when_loudness_is_temporarily_disabled() {
+        block_on(async {
+            let previous = set_execution_bound_exhaustion_loud(false);
+            let result = execute_code_with_bounds(
+                RlmExecutionState::new().expect("state"),
+                lash_core::testing::code_execution_context(),
+                ExecRequest {
+                    language: "lashlang".to_string(),
+                    code: "value = 1".to_string(),
+                    accept_finish: true,
+                },
+                lashlang::global_in_memory_lashlang_artifact_store(),
+                LashlangSurface::default(),
+                None,
+                RlmProjectedBindings::default(),
+                Arc::new(ProjectionRegistry::new()),
+                RlmLashlangExecutionTraceConfig::default(),
+                lashlang::ExecutionBounds::new(
+                    lashlang::ExecutionBound::instructions(1),
+                    lashlang::ExecutionBound::Unbounded,
+                ),
+            )
+            .await
+            .expect("execution response");
+            set_execution_bound_exhaustion_loud(previous);
+            assert!(
+                result
+                    .1
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("instruction budget"))
+            );
+        });
     }
 
     #[test]
@@ -755,7 +870,7 @@ mod tests {
                 )
             };
 
-            let (state, first) = execute_code(
+            let (state, first) = execute_code_unbounded_for_tests(
                 state,
                 lash_core::testing::code_execution_context(),
                 request(),
@@ -774,7 +889,7 @@ mod tests {
             assert_eq!(first_stats.hits, 0);
             assert_eq!(first_stats.misses, 1);
 
-            let (state, second) = execute_code(
+            let (state, second) = execute_code_unbounded_for_tests(
                 state,
                 lash_core::testing::code_execution_context(),
                 request(),
@@ -965,7 +1080,7 @@ mod tests {
             let first_ctx =
                 lash_core::testing::code_execution_context_with_invocation(first_invocation);
             assert!(first_ctx.tool_catalog().tools.is_empty());
-            let (mut state, first) = execute_code(
+            let (mut state, first) = execute_code_unbounded_for_tests(
                 RlmExecutionState::new().expect("state"),
                 first_ctx.clone(),
                 deferred_matrix_request(),
@@ -1002,7 +1117,7 @@ mod tests {
 
             // Same stable link: both positive and negative outcomes survive the
             // snapshot and win without another authorization decision.
-            let (restored, replay) = execute_code(
+            let (restored, replay) = execute_code_unbounded_for_tests(
                 restored,
                 first_ctx.clone(),
                 deferred_matrix_request(),
@@ -1031,7 +1146,7 @@ mod tests {
                     "replay:effect-2",
                 ),
             );
-            let (restored, second_link) = execute_code(
+            let (restored, second_link) = execute_code_unbounded_for_tests(
                 restored,
                 second_ctx.clone(),
                 deferred_matrix_request(),
@@ -1061,7 +1176,7 @@ mod tests {
                     "replay:effect-3",
                 ),
             );
-            let (restored, next_turn) = execute_code(
+            let (restored, next_turn) = execute_code_unbounded_for_tests(
                 restored,
                 next_turn_ctx.clone(),
                 deferred_matrix_request(),
@@ -1111,7 +1226,7 @@ mod tests {
             );
             assert!(ctx.tool_catalog().tools.is_empty());
 
-            let (state, response) = execute_code(
+            let (state, response) = execute_code_unbounded_for_tests(
                 RlmExecutionState::new().expect("state"),
                 ctx.clone(),
                 ExecRequest {
@@ -1171,7 +1286,7 @@ mod tests {
                 )
             };
 
-            let (state, first) = execute_code(
+            let (state, first) = execute_code_unbounded_for_tests(
                 state,
                 context(),
                 request(),
@@ -1187,7 +1302,7 @@ mod tests {
             assert!(first.error.is_none(), "{:?}", first.error);
             assert_eq!(state.stored_lashlang_modules.len(), 1);
 
-            let (state, second) = execute_code(
+            let (state, second) = execute_code_unbounded_for_tests(
                 state,
                 context(),
                 request(),
@@ -1330,7 +1445,7 @@ mod tests {
             lashlang::LashlangLanguageFeatures::default(),
             timer_trigger_resources(),
         );
-        let (_, response) = execute_code(
+        let (_, response) = execute_code_unbounded_for_tests(
             state,
             ctx,
             ExecRequest {
@@ -1432,7 +1547,7 @@ mod tests {
                 lashlang::LashlangLanguageFeatures::default(),
                 timer_trigger_resources(),
             );
-            let (_, response) = execute_code(
+            let (_, response) = execute_code_unbounded_for_tests(
                 RlmExecutionState::new().expect("state"),
                 ctx,
                 ExecRequest {
@@ -1586,7 +1701,7 @@ mod tests {
             );
             let mut state = RlmExecutionState::new().expect("state");
 
-            let (next, first) = execute_code(
+            let (next, first) = execute_code_unbounded_for_tests(
                 state,
                 lash_core::testing::code_execution_context_with_trigger_store(
                     trigger_store.clone(),
@@ -1619,7 +1734,7 @@ mod tests {
             assert!(first.error.is_none(), "{:?}", first.error);
             state = next;
 
-            let (_next, replacement) = execute_code(
+            let (_next, replacement) = execute_code_unbounded_for_tests(
                 state,
                 lash_core::testing::code_execution_context_with_trigger_store(
                     trigger_store.clone(),
@@ -2287,7 +2402,7 @@ mod tests {
         block_on(async {
             let state = RlmExecutionState::new().expect("state");
             let ctx = lash_core::testing::code_execution_context();
-            let (state, response) = execute_code(
+            let (state, response) = execute_code_unbounded_for_tests(
                 state,
                 ctx,
                 ExecRequest {
@@ -2340,7 +2455,7 @@ mod tests {
                 }\n\
                 inventory = [\"brass lantern\", \"elvish sword\", \"leaflet\"]"
                 .to_string();
-            let (state, response) = execute_code(
+            let (state, response) = execute_code_unbounded_for_tests(
                 state,
                 ctx,
                 ExecRequest {
@@ -2424,7 +2539,7 @@ mod tests {
                   big_notes = push(big_notes, format(\"note {}: observation\", i))\n\
                 }"
             .to_string();
-            let (state, response) = execute_code(
+            let (state, response) = execute_code_unbounded_for_tests(
                 state,
                 ctx,
                 ExecRequest {
