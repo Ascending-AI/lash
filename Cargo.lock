@@ -2091,6 +2091,7 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "base64",
+ "fastrand",
  "http",
  "lash-core",
  "lash-lashlang-runtime",
@@ -2098,9 +2099,11 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

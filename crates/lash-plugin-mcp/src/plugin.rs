@@ -357,7 +357,10 @@ mod tests {
                 env,
                 cwd: None,
                 startup_timeout_ms: 10_000,
-                call_timeout_ms: 10_000,
+                call_policy: crate::McpCallPolicy {
+                    call_timeout_ms: 10_000,
+                    ..Default::default()
+                },
                 binary_content_attachments: false,
             },
         );

@@ -23,7 +23,7 @@ pub mod naming;
 pub mod plugin;
 pub mod pool;
 
-pub use config::McpServerConfig;
+pub use config::{McpCallPolicy, McpServerConfig, TimeoutDisconnectPolicy};
 pub use error::McpError;
 pub use plugin::{McpDeferredToolProvider, McpPluginFactory, McpToolProvider};
 pub use pool::{McpConnectionPool, McpServerStatus};

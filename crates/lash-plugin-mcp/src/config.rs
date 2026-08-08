@@ -8,6 +8,24 @@ use crate::error::McpError;
 
 const DEFAULT_STARTUP_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_CALL_TIMEOUT_MS: u64 = 60_000;
+const DEFAULT_CALL_MAX_TOTAL_TIMEOUT_MS: u64 = 600_000;
+const DEFAULT_LIVENESS_PROBE_TIMEOUT_MS: u64 = 5_000;
+const DEFAULT_CONSECUTIVE_TIMEOUTS_BEFORE_DISCONNECT: u64 = 3;
+const DEFAULT_RECONNECT_INITIAL_BACKOFF_MS: u64 = 500;
+const DEFAULT_RECONNECT_MAX_BACKOFF_MS: u64 = 30_000;
+
+/// How an idle tool-call timeout affects the MCP connection.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TimeoutDisconnectPolicy {
+    /// A timeout never changes connection state.
+    Never,
+    /// Probe the peer with MCP `ping`; disconnect only when the probe fails.
+    #[default]
+    PingProbe,
+    /// Disconnect after the configured number of consecutive call timeouts.
+    ConsecutiveTimeouts,
+}
 
 fn default_startup_timeout_ms() -> u64 {
     DEFAULT_STARTUP_TIMEOUT_MS
@@ -15,6 +33,34 @@ fn default_startup_timeout_ms() -> u64 {
 
 fn default_call_timeout_ms() -> u64 {
     DEFAULT_CALL_TIMEOUT_MS
+}
+
+fn default_call_max_total_timeout_ms() -> u64 {
+    DEFAULT_CALL_MAX_TOTAL_TIMEOUT_MS
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_timeout_disconnect_policy() -> TimeoutDisconnectPolicy {
+    TimeoutDisconnectPolicy::default()
+}
+
+fn default_liveness_probe_timeout_ms() -> u64 {
+    DEFAULT_LIVENESS_PROBE_TIMEOUT_MS
+}
+
+fn default_consecutive_timeouts_before_disconnect() -> u64 {
+    DEFAULT_CONSECUTIVE_TIMEOUTS_BEFORE_DISCONNECT
+}
+
+fn default_reconnect_initial_backoff_ms() -> u64 {
+    DEFAULT_RECONNECT_INITIAL_BACKOFF_MS
+}
+
+fn default_reconnect_max_backoff_ms() -> u64 {
+    DEFAULT_RECONNECT_MAX_BACKOFF_MS
 }
 
 fn is_default_startup_timeout_ms(value: &u64) -> bool {
@@ -25,8 +71,148 @@ fn is_default_call_timeout_ms(value: &u64) -> bool {
     *value == DEFAULT_CALL_TIMEOUT_MS
 }
 
+fn is_default_call_max_total_timeout_ms(value: &u64) -> bool {
+    *value == DEFAULT_CALL_MAX_TOTAL_TIMEOUT_MS
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+fn is_default_timeout_disconnect_policy(value: &TimeoutDisconnectPolicy) -> bool {
+    *value == TimeoutDisconnectPolicy::default()
+}
+
+fn is_default_liveness_probe_timeout_ms(value: &u64) -> bool {
+    *value == DEFAULT_LIVENESS_PROBE_TIMEOUT_MS
+}
+
+fn is_default_consecutive_timeouts_before_disconnect(value: &u64) -> bool {
+    *value == DEFAULT_CONSECUTIVE_TIMEOUTS_BEFORE_DISCONNECT
+}
+
+fn is_default_reconnect_initial_backoff_ms(value: &u64) -> bool {
+    *value == DEFAULT_RECONNECT_INITIAL_BACKOFF_MS
+}
+
+fn is_default_reconnect_max_backoff_ms(value: &u64) -> bool {
+    *value == DEFAULT_RECONNECT_MAX_BACKOFF_MS
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
+}
+
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+/// Timeout, liveness, and reconnect behavior shared by every MCP transport.
+///
+/// This policy is flattened into [`McpServerConfig`]'s serialized shape, so
+/// existing configuration keys remain at the server level while future policy
+/// additions do not add fields to every transport variant.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpCallPolicy {
+    /// Idle timeout for one tool call, in milliseconds.
+    #[serde(
+        default = "default_call_timeout_ms",
+        skip_serializing_if = "is_default_call_timeout_ms"
+    )]
+    pub call_timeout_ms: u64,
+    /// Mandatory total wall-clock cap for one tool call, in milliseconds.
+    #[serde(
+        default = "default_call_max_total_timeout_ms",
+        skip_serializing_if = "is_default_call_max_total_timeout_ms"
+    )]
+    pub call_max_total_timeout_ms: u64,
+    /// Whether matching progress notifications reset the idle timeout.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub reset_call_timeout_on_progress: bool,
+    /// How an idle timeout affects connection health.
+    #[serde(
+        default = "default_timeout_disconnect_policy",
+        skip_serializing_if = "is_default_timeout_disconnect_policy"
+    )]
+    pub timeout_disconnect_policy: TimeoutDisconnectPolicy,
+    /// Maximum wait for a liveness-probe answer, in milliseconds.
+    #[serde(
+        default = "default_liveness_probe_timeout_ms",
+        skip_serializing_if = "is_default_liveness_probe_timeout_ms"
+    )]
+    pub liveness_probe_timeout_ms: u64,
+    /// Consecutive idle timeouts allowed before disconnecting.
+    #[serde(
+        default = "default_consecutive_timeouts_before_disconnect",
+        skip_serializing_if = "is_default_consecutive_timeouts_before_disconnect"
+    )]
+    pub consecutive_timeouts_before_disconnect: u64,
+    /// Background liveness-probe interval; zero disables keepalive.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub liveness_probe_interval_ms: u64,
+    /// Initial reconnect backoff ceiling, in milliseconds.
+    #[serde(
+        default = "default_reconnect_initial_backoff_ms",
+        skip_serializing_if = "is_default_reconnect_initial_backoff_ms"
+    )]
+    pub reconnect_initial_backoff_ms: u64,
+    /// Maximum reconnect backoff ceiling, in milliseconds.
+    #[serde(
+        default = "default_reconnect_max_backoff_ms",
+        skip_serializing_if = "is_default_reconnect_max_backoff_ms"
+    )]
+    pub reconnect_max_backoff_ms: u64,
+    /// Maximum reconnect attempts before pausing; zero retries indefinitely.
+    ///
+    /// When interval keepalive is enabled, it re-arms an exhausted reconnect
+    /// loop. With keepalive disabled, a bounded-attempts server stays down
+    /// until it is attached again.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub reconnect_max_attempts: u64,
+}
+
+impl Default for McpCallPolicy {
+    fn default() -> Self {
+        Self {
+            call_timeout_ms: default_call_timeout_ms(),
+            call_max_total_timeout_ms: default_call_max_total_timeout_ms(),
+            reset_call_timeout_on_progress: default_true(),
+            timeout_disconnect_policy: default_timeout_disconnect_policy(),
+            liveness_probe_timeout_ms: default_liveness_probe_timeout_ms(),
+            consecutive_timeouts_before_disconnect: default_consecutive_timeouts_before_disconnect(
+            ),
+            liveness_probe_interval_ms: 0,
+            reconnect_initial_backoff_ms: default_reconnect_initial_backoff_ms(),
+            reconnect_max_backoff_ms: default_reconnect_max_backoff_ms(),
+            reconnect_max_attempts: 0,
+        }
+    }
+}
+
+impl McpCallPolicy {
+    pub(crate) fn call_timeout(&self) -> Duration {
+        Duration::from_millis(self.call_timeout_ms)
+    }
+
+    pub(crate) fn call_max_total_timeout(&self) -> Duration {
+        Duration::from_millis(self.call_max_total_timeout_ms)
+    }
+
+    pub(crate) fn liveness_probe_timeout(&self) -> Duration {
+        Duration::from_millis(self.liveness_probe_timeout_ms)
+    }
+
+    pub(crate) fn liveness_probe_interval(&self) -> Duration {
+        Duration::from_millis(self.liveness_probe_interval_ms)
+    }
+
+    pub(crate) fn reconnect_initial_backoff(&self) -> Duration {
+        Duration::from_millis(self.reconnect_initial_backoff_ms)
+    }
+
+    pub(crate) fn reconnect_max_backoff(&self) -> Duration {
+        Duration::from_millis(self.reconnect_max_backoff_ms)
+    }
 }
 
 /// Connection configuration for one MCP server. Tag (`transport`) selects
@@ -48,11 +234,8 @@ pub enum McpServerConfig {
             skip_serializing_if = "is_default_startup_timeout_ms"
         )]
         startup_timeout_ms: u64,
-        #[serde(
-            default = "default_call_timeout_ms",
-            skip_serializing_if = "is_default_call_timeout_ms"
-        )]
-        call_timeout_ms: u64,
+        #[serde(flatten)]
+        call_policy: McpCallPolicy,
         /// Persist non-image MCP binary content as model attachments.
         #[serde(default, skip_serializing_if = "is_false")]
         binary_content_attachments: bool,
@@ -67,11 +250,8 @@ pub enum McpServerConfig {
             skip_serializing_if = "is_default_startup_timeout_ms"
         )]
         startup_timeout_ms: u64,
-        #[serde(
-            default = "default_call_timeout_ms",
-            skip_serializing_if = "is_default_call_timeout_ms"
-        )]
-        call_timeout_ms: u64,
+        #[serde(flatten)]
+        call_policy: McpCallPolicy,
         /// Persist non-image MCP binary content as model attachments.
         #[serde(default, skip_serializing_if = "is_false")]
         binary_content_attachments: bool,
@@ -87,7 +267,7 @@ impl McpServerConfig {
             env: BTreeMap::new(),
             cwd: None,
             startup_timeout_ms: default_startup_timeout_ms(),
-            call_timeout_ms: default_call_timeout_ms(),
+            call_policy: McpCallPolicy::default(),
             binary_content_attachments: false,
         }
     }
@@ -98,7 +278,7 @@ impl McpServerConfig {
             url: url.into(),
             headers: BTreeMap::new(),
             startup_timeout_ms: default_startup_timeout_ms(),
-            call_timeout_ms: default_call_timeout_ms(),
+            call_policy: McpCallPolicy::default(),
             binary_content_attachments: false,
         }
     }
@@ -115,14 +295,52 @@ impl McpServerConfig {
     }
 
     pub fn call_timeout(&self) -> Duration {
-        Duration::from_millis(match self {
-            Self::Stdio {
-                call_timeout_ms, ..
+        self.call_policy().call_timeout()
+    }
+
+    pub(crate) fn call_max_total_timeout(&self) -> Duration {
+        self.call_policy().call_max_total_timeout()
+    }
+
+    pub(crate) fn reset_call_timeout_on_progress(&self) -> bool {
+        self.call_policy().reset_call_timeout_on_progress
+    }
+
+    pub(crate) fn timeout_disconnect_policy(&self) -> TimeoutDisconnectPolicy {
+        self.call_policy().timeout_disconnect_policy
+    }
+
+    pub(crate) fn liveness_probe_timeout(&self) -> Duration {
+        self.call_policy().liveness_probe_timeout()
+    }
+
+    pub(crate) fn consecutive_timeouts_before_disconnect(&self) -> u64 {
+        self.call_policy().consecutive_timeouts_before_disconnect
+    }
+
+    pub(crate) fn liveness_probe_interval(&self) -> Duration {
+        self.call_policy().liveness_probe_interval()
+    }
+
+    pub(crate) fn reconnect_initial_backoff(&self) -> Duration {
+        self.call_policy().reconnect_initial_backoff()
+    }
+
+    pub(crate) fn reconnect_max_backoff(&self) -> Duration {
+        self.call_policy().reconnect_max_backoff()
+    }
+
+    pub(crate) fn reconnect_max_attempts(&self) -> u64 {
+        self.call_policy().reconnect_max_attempts
+    }
+
+    /// Return the timeout, liveness, and reconnect policy for this server.
+    pub fn call_policy(&self) -> &McpCallPolicy {
+        match self {
+            Self::Stdio { call_policy, .. } | Self::StreamableHttp { call_policy, .. } => {
+                call_policy
             }
-            | Self::StreamableHttp {
-                call_timeout_ms, ..
-            } => *call_timeout_ms,
-        })
+        }
     }
 
     pub fn with_binary_content_attachments(mut self, enabled: bool) -> Self {
@@ -163,6 +381,17 @@ impl McpServerConfig {
                 "MCP server `{server_name}` cannot contain `__`"
             )));
         }
+        let policy = self.call_policy();
+        if policy.reconnect_initial_backoff_ms == 0 {
+            return Err(McpError::Config(format!(
+                "MCP server `{server_name}` reconnect_initial_backoff_ms must be greater than zero"
+            )));
+        }
+        if policy.call_max_total_timeout_ms <= policy.call_timeout_ms {
+            return Err(McpError::Config(format!(
+                "MCP server `{server_name}` call_max_total_timeout_ms must be greater than call_timeout_ms"
+            )));
+        }
         match self {
             Self::Stdio { command, .. } if command.trim().is_empty() => Err(McpError::Config(
                 format!("MCP server `{server_name}` command cannot be empty"),
@@ -194,6 +423,63 @@ mod tests {
         );
     }
 
+    #[test]
+    fn liveness_and_reconnect_policy_defaults_round_trip_for_both_transports() {
+        for json in [
+            serde_json::json!({"transport": "stdio", "command": "srv"}),
+            serde_json::json!({"transport": "streamable_http", "url": "http://localhost/mcp"}),
+        ] {
+            let config: McpServerConfig = serde_json::from_value(json.clone()).unwrap();
+            assert_eq!(config.call_timeout(), Duration::from_millis(60_000));
+            assert_eq!(
+                config.call_max_total_timeout(),
+                Duration::from_millis(600_000)
+            );
+            assert!(config.reset_call_timeout_on_progress());
+            assert_eq!(
+                config.timeout_disconnect_policy(),
+                TimeoutDisconnectPolicy::PingProbe
+            );
+            assert_eq!(
+                config.liveness_probe_timeout(),
+                Duration::from_millis(5_000)
+            );
+            assert_eq!(config.consecutive_timeouts_before_disconnect(), 3);
+            assert!(config.liveness_probe_interval().is_zero());
+            assert_eq!(
+                config.reconnect_initial_backoff(),
+                Duration::from_millis(500)
+            );
+            assert_eq!(
+                config.reconnect_max_backoff(),
+                Duration::from_millis(30_000)
+            );
+            assert_eq!(config.reconnect_max_attempts(), 0);
+            assert_eq!(serde_json::to_value(config).unwrap(), json);
+        }
+
+        let custom: McpServerConfig = serde_json::from_value(serde_json::json!({
+            "transport": "stdio",
+            "command": "srv",
+            "call_max_total_timeout_ms": 42,
+            "reset_call_timeout_on_progress": false,
+            "timeout_disconnect_policy": "consecutive_timeouts",
+            "liveness_probe_timeout_ms": 43,
+            "consecutive_timeouts_before_disconnect": 4,
+            "liveness_probe_interval_ms": 44,
+            "reconnect_initial_backoff_ms": 45,
+            "reconnect_max_backoff_ms": 46,
+            "reconnect_max_attempts": 5
+        }))
+        .unwrap();
+        let encoded = serde_json::to_value(custom).unwrap();
+        assert_eq!(encoded["call_max_total_timeout_ms"], 42);
+        assert_eq!(encoded["reset_call_timeout_on_progress"], false);
+        assert_eq!(encoded["timeout_disconnect_policy"], "consecutive_timeouts");
+        assert_eq!(encoded["liveness_probe_interval_ms"], 44);
+        assert_eq!(encoded["reconnect_max_attempts"], 5);
+    }
+
     /// The accepted `transport` tags are exactly the two that can connect.
     /// A config naming any other transport — notably the legacy `sse` one this
     /// crate never supported — is rejected at deserialization, so an operator
@@ -220,6 +506,43 @@ mod tests {
             assert!(
                 msg.contains("stdio") && msg.contains("streamable_http"),
                 "rejection should name the supported transports: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn validation_rejects_zero_initial_reconnect_backoff() {
+        let config: McpServerConfig = serde_json::from_value(serde_json::json!({
+            "transport": "stdio",
+            "command": "srv",
+            "reconnect_initial_backoff_ms": 0
+        }))
+        .unwrap();
+        let error = config.validate("srv").expect_err("zero backoff rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("reconnect_initial_backoff_ms must be greater than zero")
+        );
+    }
+
+    #[test]
+    fn validation_requires_wall_cap_to_exceed_idle_timeout() {
+        for wall_cap_ms in [49, 50] {
+            let config: McpServerConfig = serde_json::from_value(serde_json::json!({
+                "transport": "stdio",
+                "command": "srv",
+                "call_timeout_ms": 50,
+                "call_max_total_timeout_ms": wall_cap_ms
+            }))
+            .unwrap();
+            let error = config
+                .validate("srv")
+                .expect_err("ambiguous wall cap rejected");
+            assert!(
+                error
+                    .to_string()
+                    .contains("call_max_total_timeout_ms must be greater than call_timeout_ms")
             );
         }
     }

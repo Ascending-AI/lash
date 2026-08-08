@@ -72,7 +72,10 @@ impl RuntimeConfig {
                 env,
                 cwd: None,
                 startup_timeout_ms: 10_000,
-                call_timeout_ms: 20_000,
+                call_policy: lash_plugin_mcp::McpCallPolicy {
+                    call_timeout_ms: 20_000,
+                    ..Default::default()
+                },
                 binary_content_attachments: false,
             },
         );

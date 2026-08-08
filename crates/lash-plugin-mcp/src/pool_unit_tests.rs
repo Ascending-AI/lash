@@ -1,0 +1,440 @@
+use super::*;
+
+/// Regression for the header-drop bug: custom/auth headers configured for
+/// an HTTP MCP server must be translated into the `http` header types the
+/// transport actually sends. Before the fix, `connect_service` called
+/// `from_uri` and dropped the configured `headers` map entirely, so an
+/// `Authorization` header never reached the server.
+#[test]
+fn build_http_headers_carries_configured_headers() {
+    let mut headers = BTreeMap::new();
+    headers.insert(
+        "Authorization".to_string(),
+        "Bearer secret-token".to_string(),
+    );
+    headers.insert("X-Tenant".to_string(), "acme".to_string());
+
+    let built = build_http_headers("api", &headers).expect("valid headers convert");
+
+    assert_eq!(
+        built
+            .get(&HeaderName::from_static("authorization"))
+            .map(|v| v.to_str().unwrap()),
+        Some("Bearer secret-token"),
+        "configured Authorization header must be carried through to the transport"
+    );
+    assert_eq!(
+        built
+            .get(&HeaderName::from_static("x-tenant"))
+            .map(|v| v.to_str().unwrap()),
+        Some("acme")
+    );
+    assert_eq!(built.len(), 2);
+}
+
+#[test]
+fn build_http_headers_empty_map_is_empty() {
+    let built = build_http_headers("api", &BTreeMap::new()).expect("empty converts");
+    assert!(built.is_empty());
+}
+
+#[test]
+fn build_http_headers_rejects_malformed_name() {
+    let mut headers = BTreeMap::new();
+    headers.insert("Bad Header Name".to_string(), "x".to_string());
+    let err = build_http_headers("api", &headers).expect_err("malformed name rejected");
+    assert!(
+        matches!(err, McpError::Config(_)),
+        "expected a config error, got {err:?}"
+    );
+}
+
+#[test]
+fn build_http_headers_rejects_malformed_value() {
+    let mut headers = BTreeMap::new();
+    // A newline is not a legal header value byte.
+    headers.insert("X-Bad".to_string(), "line1\nline2".to_string());
+    let err = build_http_headers("api", &headers).expect_err("malformed value rejected");
+    assert!(
+        matches!(err, McpError::Config(_)),
+        "expected a config error, got {err:?}"
+    );
+}
+
+/// A server that is down at startup must not fail pool construction: the
+/// entry stays registered (status: disconnected, with the error recorded)
+/// and only configuration errors abort.
+#[tokio::test]
+async fn connect_tolerates_unreachable_server() {
+    let mut servers = BTreeMap::new();
+    servers.insert(
+        "down".to_string(),
+        McpServerConfig::Stdio {
+            // Spawns, says nothing, exits — the handshake fails fast.
+            command: "sh".to_string(),
+            args: vec!["-c".to_string(), "exit 1".to_string()],
+            env: BTreeMap::new(),
+            cwd: None,
+            startup_timeout_ms: 1_000,
+            call_policy: McpCallPolicy {
+                call_timeout_ms: 1_000,
+                ..Default::default()
+            },
+            binary_content_attachments: false,
+        },
+    );
+
+    let pool = McpConnectionPool::connect(servers)
+        .await
+        .expect("an unreachable server must not fail pool construction");
+
+    assert!(pool.advertised_tools().is_empty());
+    let statuses = pool.server_statuses();
+    assert_eq!(statuses.len(), 1);
+    assert_eq!(statuses[0].server_name, "down");
+    assert!(!statuses[0].connected);
+    assert!(
+        statuses[0].last_error.is_some(),
+        "the connection failure is recorded for observability"
+    );
+
+    let result = pool
+        .call_tool(
+            "mcp__down__anything",
+            &json!({}),
+            &lash_core::testing::mock_tool_context(),
+        )
+        .await;
+    assert!(!result.is_success(), "calls fail loudly while disconnected");
+
+    pool.shutdown_all().await;
+}
+
+/// A connection that dies mid-life is detected on the next call and
+/// re-established by the background reconnect loop; tool definitions are
+/// kept across the outage so the surface stays stable.
+#[tokio::test]
+async fn pool_reconnects_after_transport_death() {
+    let initialize = json!({
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "demo", "version": "1.0.0" }
+        }
+    });
+    let list = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+            "tools": [{
+                "name": "ping",
+                "description": "Ping",
+                "inputSchema": { "type": "object", "properties": {} }
+            }]
+        }
+    });
+    let call = json!({ "jsonrpc": "2.0", "id": 2, "result": { "content": [{ "type": "text", "text": "pong" }] } });
+
+    // Serve initialize, tools/list, and exactly one tools/call, then exit:
+    // the transport dies after the first successful call. Every reconnect
+    // runs the same script again (rmcp request ids restart per connection).
+    let script = "\
+            read -r _; printf '%s\\n' \"$RESP1\"; \
+            read -r _; \
+            read -r _; printf '%s\\n' \"$RESP2\"; \
+            read -r _; printf '%s\\n' \"$RESP3\""
+        .to_string();
+
+    let mut env = BTreeMap::new();
+    env.insert("RESP1".to_string(), initialize.to_string());
+    env.insert("RESP2".to_string(), list.to_string());
+    env.insert("RESP3".to_string(), call.to_string());
+
+    let mut servers = BTreeMap::new();
+    servers.insert(
+        "flaky".to_string(),
+        McpServerConfig::Stdio {
+            command: "sh".to_string(),
+            args: vec!["-c".to_string(), script],
+            env,
+            cwd: None,
+            startup_timeout_ms: 10_000,
+            call_policy: McpCallPolicy {
+                call_timeout_ms: 2_000,
+                timeout_disconnect_policy: TimeoutDisconnectPolicy::Never,
+                ..Default::default()
+            },
+            binary_content_attachments: false,
+        },
+    );
+
+    let pool = McpConnectionPool::connect(servers)
+        .await
+        .expect("connects to the mock");
+    let ctx = lash_core::testing::mock_tool_context();
+    let args = json!({});
+
+    let first = pool.call_tool("mcp__flaky__ping", &args, &ctx).await;
+    assert!(first.is_success(), "first call succeeds: {first:?}");
+
+    // The mock exited after the first call. Definitions must survive the
+    // outage, and calls must fail until the reconnect loop brings the
+    // (respawned) server back, after which calls succeed again.
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    let mut recovered = false;
+    while std::time::Instant::now() < deadline {
+        assert_eq!(
+            pool.advertised_tools().len(),
+            1,
+            "tool definitions are kept across a disconnect"
+        );
+        let result = pool.call_tool("mcp__flaky__ping", &args, &ctx).await;
+        if result.is_success() {
+            recovered = true;
+            break;
+        }
+        let output = result
+            .as_done_output()
+            .expect("a disconnected MCP call must complete with a failure");
+        let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
+            panic!("a disconnected MCP call must be a structured failure: {output:?}");
+        };
+        assert_eq!(failure.class, ToolFailureClass::Unavailable);
+        assert!(
+            matches!(
+                failure.code.as_str(),
+                "mcp_connection_lost" | "mcp_server_unavailable"
+            ),
+            "unexpected unavailable code: {}",
+            failure.code
+        );
+        assert_eq!(
+            failure.retry,
+            ToolRetryDisposition::Safe {
+                after_ms: Some(500)
+            }
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    assert!(recovered, "pool must reconnect after the transport died");
+
+    pool.shutdown_all().await;
+}
+
+#[tokio::test]
+async fn call_timeout_is_a_typed_retryable_failure() {
+    let initialize = json!({
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "demo", "version": "1.0.0" }
+        }
+    });
+    let list = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+            "tools": [{
+                "name": "hang",
+                "description": "Never returns",
+                "inputSchema": { "type": "object", "properties": {} }
+            }]
+        }
+    });
+    let script = "\
+            read -r _; printf '%s\\n' \"$RESP1\"; \
+            read -r _; \
+            read -r _; printf '%s\\n' \"$RESP2\"; \
+            read -r _; \
+            cat >/dev/null"
+        .to_string();
+    let servers = BTreeMap::from([(
+        "slow".to_string(),
+        McpServerConfig::Stdio {
+            command: "sh".to_string(),
+            args: vec!["-c".to_string(), script],
+            env: BTreeMap::from([
+                ("RESP1".to_string(), initialize.to_string()),
+                ("RESP2".to_string(), list.to_string()),
+            ]),
+            cwd: None,
+            startup_timeout_ms: 1_000,
+            call_policy: McpCallPolicy {
+                call_timeout_ms: 50,
+                timeout_disconnect_policy: TimeoutDisconnectPolicy::Never,
+                liveness_probe_timeout_ms: 50,
+                ..Default::default()
+            },
+            binary_content_attachments: false,
+        },
+    )]);
+    let pool = McpConnectionPool::connect(servers)
+        .await
+        .expect("connect to hanging mock");
+
+    let result = pool
+        .call_tool(
+            "mcp__slow__hang",
+            &json!({}),
+            &lash_core::testing::mock_tool_context(),
+        )
+        .await;
+    let output = result
+        .as_done_output()
+        .expect("timeout must complete with a failure");
+    let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
+        panic!("timeout must be a structured failure: {output:?}");
+    };
+    assert_eq!(failure.class, ToolFailureClass::Timeout);
+    assert_eq!(failure.code, "mcp_call_timeout");
+    assert_eq!(failure.retry, ToolRetryDisposition::Safe { after_ms: None });
+
+    pool.shutdown_all().await;
+}
+
+/// Regression for the missing discovery timeout: a server that completes
+/// the handshake but then hangs on `tools/list` must surface a
+/// `StartupTimeout` rather than blocking `connect` forever.
+#[tokio::test]
+async fn discovery_hang_surfaces_startup_timeout() {
+    let initialize = json!({
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "demo", "version": "1.0.0" }
+        }
+    });
+
+    // Respond to `initialize`, swallow `notifications/initialized`, read the
+    // `tools/list` request line, then hang (never respond) by blocking on
+    // stdin. The short startup timeout must trip.
+    let script = "\
+            read -r _; printf '%s\\n' \"$RESP1\"; \
+            read -r _; \
+            read -r _; \
+            cat >/dev/null"
+        .to_string();
+
+    let mut env = BTreeMap::new();
+    env.insert("RESP1".to_string(), initialize.to_string());
+
+    let config = McpServerConfig::Stdio {
+        command: "sh".to_string(),
+        args: vec!["-c".to_string(), script],
+        env,
+        cwd: None,
+        startup_timeout_ms: 750,
+        call_policy: McpCallPolicy {
+            call_timeout_ms: 10_000,
+            ..Default::default()
+        },
+        binary_content_attachments: false,
+    };
+
+    let entry = McpEntry::new("hangs".to_string(), config);
+    match entry.establish().await {
+        Err(McpError::StartupTimeout { .. }) => {}
+        Err(other) => panic!("expected StartupTimeout from a hung tools/list, got {other:?}"),
+        Ok(_) => panic!("a hung tools/list must not connect"),
+    }
+    assert!(!entry.connected.load(Ordering::SeqCst));
+    assert!(
+        entry
+            .last_error
+            .read()
+            .expect("error lock")
+            .as_deref()
+            .is_some_and(|err| err.contains("timed out") || err.contains("timeout")),
+        "the failure is recorded for status reporting"
+    );
+}
+
+/// Regression for the service mutex held across the network await: two
+/// concurrent `tools/call` requests to the same server must be able to be
+/// in flight at once. The mock refuses to answer the first call until it
+/// has read the second request line, so a serializing implementation (lock
+/// held across `.await`) would deadlock and time out, while the concurrent
+/// implementation completes both calls.
+#[tokio::test]
+async fn concurrent_calls_are_not_serialized_by_the_service_mutex() {
+    let initialize = json!({
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "demo", "version": "1.0.0" }
+        }
+    });
+    let list = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+            "tools": [{
+                "name": "ping",
+                "description": "Ping",
+                "inputSchema": { "type": "object", "properties": {} }
+            }]
+        }
+    });
+    // rmcp assigns request ids 2 and 3 to the two concurrent calls. The
+    // mock reads BOTH request lines before emitting EITHER response, which
+    // is only possible if both requests are in flight concurrently.
+    let call2 = json!({ "jsonrpc": "2.0", "id": 2, "result": { "content": [{ "type": "text", "text": "pong" }] } });
+    let call3 = json!({ "jsonrpc": "2.0", "id": 3, "result": { "content": [{ "type": "text", "text": "pong" }] } });
+
+    let script = "\
+            read -r _; printf '%s\\n' \"$RESP1\"; \
+            read -r _; \
+            read -r _; printf '%s\\n' \"$RESP2\"; \
+            read -r _; \
+            read -r _; \
+            printf '%s\\n' \"$RESP3\"; \
+            printf '%s\\n' \"$RESP4\"; \
+            cat >/dev/null"
+        .to_string();
+
+    let mut env = BTreeMap::new();
+    env.insert("RESP1".to_string(), initialize.to_string());
+    env.insert("RESP2".to_string(), list.to_string());
+    env.insert("RESP3".to_string(), call2.to_string());
+    env.insert("RESP4".to_string(), call3.to_string());
+
+    let mut servers = BTreeMap::new();
+    servers.insert(
+        "svc".to_string(),
+        McpServerConfig::Stdio {
+            command: "sh".to_string(),
+            args: vec!["-c".to_string(), script],
+            env,
+            cwd: None,
+            startup_timeout_ms: 10_000,
+            call_policy: McpCallPolicy {
+                call_timeout_ms: 5_000,
+                ..Default::default()
+            },
+            binary_content_attachments: false,
+        },
+    );
+
+    let pool = McpConnectionPool::connect(servers)
+        .await
+        .expect("connects to concurrency mock");
+
+    let ctx = lash_core::testing::mock_tool_context();
+    let args = json!({});
+    let (a, b) = tokio::join!(
+        pool.call_tool("mcp__svc__ping", &args, &ctx),
+        pool.call_tool("mcp__svc__ping", &args, &ctx),
+    );
+    assert!(a.is_success(), "first concurrent call failed: {a:?}");
+    assert!(b.is_success(), "second concurrent call failed: {b:?}");
+
+    pool.shutdown_all().await;
+}
