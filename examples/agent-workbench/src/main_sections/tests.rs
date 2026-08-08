@@ -1608,7 +1608,10 @@ finish initial
         register_restate_deployment(&admin_url, &endpoint_url).await;
         let turn_invocation_id = run_workbench_turn_via_restate(
             &harness.state,
-            "Register a cron trigger that runs every two seconds and reports the tick.",
+            &format!(
+                "Register a cron trigger that runs every {} seconds and reports the tick.",
+                LIVE_RESTATE_CRON_SCHEDULE_INTERVAL.as_secs()
+            ),
         )
         .await;
         wait_for_workbench_message(&harness.state, "cron registered", Duration::from_secs(60))
@@ -1627,10 +1630,13 @@ finish initial
         // Another cron job may legitimately share the trace file and key set;
         // every decision assertion below must stay scoped to this session and
         // object instead of accepting an unrelated whole-file match.
-        wait_for_workbench_message(
+        wait_for_cron_workbench_message(
             &harness.state,
+            &harness.trace_path,
+            &cron_session_id,
+            &cron_job_key,
             "cron tick observed",
-            Duration::from_secs(60),
+            live_restate_cron_tick_wait(),
         )
         .await;
         wait_for_cron_trace_record_count(
@@ -1639,7 +1645,7 @@ finish initial
             &cron_session_id,
             &cron_job_key,
             1,
-            Duration::from_secs(30),
+            live_restate_cron_tick_wait(),
         )
         .await;
         let trace_text =
@@ -2467,23 +2473,6 @@ finish initial
           name: "remembered"
         })?
         finish "registered"
-        "#
-    }
-
-    fn test_cron_trigger_source() -> &'static str {
-        r#"
-        process remember_tick(tick: cron.Tick) {
-          wake { kind: "cron_tick", fired_at: tick.fired_at }
-          finish { fired_at: tick.fired_at }
-        }
-
-        handle = await triggers.register({
-          source: cron.Schedule({ expr: "*/2 * * * * *", tz: "UTC" }),
-          target: remember_tick,
-          inputs: { tick: trigger.event },
-          name: "cron smoke"
-        })?
-        finish "cron registered"
         "#
     }
 

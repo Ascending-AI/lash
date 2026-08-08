@@ -147,6 +147,10 @@ fn is_durable_internal_rlm_message(message: &lash::messages::Message) -> bool {
     )
 }
 
+fn project_committed_chat_message(message: &lash::messages::Message) -> Option<ChatMessage> {
+    (!is_durable_internal_rlm_message(message)).then(|| chat_message_from_committed(message))
+}
+
 fn durable_rlm_reasoning_rows(message: &lash::messages::Message) -> Vec<TranscriptRow> {
     message
         .parts
@@ -263,17 +267,13 @@ fn project_chat(
 
     let mut messages = historical_ui_rows.clone();
     messages.extend(read_view.messages().iter().filter_map(|message| {
-        if protocol_state_message_ids.contains(&message.id)
-            || is_durable_internal_rlm_message(message)
-        {
+        if protocol_state_message_ids.contains(&message.id) {
             return None;
         }
-        Some(
-            user_replacements
-                .get(&message.id)
-                .cloned()
-                .unwrap_or_else(|| chat_message_from_committed(message)),
-        )
+        user_replacements
+            .get(&message.id)
+            .cloned()
+            .or_else(|| project_committed_chat_message(message))
     }));
     let mut transcript = historical_ui_rows
         .into_iter()

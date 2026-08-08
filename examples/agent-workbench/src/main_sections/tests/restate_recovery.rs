@@ -757,7 +757,7 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() {
 fn assert_single_retry_marker_message(projection: &str, messages: &[lash::messages::Message]) {
     let messages = messages
         .iter()
-        .map(chat_message_from_committed)
+        .filter_map(project_committed_chat_message)
         .collect::<Vec<_>>();
     let marker_messages = messages
         .iter()
