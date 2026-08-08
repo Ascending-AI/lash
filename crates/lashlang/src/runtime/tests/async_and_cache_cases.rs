@@ -210,7 +210,10 @@ async fn receiver_module_operation_errors_are_sanitized() {
     let err = exec(r#"finish (await tools.err({ value: "nope" })?)"#)
         .await
         .expect_err("module operation should fail");
-    assert!(matches!(err, RuntimeError::ValueError { .. }));
+    assert!(matches!(
+        err,
+        RuntimeError::UnwrappedModuleOperationFailed { .. }
+    ));
     assert!(err.to_string().contains("module operation"));
 }
 
@@ -917,8 +920,8 @@ async fn type_ref_to_non_type_value_is_type_error() {
     .await
     .expect_err("should fail: Inner is not a Type value");
     assert!(
-        matches!(err, RuntimeError::TypeError { .. }),
-        "expected TypeError, got {err:?}"
+        matches!(err, RuntimeError::NotTypeValue { .. }),
+        "expected NotTypeValue, got {err:?}"
     );
 }
 

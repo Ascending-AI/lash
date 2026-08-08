@@ -913,8 +913,8 @@ async fn direct_module_operation_unwrap_skips_observable_wrapper() {
         .expect_err("failed unwrap should abort");
     assert_eq!(
         err,
-        RuntimeError::ValueError {
-            message: "`?` unwrapped failed module operation: boom".to_string(),
+        RuntimeError::UnwrappedModuleOperationFailed {
+            source: ExecutionHostError::new("boom"),
         }
     );
 }
@@ -926,8 +926,8 @@ async fn result_unwrap_reports_failed_and_malformed_wrappers() {
         .expect_err("failed module operation unwrap should abort");
     assert_eq!(
         err,
-        RuntimeError::ValueError {
-            message: "`?` unwrapped failed module operation: boom".to_string(),
+        RuntimeError::UnwrappedModuleOperationFailed {
+            source: ExecutionHostError::new("boom"),
         }
     );
 
@@ -936,8 +936,8 @@ async fn result_unwrap_reports_failed_and_malformed_wrappers() {
         .expect_err("non-wrapper should fail");
     assert_eq!(
         err,
-        RuntimeError::TypeError {
-            message: "`?` expected a tool result wrapper, got number".to_string(),
+        RuntimeError::ToolResultExpected {
+            actual: "number".to_string(),
         }
     );
 
@@ -946,9 +946,7 @@ async fn result_unwrap_reports_failed_and_malformed_wrappers() {
         .expect_err("missing value should fail");
     assert_eq!(
         err,
-        RuntimeError::TypeError {
-            message: "`?` found a successful tool result wrapper missing `value`".to_string(),
-        }
+        RuntimeError::ToolResultMissingValue
     );
 }
 
@@ -999,7 +997,7 @@ async fn field_index_and_type_errors_are_covered() {
     let err = exec("n = 1 finish n.name")
         .await
         .expect_err("field access should fail");
-    assert!(matches!(err, RuntimeError::TypeError { .. }));
+    assert!(matches!(err, RuntimeError::CannotReadField { .. }));
 
     let value = exec("rec = {} finish rec.name")
         .await
@@ -1009,7 +1007,7 @@ async fn field_index_and_type_errors_are_covered() {
     let err = exec("finish 1[0]")
         .await
         .expect_err("bad index target should fail");
-    assert!(matches!(err, RuntimeError::TypeError { .. }));
+    assert!(matches!(err, RuntimeError::CannotIndex { .. }));
 
     let value = exec("finish [1][2]")
         .await
@@ -1024,7 +1022,7 @@ async fn field_index_and_type_errors_are_covered() {
     let err = exec("finish [1][1.5]")
         .await
         .expect_err("fractional index should fail");
-    assert!(matches!(err, RuntimeError::TypeError { .. }));
+    assert!(matches!(err, RuntimeError::InvalidIndex));
 
     let value = exec("finish [1][-1]")
         .await
@@ -1132,7 +1130,7 @@ async fn arithmetic_and_compare_errors_are_covered() {
     let err = exec("finish {} + 1")
         .await
         .expect_err("records should still fail arithmetic");
-    assert!(matches!(err, RuntimeError::TypeError { .. }));
+    assert!(matches!(err, RuntimeError::ExpectedNumberType { .. }));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1405,8 +1403,32 @@ async fn builtin_error_matrix_is_covered() {
         let err = exec(source).await.expect_err("builtin should fail");
         assert!(matches!(
             err,
-            RuntimeError::TypeError { .. }
-                | RuntimeError::ValueError { .. }
+            RuntimeError::InvalidArgumentCount { .. }
+                | RuntimeError::EmptyUnsupported
+                | RuntimeError::KeysUnsupported
+                | RuntimeError::ValuesUnsupported
+                | RuntimeError::LenUnsupported
+                | RuntimeError::ContainsUnsupported
+                | RuntimeError::InvalidCharacterIndex { .. }
+                | RuntimeError::ExpectedText { .. }
+                | RuntimeError::EmptyGrepNeedle
+                | RuntimeError::JoinUnsupported
+                | RuntimeError::SliceUnsupported
+                | RuntimeError::ExpectedNumber
+                | RuntimeError::ExpectedNumberType { .. }
+                | RuntimeError::InvalidJson { .. }
+                | RuntimeError::FormatTemplateMissing
+                | RuntimeError::FormatTemplateInvalid { .. }
+                | RuntimeError::Format(_)
+                | RuntimeError::ValidateTypeLiteralRequired
+                | RuntimeError::InvalidRangeBound
+                | RuntimeError::InvalidRangeBoundType { .. }
+                | RuntimeError::ZeroRangeStep
+                | RuntimeError::RangeTooLarge { .. }
+                | RuntimeError::InvalidIntegerDivisionArgument { .. }
+                | RuntimeError::InvalidIntegerDivisionArgumentType { .. }
+                | RuntimeError::IntegerDivisionByZero { .. }
+                | RuntimeError::PushUnsupported
                 | RuntimeError::UnknownBuiltin { .. }
         ));
     }
@@ -1414,7 +1436,7 @@ async fn builtin_error_matrix_is_covered() {
     let err = exec("finish len()")
         .await
         .expect_err("arity error should fail");
-    assert!(matches!(err, RuntimeError::TypeError { .. }));
+    assert!(matches!(err, RuntimeError::InvalidArgumentCount { .. }));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1444,8 +1466,11 @@ async fn validate_reports_precise_shape_errors() {
             .expect_err("validate should reject bad value");
         assert_eq!(
             err,
-            RuntimeError::ValueError {
-                message: expected.to_string()
+            RuntimeError::ValidationFailed {
+                reason: expected
+                    .strip_prefix("validation failed: ")
+                    .expect("validation prefix")
+                    .to_string()
             }
         );
     }
@@ -1455,9 +1480,7 @@ async fn validate_reports_precise_shape_errors() {
         .expect_err("raw schema records should be rejected");
     assert_eq!(
         err,
-        RuntimeError::TypeError {
-            message: "`validate` requires a Type literal as the second argument".to_string()
-        }
+        RuntimeError::ValidateTypeLiteralRequired
     );
 }
 
@@ -1490,12 +1513,12 @@ async fn validate_union_rejects_value_matching_no_variant() {
     let err = exec(r#"finish validate({ email: 42 }, Type { email: str | null })"#)
         .await
         .expect_err("number should not match str | null");
-    let RuntimeError::ValueError { message } = err else {
-        panic!("expected ValueError");
+    let RuntimeError::ValidationFailed { reason } = err else {
+        panic!("expected ValidationFailed");
     };
     assert!(
-        message.contains("$.email"),
-        "error should point at the failing field: {message}",
+        reason.contains("$.email"),
+        "error should point at the failing field: {reason}",
     );
 }
 
@@ -1516,9 +1539,8 @@ finish validate({ email: 42 }, Schema)
     assert_eq!(static_err, dynamic_err);
     assert_eq!(
         dynamic_err,
-        RuntimeError::ValueError {
-            message: "validation failed: $.email: expected one of [string, null], got number"
-                .to_string()
+        RuntimeError::ValidationFailed {
+            reason: "$.email: expected one of [string, null], got number".to_string()
         }
     );
 }
@@ -1723,15 +1745,13 @@ async fn helper_functions_are_covered_directly() {
     assert_eq!(
         apply_format("{999999999999999999999999999999999999}", &[])
             .expect_err("overflow slot should fail"),
-        RuntimeError::ValueError {
-            message: "bad format slot `999999999999999999999999999999999999`".to_string()
-        }
+        RuntimeError::Format(FormatError::InvalidSlot {
+            slot: "999999999999999999999999999999999999".to_string()
+        })
     );
     assert_eq!(
         apply_format("{x}", &[]).expect_err("invalid placeholder should fail"),
-        RuntimeError::ValueError {
-            message: "invalid format placeholder".to_string()
-        }
+        RuntimeError::Format(FormatError::InvalidPlaceholder)
     );
     assert_eq!(
         apply_format(
@@ -1739,27 +1759,19 @@ async fn helper_functions_are_covered_directly() {
             &[Value::String("x".into()), Value::String("y".into())]
         )
         .expect_err("mixed placeholder styles should fail"),
-        RuntimeError::ValueError {
-            message: "can't mix `{}` and indexed format placeholders".to_string()
-        }
+        RuntimeError::Format(FormatError::MixedPlaceholderKinds)
     );
     assert_eq!(
         apply_format("{", &[]).expect_err("unmatched open brace should fail"),
-        RuntimeError::ValueError {
-            message: "unmatched `{` in format string".to_string()
-        }
+        RuntimeError::Format(FormatError::UnmatchedOpenBrace)
     );
     assert_eq!(
         apply_format("}", &[]).expect_err("unmatched close brace should fail"),
-        RuntimeError::ValueError {
-            message: "unmatched `}` in format string".to_string()
-        }
+        RuntimeError::Format(FormatError::UnmatchedCloseBrace)
     );
     assert_eq!(
         apply_format("plain", &[Value::Number(1.0)]).expect_err("unused arg should fail"),
-        RuntimeError::ValueError {
-            message: "format argument `0` is unused".to_string()
-        }
+        RuntimeError::Format(FormatError::UnusedArgument { index: 0 })
     );
     assert_eq!(
         value_type_name(&Value::Record(Record::default().into())),
@@ -1774,8 +1786,8 @@ async fn helper_functions_are_covered_directly() {
         "unknown name `x`"
     );
     assert_eq!(
-        RuntimeError::TypeError {
-            message: "can't index record".to_string()
+        RuntimeError::CannotIndex {
+            actual: "record".to_string()
         }
         .to_string(),
         "can't index record"

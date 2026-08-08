@@ -1,10 +1,12 @@
 use lashlang::{ExecutionHostError, Value as LashlangValue};
 
+use crate::LashlangHostError;
+
 pub fn lashlang_value_to_json(
     value: &LashlangValue,
 ) -> Result<serde_json::Value, ExecutionHostError> {
     serde_json::to_value(value)
-        .map_err(|err| ExecutionHostError::new(format!("failed to serialize value: {err}")))
+        .map_err(|source| LashlangHostError::SerializeValue { source }.into())
 }
 
 pub fn protocol_tool_reply_to_lashlang_value(
@@ -16,7 +18,10 @@ pub fn protocol_tool_reply_to_lashlang_value(
     if is_success {
         Ok(lashlang::from_json(value))
     } else {
-        Err(ExecutionHostError::new(json_error_message(value)))
+        Err(LashlangHostError::ToolRejected {
+            message: json_error_message(value),
+        }
+        .into())
     }
 }
 
@@ -27,7 +32,10 @@ pub fn protocol_tool_output_to_lashlang_value(
     if output.is_success() {
         Ok(lashlang::from_json(value))
     } else {
-        Err(ExecutionHostError::new(json_error_message(value)))
+        Err(LashlangHostError::ToolRejected {
+            message: json_error_message(value),
+        }
+        .into())
     }
 }
 
@@ -60,9 +68,10 @@ fn duration_value_ms(value: &LashlangValue) -> Result<u64, ExecutionHostError> {
             Ok(value.round() as u64)
         }
         LashlangValue::String(value) => parse_duration_ms(value),
-        other => Err(ExecutionHostError::new(format!(
-            "`sleep for` expects a non-negative millisecond number or duration string, got {other}"
-        ))),
+        other => Err(LashlangHostError::InvalidSleepDuration {
+            actual: other.to_string(),
+        }
+        .into()),
     }
 }
 
@@ -73,14 +82,11 @@ fn deadline_value_ms(value: &LashlangValue) -> Result<u64, ExecutionHostError> {
         }
         LashlangValue::String(value) => chrono::DateTime::parse_from_rfc3339(value)
             .map(|deadline| deadline.timestamp_millis().max(0) as u64)
-            .map_err(|err| {
-                ExecutionHostError::new(format!(
-                    "`sleep until` expects RFC3339 text or Unix epoch milliseconds: {err}"
-                ))
-            }),
-        other => Err(ExecutionHostError::new(format!(
-            "`sleep until` expects RFC3339 text or Unix epoch milliseconds, got {other}"
-        ))),
+            .map_err(|source| LashlangHostError::InvalidSleepDeadline { source }.into()),
+        other => Err(LashlangHostError::InvalidSleepDeadlineValue {
+            actual: other.to_string(),
+        }
+        .into()),
     }
 }
 
@@ -97,14 +103,19 @@ fn parse_duration_ms(value: &str) -> Result<u64, ExecutionHostError> {
     } else {
         (value, 1.0)
     };
-    let parsed = number
-        .trim()
-        .parse::<f64>()
-        .map_err(|err| ExecutionHostError::new(format!("invalid duration `{value}`: {err}")))?;
+    let parsed = number.trim().parse::<f64>().map_err(|source| {
+        let error: ExecutionHostError = LashlangHostError::InvalidDurationNumber {
+            value: value.to_string(),
+            source,
+        }
+        .into();
+        error
+    })?;
     if !parsed.is_finite() || parsed < 0.0 {
-        return Err(ExecutionHostError::new(format!(
-            "invalid duration `{value}`: expected a non-negative finite number"
-        )));
+        return Err(LashlangHostError::InvalidDurationValue {
+            value: value.to_string(),
+        }
+        .into());
     }
     Ok((parsed * multiplier).round() as u64)
 }

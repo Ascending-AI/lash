@@ -60,6 +60,8 @@ enum ExecuteError {
     #[error(transparent)]
     Parse(#[from] lashlang::ParseError),
     #[error(transparent)]
+    Link(#[from] lashlang::LinkError),
+    #[error(transparent)]
     Runtime(#[from] lashlang::RuntimeError),
 }
 
@@ -70,12 +72,7 @@ async fn execute<H: ExecutionHost>(
 ) -> Result<ExecutionOutcome, ExecuteError> {
     let compiled = if source.contains("tools.") {
         let program = parse(source)?;
-        let linked =
-            lashlang::LinkedModule::link(program, property_host_environment()).map_err(|err| {
-                ExecuteError::Runtime(lashlang::RuntimeError::ValueError {
-                    message: err.to_string(),
-                })
-            })?;
+        let linked = lashlang::LinkedModule::link(program, property_host_environment())?;
         lashlang::compile_linked(&linked)
     } else {
         lashlang::compile(source)?

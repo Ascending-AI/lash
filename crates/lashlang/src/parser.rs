@@ -1634,10 +1634,8 @@ impl Parser {
                 self.bump();
                 Ok(TypeExpr::Enum(vec![value]))
             }
-            // A bare `{` in type position is the classic "forgot the
-            // `Type` keyword" mistake (`foo: { ok: bool }` instead of
-            // `foo: Type { ok: bool }`). Surface a targeted diagnostic
-            // rather than the generic "expected type expression" shrug.
+            // Nested object types support the concise `{ field: type }` form;
+            // top-level type literals still use `Type { field: type }`.
             TokenKind::LBrace => self.parse_type_object_body(),
             TokenKind::Ident(_name) => {
                 let name = self.parse_type_name()?;

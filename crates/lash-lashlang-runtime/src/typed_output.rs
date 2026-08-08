@@ -15,8 +15,10 @@ use serde_json::Value;
 ///
 /// Returns `Ok(None)` when `output` is absent or `null` (the tool falls back
 /// to its untyped default).
-pub fn parse_output_schema(value: Option<&Value>) -> Result<Option<Value>, String> {
-    lashlang::parse_output_schema(value)
+pub fn parse_output_schema(
+    value: Option<&Value>,
+) -> Result<Option<Value>, crate::LashlangRuntimeError> {
+    lashlang::parse_output_schema(value).map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -63,7 +65,7 @@ mod tests {
     fn output_schema_rejects_lash_type_without_type_field() {
         let wrapped = json!({ LASH_TYPE_KEY: {"properties": {}} });
         let err = parse_output_schema(Some(&wrapped)).expect_err("missing type");
-        assert!(err.contains("type"), "error: {err}");
+        assert!(err.to_string().contains("type"), "error: {err}");
     }
 
     #[test]

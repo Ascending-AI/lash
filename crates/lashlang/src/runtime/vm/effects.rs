@@ -95,9 +95,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     }))
                     .await
                     .and_then(|result| result.into_value("module operation"))
-                    .map_err(|error| RuntimeError::ValueError {
-                        message: format!("`?` unwrapped failed module operation: {error}"),
-                    })?;
+                    .map_err(|source| RuntimeError::UnwrappedModuleOperationFailed { source })?;
                 self.stack.push(value);
             }
             VmEffect::ResourceOperationBatch(batch) => {
@@ -105,30 +103,22 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             VmEffect::StartProcess { process, keys } => {
                 let args = self.drain_record_from_stack(keys)?;
-                let start_site = active.map(lashlang_execution_call_site).ok_or_else(|| {
-                    RuntimeError::ValueError {
-                        message: "`start` requires a deterministic lashlang execution site"
-                            .to_string(),
-                    }
-                })?;
+                let start_site = active
+                    .map(lashlang_execution_call_site)
+                    .ok_or(RuntimeError::StartSiteMissing)?;
                 let process_name = self.chunk.names[process].text.to_string();
-                let module_context =
-                    self.chunk
-                        .module_context
-                        .as_ref()
-                        .ok_or_else(|| RuntimeError::ValueError {
-                            message: "`start` requires a linked lashlang module artifact"
-                                .to_string(),
-                        })?;
+                let module_context = self
+                    .chunk
+                    .module_context
+                    .as_ref()
+                    .ok_or(RuntimeError::LinkedArtifactMissing)?;
                 let process_ref = module_context
                     .process_refs
                     .get(&process_name)
                     .cloned()
-                    .ok_or_else(|| RuntimeError::ValueError {
-                        message: format!(
-                            "linked lashlang module `{}` does not export process `{process_name}`",
-                            module_context.module_ref
-                        ),
+                    .ok_or_else(|| RuntimeError::LinkedProcessNotExported {
+                        module_ref: module_context.module_ref.clone(),
+                        name: process_name.clone(),
                     })?;
                 let child_module_ref = module_context.module_ref.clone();
                 let child_host_requirements_ref = module_context.host_requirements_ref.clone();
@@ -144,9 +134,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     })))
                     .await
                     .and_then(|result| result.into_value("process start"))
-                    .map_err(|err| RuntimeError::ValueError {
-                        message: format!("process start failed: {err}"),
-                    })?;
+                    .map_err(|source| RuntimeError::ProcessStartFailed { source })?;
                 if let (Some(active), Some(process_id)) =
                     (active, process_handle_id_from_value(&value))
                 {
@@ -173,9 +161,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .perform(AbilityOp::Sleep(Sleep { kind, value }))
                     .await
                     .and_then(|result| result.into_value("sleep"))
-                    .map_err(|err| RuntimeError::ValueError {
-                        message: format!("sleep failed: {err}"),
-                    })?;
+                    .map_err(|source| RuntimeError::SleepFailed { source })?;
                 self.last_value = Some(Value::Null);
                 self.stack.push(Value::Null);
             }
@@ -187,9 +173,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     })
                     .await
                     .and_then(|result| result.into_value("wait_signal"))
-                    .map_err(|err| RuntimeError::ValueError {
-                        message: format!("wait_signal failed: {err}"),
-                    })?;
+                    .map_err(|source| RuntimeError::WaitSignalFailed { source })?;
                 self.stack.push(value);
             }
             VmEffect::SignalRun { name } => {
@@ -203,9 +187,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     }))
                     .await
                     .and_then(|result| result.into_value("signal_run"))
-                    .map_err(|err| RuntimeError::ValueError {
-                        message: format!("signal_run failed: {err}"),
-                    })?;
+                    .map_err(|source| RuntimeError::SignalRunFailed { source })?;
                 self.last_value = Some(Value::Null);
                 self.stack.push(Value::Null);
             }
@@ -221,9 +203,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .perform(AbilityOp::Cancel(handle))
                     .await
                     .and_then(|result| result.into_value("cancel"))
-                    .map_err(|err| RuntimeError::ValueError {
-                        message: format!("cancel failed: {err}"),
-                    })?;
+                    .map_err(|source| RuntimeError::CancelFailed { source })?;
                 self.last_value = Some(value.clone());
                 self.stack.push(value);
             }
@@ -235,9 +215,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         value: value.clone(),
                     }))
                     .await
-                    .map_err(|err| RuntimeError::ValueError {
-                        message: format!("process event failed: {err}"),
-                    })?;
+                    .map_err(|source| RuntimeError::ProcessEventFailed { source })?;
                 self.last_value = Some(value.clone());
                 self.stack.push(value);
             }
@@ -246,9 +224,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.host
                     .perform(AbilityOp::Print(value))
                     .await
-                    .map_err(|err| RuntimeError::ValueError {
-                        message: format!("print failed: {err}"),
-                    })?;
+                    .map_err(|source| RuntimeError::PrintFailed { source })?;
                 self.last_value = Some(Value::Null);
                 self.stack.push(Value::Null);
             }
@@ -259,9 +235,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .perform(AbilityOp::Finish(value))
                     .await
                     .and_then(|result| result.into_value("finish"))
-                    .map_err(|err| RuntimeError::ValueError {
-                        message: format!("finish failed: {err}"),
-                    })?;
+                    .map_err(|source| RuntimeError::FinishFailed { source })?;
                 return Ok(Some(match self.mode {
                     super::control::VmMode::Foreground => VmOutcome::Finished(value),
                     super::control::VmMode::Process => VmOutcome::ProcessFinished(value),
@@ -274,9 +248,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .perform(AbilityOp::Fail(value))
                     .await
                     .and_then(|result| result.into_value("fail"))
-                    .map_err(|err| RuntimeError::ValueError {
-                        message: format!("fail failed: {err}"),
-                    })?;
+                    .map_err(|source| RuntimeError::FailFailed { source })?;
                 return Ok(Some(VmOutcome::ProcessFailed(value)));
             }
         }
@@ -297,16 +269,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
             let receiver = values
                 .get(leaf.receiver_stack_index)
                 .cloned()
-                .ok_or_else(|| RuntimeError::ValueError {
-                    message: "resource operation batch receiver index out of range".to_string(),
-                })?;
+                .ok_or(RuntimeError::ResourceBatchReceiverOutOfRange)?;
             let args_start = leaf.receiver_stack_index + 1;
             let args_end = args_start + leaf.argc;
             let args = values
                 .get(args_start..args_end)
-                .ok_or_else(|| RuntimeError::ValueError {
-                    message: "resource operation batch argument index out of range".to_string(),
-                })?
+                .ok_or(RuntimeError::ResourceBatchArgumentOutOfRange)?
                 .to_vec();
             operations.push(ResourceOperation {
                 receiver,
@@ -326,18 +294,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let result = match result {
             Ok(AbilityResult::ResourceOperationBatch(result)) => result,
             Ok(AbilityResult::Value(_)) | Ok(AbilityResult::Unit) => {
-                let error = RuntimeError::ValueError {
-                    message: "resource operation batch returned invalid result".to_string(),
-                };
+                let error = RuntimeError::InvalidResourceBatchResult;
                 for active in active_nodes.iter().flatten() {
                     self.fail_lashlang_execution(active, error.to_string());
                 }
                 return Err(error);
             }
             Err(error) => {
-                let runtime_error = RuntimeError::ValueError {
-                    message: format!("resource operation batch failed: {error}"),
-                };
+                let runtime_error = RuntimeError::ResourceBatchFailed { source: error };
                 for active in active_nodes.iter().flatten() {
                     self.fail_lashlang_execution(active, runtime_error.to_string());
                 }
@@ -345,12 +309,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
         };
         if result.results.len() != batch.leaves.len() {
-            let error = RuntimeError::ValueError {
-                message: format!(
-                    "resource operation batch returned {} results for {} operations",
-                    result.results.len(),
-                    batch.leaves.len()
-                ),
+            let error = RuntimeError::ResourceBatchResultCount {
+                actual: result.results.len(),
+                expected: batch.leaves.len(),
             };
             for active in active_nodes.iter().flatten() {
                 self.fail_lashlang_execution(active, error.to_string());
@@ -376,7 +337,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 ResourceOperationResult::Error(error) => {
                     if leaf.unwrap {
                         if first_unwrapped_error.is_none() {
-                            first_unwrapped_error = Some((error.to_string(), leaf.source_span));
+                            first_unwrapped_error = Some((error.clone(), leaf.source_span));
                         }
                         if let Some(active) = active {
                             self.fail_lashlang_execution(active, error.to_string());
@@ -392,11 +353,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
         }
 
-        if let Some((error, span)) = first_unwrapped_error {
+        if let Some((source, span)) = first_unwrapped_error {
             self.pending_error_span = span;
-            return Err(RuntimeError::ValueError {
-                message: format!("`?` unwrapped failed module operation: {error}"),
-            });
+            return Err(RuntimeError::UnwrappedModuleOperationFailed { source });
         }
 
         let mut value = build_aggregate_await_shape(&batch.shape, &values, &leaf_values, self)?;
@@ -473,8 +432,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .perform(AbilityOp::Await(Value::Record(handles)))
                 .await
                 .and_then(|result| result.into_value("await"))
-                .map_err(|error| RuntimeError::ValueError {
-                    message: format!("`?` unwrapped failed tool result: {error}"),
+                .map_err(|error| RuntimeError::UnwrappedToolResultFailed {
+                    message: error.to_string(),
                 }),
             Value::Tuple(_) | Value::List(_) | Value::Record(_) => {
                 unwrap_tool_result(self.await_value(handle).await)
@@ -484,8 +443,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .perform(AbilityOp::Await(handle))
                 .await
                 .and_then(|result| result.into_value("await"))
-                .map_err(|error| RuntimeError::ValueError {
-                    message: format!("`?` unwrapped failed tool result: {error}"),
+                .map_err(|error| RuntimeError::UnwrappedToolResultFailed {
+                    message: error.to_string(),
                 }),
         }
     }
@@ -501,17 +460,11 @@ fn build_aggregate_await_shape<H: ExecutionHost>(
         CompiledAggregateAwaitShape::BatchLeaf(index) => leaf_values
             .get(*index)
             .cloned()
-            .ok_or_else(|| RuntimeError::ValueError {
-                message: "aggregate await leaf index out of range".to_string(),
-            }),
-        CompiledAggregateAwaitShape::Value(index) => {
-            stack_values
-                .get(*index)
-                .cloned()
-                .ok_or_else(|| RuntimeError::ValueError {
-                    message: "aggregate await value index out of range".to_string(),
-                })
-        }
+            .ok_or(RuntimeError::AggregateAwaitLeafOutOfRange),
+        CompiledAggregateAwaitShape::Value(index) => stack_values
+            .get(*index)
+            .cloned()
+            .ok_or(RuntimeError::AggregateAwaitValueOutOfRange),
         CompiledAggregateAwaitShape::Tuple(values) => values
             .iter()
             .map(|value| build_aggregate_await_shape(value, stack_values, leaf_values, vm))
@@ -525,9 +478,7 @@ fn build_aggregate_await_shape<H: ExecutionHost>(
         CompiledAggregateAwaitShape::Record { keys, values } => {
             let key_indices = &vm.chunk.key_lists[*keys];
             if key_indices.len() != values.len() {
-                return Err(RuntimeError::ValueError {
-                    message: "aggregate await record shape is invalid".to_string(),
-                });
+                return Err(RuntimeError::InvalidAggregateAwaitRecordShape);
             }
             let mut record = record_with_capacity(values.len());
             for (key, value_shape) in key_indices.iter().zip(values.iter()) {

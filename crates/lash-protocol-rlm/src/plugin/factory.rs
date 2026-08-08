@@ -203,7 +203,7 @@ impl RlmProtocolPluginFactory {
         // session below, which invokes this factory's `build` (the plugin host
         // contains this factory) and reads the recorded value.
         self.record_process_lifecycle(process_lifecycle_available)
-            .map_err(PluginError::Registration)?;
+            .map_err(|err| PluginError::Registration(err.to_string()))?;
         let plugins = plugin_host.build_session_with_parent(
             &request.session_id,
             None,
@@ -217,10 +217,10 @@ impl RlmProtocolPluginFactory {
         let config = rlm_protocol_config(self.config.clone(), process_lifecycle_available);
         let surface = rlm_lashlang_surface(&config, process_lifecycle_available)
             .with_plugin_extensions(plugin_host.extensions())
-            .map_err(PluginError::Registration)?;
+            .map_err(|err| PluginError::Registration(err.to_string()))?;
         let host_environment = surface
             .host_environment(&tool_catalog)
-            .map_err(PluginError::Registration)?;
+            .map_err(|err| PluginError::Registration(err.to_string()))?;
         Ok(LashlangCompileSurface {
             host_environment,
             tool_catalog,
@@ -291,7 +291,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
         let config = rlm_protocol_config(self.config.clone(), process_lifecycle);
         let surface = rlm_lashlang_surface(&config, process_lifecycle)
             .with_plugin_extensions(ctx.extensions())
-            .map_err(PluginError::Registration)?;
+            .map_err(|err| PluginError::Registration(err.to_string()))?;
         let engine = LashlangProcessEngine::new(Arc::clone(&self.artifact_store), surface)
             .with_execution_trace(
                 self.lashlang_execution_trace_config.sink.clone(),
@@ -308,7 +308,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
             lashlang::LashlangHostCatalog::new(),
         )
         .with_plugin_extensions(&ctx.extensions)
-        .map_err(PluginError::Registration)?;
+        .map_err(|err| PluginError::Registration(err.to_string()))?;
         Ok(Arc::new(RlmProtocolPlugin {
             config,
             projection_resolver: Arc::clone(&self.projection_resolver),

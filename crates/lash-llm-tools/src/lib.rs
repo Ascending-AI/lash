@@ -93,7 +93,8 @@ impl LlmToolsProvider {
     async fn llm_query(&self, args: &Value, context: &ToolContext<'_>) -> Result<Value, String> {
         let task = required_string(args, "task")?;
         let inputs = args.get("inputs").cloned().unwrap_or(Value::Null);
-        let output_schema = lash_lashlang_runtime::parse_output_schema(args.get("output"))?;
+        let output_schema = lash_lashlang_runtime::parse_output_schema(args.get("output"))
+            .map_err(|err| err.to_string())?;
         let session_model = context
             .sessions()
             .model()

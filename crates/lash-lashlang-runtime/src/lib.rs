@@ -2,6 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use sha2::{Digest, Sha256};
 
+mod error;
+pub use error::{LashlangHostError, LashlangProcessFailureCode, LashlangRuntimeError};
+
 #[cfg(feature = "testing")]
 pub mod testing;
 
@@ -85,11 +88,14 @@ impl LashlangToolBinding {
         self
     }
 
-    pub fn executable_for(&self, tool_name: &str) -> Result<ResolvedLashlangToolBinding, String> {
+    pub fn executable_for(
+        &self,
+        tool_name: &str,
+    ) -> Result<ResolvedLashlangToolBinding, LashlangRuntimeError> {
         if self.module_path.is_empty() {
-            return Err(format!(
-                "tool `{tool_name}` is missing an explicit Lashlang module path"
-            ));
+            return Err(LashlangRuntimeError::MissingToolModulePath {
+                tool: tool_name.to_string(),
+            });
         }
         for segment in &self.module_path {
             validate_lashlang_identifier(tool_name, "module path segment", segment)?;
@@ -98,8 +104,8 @@ impl LashlangToolBinding {
             .operation
             .as_deref()
             .filter(|operation| !operation.trim().is_empty())
-            .ok_or_else(|| {
-                format!("tool `{tool_name}` is missing an explicit Lashlang operation name")
+            .ok_or_else(|| LashlangRuntimeError::MissingToolOperation {
+                tool: tool_name.to_string(),
             })?;
         validate_lashlang_identifier(tool_name, "operation name", operation)?;
         let authority_type = self
@@ -118,14 +124,14 @@ impl LashlangToolBinding {
 
     pub fn required_for_remote(
         manifest: &lash_core::ToolManifest,
-    ) -> Result<ResolvedLashlangToolBinding, String> {
+    ) -> Result<ResolvedLashlangToolBinding, LashlangRuntimeError> {
         required_tool_lashlang_executable(manifest)
     }
 
     pub fn required_executable_for_remote(
         &self,
         tool_name: &str,
-    ) -> Result<ResolvedLashlangToolBinding, String> {
+    ) -> Result<ResolvedLashlangToolBinding, LashlangRuntimeError> {
         self.executable_for(tool_name)
     }
 }
@@ -161,56 +167,62 @@ fn default_authority_type(module_path: &[String]) -> String {
         .unwrap_or_else(|| "Tool".to_string())
 }
 
-fn validate_lashlang_identifier(tool_name: &str, label: &str, value: &str) -> Result<(), String> {
+fn validate_lashlang_identifier(
+    tool_name: &str,
+    label: &str,
+    value: &str,
+) -> Result<(), LashlangRuntimeError> {
     let value = value.trim();
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
-        return Err(format!("tool `{tool_name}` has an empty Lashlang {label}"));
+        return Err(LashlangRuntimeError::EmptyIdentifier {
+            tool: tool_name.to_string(),
+            label: label.to_string(),
+        });
     };
     if !(first == '_' || first.is_ascii_alphabetic()) {
-        return Err(format!(
-            "tool `{tool_name}` has invalid Lashlang {label} `{value}`"
-        ));
+        return Err(LashlangRuntimeError::InvalidIdentifier {
+            tool: tool_name.to_string(),
+            label: label.to_string(),
+            value: value.to_string(),
+        });
     }
     if !chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric()) {
-        return Err(format!(
-            "tool `{tool_name}` has invalid Lashlang {label} `{value}`"
-        ));
+        return Err(LashlangRuntimeError::InvalidIdentifier {
+            tool: tool_name.to_string(),
+            label: label.to_string(),
+            value: value.to_string(),
+        });
     }
     Ok(())
 }
 
 pub fn tool_lashlang_binding(
     manifest: &lash_core::ToolManifest,
-) -> Result<Option<LashlangToolBinding>, String> {
+) -> Result<Option<LashlangToolBinding>, LashlangRuntimeError> {
     manifest
         .bindings
         .get(LASHLANG_TOOL_BINDING_KEY)
         .cloned()
         .map(serde_json::from_value)
         .transpose()
-        .map_err(|err| {
-            format!(
-                "tool `{}` has invalid `{LASHLANG_TOOL_BINDING_KEY}` binding: {err}",
-                manifest.name
-            )
+        .map_err(|source| LashlangRuntimeError::InvalidToolBinding {
+            tool: manifest.name.clone(),
+            source,
         })
 }
 
 pub fn required_tool_lashlang_binding(
     manifest: &lash_core::ToolManifest,
-) -> Result<LashlangToolBinding, String> {
-    tool_lashlang_binding(manifest)?.ok_or_else(|| {
-        format!(
-            "tool `{}` is missing an explicit `{LASHLANG_TOOL_BINDING_KEY}` binding",
-            manifest.name
-        )
+) -> Result<LashlangToolBinding, LashlangRuntimeError> {
+    tool_lashlang_binding(manifest)?.ok_or_else(|| LashlangRuntimeError::MissingToolBinding {
+        tool: manifest.name.clone(),
     })
 }
 
 pub fn required_tool_lashlang_executable(
     manifest: &lash_core::ToolManifest,
-) -> Result<ResolvedLashlangToolBinding, String> {
+) -> Result<ResolvedLashlangToolBinding, LashlangRuntimeError> {
     required_tool_lashlang_binding(manifest)?.executable_for(&manifest.name)
 }
 
@@ -315,12 +327,10 @@ impl LashlangSurface {
     pub fn with_plugin_extensions(
         mut self,
         extensions: &lash_core::PluginExtensions,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, LashlangRuntimeError> {
         for payload in extensions.payloads(LASHLANG_SURFACE_EXTENSION_ID) {
             let contribution: LashlangSurfaceContribution = serde_json::from_value(payload.clone())
-                .map_err(|err| {
-                    format!("invalid `{LASHLANG_SURFACE_EXTENSION_ID}` extension payload: {err}")
-                })?;
+                .map_err(|source| LashlangRuntimeError::InvalidSurfaceExtension { source })?;
             self.abilities = self.abilities.union(contribution.abilities);
             self.language_features = self.language_features.union(contribution.language_features);
             self.resources.extend(contribution.resources);
@@ -331,7 +341,7 @@ impl LashlangSurface {
     pub fn host_environment(
         &self,
         catalog: &lash_core::ToolCatalog,
-    ) -> Result<LashlangHostEnvironment, String> {
+    ) -> Result<LashlangHostEnvironment, LashlangRuntimeError> {
         lashlang_host_environment_from_tool_catalog(
             catalog,
             self.abilities,
@@ -346,7 +356,7 @@ pub fn lashlang_host_environment_from_tool_catalog(
     abilities: LashlangAbilities,
     language_features: LashlangLanguageFeatures,
     host_resources: LashlangHostCatalog,
-) -> Result<LashlangHostEnvironment, String> {
+) -> Result<LashlangHostEnvironment, LashlangRuntimeError> {
     let mut resources = lashlang_resources_from_tool_catalog(catalog)?;
     resources.extend(host_resources);
     if abilities.triggers {
@@ -360,7 +370,7 @@ pub fn lashlang_host_environment_from_tool_catalog(
 
 pub fn lashlang_resources_from_tool_catalog(
     catalog: &lash_core::ToolCatalog,
-) -> Result<LashlangHostCatalog, String> {
+) -> Result<LashlangHostCatalog, LashlangRuntimeError> {
     let mut host_catalog = LashlangHostCatalog::new();
     // Every catalog member is callable; membership is the execution gate.
     for entry in catalog.tools.iter() {
@@ -417,36 +427,39 @@ fn lashlang_tool_contract_types(
 pub fn lashlang_host_environment_satisfies_requirements(
     required: &lashlang::HostRequirements,
     current: &LashlangHostEnvironment,
-) -> Result<(), String> {
+) -> Result<(), LashlangRuntimeError> {
     let abilities = required.abilities;
     let current_abilities = current.abilities;
     if abilities.processes && !current_abilities.processes {
-        return Err("processes are not available".to_string());
+        return Err(LashlangRuntimeError::ProcessesUnavailable);
     }
     if abilities.sleep && !current_abilities.sleep {
-        return Err("sleep is not available".to_string());
+        return Err(LashlangRuntimeError::SleepUnavailable);
     }
     if abilities.process_signals && !current_abilities.process_signals {
-        return Err("process signals are not available".to_string());
+        return Err(LashlangRuntimeError::ProcessSignalsUnavailable);
     }
     if abilities.triggers && !current_abilities.triggers {
-        return Err("triggers are not available".to_string());
+        return Err(LashlangRuntimeError::TriggersUnavailable);
     }
     if required.language_features.label_annotations && !current.language_features.label_annotations
     {
-        return Err("label annotations are not available".to_string());
+        return Err(LashlangRuntimeError::LabelAnnotationsUnavailable);
     }
 
     for (_, module) in required.resources.module_instances() {
         let current_module = current
             .resources
             .resolve_module_path(&module.path)
-            .ok_or_else(|| format!("module `{}` is not available", module.alias))?;
+            .ok_or_else(|| LashlangRuntimeError::ModuleUnavailable {
+                module: module.alias.clone(),
+            })?;
         if current_module.resource_type != module.resource_type {
-            return Err(format!(
-                "module `{}` has type `{}`, expected `{}`",
-                module.alias, current_module.resource_type, module.resource_type
-            ));
+            return Err(LashlangRuntimeError::ModuleTypeMismatch {
+                module: module.alias.clone(),
+                actual: current_module.resource_type.to_string(),
+                expected: module.resource_type.clone(),
+            });
         }
         for (operation, required_binding) in &module.operations {
             match current.resources.resolve_module_operation(
@@ -456,18 +469,18 @@ pub fn lashlang_host_environment_satisfies_requirements(
             ) {
                 Some(current_binding) if current_binding == required_binding => {}
                 Some(current_binding) => {
-                    return Err(format!(
-                        "module `{}` operation `{operation}` resolves to `{}`, expected `{}`",
-                        module.alias,
-                        current_binding.host_operation,
-                        required_binding.host_operation
-                    ));
+                    return Err(LashlangRuntimeError::ModuleOperationMismatch {
+                        module: module.alias.clone(),
+                        operation: operation.clone(),
+                        actual: current_binding.host_operation.clone(),
+                        expected: required_binding.host_operation.clone(),
+                    });
                 }
                 None => {
-                    return Err(format!(
-                        "module `{}` does not expose operation `{operation}`",
-                        module.alias
-                    ));
+                    return Err(LashlangRuntimeError::ModuleOperationUnavailable {
+                        module: module.alias.clone(),
+                        operation: operation.clone(),
+                    });
                 }
             }
         }
@@ -475,65 +488,75 @@ pub fn lashlang_host_environment_satisfies_requirements(
 
     for (resource_type, required_type) in required.resources.resource_types() {
         if !current.resources.has_resource_type(resource_type) {
-            return Err(format!("resource type `{resource_type}` is not available"));
+            return Err(LashlangRuntimeError::ResourceTypeUnavailable {
+                resource_type: resource_type.to_string(),
+            });
         }
         for (operation, required_binding) in &required_type.operations {
             let current_binding = current
                 .resources
                 .resolve_operation(resource_type, operation)
-                .ok_or_else(|| {
-                    format!(
-                        "resource type `{resource_type}` does not expose operation `{operation}`"
-                    )
+                .ok_or_else(|| LashlangRuntimeError::ResourceOperationUnavailable {
+                    resource_type: resource_type.to_string(),
+                    operation: operation.clone(),
                 })?;
             if current_binding.input_ty != required_binding.input_ty {
-                return Err(format!(
-                    "resource type `{resource_type}` operation `{operation}` has incompatible input type"
-                ));
+                return Err(LashlangRuntimeError::ResourceInputMismatch {
+                    resource_type: resource_type.to_string(),
+                    operation: operation.clone(),
+                });
             }
             if current_binding.output_ty != required_binding.output_ty {
-                return Err(format!(
-                    "resource type `{resource_type}` operation `{operation}` has incompatible output type"
-                ));
+                return Err(LashlangRuntimeError::ResourceOutputMismatch {
+                    resource_type: resource_type.to_string(),
+                    operation: operation.clone(),
+                });
             }
         }
     }
     for (name, required_data_type) in required.resources.named_data_types() {
-        let current_data_type = current
-            .resources
-            .resolve_named_data_type(name)
-            .ok_or_else(|| format!("host data type `{name}` is not available"))?;
+        let current_data_type =
+            current
+                .resources
+                .resolve_named_data_type(name)
+                .ok_or_else(|| LashlangRuntimeError::HostDataTypeUnavailable {
+                    name: name.to_string(),
+                })?;
         if current_data_type != required_data_type {
-            return Err(format!(
-                "host data type `{name}` has incompatible structure"
-            ));
+            return Err(LashlangRuntimeError::HostDataTypeMismatch {
+                name: name.to_string(),
+            });
         }
     }
     for (path, required_binding) in required.resources.value_constructors() {
         let current_binding = current
             .resources
             .resolve_value_constructor(&path.split('.').collect::<Vec<_>>())
-            .ok_or_else(|| format!("value constructor `{path}` is not available"))?;
+            .ok_or_else(|| LashlangRuntimeError::ValueConstructorUnavailable {
+                path: path.to_string(),
+            })?;
         if current_binding.input_ty != required_binding.input_ty {
-            return Err(format!(
-                "value constructor `{path}` has incompatible input type"
-            ));
+            return Err(LashlangRuntimeError::ValueConstructorInputMismatch {
+                path: path.to_string(),
+            });
         }
         if current_binding.output_ty != required_binding.output_ty {
-            return Err(format!(
-                "value constructor `{path}` has incompatible output type"
-            ));
+            return Err(LashlangRuntimeError::ValueConstructorOutputMismatch {
+                path: path.to_string(),
+            });
         }
     }
     for (source_ty, required_binding) in required.resources.trigger_sources() {
         let current_binding = current
             .resources
             .resolve_trigger_source(source_ty)
-            .ok_or_else(|| format!("trigger source type `{source_ty}` is not available"))?;
+            .ok_or_else(|| LashlangRuntimeError::TriggerSourceUnavailable {
+                source_type: source_ty.to_string(),
+            })?;
         if current_binding != required_binding {
-            return Err(format!(
-                "trigger source type `{source_ty}` has incompatible event type"
-            ));
+            return Err(LashlangRuntimeError::TriggerSourceMismatch {
+                source_type: source_ty.to_string(),
+            });
         }
     }
 
@@ -630,35 +653,35 @@ pub async fn prepare_lashlang_process_start(
     artifact_store: Arc<dyn LashlangArtifactStore>,
     parent_start_seed: &str,
     start: lashlang::ProcessStart,
-) -> Result<PreparedLashlangProcessStart, String> {
+) -> Result<PreparedLashlangProcessStart, LashlangRuntimeError> {
     let display_name = Some(start.process_name.clone());
     let artifact = artifact_store
         .get_module_artifact(&start.module_ref)
         .await
-        .map_err(|err| format!("failed to load lashlang module artifact: {err}"))?
-        .ok_or_else(|| {
-            format!(
-                "missing lashlang module artifact `{}` for process `{}`",
-                start.module_ref, start.process_name
-            )
+        .map_err(|source| LashlangRuntimeError::LoadArtifact { source })?
+        .ok_or_else(|| LashlangRuntimeError::MissingArtifact {
+            module_ref: start.module_ref.to_string(),
+            process: start.process_name.clone(),
         })?;
     if artifact.host_requirements_ref != start.host_requirements_ref {
-        return Err(format!(
-            "lashlang module artifact `{}` host requirements mismatch: process requested {}, artifact has {}",
-            start.module_ref, start.host_requirements_ref, artifact.host_requirements_ref
-        ));
+        return Err(LashlangRuntimeError::ArtifactRequirementsMismatch {
+            module_ref: start.module_ref.to_string(),
+            requested: start.host_requirements_ref.to_string(),
+            actual: artifact.host_requirements_ref.to_string(),
+        });
     }
     if artifact.process_ref(&start.process_name) != Some(&start.process_ref) {
-        return Err(format!(
-            "lashlang module artifact `{}` does not export process `{}` as requested ref {:?}",
-            start.module_ref, start.process_name, start.process_ref
-        ));
+        return Err(LashlangRuntimeError::ArtifactProcessMismatch {
+            module_ref: start.module_ref.to_string(),
+            process: start.process_name.clone(),
+            process_ref: format!("{:?}", start.process_ref),
+        });
     }
     let args = match serde_json::to_value(lashlang::Value::Record(Arc::new(start.args)))
-        .map_err(|err| format!("failed to serialize process args: {err}"))?
+        .map_err(|source| LashlangRuntimeError::SerializeProcessArgs { source })?
     {
         serde_json::Value::Object(map) => map,
-        _ => return Err("process args must serialize as a record".to_string()),
+        _ => return Err(LashlangRuntimeError::ProcessArgsNotRecord),
     };
     let signal_event_types = artifact
         .canonical_ir
@@ -675,10 +698,10 @@ pub async fn prepare_lashlang_process_start(
     let identity = lashlang_process_identity(&process_input);
     let process_id =
         deterministic_lashlang_process_id(parent_start_seed, &start.start_site, &process_input)
-            .map_err(|err| format!("failed to derive deterministic process id: {err}"))?;
+            .map_err(|source| LashlangRuntimeError::DeriveProcessId { source })?;
     let process_input = process_input
         .into_process_input()
-        .map_err(|err| format!("failed to encode process input: {err}"))?;
+        .map_err(|source| LashlangRuntimeError::EncodeProcessInput { source })?;
     let registration = lash_core::ProcessRegistration::new(
         process_id,
         process_input,
@@ -736,10 +759,12 @@ pub fn resolve_lashlang_module_operation(
         .resolve_module_operation(&receiver.resource_type, &receiver.alias, operation)
         .map(|binding| binding.host_operation.clone())
         .ok_or_else(|| {
-            lashlang::ExecutionHostError::new(format!(
-                "module `{}` of type `{}` does not expose operation `{operation}`",
-                receiver.alias, receiver.resource_type
-            ))
+            LashlangHostError::ModuleOperationUnavailable {
+                module: receiver.alias.to_string(),
+                resource_type: receiver.resource_type.to_string(),
+                operation: operation.to_string(),
+            }
+            .into()
         })
 }
 
@@ -836,7 +861,7 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
             .for_process_registry(context.process_registry_available());
         let host_environment = surface
             .host_environment(context.tool_catalog())
-            .map_err(lash_core::PluginError::Session)?;
+            .map_err(|err| lash_core::PluginError::Session(err.to_string()))?;
         if let Err(err) = lashlang_host_environment_satisfies_requirements(
             &artifact.host_requirements,
             &host_environment,
@@ -1103,7 +1128,10 @@ mod tests {
         let err = required_tool_lashlang_executable(&tool.manifest)
             .expect_err("missing explicit binding should fail");
 
-        assert!(err.contains("missing an explicit `lashlang.tool` binding"));
+        assert!(
+            err.to_string()
+                .contains("missing an explicit `lashlang.tool` binding")
+        );
     }
 
     #[test]
@@ -1263,7 +1291,10 @@ mod tests {
         let err = required_tool_lashlang_executable(&tool.manifest)
             .expect_err("dotted operation cannot compile as one Lashlang operation");
 
-        assert!(err.contains("invalid Lashlang operation name `update.plan`"));
+        assert!(
+            err.to_string()
+                .contains("invalid Lashlang operation name `update.plan`")
+        );
     }
 
     #[test]

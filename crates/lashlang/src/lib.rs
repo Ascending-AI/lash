@@ -59,18 +59,19 @@ pub use runtime::{
     CompiledLinkedProgram, CompiledProcessCache, CompiledProcessCacheKey, CompiledProgram,
     CompiledProgramCache, CompiledProgramCacheStats, ContinuationError, ExecutableProgram,
     ExecutionEnvironment, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
-    ExecutionScratch, ImageValue, LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY,
-    LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY,
-    LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY, LinkedProgramCache,
-    LinkedProgramCacheError, ListValue, ProcessEvent, ProcessEventKind, ProcessSignal,
-    ProcessStart, ProfileReport, ProfileStat, ProjectedBindingError, ProjectedBindings,
-    ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
-    ProjectedValue, Record, ResourceHandle, ResourceOperation, ResourceOperationBatch,
-    ResourceOperationBatchResult, ResourceOperationResult, RuntimeError, RuntimeFailure, Sleep,
-    SleepKind, Snapshot, State, Value, ValueProjectionContext, ValueProjector, Vm, VmContinuation,
-    VmIteratorContinuation, VmIteratorCursor, VmProfileContinuation, VmRunOutcome, compile,
-    compile_linked, compile_linked_process, compile_module_artifact_process, compile_process,
-    execute, from_json, prewarm, unwrap_type_value,
+    ExecutionScratch, FormatError, ImageValue, LASH_HOST_DESCRIPTOR_TYPE_KEY,
+    LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY,
+    LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY,
+    LinkedProgramCache, LinkedProgramCacheError, ListValue, ProcessEvent, ProcessEventKind,
+    ProcessSignal, ProcessStart, ProfileReport, ProfileStat, ProjectedBindingError,
+    ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest,
+    ProjectedReadResponse, ProjectedValue, Record, ResourceHandle, ResourceOperation,
+    ResourceOperationBatch, ResourceOperationBatchResult, ResourceOperationResult, RuntimeError,
+    RuntimeFailure, Sleep, SleepKind, Snapshot, State, Value, ValueProjectionContext,
+    ValueProjector, Vm, VmContinuation, VmIteratorContinuation, VmIteratorCursor,
+    VmProfileContinuation, VmRunOutcome, compile, compile_linked, compile_linked_process,
+    compile_module_artifact_process, compile_process, execute, from_json, prewarm,
+    unwrap_type_value,
 };
 
 /// Version of the compiled bytecode contract used for durable continuations.
@@ -99,7 +100,7 @@ pub use trigger_manifest::{
     CurrentTriggerKeyManifest, TriggerKeyManifest, TriggerKeyManifestDiff,
     TriggerManifestReplacement,
 };
-pub use typed_output::parse_output_schema;
+pub use typed_output::{OutputSchemaError, parse_output_schema};
 pub use workflow_graph::{
     GraphRenderError, VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION,
     WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowContainer, WorkflowDeclaration, WorkflowEdge,
@@ -176,9 +177,6 @@ fn parse_hint(error: &ParseError) -> Option<&'static str> {
         ParseError::Unexpected { found, .. } if found == "`for`" => Some(
             "`for` is a statement. Put it on its own line, not inside an expression or record literal.",
         ),
-        ParseError::Expected { expected, .. } if expected.contains("type literals must start") => {
-            Some("write nested object types as `Type { field: type }`")
-        }
         ParseError::DeclarativeTriggerRemoved { .. } => Some(
             "construct a host-provided trigger source value and call the trigger registry register operation",
         ),
@@ -188,19 +186,14 @@ fn parse_hint(error: &ParseError) -> Option<&'static str> {
 
 fn runtime_hint(error: &RuntimeError) -> Option<&'static str> {
     match error {
-        RuntimeError::TypeError { message } | RuntimeError::ValueError { message } => {
-            if message.starts_with("`?` unwrapped failed tool result:") {
-                return Some(
-                    "remove `?` and inspect `.ok` or `.error` when you need to handle failures",
-                );
-            }
-            if message.contains("read-only projected binding") {
-                return Some("copy the projected value into a new variable before changing it");
-            }
-            if message == "`validate` requires a Type literal as the second argument" {
-                return Some("pass `Type { ... }` or a variable that holds a Type literal");
-            }
-            None
+        RuntimeError::UnwrappedToolResultFailed { .. } => {
+            Some("remove `?` and inspect `.ok` or `.error` when you need to handle failures")
+        }
+        RuntimeError::ReadOnlyProjectedBinding { .. } => {
+            Some("copy the projected value into a new variable before changing it")
+        }
+        RuntimeError::ValidateTypeLiteralRequired => {
+            Some("pass `Type { ... }` or a variable that holds a Type literal")
         }
         _ => None,
     }

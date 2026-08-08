@@ -753,7 +753,7 @@ impl HostBridge<'_> {
                 start,
             )
             .await
-            .map_err(ExecutionHostError::new)?
+            .map_err(|err| ExecutionHostError::new(err.to_string()))?
         };
         let reply = {
             let _phase = self.ctx.named_phase("rlm_process.start");

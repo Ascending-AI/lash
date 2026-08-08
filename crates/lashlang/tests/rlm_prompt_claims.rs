@@ -127,6 +127,8 @@ enum ExecuteError {
     #[error(transparent)]
     Parse(#[from] lashlang::ParseError),
     #[error(transparent)]
+    Link(#[from] lashlang::LinkError),
+    #[error(transparent)]
     Runtime(#[from] lashlang::RuntimeError),
 }
 
@@ -141,12 +143,7 @@ async fn execute<H: ExecutionHost>(
     {
         lashlang::compile_linked(&linked)
     } else if program_contains_start_process(&program.main) {
-        let linked =
-            lashlang::LinkedModule::link(program, test_host_environment()).map_err(|err| {
-                ExecuteError::Runtime(lashlang::RuntimeError::ValueError {
-                    message: err.to_string(),
-                })
-            })?;
+        let linked = lashlang::LinkedModule::link(program, test_host_environment())?;
         lashlang::compile_linked(&linked)
     } else {
         lashlang::compile(source)?

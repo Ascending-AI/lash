@@ -18,8 +18,10 @@ pub(crate) fn expect_arg_count(
     if values.len() == expected {
         Ok(())
     } else {
-        Err(RuntimeError::TypeError {
-            message: format!("`{name}` takes {expected} arg(s), got {}", values.len()),
+        Err(RuntimeError::InvalidArgumentCount {
+            name: name.to_string(),
+            expected: expected.to_string(),
+            actual: values.len(),
         })
     }
 }
@@ -41,20 +43,13 @@ pub(crate) async fn execute_intrinsic(
                 Value::Tuple(values) => Ok(Value::Bool(values.is_empty())),
                 Value::List(values) => Ok(Value::Bool(values.is_empty())),
                 Value::Record(record) => Ok(Value::Bool(record.is_empty())),
-                Value::Projected(value) => {
-                    value
-                        .empty()
-                        .await
-                        .map(Value::Bool)
-                        .ok_or_else(|| RuntimeError::TypeError {
-                            message: "`empty` requires a string, tuple, list, record, or null"
-                                .to_string(),
-                        })
-                }
+                Value::Projected(value) => value
+                    .empty()
+                    .await
+                    .map(Value::Bool)
+                    .ok_or(RuntimeError::EmptyUnsupported),
                 Value::Null => Ok(Value::Bool(true)),
-                _ => Err(RuntimeError::TypeError {
-                    message: "`empty` requires a string, tuple, list, record, or null".to_string(),
-                }),
+                _ => Err(RuntimeError::EmptyUnsupported),
             }
         }
         IntrinsicOp::Keys => {
@@ -77,9 +72,7 @@ pub(crate) async fn execute_intrinsic(
                         .into(),
                 )),
                 Value::Null => Ok(Value::List(Vec::new().into())),
-                _ => Err(RuntimeError::TypeError {
-                    message: "`keys` requires a record or null".to_string(),
-                }),
+                _ => Err(RuntimeError::KeysUnsupported),
             }
         }
         IntrinsicOp::Values => {
@@ -95,9 +88,7 @@ pub(crate) async fn execute_intrinsic(
                     record.values().cloned().collect::<Vec<_>>().into(),
                 )),
                 Value::Null => Ok(Value::List(Vec::new().into())),
-                _ => Err(RuntimeError::TypeError {
-                    message: "`values` requires a record or null".to_string(),
-                }),
+                _ => Err(RuntimeError::ValuesUnsupported),
             }
         }
         IntrinsicOp::Contains => {
@@ -189,9 +180,7 @@ pub(crate) async fn execute_intrinsic(
                     };
                     Ok(Value::List(items[start..end].to_vec().into()))
                 }
-                _ => Err(RuntimeError::TypeError {
-                    message: "`slice` requires a string, tuple, or list".to_string(),
-                }),
+                _ => Err(RuntimeError::SliceUnsupported),
             }
         }
         IntrinsicOp::ToString => {
@@ -233,26 +222,21 @@ pub(crate) async fn execute_intrinsic(
             let value = materialize_projected_async(values[0].clone()).await;
             let parsed: serde_json::Value =
                 serde_json::from_str(&coerce_string(&value)?).map_err(|err| {
-                    RuntimeError::ValueError {
-                        message: format!("invalid json: {err}"),
+                    RuntimeError::InvalidJson {
+                        detail: err.to_string(),
                     }
                 })?;
             Ok(from_json(parsed))
         }
         IntrinsicOp::Format(_) => {
             if values.is_empty() {
-                return Err(RuntimeError::TypeError {
-                    message: "`format` requires at least a template string".to_string(),
-                });
+                return Err(RuntimeError::FormatTemplateMissing);
             }
             let template = match &values[0] {
                 Value::String(value) => value.as_str(),
                 other => {
-                    return Err(RuntimeError::TypeError {
-                        message: format!(
-                            "`format` template must be a string, got {}",
-                            value_type_name(other)
-                        ),
+                    return Err(RuntimeError::FormatTemplateInvalid {
+                        actual: value_type_name(other).to_string(),
                     });
                 }
             };
@@ -285,28 +269,40 @@ pub(crate) async fn execute_intrinsic(
         | IntrinsicOp::FormatCompiledSlotNumberBinary { .. } => {
             unreachable!("compiled-only intrinsic reached generic executor")
         }
-        IntrinsicOp::InvalidArity { name, argc } => Err(RuntimeError::TypeError {
-            message: invalid_arity_message(names[name].text.as_ref(), argc),
-        }),
+        IntrinsicOp::InvalidArity { name, argc } => {
+            Err(invalid_arity_error(names[name].text.as_ref(), argc))
+        }
         IntrinsicOp::Unknown { name, .. } => Err(RuntimeError::UnknownBuiltin {
             name: names[name].text.to_string(),
         }),
     }
 }
 
-fn invalid_arity_message(name: &str, argc: usize) -> String {
+fn invalid_arity_error(name: &str, argc: usize) -> RuntimeError {
     // A handful of variadic builtins have bespoke prose; the rest derive their
     // message directly from the single arity registry.
     match name {
-        "find" => format!("`find` takes 2 or 3 arg(s), got {argc}"),
-        "range" => format!("`range` takes 1, 2, or 3 arg(s), got {argc}"),
-        "format" => "`format` requires at least a template string".to_string(),
+        "find" => RuntimeError::InvalidArgumentCount {
+            name: "find".to_string(),
+            expected: "2 or 3".to_string(),
+            actual: argc,
+        },
+        "range" => RuntimeError::InvalidArgumentCount {
+            name: "range".to_string(),
+            expected: "1, 2, or 3".to_string(),
+            actual: argc,
+        },
+        "format" => RuntimeError::FormatTemplateMissing,
         _ => {
             let expected = match crate::builtins::lookup(name).map(|builtin| builtin.arity) {
                 Some(crate::builtins::Arity::Exact(n)) => n,
                 _ => 0,
             };
-            format!("`{name}` takes {expected} arg(s), got {argc}")
+            RuntimeError::InvalidArgumentCount {
+                name: name.to_string(),
+                expected: expected.to_string(),
+                actual: argc,
+            }
         }
     }
 }
@@ -321,11 +317,7 @@ pub(crate) async fn execute_len_builtin(value: &Value) -> Result<Value, RuntimeE
 pub(crate) fn execute_len_direct(value: &Value) -> Result<Value, RuntimeError> {
     value_len(value)
         .map(|len| Value::Number(len as f64))
-        .ok_or_else(|| RuntimeError::TypeError {
-            message:
-                "`len` requires a string, tuple, list, record, or null; use `.size` for images"
-                    .to_string(),
-        })
+        .ok_or(RuntimeError::LenUnsupported)
 }
 
 pub(crate) async fn execute_contains_builtin(
@@ -339,11 +331,7 @@ pub(crate) async fn execute_contains_builtin(
     match haystack {
         Value::Projected(value) => Ok(Value::Bool(value.contains(&needle).await?)),
         Value::Null => Ok(Value::Bool(false)),
-        _ => Err(RuntimeError::TypeError {
-            message:
-                "`contains` requires a string/string, tuple/value, list/value, record/key, or null/value pair"
-                    .to_string(),
-        }),
+        _ => Err(RuntimeError::ContainsUnsupported),
     }
 }
 
@@ -359,18 +347,16 @@ pub(crate) fn execute_contains_direct(
             Ok(record.get(coerce_string(needle)?.as_ref()).is_some())
         }
         (Value::Null, _) => Ok(false),
-        _ => Err(RuntimeError::TypeError {
-            message:
-                "`contains` requires a string/string, tuple/value, list/value, record/key, or null/value pair"
-                    .to_string(),
-        }),
+        _ => Err(RuntimeError::ContainsUnsupported),
     }
 }
 
 pub(crate) async fn execute_find_builtin(values: &[Value]) -> Result<Value, RuntimeError> {
     if !(values.len() == 2 || values.len() == 3) {
-        return Err(RuntimeError::TypeError {
-            message: format!("`find` takes 2 or 3 arg(s), got {}", values.len()),
+        return Err(RuntimeError::InvalidArgumentCount {
+            name: "find".to_string(),
+            expected: "2 or 3".to_string(),
+            actual: values.len(),
         });
     }
 
@@ -428,9 +414,7 @@ pub(crate) fn execute_grep_text_direct(
 
 fn grep_text_strings(text: &str, needle: &str) -> Result<Value, RuntimeError> {
     if needle.is_empty() {
-        return Err(RuntimeError::ValueError {
-            message: "`grep_text` needle must not be empty".to_string(),
-        });
+        return Err(RuntimeError::EmptyGrepNeedle);
     }
 
     let needle_len = needle.chars().count();
@@ -519,9 +503,7 @@ pub(crate) async fn execute_join_builtin_async(
     let items = match &items {
         Value::List(items) | Value::Tuple(items) => items,
         _ => {
-            return Err(RuntimeError::TypeError {
-                message: "`join` requires a tuple or list as the first argument".to_string(),
-            });
+            return Err(RuntimeError::JoinUnsupported);
         }
     };
     let sep = coerce_string(&sep)?;
@@ -576,15 +558,15 @@ pub(crate) fn range_bounds(values: &[Value]) -> Result<(i64, i64, i64), RuntimeE
             as_range_bound(step)?,
         ),
         _ => {
-            return Err(RuntimeError::TypeError {
-                message: format!("`range` takes 1, 2, or 3 arg(s), got {}", values.len()),
+            return Err(RuntimeError::InvalidArgumentCount {
+                name: "range".to_string(),
+                expected: "1, 2, or 3".to_string(),
+                actual: values.len(),
             });
         }
     };
     if step == 0 {
-        return Err(RuntimeError::ValueError {
-            message: "`range` step must not be 0".to_string(),
-        });
+        return Err(RuntimeError::ZeroRangeStep);
     }
     validate_range_len(start, end, step)?;
     Ok((start, end, step))
@@ -602,9 +584,7 @@ pub(crate) async fn execute_push_builtin_async(
     }
     let list = materialize_projected_async(list).await;
     let Value::List(items) = list else {
-        return Err(RuntimeError::TypeError {
-            message: "`push` requires a list as the first argument".to_string(),
-        });
+        return Err(RuntimeError::PushUnsupported);
     };
     let mut values = items.into_vec();
     if values.len() == values.capacity() {
@@ -621,11 +601,8 @@ pub(crate) fn execute_push_builtin(list: &Value, item: Value) -> Result<Value, R
 
 pub(crate) fn as_range_bound(value: &Value) -> Result<i64, RuntimeError> {
     let Value::Number(number) = value else {
-        return Err(RuntimeError::TypeError {
-            message: format!(
-                "`range` bounds must be finite integers, got {}",
-                value_type_name(value)
-            ),
+        return Err(RuntimeError::InvalidRangeBoundType {
+            actual: value_type_name(value).to_string(),
         });
     };
     if !number.is_finite()
@@ -633,9 +610,7 @@ pub(crate) fn as_range_bound(value: &Value) -> Result<i64, RuntimeError> {
         || *number < i64::MIN as f64
         || *number > i64::MAX as f64
     {
-        return Err(RuntimeError::TypeError {
-            message: "`range` bounds must be finite integers".to_string(),
-        });
+        return Err(RuntimeError::InvalidRangeBound);
     }
     Ok(*number as i64)
 }
@@ -663,8 +638,8 @@ pub(crate) fn build_range(start: i64, end: i64, step: i64) -> Result<Value, Runt
 pub(crate) fn validate_range_len(start: i64, end: i64, step: i64) -> Result<(), RuntimeError> {
     const MAX_RANGE_ITEMS: i128 = 1_000_000;
     if range_len(start, end, step)? > MAX_RANGE_ITEMS {
-        return Err(RuntimeError::ValueError {
-            message: format!("`range` would create more than {MAX_RANGE_ITEMS} items"),
+        return Err(RuntimeError::RangeTooLarge {
+            limit: MAX_RANGE_ITEMS,
         });
     }
     Ok(())
@@ -672,9 +647,7 @@ pub(crate) fn validate_range_len(start: i64, end: i64, step: i64) -> Result<(), 
 
 fn range_len(start: i64, end: i64, step: i64) -> Result<i128, RuntimeError> {
     if step == 0 {
-        return Err(RuntimeError::ValueError {
-            message: "`range` step must not be 0".to_string(),
-        });
+        return Err(RuntimeError::ZeroRangeStep);
     }
     if (step > 0 && start >= end) || (step < 0 && start <= end) {
         return Ok(0);
@@ -697,9 +670,7 @@ pub(crate) fn execute_integer_div_builtin(
     let dividend = as_integer_div_arg(name, "dividend", &values[0])?;
     let divisor = as_integer_div_arg(name, "divisor", &values[1])?;
     if divisor == 0.0 {
-        return Err(RuntimeError::ValueError {
-            message: format!("`{name}` divisor must not be 0"),
-        });
+        return Err(RuntimeError::IntegerDivisionByZero { builtin: name });
     }
     Ok(Value::Number(round(dividend / divisor)))
 }
@@ -721,16 +692,16 @@ fn as_integer_div_arg(
     value: &Value,
 ) -> Result<f64, RuntimeError> {
     let Value::Number(number) = value else {
-        return Err(RuntimeError::TypeError {
-            message: format!(
-                "`{builtin}` {arg_name} must be a finite integer, got {}",
-                value_type_name(value)
-            ),
+        return Err(RuntimeError::InvalidIntegerDivisionArgumentType {
+            builtin,
+            argument: arg_name,
+            actual: value_type_name(value).to_string(),
         });
     };
     if !number.is_finite() || number.fract() != 0.0 {
-        return Err(RuntimeError::TypeError {
-            message: format!("`{builtin}` {arg_name} must be a finite integer"),
+        return Err(RuntimeError::InvalidIntegerDivisionArgument {
+            builtin,
+            argument: arg_name,
         });
     }
     Ok(*number)
@@ -884,12 +855,12 @@ pub(crate) fn as_number(value: &Value) -> Result<f64, RuntimeError> {
             if value.is_empty() {
                 return Ok(0.0);
             }
-            value.parse::<f64>().map_err(|_| RuntimeError::TypeError {
-                message: "expected a number".to_string(),
-            })
+            value
+                .parse::<f64>()
+                .map_err(|_| RuntimeError::ExpectedNumber)
         }
-        _ => Err(RuntimeError::TypeError {
-            message: format!("expected a number, got {}", value_type_name(value)),
+        _ => Err(RuntimeError::ExpectedNumberType {
+            actual: value_type_name(value).to_string(),
         }),
     }
 }
@@ -905,8 +876,8 @@ pub(crate) fn coerce_string(value: &Value) -> Result<Cow<'_, str>, RuntimeError>
         | Value::Tuple(_)
         | Value::List(_)
         | Value::Record(_)
-        | Value::Projected(_) => Err(RuntimeError::TypeError {
-            message: format!("expected text, got {}", value_type_name(value)),
+        | Value::Projected(_) => Err(RuntimeError::ExpectedText {
+            actual: value_type_name(value).to_string(),
         }),
     }
 }
@@ -914,9 +885,7 @@ pub(crate) fn coerce_string(value: &Value) -> Result<Cow<'_, str>, RuntimeError>
 pub(crate) fn as_offset(value: &Value) -> Result<isize, RuntimeError> {
     let number = as_number(value)?;
     if !number.is_finite() || number.fract() != 0.0 {
-        return Err(RuntimeError::TypeError {
-            message: "index must be an integer".to_string(),
-        });
+        return Err(RuntimeError::InvalidIndex);
     }
     Ok(number as isize)
 }
@@ -929,14 +898,15 @@ pub(crate) fn as_slice_bound(value: &Value) -> Result<Option<isize>, RuntimeErro
 }
 
 fn as_non_negative_char_index(
-    builtin: &str,
-    arg_name: &str,
+    builtin: &'static str,
+    arg_name: &'static str,
     value: &Value,
 ) -> Result<usize, RuntimeError> {
     let number = as_number(value)?;
     if !number.is_finite() || number.fract() != 0.0 || number < 0.0 || number > usize::MAX as f64 {
-        return Err(RuntimeError::TypeError {
-            message: format!("`{builtin}` {arg_name} must be a non-negative integer"),
+        return Err(RuntimeError::InvalidCharacterIndex {
+            builtin,
+            argument: arg_name,
         });
     }
     Ok(number as usize)
@@ -1002,9 +972,7 @@ pub(crate) fn add_values(left: Value, right: Value) -> Result<Value, RuntimeErro
             Ok(Value::Tuple(values.into()))
         }
         (Value::List(_), Value::Tuple(_)) | (Value::Tuple(_), Value::List(_)) => {
-            Err(RuntimeError::TypeError {
-                message: "can't concatenate list and tuple".to_string(),
-            })
+            Err(RuntimeError::IncompatibleSequenceConcatenation)
         }
         (left, right) => Ok(Value::Number(as_number(&left)? + as_number(&right)?)),
     }

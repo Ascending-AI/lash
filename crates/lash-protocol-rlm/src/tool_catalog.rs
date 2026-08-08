@@ -35,7 +35,8 @@ pub(crate) fn rlm_prompt_tool_docs(tool_catalog: &ToolCatalog) -> String {
 
 fn validate_rlm_lashlang_bindings(ctx: &ToolCatalogContext) -> Result<(), PluginError> {
     for tool in &ctx.tools {
-        required_tool_lashlang_executable(tool).map_err(PluginError::Registration)?;
+        required_tool_lashlang_executable(tool)
+            .map_err(|err| PluginError::Registration(err.to_string()))?;
     }
     Ok(())
 }

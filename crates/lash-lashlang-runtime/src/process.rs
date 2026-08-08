@@ -16,7 +16,8 @@ use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    LASHLANG_ENGINE_KIND, LashlangProcessEngine, LashlangProcessInput,
+    LASHLANG_ENGINE_KIND, LashlangHostError, LashlangProcessEngine, LashlangProcessFailureCode,
+    LashlangProcessInput,
     bridge::{
         lashlang_value_to_json, process_event_payload, protocol_tool_reply_to_lashlang_value,
         sleep_duration_ms,
@@ -74,7 +75,7 @@ fn validate_lashlang_program_hash(
         && persisted != current
     {
         return Err(Box::new(process_lashlang_failure(
-            "restate_segment_program_hash_mismatch",
+            LashlangProcessFailureCode::RestateSegmentProgramHashMismatch,
             format!(
                 "lashlang segment program identity mismatch: persisted {persisted}, current {current}"
             ),
@@ -100,7 +101,7 @@ pub async fn run_lashlang_process(
         Ok(input) => input,
         Err(err) => {
             return Ok(process_lashlang_failure(
-                "process_payload_invalid",
+                LashlangProcessFailureCode::ProcessPayloadInvalid,
                 format!("invalid lashlang process payload: {err}"),
                 None,
             )
@@ -117,7 +118,7 @@ pub async fn run_lashlang_process(
             Ok(Some(artifact)) => artifact,
             Ok(None) => {
                 return Ok(process_lashlang_failure(
-                    "process_module_artifact_missing",
+                    LashlangProcessFailureCode::ProcessModuleArtifactMissing,
                     format!("missing lashlang module artifact `{}`", input.module_ref),
                     None,
                 )
@@ -135,7 +136,7 @@ pub async fn run_lashlang_process(
     };
     if artifact.host_requirements_ref != input.host_requirements_ref {
         return Ok(process_lashlang_failure(
-            "process_host_requirements_mismatch",
+            LashlangProcessFailureCode::ProcessHostRequirementsMismatch,
             format!(
                 "lashlang process `{}` requested surface {}, artifact has {}",
                 input.process_name, input.host_requirements_ref, artifact.host_requirements_ref
@@ -146,7 +147,7 @@ pub async fn run_lashlang_process(
     }
     if artifact.process_ref(&input.process_name) != Some(&input.process_ref) {
         return Ok(process_lashlang_failure(
-            "process_ref_mismatch",
+            LashlangProcessFailureCode::ProcessRefMismatch,
             format!(
                 "lashlang module `{}` does not export process `{}` as requested ref {:?}",
                 input.module_ref, input.process_name, input.process_ref
@@ -170,9 +171,12 @@ pub async fn run_lashlang_process(
         let host_environment = match surface.host_environment(&tool_catalog) {
             Ok(host_environment) => host_environment,
             Err(err) => {
-                return Ok(
-                    process_lashlang_failure("process_host_environment_invalid", err, None).into(),
-                );
+                return Ok(process_lashlang_failure(
+                    LashlangProcessFailureCode::ProcessHostEnvironmentInvalid,
+                    err.to_string(),
+                    None,
+                )
+                .into());
             }
         };
         if let Err(err) = lashlang_host_environment_satisfies_requirements(
@@ -180,7 +184,7 @@ pub async fn run_lashlang_process(
             &host_environment,
         ) {
             return Ok(process_lashlang_failure(
-                "process_host_environment_incompatible",
+                LashlangProcessFailureCode::ProcessHostEnvironmentIncompatible,
                 format!(
                     "lashlang process `{}` is incompatible with this host surface: {err}",
                     input.process_name
@@ -197,15 +201,13 @@ pub async fn run_lashlang_process(
             Ok(mut cache) => {
                 cache.get_or_compile(&artifact, &input.process_ref, &input.host_requirements_ref)
             }
-            Err(_) => Err(lashlang::RuntimeError::ValueError {
-                message: "lashlang compiled process cache lock poisoned".to_string(),
-            }),
+            Err(_) => Err(lashlang::RuntimeError::CompiledProcessCacheUnavailable),
         };
         match compiled {
             Ok(compiled) => compiled,
             Err(err) => {
                 return Ok(process_lashlang_failure(
-                    "process_compile_failed",
+                    LashlangProcessFailureCode::ProcessCompileFailed,
                     format!("failed to compile process `{}`: {err}", input.process_name),
                     None,
                 )
@@ -218,7 +220,7 @@ pub async fn run_lashlang_process(
             Ok(state) => Some(state),
             Err(err) => {
                 return Ok(process_lashlang_failure(
-                    "process_segment_handover_invalid",
+                    LashlangProcessFailureCode::ProcessSegmentHandoverInvalid,
                     format!("invalid lashlang segment handover: {err}"),
                     None,
                 )
@@ -333,7 +335,7 @@ async fn execute_lashlang(
             Ok(vm) => vm,
             Err(err) => {
                 return process_lashlang_failure(
-                    "process_segment_resume_failed",
+                    LashlangProcessFailureCode::ProcessSegmentResumeFailed,
                     format!("failed to resume lashlang segment: {err}"),
                     None,
                 )
@@ -455,7 +457,7 @@ impl LashlangProcessHost<'_> {
         };
         payload
             .as_object_mut()
-            .ok_or_else(|| ExecutionHostError::new("module operation payload must be an object"))?;
+            .ok_or_else(|| ExecutionHostError::from(LashlangHostError::ModulePayloadNotObject))?;
         Ok(payload)
     }
 
@@ -486,25 +488,27 @@ impl LashlangProcessHost<'_> {
         let receiver = match &receiver {
             lashlang::Value::Resource(receiver) => receiver,
             _ => {
-                return Err(ExecutionHostError::new(format!(
-                    "module operation `{operation}` requires a module authority receiver"
-                )));
+                return Err(LashlangHostError::ModuleAuthorityRequired { operation }.into());
             }
         };
         let host_operation =
             resolve_lashlang_module_operation(&self.host_environment, receiver, &operation)?;
         let tool_id = lash_core::ToolId::from(host_operation.as_str());
-        let manifest = self.ctx.callable_tool_manifest_by_id(&tool_id).ok_or_else(|| {
-            ExecutionHostError::new(format!(
-                "module operation `{}` resolved to unavailable host operation `{host_operation}`",
-                operation
-            ))
-        })?;
+        let manifest = self
+            .ctx
+            .callable_tool_manifest_by_id(&tool_id)
+            .ok_or_else(|| {
+                ExecutionHostError::from(LashlangHostError::ResolvedOperationUnavailable {
+                    operation: operation.clone(),
+                    host_operation: host_operation.clone(),
+                })
+            })?;
         let payload = self.resource_payload(&args)?;
         let call_site = call_site.ok_or_else(|| {
-            ExecutionHostError::new(format!(
-                "module operation `{operation}` resolved to host operation `{host_operation}` but has no deterministic lashlang execution call site"
-            ))
+            ExecutionHostError::from(LashlangHostError::OperationCallSiteMissing {
+                operation,
+                host_operation: host_operation.clone(),
+            })
         })?;
         let call_id = self.resource_tool_call_id(&host_operation, &call_site, batch_index);
         let mut invocation =
@@ -629,7 +633,9 @@ impl LashlangProcessHost<'_> {
                 start,
             )
             .await
-            .map_err(ExecutionHostError::new)?
+            .map_err(|error| LashlangHostError::PrepareProcessStart {
+                message: error.to_string(),
+            })?
         };
         let reply = {
             let _phase = self.ctx.named_phase("rlm_process.start");
@@ -655,7 +661,9 @@ impl LashlangProcessHost<'_> {
                 .with_replay_key(format!("process:{}:event:{ordinal}", self.process_id)),
             )
             .await
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
+            .map_err(|error| LashlangHostError::AppendProcessEvent {
+                message: error.to_string(),
+            })?;
         Ok(())
     }
 
@@ -666,13 +674,19 @@ impl LashlangProcessHost<'_> {
         self.ctx
             .sleep_process(&scope, sequence, duration_ms)
             .await
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
+            .map_err(|error| LashlangHostError::SleepProcess {
+                message: error.to_string(),
+            })?;
         Ok(lashlang::Value::Null)
     }
 
     async fn wait_signal(&self, name: String) -> Result<lashlang::Value, ExecutionHostError> {
-        let event_type = lash_core::facade_support::process_signal_event_type(&name)
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
+        let event_type =
+            lash_core::facade_support::process_signal_event_type(&name).map_err(|error| {
+                LashlangHostError::ValidateSignalName {
+                    message: error.to_string(),
+                }
+            })?;
         let event_ordinal = {
             let mut ordinals = self.signal_wait_ordinals.lock().await;
             let ordinal = ordinals.entry(name.clone()).or_insert(0);
@@ -684,10 +698,12 @@ impl LashlangProcessHost<'_> {
             &name,
             event_ordinal,
         );
-        let since_ms = self
-            .wait_since_ms(&key)
-            .await
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
+        let since_ms =
+            self.wait_since_ms(&key)
+                .await
+                .map_err(|error| LashlangHostError::ReadSignalWait {
+                    message: error.to_string(),
+                })?;
         let wait = lash_core::WaitState {
             since_ms,
             kind: lash_core::WaitKind::Signal {
@@ -700,16 +716,22 @@ impl LashlangProcessHost<'_> {
         self.processes
             .set_wait(wait.clone())
             .await
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
+            .map_err(|error| LashlangHostError::SetSignalWait {
+                message: error.to_string(),
+            })?;
         let payload = self
             .ctx
             .await_process_signal_event(&self.process_id, &name, event_ordinal)
             .await
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
+            .map_err(|error| LashlangHostError::AwaitSignal {
+                message: error.to_string(),
+            })?;
         self.processes
             .clear_wait()
             .await
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
+            .map_err(|error| LashlangHostError::ClearSignalWait {
+                message: error.to_string(),
+            })?;
         Ok(lashlang::from_json(payload))
     }
 
@@ -756,7 +778,9 @@ impl LashlangProcessHost<'_> {
         self.ctx
             .signal_process_by_id(&target, &signal.name, signal_id, payload)
             .await
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?;
+            .map_err(|error| LashlangHostError::SignalProcess {
+                message: error.to_string(),
+            })?;
         Ok(lashlang::Value::Null)
     }
 
@@ -812,11 +836,9 @@ impl LashlangProcessHost<'_> {
                     .await
                     .map(lashlang::AbilityResult::Value)
             }),
-            lashlang::AbilityOp::Print(_) => Box::pin(async {
-                Err(ExecutionHostError::new(
-                    "`print` is not available inside lashlang process bodies",
-                ))
-            }),
+            lashlang::AbilityOp::Print(_) => {
+                Box::pin(async { Err(LashlangHostError::PrintUnavailable.into()) })
+            }
             lashlang::AbilityOp::Finish(value) | lashlang::AbilityOp::Fail(value) => {
                 Box::pin(async move { Ok(lashlang::AbilityResult::Value(value)) })
             }
@@ -1249,7 +1271,7 @@ fn process_lashlang_execution_result(
             control: None,
         },
         Ok(lashlang::ExecutionOutcome::Failed(value)) => process_lashlang_failure(
-            "process_failed",
+            LashlangProcessFailureCode::ProcessFailed,
             value.to_string(),
             Some(
                 lashlang_value_to_json(&value)
@@ -1260,18 +1282,22 @@ fn process_lashlang_execution_result(
             value: serde_json::Value::Null,
             control: None,
         },
-        Err(err) => process_lashlang_failure("process_runtime_error", err.to_string(), None),
+        Err(err) => process_lashlang_failure(
+            LashlangProcessFailureCode::ProcessRuntimeError,
+            err.to_string(),
+            None,
+        ),
     }
 }
 
 fn process_lashlang_failure(
-    code: &str,
+    code: LashlangProcessFailureCode,
     message: impl Into<String>,
     raw: Option<serde_json::Value>,
 ) -> lash_core::ProcessAwaitOutput {
     lash_core::ProcessAwaitOutput::Failure {
         class: lash_core::ToolFailureClass::Execution,
-        code: code.to_string(),
+        code: code.as_str().to_string(),
         message: message.into(),
         raw,
         control: None,
@@ -1289,20 +1315,16 @@ fn process_lashlang_cancelled(message: impl Into<String>) -> lash_core::ProcessA
 fn process_id_from_lashlang_handle(handle: &lashlang::Value) -> Result<String, ExecutionHostError> {
     let value = lashlang_value_to_json(handle)?;
     let Some(object) = value.as_object() else {
-        return Err(ExecutionHostError::new(
-            "signal_run expects a process handle",
-        ));
+        return Err(LashlangHostError::InvalidProcessHandle.into());
     };
     if object.get("__handle__").and_then(serde_json::Value::as_str) != Some("process") {
-        return Err(ExecutionHostError::new(
-            "signal_run expects a process handle",
-        ));
+        return Err(LashlangHostError::InvalidProcessHandle.into());
     }
     object
         .get("id")
         .and_then(serde_json::Value::as_str)
         .map(ToOwned::to_owned)
-        .ok_or_else(|| ExecutionHostError::new("signal_run process handle is missing `id`"))
+        .ok_or_else(|| LashlangHostError::ProcessHandleMissingId.into())
 }
 
 pub fn lashlang_process_event_types() -> Vec<lash_core::ProcessEventType> {

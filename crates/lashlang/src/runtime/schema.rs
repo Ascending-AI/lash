@@ -93,9 +93,7 @@ pub(crate) fn execute_validate_builtin(
     value: Value,
     schema: &Value,
 ) -> Result<Value, RuntimeError> {
-    let schema = unwrap_type_value(schema).ok_or_else(|| RuntimeError::TypeError {
-        message: "`validate` requires a Type literal as the second argument".to_string(),
-    })?;
+    let schema = unwrap_type_value(schema).ok_or(RuntimeError::ValidateTypeLiteralRequired)?;
     let plan = compile_schema_value(schema);
     execute_validation_plan(value, &plan)
 }
@@ -110,9 +108,7 @@ pub(crate) fn execute_validation_plan(
 
     let mut path = SmallVec::<[PathSegment<'_>; 8]>::new();
     let message = plan.describe_failure(&value, &mut path);
-    Err(RuntimeError::ValueError {
-        message: format!("validation failed: {message}"),
-    })
+    Err(RuntimeError::ValidationFailed { reason: message })
 }
 
 pub(crate) fn compile_schema_value(schema: &Value) -> ValidationPlan {

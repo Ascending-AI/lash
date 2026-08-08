@@ -108,7 +108,7 @@ impl RlmSubagentToolsProvider {
             )));
         }
         let output_schema = lash_lashlang_runtime::parse_output_schema(args.get("output"))
-            .map_err(|err| ToolResult::err(serde_json::json!(err)))?;
+            .map_err(|err| ToolResult::err(serde_json::json!(err.to_string())))?;
         let seed = lash_protocol_rlm::RlmSeed::from_tool_args(args)
             .map_err(|err| ToolResult::err(serde_json::json!(err)))?;
         let current_snapshot = context

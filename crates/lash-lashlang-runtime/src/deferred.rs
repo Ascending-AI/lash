@@ -20,7 +20,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    LashlangHostEnvironment, lashlang_tool_contract_types, required_tool_lashlang_executable,
+    LashlangHostEnvironment, LashlangRuntimeError, lashlang_tool_contract_types,
+    required_tool_lashlang_executable,
 };
 
 /// A host-authorized tool capability resolved for a deferred call-path. It
@@ -183,7 +184,7 @@ impl DeferredResolutionRecord {
 fn fold_grant(
     host_environment: &mut LashlangHostEnvironment,
     grant: &ToolGrant,
-) -> Result<(), String> {
+) -> Result<(), LashlangRuntimeError> {
     let binding = required_tool_lashlang_executable(&grant.definition.manifest)?;
     let operation_binding = lashlang_tool_contract_types(&grant.definition.contract);
     host_environment.resources.add_module_operation_binding(
