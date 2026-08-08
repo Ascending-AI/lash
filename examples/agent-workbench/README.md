@@ -188,11 +188,18 @@ lanes after those cursors:
   sequence and stable event id, then broadcasts it as a freshness hint. A
   lagged subscriber receives an authoritative `resync` snapshot instead of an
   error. The registry deduplicates stable ids across Restate replay and process
-  restart.
+  restart. This log is now the durable home of the user half of the transcript,
+  so its growth is intentional and bounded by reset, which drops the session
+  history and persists that removal. Rewriting the full snapshot after every
+  mutation is a known reference-host simplification, not the intended shape of
+  a production event store.
 
 The lanes never share a broadcast channel. Internal observation, provider, and
 serialization failures are traced server-side; no raw error string is a
 product-stream variant. The UI renders stable safe failure copy.
+
+At a `continue_as` boundary, all old-frame assistant replies and trigger-driven
+inputs collapse by design; user chat rows persist across the switch.
 
 Provisional prose and reasoning are keyed by Lash correlation id. A
 `model_attempt_reset` retracts only the superseded chunks. Provisional rows

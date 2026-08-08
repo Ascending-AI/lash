@@ -34,9 +34,35 @@ async fn app_state(
         .iter()
         .map(|message| message.id.clone())
         .collect::<BTreeSet<_>>();
+    let current_frame_input_turn_ids = observation_snapshot
+        .read_view
+        .messages()
+        .iter()
+        .filter_map(|message| match message.origin.as_ref() {
+            Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) => {
+                Some(turn_id.clone())
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    let mut pending_message_nodes = observation_snapshot.read_view.message_tree();
+    let mut committed_input_turn_ids = BTreeSet::new();
+    while let Some(node) = pending_message_nodes.pop() {
+        if let Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) =
+            node.message.origin.as_ref()
+        {
+            committed_input_turn_ids.insert(turn_id.clone());
+        }
+        pending_message_nodes.extend(node.children);
+    }
     state
         .event_tx
-        .reconcile_settled(&session_id, &committed_message_ids, &active_turn_ids);
+        .reconcile_settled(
+            &session_id,
+            &committed_message_ids,
+            &committed_input_turn_ids,
+            &active_turn_ids,
+        );
     let product_events = state.event_tx.snapshot(&session_id);
     let product_messages = product_events
         .events
@@ -46,38 +72,17 @@ async fn app_state(
             StreamItem::TurnInput { .. } | StreamItem::Done { .. } => None,
         })
         .collect::<Vec<_>>();
-    let (ui_user_turn_ids, prompt_fallback_rows) =
-        ui_owned_user_rows(&state, &active_turns, &product_messages);
-    let suppressed_turn_input_ids =
-        suppressed_turn_input_message_ids(&observation_snapshot.read_view, &ui_user_turn_ids);
-    let mut messages: Vec<_> = observation_snapshot
-        .read_view
-        .messages()
-        .iter()
-        .filter(|message| !suppressed_turn_input_ids.contains(&message.id))
-        .map(chat_message_from_committed)
-        .collect();
-    let mut transcript =
-        transcript_rows_from_committed(&observation_snapshot.read_view, &suppressed_turn_input_ids);
-    let mut message_ids = messages
-        .iter()
-        .map(|message| message.id.clone())
-        .collect::<BTreeSet<_>>();
-    for message in product_messages.into_iter().chain(prompt_fallback_rows) {
-        // A suppressed committed message stays suppressed however it reached
-        // this list: the workbench mirrors committed ingress messages into the
-        // product log, and that mirror is the same copy the UI-owned row already
-        // speaks for.
-        if suppressed_turn_input_ids.contains(&message.id) {
-            continue;
-        }
-        if message_ids.insert(message.id.clone()) {
-            transcript.push(TranscriptRow::Message {
-                message: message.clone(),
-            });
-            messages.push(message);
-        }
-    }
+    let ChatProjection {
+        messages,
+        transcript,
+    } = project_chat(
+        &state,
+        &observation_snapshot.read_view,
+        &active_turns,
+        &committed_input_turn_ids,
+        &current_frame_input_turn_ids,
+        product_messages,
+    );
     let pending_turn_inputs = session
         .pending_turn_inputs()
         .await
@@ -432,6 +437,7 @@ async fn send_turn(
     .await
     {
         state.active_turns.remove(&session_id, &turn_id);
+        state.publish_turn_failed(&session_id, &turn_id);
         return Err(err);
     }
     Ok(Json(TurnAccepted::started()))

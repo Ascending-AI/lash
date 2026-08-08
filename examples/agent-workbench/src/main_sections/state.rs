@@ -634,6 +634,7 @@ impl SessionEventRegistry {
         &self,
         session_id: &str,
         committed_message_ids: &BTreeSet<String>,
+        committed_input_turn_ids: &BTreeSet<String>,
         active_turn_ids: &BTreeSet<String>,
     ) {
         let mut histories = self
@@ -646,18 +647,25 @@ impl SessionEventRegistry {
         let before = history.events.len();
         history.events.retain(|event| match &event.item {
             StreamItem::Message { message } => {
-                match workbench_turn_id_from_user_message_id(&message.id)
-                    .or_else(|| workbench_turn_id_from_assistant_message_id(&message.id))
+                if let Some(turn_id) = workbench_turn_id_from_user_message_id(&message.id) {
+                    // Submitted user rows become session-scoped host state
+                    // once the turn commits anywhere in the session graph.
+                    // Until then they remain optimistic and retire with a turn
+                    // that is no longer active (FIG-1000, FIG-1062).
+                    active_turn_ids.contains(turn_id)
+                        || committed_input_turn_ids.contains(turn_id)
+                } else if let Some(turn_id) =
+                    workbench_turn_id_from_assistant_message_id(&message.id)
                 {
-                    // A row the workbench owns belongs to a turn, so it retires
-                    // when that turn stops running. Identity is not enough for
-                    // the agent row: the durable copy of the reply is the
-                    // runtime's terminal message on the paths where the runtime
-                    // commits it, and that id is runtime-minted (FIG-984).
-                    Some(turn_id) => active_turn_ids.contains(turn_id),
+                    // The live assistant row is turn-scoped. The committed
+                    // reply replaces it at settlement; old-frame replies then
+                    // collapse naturally when the active frame changes. Its
+                    // durable id is termination-dependent (FIG-984).
+                    active_turn_ids.contains(turn_id)
+                } else {
                     // Everything else in this lane is a mirror of a committed
                     // message and retires once that commit is readable.
-                    None => !committed_message_ids.contains(&message.id),
+                    !committed_message_ids.contains(&message.id)
                 }
             }
             StreamItem::Done {
