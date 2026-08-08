@@ -160,7 +160,12 @@ async fn resolve_restate_await_event_via_ingress(
             &request,
         )
         .await;
-    outcome.map_err(|err| RuntimeError::new("restate_await_event_resolve", err.to_string()))
+    outcome.map_err(|err| {
+        RuntimeError::new(
+            lash_core::RuntimeErrorCode::RestateAwaitEventResolve,
+            err.to_string(),
+        )
+    })
 }
 
 async fn update_restate_session_waits_via_ingress(
@@ -173,7 +178,12 @@ async fn update_restate_session_waits_via_ingress(
         .ingress
         .call_object_empty("LashDurableWaitIndex", session_id, handler)
         .await
-        .map_err(|err| RuntimeError::new("restate_await_event_session_update", err.to_string()))
+        .map_err(|err| {
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::RestateAwaitEventSessionUpdate,
+                err.to_string(),
+            )
+        })
 }
 
 async fn restate_session_is_revoked_via_ingress(
@@ -184,7 +194,12 @@ async fn restate_session_is_revoked_via_ingress(
         .ingress
         .call_object_json::<_, bool>("LashDurableWaitIndex", session_id, "is_revoked", &())
         .await
-        .map_err(|err| RuntimeError::new("restate_await_event_revocation_read", err.to_string()))
+        .map_err(|err| {
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::RestateAwaitEventRevocationRead,
+                err.to_string(),
+            )
+        })
 }
 
 async fn ensure_restate_key_access_via_ingress(
@@ -230,10 +245,9 @@ async fn await_restate_await_event_via_ingress(
                 ).await,
             }
         } => result.map_err(|err| {
-            RuntimeError::new("restate_await_event_await", err.to_string())
+            RuntimeError::new(lash_core::RuntimeErrorCode::RestateAwaitEventAwait, err.to_string())
         }),
-        _ = cancel.cancelled() => Err(RuntimeError::new(
-            "restate_await_event_cancelled",
+        _ = cancel.cancelled() => Err(RuntimeError::new(lash_core::RuntimeErrorCode::RestateAwaitEventCancelled,
             "Restate await-event ingress observation was cancelled locally",
         )),
     }
@@ -293,7 +307,12 @@ impl AwaitEventResolver for RestateEffectHostController {
                 "peek",
             )
             .await
-            .map_err(|err| RuntimeError::new("restate_await_event_peek", err.to_string()))
+            .map_err(|err| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::RestateAwaitEventPeek,
+                    err.to_string(),
+                )
+            })
     }
 
     async fn await_await_event(

@@ -1,5 +1,5 @@
 use crate::PluginError;
-use crate::runtime::RuntimeError;
+use crate::runtime::{RuntimeError, RuntimeErrorCode};
 
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +19,11 @@ pub struct RuntimeEffectControllerError {
 impl RuntimeEffectControllerError {
     /// Constructs a `RuntimeEffectControllerError` for effect-host implementors while executing or
     /// replaying a runtime effect.
+    ///
+    /// This is an intentionally open extension point. Hosts should namespace
+    /// their codes and must not mint a built-in [`RuntimeErrorCode`] string;
+    /// built-in strings are canonicalized, and unknown codes cross the runtime
+    /// boundary as [`RuntimeErrorCode::ForeignCode`].
     pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             code: code.into(),
@@ -53,7 +58,7 @@ impl RuntimeEffectControllerError {
     }
 
     pub(crate) fn into_runtime_error(self) -> RuntimeError {
-        let runtime = RuntimeError::new(self.code, self.message);
+        let runtime = RuntimeError::new(RuntimeErrorCode::from_wire_code(&self.code), self.message);
         match self.cause {
             Some(cause) => runtime.with_cause(cause),
             None => runtime,

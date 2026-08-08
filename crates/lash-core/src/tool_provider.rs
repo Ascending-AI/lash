@@ -37,7 +37,7 @@ impl ToolCompletionState {
     ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
         let mut guard = self.key.lock().map_err(|_| {
             crate::RuntimeError::new(
-                "tool_completion_state_poisoned",
+                crate::RuntimeErrorCode::ToolCompletionStatePoisoned,
                 "tool completion key state lock poisoned",
             )
         })?;
@@ -51,7 +51,7 @@ impl ToolCompletionState {
     pub(crate) fn take(&self) -> Result<Option<crate::AwaitEventKey>, crate::RuntimeError> {
         self.key.lock().map(|mut guard| guard.take()).map_err(|_| {
             crate::RuntimeError::new(
-                "tool_completion_state_poisoned",
+                crate::RuntimeErrorCode::ToolCompletionStatePoisoned,
                 "tool completion key state lock poisoned",
             )
         })
@@ -584,7 +584,7 @@ impl<'run> ToolContext<'run> {
     pub async fn completion_key(&self) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
         let tool_call_id = self.tool_call_id.clone().ok_or_else(|| {
             crate::RuntimeError::new(
-                "tool_completion_key_missing_call_id",
+                crate::RuntimeErrorCode::ToolCompletionKeyMissingCallId,
                 "completion keys require a prepared tool call id",
             )
         })?;
@@ -594,7 +594,7 @@ impl<'run> ToolContext<'run> {
             .allows_process_lifetime_completion_keys()
         {
             return Err(crate::RuntimeError::new(
-                "tool_completion_key_process_lifetime",
+                crate::RuntimeErrorCode::ToolCompletionKeyProcessLifetime,
                 "completion keys require an effect controller with process-loss-safe await-event routing; single-process deployments may explicitly opt in with InlineEffectHost::allow_process_lifetime_completion_keys()",
             ));
         }

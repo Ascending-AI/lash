@@ -8,11 +8,11 @@
 
 use std::sync::Arc;
 
-use lash_core::RuntimeError;
 use lash_core::facade_support::await_event_coordinator::{
     AwaitEventBackend, AwaitEventCoordinator, AwaitEventRowIdentity, AwaitEventVocabulary,
     PersistedPromise, TerminalCas,
 };
+use lash_core::{RuntimeError, RuntimeErrorCode};
 use rusqlite::{OptionalExtension, params};
 
 use crate::conn::SqliteConnection;
@@ -22,7 +22,10 @@ use crate::conn::SqliteConnection;
 pub(crate) type SqliteAwaitEvents = AwaitEventCoordinator<SqliteAwaitEventBackend>;
 
 const VOCABULARY: AwaitEventVocabulary = AwaitEventVocabulary {
-    code_prefix: "sqlite",
+    sign: RuntimeErrorCode::SqliteAwaitEventSign,
+    encode: RuntimeErrorCode::SqliteAwaitEventEncode,
+    decode: RuntimeErrorCode::SqliteAwaitEventDecode,
+    notify: RuntimeErrorCode::SqliteAwaitEventNotify,
     display_name: "SQLite",
 };
 
@@ -47,7 +50,7 @@ pub(crate) struct SqliteAwaitEventBackend {
 #[async_trait::async_trait]
 impl AwaitEventBackend for SqliteAwaitEventBackend {
     fn vocabulary(&self) -> AwaitEventVocabulary {
-        VOCABULARY
+        VOCABULARY.clone()
     }
 
     async fn session_is_revoked(&self, session_id: &str) -> Result<bool, RuntimeError> {
@@ -300,5 +303,8 @@ fn session_is_revoked(
 }
 
 fn store_error(err: rusqlite::Error) -> RuntimeError {
-    RuntimeError::new("sqlite_await_event_store", err.to_string())
+    RuntimeError::new(
+        lash_core::RuntimeErrorCode::SqliteAwaitEventStore,
+        err.to_string(),
+    )
 }

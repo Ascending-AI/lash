@@ -72,10 +72,7 @@ fn post_commit_plugin_lifecycle_hook_issue(error: crate::PluginError) -> TurnIss
 }
 
 fn session_head_refresh_error(err: SessionError) -> RuntimeError {
-    RuntimeError::new(
-        RuntimeErrorCode::Other("session_head_refresh".to_string()),
-        err.to_string(),
-    )
+    RuntimeError::new(RuntimeErrorCode::SessionHeadRefresh, err.to_string())
 }
 
 #[derive(Clone, Copy)]
@@ -1016,7 +1013,7 @@ impl LashRuntime {
         {
             self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
             return Err(RuntimeError::new(
-                "turn_cancellation_evidence_missing",
+                crate::RuntimeErrorCode::TurnCancellationEvidenceMissing,
                 "cancelled turns must carry cancellation evidence",
             ));
         }
@@ -2099,10 +2096,7 @@ impl LashRuntime {
                     prepared_context.include_base_tools,
                 )
                 .map_err(|err| {
-                    RuntimeError::new(
-                        RuntimeErrorCode::Other("session_tool_registry".to_string()),
-                        err.to_string(),
-                    )
+                    RuntimeError::new(RuntimeErrorCode::SessionToolRegistry, err.to_string())
                 })?;
         }
 
@@ -2448,11 +2442,15 @@ impl LashRuntime {
                 turn_policy.clone(),
                 provider.with_clock(Arc::clone(&self.host.core.clock)),
             )
-            .map_err(|err| RuntimeError::new("llm_provider", err.to_string()))?
+            .map_err(|err| {
+                RuntimeError::new(crate::RuntimeErrorCode::LlmProvider, err.to_string())
+            })?
         } else {
             self.host
                 .resolve_session_policy(&self.state.session_id, turn_policy.clone())
-                .map_err(|err| RuntimeError::new("llm_provider", err.to_string()))?
+                .map_err(|err| {
+                    RuntimeError::new(crate::RuntimeErrorCode::LlmProvider, err.to_string())
+                })?
         };
         let manager = self
             .runtime_session_services_for_turn(Some(child_usage_event_relay.clone()))
@@ -3043,7 +3041,7 @@ mod tests {
         ) -> Result<ResolveOutcome, RuntimeError> {
             self.attempts.fetch_add(1, Ordering::SeqCst);
             Err(RuntimeError::new(
-                "transient_terminal_publication",
+                crate::RuntimeErrorCode::TransientTerminalPublication,
                 "terminal backend unavailable",
             ))
         }
@@ -3105,7 +3103,7 @@ mod tests {
             async move {
                 if attempt < 2 {
                     Err(RuntimeError::new(
-                        "transient_cancel_watch",
+                        crate::RuntimeErrorCode::TransientCancelWatch,
                         "temporary ingress failure",
                     ))
                 } else {
@@ -3132,7 +3130,7 @@ mod tests {
             observed_attempts.fetch_add(1, Ordering::SeqCst);
             async {
                 Err(RuntimeError::new(
-                    "cancel_start_gate_unavailable",
+                    crate::RuntimeErrorCode::CancelStartGateUnavailable,
                     "temporary ingress failure",
                 ))
             }

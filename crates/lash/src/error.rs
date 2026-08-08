@@ -85,18 +85,13 @@ impl EmbedError {
     /// retry as-is; `false` means "no typed retryable signal", not "known
     /// permanent" (see [`is_terminal`](Self::is_terminal) for that).
     ///
-    /// The retryable set is enumerated deliberately from
-    /// [`RuntimeErrorCode`](lash_core::RuntimeErrorCode):
+    /// Runtime failures delegate to the closed
+    /// [`RuntimeErrorCode`](lash_core::RuntimeErrorCode) taxonomy. Its
+    /// retryable set includes lease contention plus idempotent store, Restate
+    /// ingress, session-refresh, and bounded-wait operations. Foreign extension
+    /// codes are conservatively not retryable.
     ///
-    /// - [`SessionExecutionBusy`](lash_core::RuntimeErrorCode::SessionExecutionBusy):
-    ///   another executor currently holds the session-execution lease; the
-    ///   turn was rejected before any state changed, so retrying after a
-    ///   backoff is safe.
-    /// - [`StoreCommitContended`](lash_core::RuntimeErrorCode::StoreCommitContended):
-    ///   the backend aborted before publication because transactional write
-    ///   authority was unavailable; retry the identical operation unchanged.
-    ///
-    /// Everything else is `false`. Notably
+    /// Notably
     /// [`SessionExecutionLeaseLost`](lash_core::RuntimeErrorCode::SessionExecutionLeaseLost)
     /// is non-retryable as-is: reload durable state and re-establish lease and
     /// claim authority before deciding whether to issue new work.
@@ -111,7 +106,7 @@ impl EmbedError {
     /// [`TurnIssue::retryable`](crate::turn::TurnIssue) instead.
     pub fn is_retryable(&self) -> bool {
         match self {
-            Self::Runtime(err) => err.code.is_retryable(),
+            Self::Runtime(err) => err.is_retryable(),
             _ => false,
         }
     }
@@ -121,19 +116,14 @@ impl EmbedError {
     /// a retry cannot repair). Errors that are neither
     /// [`is_retryable`](Self::is_retryable) nor terminal are simply unknown.
     ///
-    /// The terminal set:
+    /// The terminal set includes:
     ///
     /// - builder/wiring variants of this enum (missing protocol plugin,
     ///   model spec, effect host, stores, registries, handler context, and
     ///   store/session mismatches) — the same call fails identically until
     ///   the host changes its wiring;
-    /// - [`RuntimeErrorCode`](lash_core::RuntimeErrorCode) wiring codes:
-    ///   `MissingExecutionScopeId`, `ExecutionScopeTurnIdMismatch`,
-    ///   `MissingProcessExecutionId`,
-    ///   `StoreCommitNodeBudgetExceeded`,
-    ///   `StoreCommitByteBudgetExceeded`,
-    ///   `DurableEffectLiveProtocolExtension`,
-    ///   `DurableEffectLivePluginInput`;
+    /// - typed runtime wiring, caller-invariant, unsupported-operation,
+    ///   deterministic codec, and corrupt durable-state codes;
     /// - session provider-configuration errors (`ProviderMismatch`,
     ///   `ProviderUnconfigured`, `ProviderUnavailable`,
     ///   `CodeExecutionUnavailable`);
@@ -141,7 +131,6 @@ impl EmbedError {
     ///   [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted)
     ///   tombstones — session ids are permanently single-use.
     pub fn is_terminal(&self) -> bool {
-        use lash_core::RuntimeErrorCode;
         match self {
             Self::MissingProtocolPlugin
             | Self::MissingModelSpec
@@ -159,19 +148,7 @@ impl EmbedError {
             | Self::DurableEffectHostRequiresHandlerContext { .. }
             | Self::StaticTurnStreamRequiresStaticEffectHost => true,
             Self::Store(lash_core::StoreError::SessionDeleted { .. }) => true,
-            Self::Runtime(err) => {
-                err.deleted_session_id().is_some()
-                    || matches!(
-                        err.code,
-                        RuntimeErrorCode::MissingExecutionScopeId
-                            | RuntimeErrorCode::ExecutionScopeTurnIdMismatch
-                            | RuntimeErrorCode::MissingProcessExecutionId
-                            | RuntimeErrorCode::StoreCommitNodeBudgetExceeded
-                            | RuntimeErrorCode::StoreCommitByteBudgetExceeded
-                            | RuntimeErrorCode::DurableEffectLiveProtocolExtension
-                            | RuntimeErrorCode::DurableEffectLivePluginInput
-                    )
-            }
+            Self::Runtime(err) => err.is_terminal(),
             Self::Plugin(lash_core::PluginError::RuntimeEffectController(err)) => matches!(
                 err.cause.as_ref(),
                 Some(lash_core::RuntimeErrorCause::SessionDeleted { .. })
@@ -243,7 +220,7 @@ mod tests {
 
     #[test]
     fn untyped_runtime_failures_are_neither_retryable_nor_terminal() {
-        let err = runtime_error(RuntimeErrorCode::Other("plugin_defined_abort".into()));
+        let err = runtime_error(RuntimeErrorCode::from_wire_code("plugin_defined_abort"));
         assert!(!err.is_retryable(), "{err}");
         assert!(!err.is_terminal(), "{err}");
     }
@@ -284,11 +261,13 @@ mod tests {
             },
         });
         let controller_owned = EmbedError::Runtime(
-            RuntimeError::new("runtime_store", "retired controller-owned session").with_cause(
-                RuntimeErrorCause::SessionDeleted {
-                    session_id: "retired-controller-owned".to_string(),
-                },
-            ),
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::RuntimeStore,
+                "retired controller-owned session",
+            )
+            .with_cause(RuntimeErrorCause::SessionDeleted {
+                session_id: "retired-controller-owned".to_string(),
+            }),
         );
         let nested_controller_owned = EmbedError::Plugin(PluginError::RuntimeEffectController(
             RuntimeEffectControllerError::from(StoreError::SessionDeleted {

@@ -48,7 +48,7 @@ pub(crate) fn restate_await_event_key_is_valid(key: &AwaitEventKey) -> bool {
 
 pub(crate) fn restate_unknown_or_revoked() -> RuntimeError {
     RuntimeError::new(
-        "await_event_unknown_or_revoked",
+        lash_core::RuntimeErrorCode::AwaitEventUnknownOrRevoked,
         "await-event key is invalid or revoked",
     )
 }

@@ -1201,7 +1201,7 @@ impl Stream for SessionObservationStream {
 
 fn live_replay_error(err: lash_core::LiveReplayStoreError) -> EmbedError {
     EmbedError::Runtime(lash_core::RuntimeError::new(
-        RuntimeErrorCode::Other("live_replay".to_string()),
+        RuntimeErrorCode::LiveReplay,
         err.to_string(),
     ))
 }

@@ -7375,7 +7375,7 @@ async fn segment_program_hash_mismatch_is_typed_and_cancel_redrives_successor_en
     .expect_err("changed program must fail closed");
     assert_eq!(
         mismatch.code,
-        lash_core::RuntimeErrorCode::from("restate_segment_program_hash_mismatch")
+        lash_core::RuntimeErrorCode::RestateSegmentProgramHashMismatch
     );
 
     let runner = Arc::new(SegmentedRecordingRunner {

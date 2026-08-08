@@ -835,7 +835,7 @@ impl lash_core::AwaitEventResolver for RetryingStartGateController {
             *attempt += 1;
             if *attempt < 3 {
                 return Err(lash_core::RuntimeError::new(
-                    "runtime_perf_start_gate_retry",
+                    lash_core::RuntimeErrorCode::RuntimePerfStartGateRetry,
                     "deterministic start-gate retry fixture",
                 ));
             }

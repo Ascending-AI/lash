@@ -135,7 +135,7 @@ impl TurnCancelRequest {
         self.address.validate()?;
         if self.request_id.trim().is_empty() {
             return Err(RuntimeError::new(
-                "invalid_turn_cancel_request",
+                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
                 "turn cancellation requires a non-empty request id",
             ));
         }
@@ -235,7 +235,7 @@ impl TurnWorkDriver {
         request.validate()?;
         let key = match cancel_gate_key(self.effect_host.as_ref(), &request.address).await {
             Ok(key) => key,
-            Err(err) if err.code.as_str() == "await_event_unknown_or_revoked" => {
+            Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
                 return Ok(TurnCancelReceipt {
                     outcome: TurnCancelOutcome::UnknownOrRevoked,
                 });
@@ -290,7 +290,7 @@ impl TurnWorkDriver {
             .await
             .map_err(|_| {
                 RuntimeError::new(
-                    "turn_terminal_await_timeout",
+                    crate::RuntimeErrorCode::TurnTerminalAwaitTimeout,
                     format!(
                         "timed out awaiting terminal for turn `{}` in session `{}` after {} ms",
                         address.turn_id,
@@ -312,15 +312,24 @@ enum TurnGateTerminal {
 fn gate_resolution(value: TurnGateTerminal) -> Result<Resolution, RuntimeError> {
     serde_json::to_value(value)
         .map(Resolution::Ok)
-        .map_err(|err| RuntimeError::new("turn_cancel_gate_encode", err.to_string()))
+        .map_err(|err| {
+            RuntimeError::new(
+                crate::RuntimeErrorCode::TurnCancelGateEncode,
+                err.to_string(),
+            )
+        })
 }
 
 fn decode_gate(resolution: Resolution) -> Result<TurnGateTerminal, RuntimeError> {
     match resolution {
-        Resolution::Ok(value) => serde_json::from_value(value)
-            .map_err(|err| RuntimeError::new("turn_cancel_gate_decode", err.to_string())),
+        Resolution::Ok(value) => serde_json::from_value(value).map_err(|err| {
+            RuntimeError::new(
+                crate::RuntimeErrorCode::TurnCancelGateDecode,
+                err.to_string(),
+            )
+        }),
         other => Err(RuntimeError::new(
-            "turn_cancel_gate_invalid_terminal",
+            crate::RuntimeErrorCode::TurnCancelGateInvalidTerminal,
             format!("turn cancellation gate resolved with {other:?}"),
         )),
     }
@@ -329,7 +338,9 @@ fn decode_gate(resolution: Resolution) -> Result<TurnGateTerminal, RuntimeError>
 fn terminal_resolution(value: &TurnTerminal) -> Result<Resolution, RuntimeError> {
     serde_json::to_value(value)
         .map(Resolution::Ok)
-        .map_err(|err| RuntimeError::new("turn_terminal_encode", err.to_string()))
+        .map_err(|err| {
+            RuntimeError::new(crate::RuntimeErrorCode::TurnTerminalEncode, err.to_string())
+        })
 }
 
 fn decode_terminal(
@@ -339,7 +350,7 @@ fn decode_terminal(
     match resolution {
         Resolution::Ok(value) => serde_json::from_value(value).map_err(|err| {
             RuntimeError::new(
-                "turn_terminal_decode",
+                crate::RuntimeErrorCode::TurnTerminalDecode,
                 format!(
                     "invalid terminal result for turn `{}` in session `{}`: {err}",
                     address.turn_id, address.session_id
@@ -347,7 +358,7 @@ fn decode_terminal(
             )
         }),
         other => Err(RuntimeError::new(
-            "turn_terminal_invalid_resolution",
+            crate::RuntimeErrorCode::TurnTerminalInvalidResolution,
             format!(
                 "terminal result for turn `{}` in session `{}` resolved with {other:?}",
                 address.turn_id, address.session_id
@@ -455,10 +466,15 @@ impl ActiveTurnControl {
                 RuntimeEffectLocalExecutor::unavailable(),
             )
             .await
-            .map_err(|err| RuntimeError::new(err.code, err.message))?;
+            .map_err(|err| {
+                RuntimeError::new(
+                    crate::RuntimeErrorCode::from_wire_code(&err.code),
+                    err.message,
+                )
+            })?;
         let RuntimeEffectOutcome::PeekAwaitEvent { resolution } = outcome else {
             return Err(RuntimeError::new(
-                "turn_control_peek_outcome",
+                crate::RuntimeErrorCode::TurnControlPeekOutcome,
                 format!("{causal_identity} returned a non-peek runtime effect outcome"),
             ));
         };
@@ -495,7 +511,7 @@ impl ActiveTurnControl {
             ResolveOutcome::AlreadyResolved { terminal } => decode_gate(terminal)?,
             ResolveOutcome::UnknownOrRevoked => {
                 return Err(RuntimeError::new(
-                    "turn_control_unknown_or_revoked",
+                    crate::RuntimeErrorCode::TurnControlUnknownOrRevoked,
                     format!(
                         "turn `{}` in session `{}` was revoked before final commit",
                         self.address.turn_id, self.address.session_id
@@ -523,7 +539,7 @@ impl ActiveTurnControl {
         {
             ResolveOutcome::Accepted | ResolveOutcome::AlreadyResolved { .. } => Ok(()),
             ResolveOutcome::UnknownOrRevoked => Err(RuntimeError::new(
-                "turn_terminal_unknown_or_revoked",
+                crate::RuntimeErrorCode::TurnTerminalUnknownOrRevoked,
                 format!(
                     "terminal promise for turn `{}` in session `{}` was revoked",
                     self.address.turn_id, self.address.session_id

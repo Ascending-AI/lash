@@ -286,7 +286,10 @@ impl AppState {
                     .await
                 {
                     Ok(terminal) => (Some(terminal), None),
-                    Err(err) if err.code.as_str() == "turn_terminal_await_timeout" => {
+                    Err(err)
+                        if err.code
+                            == lash::runtime::RuntimeErrorCode::TurnTerminalAwaitTimeout =>
+                    {
                         (None, Some(err))
                     }
                     // Audited: terminal attachment lowers Restate transport and revocation failures to RuntimeError without a tombstone cause.
@@ -298,7 +301,9 @@ impl AppState {
             let routing_retained = if terminal.is_none()
                 && terminal_error
                     .as_ref()
-                    .is_some_and(|err| err.code.as_str() == "turn_terminal_await_timeout")
+                    .is_some_and(|err| {
+                        err.code == lash::runtime::RuntimeErrorCode::TurnTerminalAwaitTimeout
+                    })
             {
                 match self.restate_turn_is_active(&address).await {
                     Ok(true) => true,

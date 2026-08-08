@@ -142,7 +142,12 @@ where
             resolution,
         })
         .await
-        .map_err(|err| RuntimeError::new("restate_await_event_resolve", err.to_string()))
+        .map_err(|err| {
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::RestateEffectController,
+                err.to_string(),
+            )
+        })
 }
 fn restate_turn_cancel_wait_request(
     invocation: &RuntimeInvocation,
@@ -323,7 +328,10 @@ where
                 .session_is_revoked(session_id.to_string())
                 .await
                 .map_err(|err| {
-                    RuntimeError::new("restate_await_event_revocation_read", err.to_string())
+                    RuntimeError::new(
+                        lash_core::RuntimeErrorCode::RestateEffectController,
+                        err.to_string(),
+                    )
                 })?
         {
             return Err(restate_unknown_or_revoked());
@@ -355,7 +363,10 @@ where
                 .session_is_revoked(session_id.to_string())
                 .await
                 .map_err(|err| {
-                    RuntimeError::new("restate_await_event_revocation_read", err.to_string())
+                    RuntimeError::new(
+                        lash_core::RuntimeErrorCode::RestateEffectController,
+                        err.to_string(),
+                    )
                 })?
         {
             return Err(restate_unknown_or_revoked());
@@ -363,7 +374,12 @@ where
         self.context
             .peek_event(RestateDurableWaitAddress::for_key(key))
             .await
-            .map_err(|err| RuntimeError::new("restate_effect_controller", err.to_string()))
+            .map_err(|err| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::RestateEffectController,
+                    err.to_string(),
+                )
+            })
     }
 
     async fn await_await_event(
@@ -381,7 +397,10 @@ where
                 .session_is_revoked(session_id.to_string())
                 .await
                 .map_err(|err| {
-                    RuntimeError::new("restate_await_event_revocation_read", err.to_string())
+                    RuntimeError::new(
+                        lash_core::RuntimeErrorCode::RestateEffectController,
+                        err.to_string(),
+                    )
                 })?
         {
             return Err(restate_unknown_or_revoked());
@@ -390,21 +409,36 @@ where
         self.context
             .await_event(restate_durable_wait_request(key, deadline, &clock), cancel)
             .await
-            .map_err(|err| RuntimeError::new("restate_effect_controller", err.to_string()))
+            .map_err(|err| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::RestateEffectController,
+                    err.to_string(),
+                )
+            })
     }
 
     async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
         self.context
             .update_session_waits(session_id.to_string(), true)
             .await
-            .map_err(|err| RuntimeError::new("restate_await_event_revoke", err.to_string()))
+            .map_err(|err| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::RestateEffectController,
+                    err.to_string(),
+                )
+            })
     }
 
     async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
         self.context
             .update_session_waits(session_id.to_string(), false)
             .await
-            .map_err(|err| RuntimeError::new("restate_await_event_cancel", err.to_string()))
+            .map_err(|err| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::RestateEffectController,
+                    err.to_string(),
+                )
+            })
     }
 }
 

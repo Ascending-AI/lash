@@ -26,7 +26,7 @@ use hmac::{Hmac, Mac};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
-use crate::RuntimeError;
+use crate::{RuntimeError, RuntimeErrorCode};
 
 use super::executor::{
     AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome,
@@ -42,22 +42,23 @@ const MAX_POLL: Duration = Duration::from_secs(1);
 
 /// Backend-specific error vocabulary for coordinator-owned failures.
 ///
-/// Hosts match on `RuntimeError::code`, so each backend keeps the codes it
-/// shipped: `{code_prefix}_await_event_{sign,encode,decode,notify}`. Storage
-/// failures stay in the backend, which owns its own `_store` mapping.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Hosts match on `RuntimeError::code`, so each backend supplies typed codes
+/// for the four coordinator failures it can emit. Bundled backends use built-in
+/// variants; external backends can deliberately use namespaced values from
+/// [`RuntimeErrorCode::from_wire_code`]. Storage failures stay in the backend,
+/// which owns its own `_store` mapping.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AwaitEventVocabulary {
-    /// Error-code prefix, e.g. `"sqlite"` or `"postgres"`.
-    pub code_prefix: &'static str,
+    /// Signer initialization failure.
+    pub sign: RuntimeErrorCode,
+    /// State encoding failure.
+    pub encode: RuntimeErrorCode,
+    /// Persisted state decoding failure.
+    pub decode: RuntimeErrorCode,
+    /// In-process notifier failure.
+    pub notify: RuntimeErrorCode,
     /// Human-readable backend name used in error messages, e.g. `"SQLite"`.
     pub display_name: &'static str,
-}
-
-impl AwaitEventVocabulary {
-    /// Build the backend-qualified error code for a coordinator failure.
-    fn code(&self, suffix: &str) -> String {
-        format!("{}_await_event_{suffix}", self.code_prefix)
-    }
 }
 
 /// The persisted projection of an [`AwaitEventKey`]'s identity.
@@ -384,8 +385,7 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
                 tokio::select! {
                     _ = cancel.cancelled() => {
                         if key.wait.is_turn_control() {
-                            return Err(RuntimeError::new(
-                                "turn_control_wait_cancelled",
+                            return Err(RuntimeError::new(crate::RuntimeErrorCode::TurnControlWaitCancelled,
                                 "turn-control waiter stopped without resolving its keyed promise",
                             ));
                         }
@@ -393,8 +393,7 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
                     }
                     _ = clock.sleep_until(deadline) => {
                         if key.wait.is_turn_control() {
-                            return Err(RuntimeError::new(
-                                "turn_control_wait_timeout",
+                            return Err(RuntimeError::new(crate::RuntimeErrorCode::TurnControlWaitTimeout,
                                 "turn-control waiter timed out without resolving its keyed promise",
                             ));
                         }
@@ -410,8 +409,7 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
                 tokio::select! {
                     _ = cancel.cancelled() => {
                         if key.wait.is_turn_control() {
-                            return Err(RuntimeError::new(
-                                "turn_control_wait_cancelled",
+                            return Err(RuntimeError::new(crate::RuntimeErrorCode::TurnControlWaitCancelled,
                                 "turn-control waiter stopped without resolving its keyed promise",
                             ));
                         }
@@ -507,7 +505,7 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
         let vocabulary = self.backend.vocabulary();
         serde_json::from_str(encoded).map_err(|err| {
             RuntimeError::new(
-                vocabulary.code("decode"),
+                vocabulary.decode,
                 format!(
                     "failed to decode {} await-event terminal: {err}",
                     vocabulary.display_name
@@ -519,7 +517,7 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
     fn encode_error(&self, err: &serde_json::Error) -> RuntimeError {
         let vocabulary = self.backend.vocabulary();
         RuntimeError::new(
-            vocabulary.code("encode"),
+            vocabulary.encode,
             format!(
                 "failed to encode {} await-event state: {err}",
                 vocabulary.display_name
@@ -533,10 +531,10 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
         wait: &AwaitEventWaitIdentity,
         key_id: &str,
     ) -> Result<String, RuntimeError> {
-        let vocabulary = self.backend.vocabulary();
         let mut mac = HmacSha256::new_from_slice(&self.signing_secret).map_err(|err| {
+            let vocabulary = self.backend.vocabulary();
             RuntimeError::new(
-                vocabulary.code("sign"),
+                vocabulary.sign,
                 format!(
                     "failed to initialize {} await-event signer: {err}",
                     vocabulary.display_name
@@ -603,7 +601,7 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
     fn notifier_error(&self) -> RuntimeError {
         let vocabulary = self.backend.vocabulary();
         RuntimeError::new(
-            vocabulary.code("notify"),
+            vocabulary.notify,
             format!(
                 "{} await-event notifier lock poisoned",
                 vocabulary.display_name
@@ -618,7 +616,7 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
 /// reveal which of the three conditions applied.
 fn unknown_or_revoked() -> RuntimeError {
     RuntimeError::new(
-        "await_event_unknown_or_revoked",
+        crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked,
         "await-event key is invalid or revoked",
     )
 }
@@ -628,7 +626,7 @@ fn unknown_or_revoked() -> RuntimeError {
 fn validate_session_id(session_id: &str) -> Result<(), RuntimeError> {
     if session_id.trim().is_empty() {
         return Err(RuntimeError::new(
-            "invalid_await_event_session_id",
+            crate::RuntimeErrorCode::InvalidAwaitEventSessionId,
             "await-event session id must be non-empty",
         ));
     }
@@ -672,7 +670,10 @@ mod tests {
     impl AwaitEventBackend for MemoryBackend {
         fn vocabulary(&self) -> AwaitEventVocabulary {
             AwaitEventVocabulary {
-                code_prefix: "memory",
+                sign: RuntimeErrorCode::from_wire_code("memory_await_event_sign"),
+                encode: RuntimeErrorCode::from_wire_code("memory_await_event_encode"),
+                decode: RuntimeErrorCode::from_wire_code("memory_await_event_decode"),
+                notify: RuntimeErrorCode::from_wire_code("memory_await_event_notify"),
                 display_name: "in-memory",
             }
         }

@@ -671,7 +671,7 @@ impl LashCore {
             } if scoped_session_id == &session_id => {}
             _ => {
                 return Err(lash_core::RuntimeError::new(
-                    "session_delete_scope_mismatch",
+                    lash_core::RuntimeErrorCode::SessionDeleteScopeMismatch,
                     "session deletion requires a matching SessionDelete scope",
                 )
                 .into());

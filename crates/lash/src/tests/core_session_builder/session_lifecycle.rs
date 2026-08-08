@@ -1209,11 +1209,10 @@ async fn persisted_provider_id_mismatch_fails_at_turn_execution() -> Result<()> 
     assert!(matches!(
         err,
         EmbedError::Runtime(lash_core::RuntimeError {
-            code: lash_core::RuntimeErrorCode::Other(code),
+            code: lash_core::RuntimeErrorCode::LlmProvider,
             message,
             ..
-        }) if code == "llm_provider"
-            && message.contains("other-provider")
+        }) if message.contains("other-provider")
             && message.contains("provider-mismatch")
     ));
     Ok(())
@@ -1299,11 +1298,10 @@ async fn refreshed_head_provider_id_mismatch_fails_before_turn() -> Result<()> {
     assert!(matches!(
         err,
         EmbedError::Runtime(lash_core::RuntimeError {
-            code: lash_core::RuntimeErrorCode::Other(code),
+            code: lash_core::RuntimeErrorCode::LlmProvider,
             message,
             ..
-        }) if code == "llm_provider"
-            && message.contains("other-provider")
+        }) if message.contains("other-provider")
     ));
     Ok(())
 }

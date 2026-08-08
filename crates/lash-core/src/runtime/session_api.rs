@@ -477,7 +477,7 @@ impl LashRuntime {
         let idempotency_key = idempotency_key.into();
         if idempotency_key.trim().is_empty() {
             return Err(RuntimeError::new(
-                RuntimeErrorCode::Other("session_command_idempotency_key".to_string()),
+                RuntimeErrorCode::SessionCommandIdempotencyKey,
                 "session command idempotency key cannot be empty",
             ));
         }
@@ -510,12 +510,7 @@ impl LashRuntime {
             driver
                 .claim_and_run_pending(Some(&session_id), "session_command")
                 .await
-                .map_err(|err| {
-                    RuntimeError::new(
-                        RuntimeErrorCode::Other("queued_work".to_string()),
-                        err.to_string(),
-                    )
-                })?;
+                .map_err(|err| RuntimeError::new(RuntimeErrorCode::QueuedWork, err.to_string()))?;
             // An inline or external driver may have committed the command
             // before returning. Reconcile that authoritative head before this
             // resident runtime reaches another commit boundary; its lease is
@@ -524,7 +519,10 @@ impl LashRuntime {
             self.refresh_session_graph_from_store()
                 .await
                 .map_err(|err| {
-                    RuntimeError::new("session_command_post_drive_refresh", err.to_string())
+                    RuntimeError::new(
+                        crate::RuntimeErrorCode::SessionCommandPostDriveRefresh,
+                        err.to_string(),
+                    )
                 })?;
         }
         Ok(crate::SessionCommandReceipt {
@@ -559,7 +557,7 @@ impl LashRuntime {
         };
         let Some((batch, command)) = claim.exclusive_session_command() else {
             return Err(RuntimeError::new(
-                "session_command_claim",
+                crate::RuntimeErrorCode::SessionCommandClaim,
                 format!(
                     "queued-work claim `{}` did not contain exactly one session command batch",
                     claim.claim_id
@@ -590,11 +588,19 @@ impl LashRuntime {
     ) -> Result<(), RuntimeError> {
         self.refresh_session_graph_from_store()
             .await
-            .map_err(|err| RuntimeError::new("session_command_refresh", err.to_string()))?;
+            .map_err(|err| {
+                RuntimeError::new(
+                    crate::RuntimeErrorCode::SessionCommandRefresh,
+                    err.to_string(),
+                )
+            })?;
         let crate::SessionCommand::RefreshToolCatalog { .. } = command;
-        self.refresh_session_tool_catalog()
-            .await
-            .map_err(|err| RuntimeError::new("session_command_refresh_tools", err.to_string()))?;
+        self.refresh_session_tool_catalog().await.map_err(|err| {
+            RuntimeError::new(
+                crate::RuntimeErrorCode::SessionCommandRefreshTools,
+                err.to_string(),
+            )
+        })?;
         let Some(store) = self
             .session
             .as_ref()
