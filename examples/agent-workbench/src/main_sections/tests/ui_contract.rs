@@ -47,6 +47,17 @@ fn workbench_ui_renders_accounts_panel() {
 }
 
 #[test]
+fn workbench_ui_renders_and_controls_pending_approvals() {
+    assert!(ui::INDEX_HTML.contains("aria-label=\"Pending approvals\""));
+    assert!(ui::INDEX_HTML.contains("className = \"approval-card\""));
+    assert!(ui::INDEX_HTML.contains("approval.requesting_session"));
+    assert!(ui::INDEX_HTML.contains("formatApprovalAge(approval.age_ms)"));
+    assert!(ui::INDEX_HTML.contains("/api/approvals/"));
+    assert!(ui::INDEX_HTML.contains("decide(\"approve\", approve)"));
+    assert!(ui::INDEX_HTML.contains("decide(\"deny\", deny)"));
+}
+
+#[test]
 fn workbench_ui_distinguishes_running_turn_ingress_actions() {
     assert!(ui::INDEX_HTML.contains("id=\"injectNow\""));
     assert!(ui::INDEX_HTML.contains("id=\"queueNext\""));

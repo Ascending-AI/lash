@@ -16,6 +16,9 @@ async fn app_state(
         .authorize(WorkbenchAuthorizationAction::Observe {
             session_id: session_id.clone(),
         })?;
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::ManageApprovals)?;
     let session = state
         .open_session(&session_id)
         .await
@@ -101,6 +104,7 @@ async fn app_state(
         // Audited: application reconciliation lowers TurnInputStore failures to RuntimeError::StoreCommitFailed without a typed cause.
         .map_err(AppError::internal)?;
     let usage = session.usage_report();
+    let pending_approvals = state.approvals.pending().map_err(AppError::internal)?;
     let observation =
         RemoteSessionObservation::from_core(lash::observe::SessionObservation {
             read_view: observation_snapshot.read_view,
@@ -119,6 +123,7 @@ async fn app_state(
             queued_work,
             turn_input_applications,
             usage,
+            pending_approvals,
         },
     }))
 }
@@ -881,6 +886,7 @@ async fn reset_chat(
         queued_work: Vec::new(),
         turn_input_applications: Vec::new(),
         usage: session.usage_report(),
+        pending_approvals: state.approvals.pending().map_err(AppError::internal)?,
     }))
 }
 

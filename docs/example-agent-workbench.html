@@ -134,6 +134,14 @@ finish { handle: handle, registrations: await triggers.list({ target: daily_dige
       <p>After a Restate-backed turn registers an enabled <code>cron.Schedule</code>, the workbench syncs that source key to <code>WorkbenchCronJob/{session_id}:{source_key}</code>. The virtual object stores the source request, the next execution timestamp, and the Restate invocation id in Restate K/V state. Its <code>run</code> handler first schedules the next <code>run</code> with a delayed Restate send (so a tick that fails cannot kill the schedule), then emits a validated <code>cron.Tick</code> trigger occurrence whose idempotency key includes the journaled fire time: unique per tick, stable across retries of the same tick. A cron remains valid while its owning session has durable store metadata, including when another workbench session is current. A job whose session has a permanent deletion tombstone cancels with <code>reason: "session_retired"</code>; a job with neither a tombstone nor session store metadata cancels as an orphan with <code>reason: "session_absent"</code>. Resetting the workbench cancels the old session's cron jobs derived from its durable trigger registrations (plus anything armed in-process), and an equal-request re-sync revives a chain whose stored next execution is already in the past. The disposition read and cancel trace are Restate-journaled. Tick and zombie-guard traces record <code>session_state: "live"</code>, <code>"retired"</code>, or <code>"unknown"</code>. The trace JSONL includes <code>agent_workbench.cron.restate.sync_upserted</code>, <code>agent_workbench.cron.restate.run</code>, and <code>agent_workbench.cron.restate.zombie_cancelled</code> events.</p>
     </div>
 
+    <div class="section" id="durable-approval">
+      <div class="section-header">
+        <h2>Durable Approval Is Host Policy</h2>
+        <p>The workbench's <code>ops.apply_change</code> demo takes a <code>ToolContext::completion_key()</code>, persists it in the host-owned <code>approvals.db</code>, and returns <code>ToolResult::Pending</code>. The operator rail lists the key, tool, arguments, requesting session, and age. Approve and deny actions resolve that same durable key through <code>LashCore::completions()</code>, so an approval wait survives loss of the workbench process.</p>
+      </div>
+      <p>Approval is deliberately not a Lash manifest capability. It is host policy: the host chooses gated tools, authenticates operators, stores pending decisions, and defines their outcomes. Lash core will never grow an approval flag or approval/revert surface; its only responsibility is the general completion-key park/resume primitive.</p>
+    </div>
+
     <div class="section" id="host-wiring">
       <div class="section-header">
         <h2>Host Wiring</h2>

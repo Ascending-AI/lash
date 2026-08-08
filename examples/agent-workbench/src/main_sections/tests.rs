@@ -2,9 +2,7 @@
 mod tests {
     use super::*;
 
-    pub(super) fn in_memory_trigger_store() -> Arc<dyn lash::triggers::TriggerStore> {
-        Arc::new(lash::triggers::InMemoryTriggerStore::new())
-    }
+    include!("tests/support.rs");
     use lash::rlm::RlmTurnBuilderExt;
     use lash::tracing::{
         TraceBranchSelection, TraceLanguageChildExecution, TraceLashlangEdgeSelection,
@@ -13,7 +11,6 @@ mod tests {
         TraceRuntimeScope, TraceRuntimeSubject,
     };
     use std::future::Future;
-
     fn sync_await<T, F>(future: F) -> T
     where
         T: Send + 'static,
@@ -29,7 +26,6 @@ mod tests {
         .join()
         .expect("runtime thread")
     }
-
     fn test_model() -> lash::ModelSpec {
         lash::ModelSpec::builder("test-model")
             .context_window_tokens(4096)
@@ -51,6 +47,7 @@ mod tests {
     include!("tests/continue_as_projection.rs");
     include!("tests/tool_catalog.rs");
     include!("tests/deferred_tools.rs");
+    include!("tests/approvals.rs");
     pub(super) fn explicit_durable_test_facets(
         data_dir: &std::path::Path,
     ) -> lash::LashCoreBuilder {
@@ -459,6 +456,7 @@ mod tests {
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::default(),
             authorization: WorkbenchAuthorization::allow_all(),
+            approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
         };
         let session_id = state.current_session_id();
         let mut events = state.event_tx.subscribe(&session_id);
@@ -539,6 +537,7 @@ mod tests {
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::default(),
             authorization: WorkbenchAuthorization::allow_all(),
+            approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
         };
         let session_id = state.current_session_id();
         let mut events = state.event_tx.subscribe(&session_id);
@@ -809,6 +808,7 @@ finish "gap source"
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::default(),
             authorization: WorkbenchAuthorization::allow_all(),
+            approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
         };
         let session_id = state.current_session_id();
         let mut events = state.event_tx.subscribe(&session_id);
@@ -1090,6 +1090,7 @@ finish initial
             mail_world: mail_world.clone(),
             active_turns: ActiveTurns::default(),
             authorization: WorkbenchAuthorization::allow_all(),
+            approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
         };
 
         let receipt = enqueue_tool_catalog_refresh(&state, "initial_empty")
@@ -1287,6 +1288,7 @@ finish initial
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::default(),
             authorization: WorkbenchAuthorization::allow_all(),
+            approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
         };
         let session = state
             .core
@@ -1457,6 +1459,7 @@ finish initial
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::default(),
             authorization: WorkbenchAuthorization::allow_all(),
+            approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
         };
         let old_session_id = state.current_session_id();
         let _deleted_session_events = state.event_tx.subscribe(&old_session_id);
@@ -1931,6 +1934,7 @@ finish initial
             mail_world: mail::MailWorld::new(),
             active_turns,
             authorization: WorkbenchAuthorization::allow_all(),
+            approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
         };
         LiveWorkbenchRestateHarness {
             state,

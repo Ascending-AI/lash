@@ -76,6 +76,7 @@ mod turn_control_timeout_tests {
             active_turns: ActiveTurns::persistent(data_dir.join("active-turns.json"))
                 .expect("open active turns"),
             authorization: WorkbenchAuthorization::allow_all(),
+            approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
         };
         let session_id = state.current_session_id();
 
@@ -313,6 +314,7 @@ mod turn_control_timeout_tests {
             active_turns: ActiveTurns::persistent(data_dir.join("active-turns.json"))
                 .expect("open active turns"),
             authorization: WorkbenchAuthorization::allow_all(),
+            approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
         }
     }
 
@@ -491,6 +493,7 @@ finish (await handle)?
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::default(),
             authorization: WorkbenchAuthorization::allow_all(),
+            approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
         };
         let session_id = state.current_session_id();
         let turn_text = "start and await the held process";

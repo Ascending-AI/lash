@@ -155,6 +155,7 @@ async fn recoverable_chat_test_state_with_dependencies_and_context(
         mail_world: mail::MailWorld::new(),
         active_turns: ActiveTurns::default(),
         authorization: WorkbenchAuthorization::allow_all(),
+        approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     }
 }
 

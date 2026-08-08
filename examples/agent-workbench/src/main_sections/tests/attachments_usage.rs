@@ -410,6 +410,7 @@ fn attachment_usage_gate_state(
         mail_world: mail::MailWorld::new(),
         active_turns: ActiveTurns::default(),
         authorization: WorkbenchAuthorization::allow_all(),
+        approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     }
 }
 

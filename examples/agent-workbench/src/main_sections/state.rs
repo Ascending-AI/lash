@@ -29,6 +29,7 @@ struct AppState {
     mail_world: mail::MailWorld,
     active_turns: ActiveTurns,
     authorization: WorkbenchAuthorization,
+    approvals: approvals::WorkbenchApprovals,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -71,6 +72,7 @@ struct StateSnapshot {
     turn_input_applications:
         Vec<lash::remote::observations::RemoteTurnInputApplication>,
     usage: lash::usage::SessionUsageReport,
+    pending_approvals: Vec<approvals::PendingApproval>,
 }
 
 #[derive(Debug, Serialize)]
@@ -95,6 +97,9 @@ enum WorkbenchAuthorizationAction {
     EnqueueTurnInput { session_id: String },
     CancelTurn { session_id: String },
     ManageQueuedWork { session_id: String },
+    /// Deployment-wide operator policy. Approval decisions are deliberately
+    /// separate from chat/session participation.
+    ManageApprovals,
     /// Destructive, deployment-wide maintenance. It is deliberately not
     /// session-scoped: no chat participant should ever be able to reach it.
     PruneTriggerMutationReceipts,
@@ -135,6 +140,7 @@ impl WorkbenchAuthorizer for AllowAllWorkbenchAuthorizer {
             | WorkbenchAuthorizationAction::ManageQueuedWork { session_id } => {
                 let _ = session_id;
             }
+            WorkbenchAuthorizationAction::ManageApprovals => {}
             WorkbenchAuthorizationAction::PruneTriggerMutationReceipts => {}
         }
         Ok(())
