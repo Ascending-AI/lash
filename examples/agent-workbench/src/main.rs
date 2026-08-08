@@ -42,7 +42,9 @@ use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatiblePr
 use lash_remote_protocol::{
     RemoteLiveReplayGap, RemoteSessionObservation, RemoteSessionObservationEvent,
 };
-use lash_standard_plugins::ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS;
+use lash_standard_plugins::{
+    ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS, rolling_history::RollingHistoryPluginFactory,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc};

@@ -1,3 +1,22 @@
+fn configure_workbench_plugins(
+    plugins: &mut lash::PluginStack,
+    tavily_api_key: String,
+    mail_world: mail::MailWorld,
+    subagent_registry: Arc<lash_subagents::CapabilityRegistry>,
+) {
+    plugins.push(Arc::new(RollingHistoryPluginFactory::default()));
+    plugins.push(Arc::new(
+        WorkbenchPluginFactory::new(tavily_api_key).with_mail_world(mail_world),
+    ));
+    plugins.push(Arc::new(
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+    ));
+    plugins.push(Arc::new(
+        lash_subagents::SubagentsPluginFactory::new(subagent_registry)
+            .with_session_spec(SessionSpec::inherit()),
+    ));
+}
+
 fn main() -> AnyhowResult<()> {
     let stack_bytes = std::env::var("AGENT_WORKBENCH_TOKIO_STACK_BYTES")
         .ok()
@@ -181,17 +200,12 @@ async fn async_main() -> AnyhowResult<()> {
         .trace_sink(Arc::clone(&trace_sink))
         .trace_level(TraceLevel::Extended)
         .configure_plugins(|plugins| {
-            plugins.push(Arc::new(
-                WorkbenchPluginFactory::new(tavily_api_key.clone())
-                    .with_mail_world(mail_world.clone()),
-            ));
-            plugins.push(Arc::new(
-                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
-            ));
-            plugins.push(Arc::new(
-                lash_subagents::SubagentsPluginFactory::new(subagent_registry)
-                    .with_session_spec(SessionSpec::inherit()),
-            ));
+            configure_workbench_plugins(
+                plugins,
+                tavily_api_key.clone(),
+                mail_world.clone(),
+                subagent_registry,
+            );
         })
         .process_work_driver(process_work_driver.clone())
         .queued_work_driver(queued_work_driver.clone())
