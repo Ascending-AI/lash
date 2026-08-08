@@ -17,7 +17,7 @@ struct AppState {
     #[cfg_attr(not(test), allow(dead_code))]
     restate_admin_url: String,
     restate_http: reqwest::Client,
-    restate_cron_job_keys: Arc<Mutex<BTreeSet<String>>>,
+    restate_cron_job_keys: Arc<Mutex<BTreeMap<String, BTreeSet<String>>>>,
     mail_world: mail::MailWorld,
     active_turns: ActiveTurns,
     authorization: WorkbenchAuthorization,

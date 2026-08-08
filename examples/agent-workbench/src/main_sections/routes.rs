@@ -548,7 +548,6 @@ async fn set_trigger_enabled(
         // Audited: this locally generated error guards an impossible command/outcome shape.
         return Err(AppError::internal("trigger mutation returned a list outcome"));
     };
-    let registration = lash::triggers::TriggerRegistration::from(&receipt.record_snapshot);
     state.trace_for_session(
         &session_id,
         "api.triggers.enabled",
@@ -558,6 +557,20 @@ async fn set_trigger_enabled(
             "changed": changed,
         }),
     );
+    let registration = lash::triggers::TriggerRegistration::from(&receipt.record_snapshot);
+    // Do not gate this sync on `changed`: redundant mutations reconcile stale Restate state.
+    // A sync failure leaves the mutation durable and Restate stale; the next sync reconciles.
+    restate::sync_cron_jobs_after_trigger_mutation(
+        &state,
+        &session_id,
+        if request.enabled {
+            "trigger_enabled"
+        } else {
+            "trigger_disabled"
+        },
+        &receipt.record_snapshot,
+    )
+    .await?;
     Ok(Json(TriggerMutationResponse {
         changed,
         registration: Some(registration),
@@ -593,6 +606,14 @@ async fn delete_trigger(
         "api.triggers.delete",
         json!({ "subscription_key": subscription_key, "changed": changed }),
     );
+    // A sync failure leaves the mutation durable and Restate stale; the next sync reconciles.
+    restate::sync_cron_jobs_after_trigger_mutation(
+        &state,
+        &session_id,
+        "trigger_deleted",
+        &record,
+    )
+    .await?;
     Ok(Json(TriggerMutationResponse {
         changed,
         registration: None,

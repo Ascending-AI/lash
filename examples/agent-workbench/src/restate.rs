@@ -690,9 +690,7 @@ pub(crate) async fn cancel_cron_jobs_for_session(
             .restate_cron_job_keys
             .lock()
             .expect("restate cron job key lock");
-        let known = guard.clone();
-        guard.clear();
-        known
+        guard.remove(session_id).unwrap_or_default()
     });
     for job_key in job_keys {
         let url = format!(
@@ -1281,94 +1279,7 @@ fn record_turn_failure(
     state.publish_turn_failed(session_id, turn_id);
 }
 
-async fn sync_cron_jobs_with_context(
-    state: &AppState,
-    ctx: &WorkflowContext<'_>,
-    session_id: &str,
-    reason: &str,
-) -> HandlerResult<()> {
-    let session = state
-        .core
-        .session(session_id)
-        .open()
-        .await
-        .map_err(classified_embed_handler_error)?;
-    let registrations = session
-        .triggers()
-        .by_source_type(CRON_SCHEDULE_SOURCE_TYPE)
-        .await
-        .map_err(classified_embed_handler_error)?;
-    let previous = state
-        .restate_cron_job_keys
-        .lock()
-        .expect("restate cron job key lock")
-        .clone();
-    let mut scheduled = BTreeMap::new();
-    for registration in registrations {
-        if !registration.enabled {
-            continue;
-        }
-        let (job_key, request) = match cron_request_from_registration(session_id, &registration) {
-            Ok(value) => value,
-            Err(err) => {
-                state.trace_for_session(
-                    session_id,
-                    "cron.restate.sync_invalid",
-                    json!({
-                        "reason": reason,
-                        "subscription_key": registration.subscription_key,
-                        "error": err,
-                    }),
-                );
-                continue;
-            }
-        };
-        scheduled.entry(job_key).or_insert(request);
-    }
-    let mut active = BTreeSet::new();
-    for (job_key, request) in scheduled {
-        let Json(info) = ctx
-            .object_client::<WorkbenchCronJobClient>(job_key.clone())
-            .upsert(Json(request))
-            .call()
-            .await?;
-        state.trace_for_session(
-            session_id,
-            "cron.restate.sync_upserted",
-            json!({
-                "reason": reason,
-                "job_key": job_key,
-                // The registration's own session, so every cron trace record can
-                // be gated on the same payload field (the run/cancel records
-                // carry it too) instead of splitting between payload and trace
-                // context (FIG-1018 review).
-                "job_session_id": session_id,
-                "next_execution_time": info.next_execution_time,
-                "next_execution_id": info.next_execution_id,
-            }),
-        );
-        active.insert(job_key);
-    }
-    for stale in previous.difference(&active) {
-        ctx.object_client::<WorkbenchCronJobClient>(stale.clone())
-            .cancel()
-            .call()
-            .await?;
-        state.trace_for_session(
-            session_id,
-            "cron.restate.sync_cancelled",
-            json!({
-                "reason": reason,
-                "job_key": stale,
-            }),
-        );
-    }
-    *state
-        .restate_cron_job_keys
-        .lock()
-        .expect("restate cron job key lock") = active;
-    Ok(())
-}
+include!("restate_cron_sync.rs");
 
 /// Idempotency key for one cron tick's trigger occurrence. Must be unique
 /// per (job, tick): `fired_at` is the journaled fire time, so retries of the
