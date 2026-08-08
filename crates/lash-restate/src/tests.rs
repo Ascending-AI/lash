@@ -55,15 +55,16 @@ mod endpoint_protocol;
 mod process_tool_replay;
 mod tool_context_conformance;
 use endpoint_protocol::{
-    encode_call_replay, encode_completed_captured_sleep_replay, encode_completed_sleep_replay,
+    encode_call_replay, encode_captured_run_and_call_replay,
+    encode_completed_captured_sleep_replay, encode_completed_sleep_replay,
     encode_effectful_process_terminal_replay, encode_one_way_call_replay,
     encode_pending_sleep_replay, encode_process_segment_send_replay,
     encode_process_terminal_delivery_replay, encode_run_replay,
     encode_two_one_way_calls_and_call_replay, invoke_endpoint, invoke_endpoint_body,
     invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses, invoke_endpoint_open,
-    invoke_endpoint_with_scripted_responses, invoke_process_workflow_endpoint, restate_call_frames,
-    restate_error_message, restate_message_types, restate_output_failure_message,
-    restate_output_json,
+    invoke_endpoint_with_named_call_responses, invoke_endpoint_with_scripted_responses,
+    invoke_process_workflow_endpoint, restate_call_frames, restate_error_message,
+    restate_message_types, restate_output_failure_message, restate_output_json,
 };
 
 fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<String>) -> ExecutionScope {
@@ -621,6 +622,278 @@ impl Fig793LlmGateRedrive for Fig793LlmGateRedriveImpl {
         };
         Ok(Json(resolution.is_some()))
     }
+}
+
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+struct Fig1126PendingToolRedriveInput;
+
+#[restate_sdk::workflow]
+trait Fig1126RevokedAwaitBoundary {
+    async fn run(input: Json<Fig1126PendingToolRedriveInput>) -> HandlerResult<Json<Resolution>>;
+}
+
+struct Fig1126RevokedAwaitBoundaryImpl;
+
+impl Fig1126RevokedAwaitBoundary for Fig1126RevokedAwaitBoundaryImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(_input): Json<Fig1126PendingToolRedriveInput>,
+    ) -> HandlerResult<Json<Resolution>> {
+        let scope = durable_turn_scope("fig1126-revoked-session", "fig1126-revoked-turn");
+        let key = restate_await_event_key(
+            &scope,
+            AwaitEventWaitIdentity::tool_completion("fig1126-revoked-call"),
+        )
+        .map_err(TerminalError::from_error)?;
+        let outcome = RestateRuntimeEffectController::new(ctx)
+            .execute_effect(
+                RuntimeEffectEnvelope::new(
+                    runtime_invocation(RuntimeEffectKind::AwaitEvent, "fig1126-revoked-await"),
+                    RuntimeEffectCommand::AwaitEvent { key },
+                ),
+                RuntimeEffectLocalExecutor::await_event(
+                    tokio_util::sync::CancellationToken::new(),
+                    None,
+                )
+                .with_turn_cancel_scope(scope),
+            )
+            .await
+            .map_err(TerminalError::from_error)?;
+        let RuntimeEffectOutcome::AwaitEvent { resolution } = outcome else {
+            return Err(TerminalError::new("FIG-1126 fixture expected an await outcome").into());
+        };
+        Ok(Json(resolution))
+    }
+}
+
+#[restate_sdk::workflow]
+trait Fig1126PendingToolRedrive {
+    async fn run(input: Json<Fig1126PendingToolRedriveInput>) -> HandlerResult<Json<Resolution>>;
+}
+
+struct Fig1126PendingToolRedriveImpl {
+    tool_launches: Arc<AtomicUsize>,
+    terminal_resumes: Arc<AtomicUsize>,
+}
+
+impl Fig1126PendingToolRedrive for Fig1126PendingToolRedriveImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(_input): Json<Fig1126PendingToolRedriveInput>,
+    ) -> HandlerResult<Json<Resolution>> {
+        let controller = RestateRuntimeEffectController::new(ctx);
+        let scope = durable_turn_scope("fig1126-session", "fig1126-turn");
+        let pending_scope = scope.clone();
+        let pending = controller
+            .execute_effect(
+                RuntimeEffectEnvelope::new(
+                    RuntimeInvocation::effect(
+                        RuntimeScope::for_turn("fig1126-session", "fig1126-turn", 0, 0),
+                        "fig1126-pending-tool",
+                        RuntimeEffectKind::ToolAttempt,
+                        "fig1126-pending-tool",
+                    ),
+                    RuntimeEffectCommand::ToolAttempt {
+                        call: prepared_tool_call_with("fig1126-call", "fig1126_pending_tool"),
+                        execution_grant: None,
+                        attempt: 1,
+                        max_attempts: 1,
+                    },
+                ),
+                RuntimeEffectLocalExecutor::testing(|_envelope| async {
+                    self.tool_launches.fetch_add(1, Ordering::SeqCst);
+                    let key = controller
+                        .await_event_key(
+                            &pending_scope,
+                            AwaitEventWaitIdentity::tool_completion("fig1126-call"),
+                        )
+                        .await
+                        .map_err(lash_core::RuntimeEffectControllerError::from)?;
+                    Ok(RuntimeEffectOutcome::ToolAttempt {
+                        launch: Box::new(lash_core::ToolAttemptLaunch::Pending {
+                            key: Box::new(key),
+                            pending: lash_core::PendingCompletion::new(),
+                            duration_ms: 0,
+                        }),
+                        triggers: Vec::new(),
+                    })
+                }),
+            )
+            .await
+            .map_err(TerminalError::from_error)?;
+        let RuntimeEffectOutcome::ToolAttempt { launch, .. } = pending else {
+            return Err(TerminalError::new("FIG-1126 fixture expected a tool outcome").into());
+        };
+        let lash_core::ToolAttemptLaunch::Pending { key, .. } = *launch else {
+            return Err(TerminalError::new("FIG-1126 fixture expected a pending tool").into());
+        };
+        let waited = controller
+            .execute_effect(
+                RuntimeEffectEnvelope::new(
+                    RuntimeInvocation::effect(
+                        RuntimeScope::for_turn("fig1126-session", "fig1126-turn", 0, 0),
+                        "fig1126-await-pending-tool",
+                        RuntimeEffectKind::AwaitEvent,
+                        "fig1126-await-pending-tool",
+                    ),
+                    RuntimeEffectCommand::AwaitEvent { key: *key },
+                ),
+                RuntimeEffectLocalExecutor::await_event(
+                    tokio_util::sync::CancellationToken::new(),
+                    None,
+                )
+                .with_turn_cancel_scope(scope),
+            )
+            .await
+            .map_err(TerminalError::from_error)?;
+        let RuntimeEffectOutcome::AwaitEvent { resolution } = waited else {
+            return Err(TerminalError::new("FIG-1126 fixture expected a wait outcome").into());
+        };
+        self.terminal_resumes.fetch_add(1, Ordering::SeqCst);
+        Ok(Json(resolution))
+    }
+}
+
+#[tokio::test]
+async fn fig1126_pending_tool_redrives_after_worker_loss_and_resumes_once() {
+    let tool_launches = Arc::new(AtomicUsize::new(0));
+    let terminal_resumes = Arc::new(AtomicUsize::new(0));
+    let endpoint = Endpoint::builder()
+        .bind(
+            Fig1126PendingToolRedriveImpl {
+                tool_launches: Arc::clone(&tool_launches),
+                terminal_resumes: Arc::clone(&terminal_resumes),
+            }
+            .serve(),
+        )
+        .build();
+    let workflow_key = "fig1126-process-loss-redrive";
+    let input = Fig1126PendingToolRedriveInput;
+
+    let parked = invoke_endpoint_with_named_call_responses(
+        &endpoint,
+        "Fig1126PendingToolRedrive",
+        "run",
+        workflow_key,
+        &input,
+        vec![("is_revoked".to_string(), serde_json::json!(false))],
+    )
+    .await
+    .expect("the initial worker incarnation must park on the completion key");
+    assert_eq!(tool_launches.load(Ordering::SeqCst), 1);
+    assert_eq!(terminal_resumes.load(Ordering::SeqCst), 0);
+    assert!(
+        restate_message_types(&parked)
+            .expect("decode parked attempt")
+            .contains(&RESTATE_SUSPENSION_MESSAGE_TYPE),
+        "the first worker incarnation must suspend: error={:?}",
+        restate_error_message(&parked)
+    );
+    let parked_calls = restate_call_frames(&parked).expect("decode parked call commands");
+    assert_eq!(
+        parked_calls.last().map(|call| call.handler.as_str()),
+        Some("await_event_or_turn_cancel"),
+        "the fixture must park through the production await-event/cancellation controller path"
+    );
+
+    let terminal = Resolution::Ok(serde_json::json!({ "answer": "resumed" }));
+    let completions = parked_calls
+        .iter()
+        .map(|call| {
+            let completion = match call.handler.as_str() {
+                "is_revoked" => serde_json::json!(false),
+                "await_event_or_turn_cancel" => {
+                    serde_json::to_value(RestateAwaitEventRaceOutcome::Event(terminal.clone()))
+                        .expect("serialize FIG-1126 wait resolution")
+                }
+                other => panic!("unexpected FIG-1126 command `{other}`"),
+            };
+            (call.handler.clone(), completion)
+        })
+        .collect::<Vec<_>>();
+    let replay = encode_captured_run_and_call_replay(workflow_key, &input, &parked, &completions)
+        .expect("splice the exact parked journal and resolved completion key");
+
+    // A second endpoint invocation is a fresh handler incarnation: it has no
+    // first worker stack or in-memory future, only the captured journal and the
+    // durable completion. This is the in-crate process-loss/redrive seam.
+    let redriven = invoke_endpoint_body(&endpoint, "Fig1126PendingToolRedrive", "run", replay)
+        .await
+        .expect("redrive the parked turn after worker loss");
+    assert!(
+        restate_error_message(&redriven).is_none(),
+        "redrive must accept the exact first-incarnation command journal: {:?}",
+        restate_error_message(&redriven)
+    );
+    assert_eq!(restate_output_json::<Resolution>(&redriven), Some(terminal));
+    assert_eq!(
+        tool_launches.load(Ordering::SeqCst),
+        1,
+        "journal replay must not launch the pending tool a second time"
+    );
+    assert_eq!(
+        terminal_resumes.load(Ordering::SeqCst),
+        1,
+        "the resolved completion must execute the terminal continuation exactly once"
+    );
+}
+
+#[tokio::test]
+async fn fig1126_revoked_await_refuses_before_command_on_first_execution_and_redrive() {
+    let endpoint = Endpoint::builder()
+        .bind(Fig1126RevokedAwaitBoundaryImpl.serve())
+        .build();
+    let workflow_key = "fig1126-revoked-await-boundary";
+    let input = Fig1126PendingToolRedriveInput;
+
+    let first = invoke_endpoint_with_named_call_responses(
+        &endpoint,
+        "Fig1126RevokedAwaitBoundary",
+        "run",
+        workflow_key,
+        &input,
+        vec![("is_revoked".to_string(), serde_json::json!(true))],
+    )
+    .await
+    .expect("revoked await must return a typed refusal");
+    let calls = restate_call_frames(&first).expect("decode revoked await calls");
+    assert_eq!(
+        calls
+            .iter()
+            .map(|call| call.handler.as_str())
+            .collect::<Vec<_>>(),
+        vec!["is_revoked"],
+        "first execution must refuse before await_event_or_turn_cancel"
+    );
+    assert!(
+        restate_output_failure_message(&first)
+            .is_some_and(|failure| failure.contains("await_event_unknown_or_revoked")),
+        "first execution must preserve the typed revoked-session refusal"
+    );
+
+    let replay = encode_call_replay(
+        workflow_key,
+        &input,
+        &[(calls[0].clone(), Some(serde_json::json!(true)))],
+        None,
+    )
+    .expect("splice the refusing revocation journal");
+    let redriven = invoke_endpoint_body(&endpoint, "Fig1126RevokedAwaitBoundary", "run", replay)
+        .await
+        .expect("redrive the refusing revocation journal");
+    assert!(
+        restate_call_frames(&redriven)
+            .expect("decode revoked await redrive calls")
+            .is_empty(),
+        "redrive must append no await_event_or_turn_cancel command after refusal"
+    );
+    assert!(
+        restate_output_failure_message(&redriven)
+            .is_some_and(|failure| failure.contains("await_event_unknown_or_revoked")),
+        "redrive must preserve the typed revoked-session refusal"
+    );
 }
 
 /// FIG-779 repro. A not-yet-completed durable timer is an SDK-legitimate

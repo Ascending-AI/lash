@@ -303,6 +303,29 @@ impl<C> fmt::Debug for RestateRuntimeEffectController<'_, C> {
     }
 }
 
+impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>
+where
+    C: RestateControllerContext<'ctx>,
+{
+    async fn require_active_session(&self, session_id: Option<&str>) -> Result<(), RuntimeError> {
+        if let Some(session_id) = session_id
+            && self
+                .context
+                .session_is_revoked(session_id.to_string())
+                .await
+                .map_err(|err| {
+                    RuntimeError::new(
+                        lash_core::RuntimeErrorCode::RestateEffectController,
+                        err.to_string(),
+                    )
+                })?
+        {
+            return Err(restate_unknown_or_revoked());
+        }
+        Ok(())
+    }
+}
+
 #[async_trait::async_trait]
 impl<'ctx, C> AwaitEventResolver for RestateRuntimeEffectController<'ctx, C>
 where
@@ -322,20 +345,6 @@ where
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
         scope.validate()?;
-        if let Some(session_id) = scope.session_id()
-            && self
-                .context
-                .session_is_revoked(session_id.to_string())
-                .await
-                .map_err(|err| {
-                    RuntimeError::new(
-                        lash_core::RuntimeErrorCode::RestateEffectController,
-                        err.to_string(),
-                    )
-                })?
-        {
-            return Err(restate_unknown_or_revoked());
-        }
         restate_await_event_key(scope, wait)
     }
 
@@ -357,20 +366,7 @@ where
         if !restate_await_event_key_is_valid(key) {
             return Err(restate_unknown_or_revoked());
         }
-        if let Some(session_id) = key.scope.session_id()
-            && self
-                .context
-                .session_is_revoked(session_id.to_string())
-                .await
-                .map_err(|err| {
-                    RuntimeError::new(
-                        lash_core::RuntimeErrorCode::RestateEffectController,
-                        err.to_string(),
-                    )
-                })?
-        {
-            return Err(restate_unknown_or_revoked());
-        }
+        self.require_active_session(key.scope.session_id()).await?;
         self.context
             .peek_event(RestateDurableWaitAddress::for_key(key))
             .await
@@ -391,20 +387,7 @@ where
         if !restate_await_event_key_is_valid(key) {
             return Err(restate_unknown_or_revoked());
         }
-        if let Some(session_id) = key.scope.session_id()
-            && self
-                .context
-                .session_is_revoked(session_id.to_string())
-                .await
-                .map_err(|err| {
-                    RuntimeError::new(
-                        lash_core::RuntimeErrorCode::RestateEffectController,
-                        err.to_string(),
-                    )
-                })?
-        {
-            return Err(restate_unknown_or_revoked());
-        }
+        self.require_active_session(key.scope.session_id()).await?;
         let clock = lash_core::facade_support::SystemClock;
         self.context
             .await_event(restate_durable_wait_request(key, deadline, &clock), cancel)
@@ -530,6 +513,18 @@ where
                 Ok(RuntimeEffectOutcome::Sleep)
             }
             RestateEffectExecution::AwaitEvent { invocation, key } => {
+                if !restate_await_event_key_is_valid(&key) {
+                    return Err(RuntimeEffectControllerError::from(
+                        restate_unknown_or_revoked(),
+                    ));
+                }
+                // Key creation may run inside a journaled ToolAttempt and is
+                // skipped when Restate replays that recorded result. Emit the
+                // revocation observation here, where every live and replayed
+                // wait crosses the same durable command boundary.
+                self.require_active_session(key.scope.session_id())
+                    .await
+                    .map_err(RuntimeEffectControllerError::from)?;
                 let RuntimeAwaitEventOptions {
                     cancellation,
                     deadline,
@@ -700,7 +695,8 @@ where
             // Process::Await before observing state. FIG-793 emits LlmCall
             // before its durable cancel peek. FIG-806 makes TriggerRouter emit
             // the deterministic process start before consulting reservation
-            // status.
+            // status. FIG-1126 keeps await-event key minting pure and performs
+            // the revocation observation at the unconditional await boundary.
             //
             // This existence guard remains an explicit retention exposure, not
             // a proof: registration precedes the effect, and terminal events

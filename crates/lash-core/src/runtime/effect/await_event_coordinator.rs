@@ -269,9 +269,12 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
 
     /// Mint the authenticated key for `scope`/`wait`.
     ///
-    /// Minting is a pure read: it never registers a promise row. A tombstoned
-    /// session refuses to mint at all, so a key created after session deletion
-    /// cannot be smuggled past the resolve path.
+    /// Minting never registers a promise row. Coordinator-backed host boundaries
+    /// refuse to mint for a tombstoned session, so a key created after session
+    /// deletion cannot be smuggled past the resolve path. That mint-refusal
+    /// guarantee is host-boundary-only: handler-scoped controllers may derive a
+    /// key without a tombstone read and enforce revocation at the await boundary
+    /// to preserve their durable journal shape.
     pub async fn key_for(
         &self,
         scope: &ExecutionScope,
