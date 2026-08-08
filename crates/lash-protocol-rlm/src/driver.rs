@@ -17,7 +17,7 @@ use lash_rlm_types::{RlmCreateExtras, RlmFinalAnswerFormat, RlmTermination};
 use crate::projection::rlm_protocol_event;
 use crate::rlm_support::{SharedBoundVariablesPrompt, decode_rlm_options};
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 use history::render_history_messages;
 use history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
 
@@ -487,6 +487,41 @@ impl RlmContextProjector {
             })
             .collect::<Vec<_>>()
             .join("\n\n")
+    }
+}
+
+/// Render one durable assistant message through the production RLM history
+/// renderer for provider conformance tests.
+#[cfg(feature = "testing")]
+pub(crate) fn render_conformance_history_message(
+    message: lash_core::Message,
+) -> Result<LlmMessage, String> {
+    let events = [lash_core::SessionHistoryRecord::Conversation(
+        lash_core::session_model::ConversationRecord::from_message(message),
+    )];
+    let mut attachments = Vec::new();
+    let rendered = render_history_messages(
+        &RlmHistoryRenderInput {
+            events: &events,
+            turn_messages: &lash_core::facade_support::MessageSequence::default(),
+            turn_causes: &[],
+            max_output_chars: 10_000,
+            protocol_iteration: 0,
+            finalization: "",
+            required_output: None,
+            final_answer_format: None,
+            budget_suffix: None,
+            bound_variables: "",
+        },
+        &mut attachments,
+    );
+    match rendered.as_slice() {
+        [message] if attachments.is_empty() => Ok(message.clone()),
+        _ => Err(format!(
+            "RLM conformance history rendered {} messages and {} attachments; expected exactly one message and no attachments",
+            rendered.len(),
+            attachments.len()
+        )),
     }
 }
 

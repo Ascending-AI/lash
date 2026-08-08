@@ -1724,6 +1724,27 @@ fn queued_text_provider(texts: Vec<impl Into<String>>) -> ProviderHandle {
         .into_handle()
 }
 
+#[cfg(feature = "rlm")]
+fn native_tool_call_provider() -> ProviderHandle {
+    crate::testing::TestProvider::builder()
+        .kind("native-tool-call-under-rlm")
+        .complete(|_request| async move {
+            Ok(LlmResponse {
+                parts: vec![LlmOutputPart::ToolCall {
+                    call_id: "native-call-1".to_string(),
+                    tool_name: "native_lookup".to_string(),
+                    input_json: r#"{"query":"forbidden"}"#.to_string(),
+                    replay: None,
+                }],
+                terminal_reason: lash_core::LlmTerminalReason::ToolUse,
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            })
+        })
+        .build()
+        .into_handle()
+}
+
 fn semantic_group_provider() -> ProviderHandle {
     crate::testing::TestProvider::builder()
         .kind("embed-test")

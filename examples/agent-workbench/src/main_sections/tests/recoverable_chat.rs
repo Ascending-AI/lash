@@ -1961,10 +1961,11 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
     assert!(
         settled.transcript.iter().any(|row| matches!(
             row,
-            TranscriptRow::Reasoning { text, .. }
-                if text == "durable reasoning disclosure"
+            TranscriptRow::Reasoning { id, text }
+                if id == &format!("m_rlm_{turn_id}_0_assistant_content.p0")
+                    && text == "durable reasoning disclosure"
         )),
-        "settled state must reconstruct reasoning disclosure from durable history"
+        "settled state must reconstruct reasoning disclosure with durable part provenance"
     );
     assert!(
         settled.transcript.iter().any(|row| matches!(

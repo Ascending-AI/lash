@@ -1154,6 +1154,53 @@ fn retrying_rlm_prose_provider(
 }
 
 #[cfg(feature = "rlm")]
+fn natural_prose_reasoning_provider(
+    requests: Arc<StdMutex<Vec<lash_core::LlmRequest>>>,
+) -> ProviderHandle {
+    let calls = Arc::new(AtomicUsize::new(0));
+    crate::testing::TestProvider::builder()
+        .kind("natural-rlm-prose-reasoning")
+        .complete(move |request| {
+            let requests = Arc::clone(&requests);
+            let calls = Arc::clone(&calls);
+            async move {
+                requests.lock().expect("natural RLM requests").push(request);
+                let call = calls.fetch_add(1, Ordering::SeqCst);
+                let text = match call {
+                    0 => "natural completion single-copy marker",
+                    1 => "subsequent natural answer",
+                    other => panic!("unexpected natural RLM provider request {other}"),
+                };
+                let mut parts = Vec::new();
+                if call == 0 {
+                    parts.push(LlmOutputPart::Reasoning {
+                        text: "reasoning retained for replay".to_string(),
+                        replay: Some(lash_core::llm::types::ProviderReasoningReplay {
+                            item_id: Some("natural-reasoning".to_string()),
+                            encrypted_content: Some("opaque-natural-replay".to_string()),
+                            signature: None,
+                            redacted: false,
+                            summary: Vec::new(),
+                        }),
+                    });
+                }
+                parts.push(LlmOutputPart::Text {
+                    text: text.to_string(),
+                    response_meta: None,
+                });
+                Ok(LlmResponse {
+                    full_text: text.to_string(),
+                    parts,
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build()
+        .into_handle()
+}
+
+#[cfg(feature = "rlm")]
 fn provider_request_text(request: &lash_core::LlmRequest) -> String {
     request
         .messages
@@ -1202,25 +1249,34 @@ fn rlm_provider_retry_commits_only_surviving_prose() -> Result<()> {
             first.final_value(),
             Some(&serde_json::json!("provider retry succeeded"))
         );
-        let rlm_marker_events = first
+        let rlm_marker_records = first
             .result
             .state
             .read_view()
             .active_events()
             .iter()
-            .filter(|event| {
-                let lash_core::SessionHistoryRecord::Protocol(event) = event else {
-                    return false;
-                };
-                matches!(
+            .filter(|record| match record {
+                lash_core::SessionHistoryRecord::Conversation(message) => {
+                    matches!(
+                        message.origin.as_ref(),
+                        Some(lash_core::MessageOrigin::Plugin {
+                            plugin_id,
+                            transient: false,
+                        }) if plugin_id == lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID
+                    ) && message
+                        .parts
+                        .iter()
+                        .any(|part| part.content.contains(MARKER))
+                }
+                lash_core::SessionHistoryRecord::Protocol(event) => matches!(
                     lash_protocol_rlm::decode_rlm_protocol_event(event),
                     Some(lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(content))
                         if content.prose.contains(MARKER)
-                )
+                ),
             })
             .count();
         assert_eq!(
-            rlm_marker_events, 1,
+            rlm_marker_records, 1,
             "RLM semantic history retained aborted-attempt prose"
         );
         {
@@ -1275,8 +1331,8 @@ fn rlm_provider_retry_commits_only_surviving_prose() -> Result<()> {
         };
         assert_eq!(
             marker_messages(),
-            1,
-            "conversation history should contain only the host transcript"
+            2,
+            "conversation history should retain one RLM replay record and one host transcript"
         );
         let persisted = session.admin().state().persist_current().await?;
         session.close().await?;
@@ -1296,8 +1352,8 @@ fn rlm_provider_retry_commits_only_surviving_prose() -> Result<()> {
                             .any(|part| part.content.contains(MARKER))
                 })
                 .count(),
-            1,
-            "reloaded conversation history should contain one transcript"
+            2,
+            "reloaded conversation history should retain the RLM replay record and transcript"
         );
 
         reopened
@@ -1318,6 +1374,53 @@ fn rlm_provider_retry_commits_only_surviving_prose() -> Result<()> {
             subsequent_history_text.matches(EXEC_ERROR).count(),
             1,
             "provider-visible history duplicated exec error: {subsequent_history_json}"
+        );
+        Ok(())
+    })
+}
+
+#[cfg(feature = "rlm")]
+#[test]
+fn rlm_natural_prose_completion_is_single_copy_in_next_request() -> Result<()> {
+    run_async_test_on_stack_budget("rlm-natural-prose-single-copy-test", || async {
+        const MARKER: &str = "natural completion single-copy marker";
+        let requests = Arc::new(StdMutex::new(Vec::new()));
+        let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
+            .provider(natural_prose_reasoning_provider(Arc::clone(&requests)))
+            .model(mock_model_spec())
+            .store_factory(Arc::new(
+                lash_core::facade_support::InMemorySessionStoreFactory::new(),
+            ))
+            .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+            .build()?;
+        let session = core.session("rlm-natural-prose-single-copy").open().await?;
+
+        let first = session
+            .turn(TurnInput::text("answer naturally"))
+            .run()
+            .await?;
+        assert_eq!(first.assistant_message(), Some(MARKER));
+        session
+            .admin()
+            .state()
+            .append_messages(vec![
+                lash_core::PluginMessage::text(lash_core::MessageRole::Assistant, MARKER)
+                    .with_id("workbench-assistant:natural-turn"),
+            ])
+            .await?;
+
+        session
+            .turn(TurnInput::text("check natural completion history"))
+            .run()
+            .await?;
+
+        let requests = requests.lock().expect("natural RLM requests");
+        assert_eq!(requests.len(), 2);
+        let next_request = provider_request_text(&requests[1]);
+        assert_eq!(
+            next_request.matches(MARKER).count(),
+            1,
+            "provider-visible history duplicated natural prose: {next_request}"
         );
         Ok(())
     })
@@ -4455,6 +4558,85 @@ finish "done""#,
 
     let _ = std::fs::remove_file(&trace_path);
     Ok(())
+}
+
+#[cfg(feature = "rlm")]
+#[test]
+fn rlm_native_provider_tool_call_is_a_traced_non_retryable_turn_issue() -> Result<()> {
+    run_async_test_on_stack_budget("rlm-native-tool-contract-test", || async {
+        let trace_path = std::env::temp_dir().join(format!(
+            "lash-rlm-native-tool-contract-{}-{}.jsonl",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
+            .provider(native_tool_call_provider())
+            .model(mock_model_spec())
+            .store_factory(Arc::new(
+                lash_core::facade_support::InMemorySessionStoreFactory::new(),
+            ))
+            .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+            .trace_jsonl_path(trace_path.clone())
+            .build()?;
+        let session = core.session("rlm-native-tool-contract").open().await?;
+
+        let turn = session
+            .turn(TurnInput::text("trigger native provider tool call"))
+            .run()
+            .await?;
+
+        assert_eq!(
+            turn.result.outcome,
+            TurnOutcome::Stopped(lash_core::facade_support::TurnStop::RuntimeError)
+        );
+        let issue = turn
+            .result
+            .errors
+            .iter()
+            .find(|issue| issue.code.as_deref() == Some("native_tool_call_not_allowed"))
+            .expect("typed RLM native-tool-call issue");
+        assert_eq!(issue.kind, "rlm_protocol");
+        assert_eq!(issue.retryable, Some(false));
+        assert!(issue.message.contains("native_lookup"));
+        assert!(issue.message.contains("must flow through Lashlang"));
+
+        core.flush_trace_sink()?;
+        let logged = std::fs::read_to_string(&trace_path).expect("read trace");
+        let entries = logged
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("trace JSON"))
+            .collect::<Vec<_>>();
+        let diagnostic = entries
+            .iter()
+            .find(|entry| {
+                entry.get("type").and_then(|value| value.as_str()) == Some("protocol_step")
+                    && entry.get("plugin_id").and_then(|value| value.as_str())
+                        == Some(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID)
+                    && entry
+                        .pointer("/payload/RlmDiagnostic/phase")
+                        .and_then(|value| value.as_str())
+                        == Some("protocol_contract_violation")
+            })
+            .expect("RLM protocol-contract trace record");
+        assert_eq!(
+            diagnostic
+                .pointer("/payload/RlmDiagnostic/payload/code")
+                .and_then(|value| value.as_str()),
+            Some("native_tool_call_not_allowed")
+        );
+        assert_eq!(
+            diagnostic
+                .pointer("/payload/RlmDiagnostic/payload/tool_name")
+                .and_then(|value| value.as_str()),
+            Some("native_lookup")
+        );
+
+        let _ = std::fs::remove_file(&trace_path);
+        Ok(())
+    })
 }
 
 #[cfg(feature = "rlm")]

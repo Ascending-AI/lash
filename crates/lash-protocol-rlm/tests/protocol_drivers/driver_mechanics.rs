@@ -46,6 +46,86 @@ fn null_rlm_turn_options_fail_before_llm() {
 }
 
 #[test]
+fn opaque_reasoning_only_response_stops_as_empty_provider_response() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("respond")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(rlm_response(vec![LlmOutputPart::Reasoning {
+            text: String::new(),
+            replay: Some(lash_sansio::llm::types::ProviderReasoningReplay {
+                item_id: Some("opaque-only".to_string()),
+                encrypted_content: Some("encrypted-reasoning-blob".to_string()),
+                signature: None,
+                redacted: false,
+                summary: Vec::new(),
+            }),
+        }])),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Emit(SessionStreamEvent::Error {
+            envelope: Some(envelope),
+            ..
+        }) if envelope.code.as_deref() == Some("empty_response")
+    )));
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Emit(SessionStreamEvent::TurnOutcome {
+            outcome: lash_sansio::TurnOutcome::Stopped(lash_sansio::TurnStop::ProviderError)
+        })
+    )));
+    assert!(
+        find_checkpoint(&effects).is_none(),
+        "opaque reasoning without renderable text must not finish through a checkpoint"
+    );
+}
+
+#[test]
+fn native_tool_call_failure_preserves_the_offending_llm_response_event() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("respond")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(rlm_response(vec![LlmOutputPart::ToolCall {
+            call_id: "native-call".to_string(),
+            tool_name: "native_lookup".to_string(),
+            input_json: "{}".to_string(),
+            replay: None,
+        }])),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Emit(SessionStreamEvent::LlmResponse { .. })))
+    );
+    assert!(effects_include_runtime_error(
+        &effects,
+        "native provider tool call `native_lookup`"
+    ));
+}
+
+#[test]
 fn rlm_driver_state_with_wrong_plugin_id_fails_loudly() {
     let config = test_config();
     let msgs = vec![user_message("run some code")];

@@ -137,6 +137,31 @@ fn chat_message_from_committed(message: &lash::messages::Message) -> ChatMessage
     }
 }
 
+fn is_durable_internal_rlm_message(message: &lash::messages::Message) -> bool {
+    matches!(
+        message.origin.as_ref(),
+        Some(lash::messages::MessageOrigin::Plugin {
+            plugin_id,
+            transient: false,
+        }) if plugin_id == lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID
+    )
+}
+
+fn durable_rlm_reasoning_rows(message: &lash::messages::Message) -> Vec<TranscriptRow> {
+    message
+        .parts
+        .iter()
+        .filter(|part| {
+            matches!(part.kind, lash_core::PartKind::Reasoning)
+                && !part.content.trim().is_empty()
+        })
+        .map(|part| TranscriptRow::Reasoning {
+            id: part.id.clone(),
+            text: part.content.clone(),
+        })
+        .collect()
+}
+
 fn transcript_rows_from_committed(
     read_view: &lash::persistence::SessionReadView,
     user_replacements: &BTreeMap<String, ChatMessage>,
@@ -146,28 +171,29 @@ fn transcript_rows_from_committed(
         .chronological_projection()
         .into_entries()
         .into_iter()
-        .filter_map(|entry| match entry.payload {
+        .flat_map(|entry| match entry.payload {
             lash::persistence::ChronologicalPayload::Message(message) => {
                 if protocol_state_message_ids.contains(&message.id) {
-                    return None;
+                    return Vec::new();
+                }
+                if is_durable_internal_rlm_message(&message) {
+                    return durable_rlm_reasoning_rows(&message);
                 }
                 let message = user_replacements
                     .get(&message.id)
                     .cloned()
                     .unwrap_or_else(|| chat_message_from_committed(&message));
-                Some(TranscriptRow::Message {
-                    message,
-                })
+                vec![TranscriptRow::Message { message }]
             }
             lash::persistence::ChronologicalPayload::ProtocolEvent(event) => {
                 match lash_protocol_rlm::decode_rlm_protocol_event(&event) {
                     Some(lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(content))
                         if !content.reasoning.trim().is_empty() =>
                     {
-                        Some(TranscriptRow::Reasoning {
+                        vec![TranscriptRow::Reasoning {
                             id: content.id,
                             text: content.reasoning,
-                        })
+                        }]
                     }
                     Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step))
                         if !step.code.trim().is_empty() =>
@@ -181,16 +207,16 @@ fn transcript_rows_from_committed(
                             }
                             output.push_str(&final_output);
                         }
-                        Some(TranscriptRow::CodeBlock {
+                        vec![TranscriptRow::CodeBlock {
                             id: step.id,
                             language: "lashlang".to_string(),
                             code: step.code,
                             output,
                             success: step.error.is_none(),
                             error: step.error,
-                        })
+                        }]
                     }
-                    _ => None,
+                    _ => Vec::new(),
                 }
             }
         })
@@ -237,7 +263,9 @@ fn project_chat(
 
     let mut messages = historical_ui_rows.clone();
     messages.extend(read_view.messages().iter().filter_map(|message| {
-        if protocol_state_message_ids.contains(&message.id) {
+        if protocol_state_message_ids.contains(&message.id)
+            || is_durable_internal_rlm_message(message)
+        {
             return None;
         }
         Some(

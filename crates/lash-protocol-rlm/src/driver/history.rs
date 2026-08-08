@@ -39,6 +39,9 @@
 //!   current-iteration tail. It is deliberately outside the stable system and
 //!   history prefix while remaining adjacent to the work it describes.
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::sync::Arc;
@@ -83,6 +86,7 @@ pub(super) struct CurrentIterationMessageInput<'a> {
 /// `visit_turn_view` is a push visitor with no lookahead.
 struct PendingProse {
     text: String,
+    reasoning_blocks: Vec<LlmContentBlock>,
     image_blocks: Vec<LlmContentBlock>,
 }
 
@@ -149,6 +153,10 @@ pub(super) fn render_history_messages(
         if borrowed_entry_is_active_cause(entry, &active_cause_ids) {
             return;
         }
+        if history_projection.suppresses_chronological(entry.index) {
+            pending = None;
+            return;
+        }
         match entry.payload {
             BorrowedChronologicalPayload::Message(message)
                 if matches!(message.role, lash_core::MessageRole::Assistant) =>
@@ -159,14 +167,11 @@ pub(super) fn render_history_messages(
                 append_borrowed_entry_image_blocks(entry, attachments, &mut image_blocks);
                 pending = Some(PendingProse {
                     text: message_history_text_parts(message.parts),
+                    reasoning_blocks: message_history_reasoning_blocks(message.parts),
                     image_blocks,
                 });
             }
             BorrowedChronologicalPayload::ProtocolEvent(event) => {
-                if history_projection.suppresses_chronological(entry.index) {
-                    pending = None;
-                    return;
-                }
                 let Some(event) = decode_rlm_protocol_event(event) else {
                     return;
                 };
@@ -175,6 +180,7 @@ pub(super) fn render_history_messages(
                         flush_pending_prose(&mut messages, &mut pending);
                         pending = Some(PendingProse {
                             text: content.prose,
+                            reasoning_blocks: Vec::new(),
                             image_blocks: Vec::new(),
                         });
                         return;
@@ -187,7 +193,11 @@ pub(super) fn render_history_messages(
                 let prose = pending.take();
                 let prose_text = prose.as_ref().map(|p| p.text.as_str()).unwrap_or("");
                 let cell = render_lashlang_cell_text(prose_text, step.code.trim());
-                let mut cell_blocks = vec![text_block(cell, false)];
+                let mut cell_blocks = prose
+                    .as_ref()
+                    .map(|prose| prose.reasoning_blocks.clone())
+                    .unwrap_or_default();
+                cell_blocks.push(text_block(cell, false));
                 if let Some(prose) = prose {
                     cell_blocks.extend(prose.image_blocks);
                 }
@@ -252,10 +262,16 @@ pub(super) fn render_history_messages(
 /// finish). Carries nothing for empty prose with no images.
 fn flush_pending_prose(messages: &mut Vec<LlmMessage>, pending: &mut Option<PendingProse>) {
     if let Some(prose) = pending.take() {
-        if prose.text.trim().is_empty() && prose.image_blocks.is_empty() {
+        if prose.text.trim().is_empty()
+            && prose.reasoning_blocks.is_empty()
+            && prose.image_blocks.is_empty()
+        {
             return;
         }
-        let mut blocks = vec![text_block(prose.text, false)];
+        let mut blocks = prose.reasoning_blocks;
+        if !prose.text.trim().is_empty() {
+            blocks.push(text_block(prose.text, false));
+        }
         blocks.extend(prose.image_blocks);
         messages.push(LlmMessage::new(LlmRole::Assistant, blocks));
     }
@@ -535,6 +551,25 @@ fn message_history_text_parts(parts: &[lash_core::Part]) -> String {
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>();
     chunks.join("\n\n")
+}
+
+fn message_history_reasoning_blocks(parts: &[lash_core::Part]) -> Vec<LlmContentBlock> {
+    // Display-only reasoning without provider replay metadata remains durable
+    // for hosts, but is deliberately not rendered back to providers. Only
+    // replay-capable reasoning can safely cross the provider history seam.
+    parts
+        .iter()
+        .filter_map(|part| {
+            if !matches!(part.kind, lash_core::PartKind::Reasoning) {
+                return None;
+            }
+            let replay = part.reasoning_meta.as_ref()?;
+            (!replay.is_empty()).then(|| LlmContentBlock::Reasoning {
+                text: part.content.clone(),
+                replay: Some(replay.clone()),
+            })
+        })
+        .collect()
 }
 
 fn projected_ref(projected_lossy: bool, reference: &str) -> String {

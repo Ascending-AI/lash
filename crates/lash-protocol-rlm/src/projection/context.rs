@@ -135,10 +135,12 @@ fn completed_turn_internal_indices(
                     terminal_step = None;
                 }
                 MessageRole::Assistant => {
-                    if history_item_from_message(message).is_some()
-                        && let Some(step_index) = terminal_step.take()
-                    {
-                        suppressed.insert(step_index);
+                    if is_internal_rlm_assistant(message) {
+                        assistant_content_indices.push(entry.index);
+                    } else if history_item_from_message(message).is_some() {
+                        if let Some(step_index) = terminal_step.take() {
+                            suppressed.insert(step_index);
+                        }
                         suppressed.extend(assistant_content_indices.drain(..));
                     }
                 }
@@ -157,6 +159,16 @@ fn completed_turn_internal_indices(
     }
 
     suppressed
+}
+
+fn is_internal_rlm_assistant(message: &Message) -> bool {
+    matches!(
+        message.origin.as_ref(),
+        Some(lash_core::MessageOrigin::Plugin {
+            plugin_id,
+            transient: false,
+        }) if plugin_id == crate::plugin::RLM_PROTOCOL_PLUGIN_ID
+    )
 }
 
 pub fn rlm_history_projection(
@@ -637,6 +649,46 @@ mod tests {
             &projection.history()[2],
             RlmHistoryItem::Message { content, .. }
                 if content == "surviving prose\n\ndone"
+        ));
+    }
+
+    #[test]
+    fn prose_only_completion_suppresses_internal_assistant_record() {
+        let mut internal = message("internal", MessageRole::Assistant, "natural completion");
+        internal.origin = Some(lash_core::MessageOrigin::Plugin {
+            plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+            transient: false,
+        });
+        let events = [
+            lash_core::SessionHistoryRecord::Conversation(
+                lash_core::facade_support::ConversationRecord::from_message(message(
+                    "u1",
+                    MessageRole::User,
+                    "answer naturally",
+                )),
+            ),
+            lash_core::SessionHistoryRecord::Conversation(
+                lash_core::facade_support::ConversationRecord::from_message(internal),
+            ),
+            lash_core::SessionHistoryRecord::Conversation(
+                lash_core::facade_support::ConversationRecord::from_message(message(
+                    "a1",
+                    MessageRole::Assistant,
+                    "natural completion",
+                )),
+            ),
+        ];
+        let chronological = lash_core::facade_support::ChronologicalProjection::from_turn_view(
+            &events,
+            &lash_core::facade_support::MessageSequence::default(),
+        );
+        let projection = rlm_history_projection(&chronological);
+
+        assert!(projection.suppresses_chronological(1));
+        assert_eq!(projection.len(), 2);
+        assert!(matches!(
+            &projection.history()[1],
+            RlmHistoryItem::Message { content, .. } if content == "natural completion"
         ));
     }
 }
