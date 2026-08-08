@@ -1075,6 +1075,18 @@ derive_mutation_jobs() {{
                 test_doc,
             )
 
+    def test_lash_runtime_default_tests_are_pinned_to_the_feature_boundary_lane(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        test_doc = workflow_job_block(workflow, "test-doc")
+        push_gate = PUSH_GATE.read_text(encoding="utf-8")
+        feature_boundary = shell_function_body(
+            push_gate, "run_runtime_feature_boundary_check"
+        )
+        command = "cargo test -p lash-runtime --no-default-features --locked"
+
+        self.assertIn(command, test_doc)
+        self.assertIn(command, feature_boundary)
+
     def test_publish_time_version_injection_has_only_post_release_docs_commit(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         release = RELEASE_WORKFLOW.read_text(encoding="utf-8")

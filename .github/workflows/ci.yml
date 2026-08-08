@@ -106,6 +106,7 @@ jobs:
         run: |
           cargo check -p lash-runtime --no-default-features --locked
           cargo check -p lash-runtime --no-default-features --features testing --locked
+          cargo test -p lash-runtime --no-default-features --locked
 
           if cargo tree -p lash-runtime -e normal --no-default-features --locked | grep -E 'lash-protocol-rlm|lash-lashlang-runtime|lashlang'; then
             echo "default-off lash-runtime pulled RLM/Lashlang dependencies"

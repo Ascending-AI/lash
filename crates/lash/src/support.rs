@@ -22,7 +22,7 @@ pub(crate) use tokio::sync::mpsc;
 pub(crate) use tokio::task::JoinHandle;
 pub(crate) use tokio_util::sync::CancellationToken;
 
-#[cfg(all(test, feature = "rlm"))]
+#[cfg(test)]
 pub(crate) use lash_core::TestLocalProcessRegistry;
 pub(crate) use lash_core::plugin::runtime_host::SessionStateService;
 pub(crate) use lash_core::{
@@ -42,7 +42,7 @@ pub(crate) use lash_core::{
 pub(crate) use lash_core::{InputItem, TokenLedgerEntry, TokenUsage};
 pub(crate) use lash_core::{PromptContribution, PromptLayer, PromptSlot, PromptTemplate};
 pub(crate) use lash_core::{TurnActivity, TurnInput};
-#[cfg(all(test, feature = "rlm"))]
+#[cfg(test)]
 pub(crate) use lash_core::{TurnActivityId, TurnEvent};
 
 pub(crate) use crate::admin::*;
