@@ -374,3 +374,126 @@
             std::fs::remove_dir_all(&data_dir).expect("remove context transform data dir");
         });
     }
+
+    #[test]
+    fn workbench_rolling_history_projects_the_prompt_under_its_session_window() {
+        run_async_test_on_stack_budget("workbench-rolling-history-test", || async {
+            const OLD_MARKER: &str = "FIG992-old-context-that-must-be-pruned";
+            const CURRENT_MARKER: &str = "FIG992-current-context-that-must-remain";
+
+            fn text_message(
+                id: &str,
+                role: lash_core::MessageRole,
+                content: &str,
+            ) -> lash_core::Message {
+                lash_core::Message {
+                    id: id.to_string(),
+                    role,
+                    parts: vec![lash_core::Part {
+                        id: format!("{id}.p0"),
+                        kind: lash_core::PartKind::Text,
+                        content: content.to_string(),
+                        attachment: None,
+                        tool_call_id: None,
+                        tool_name: None,
+                        tool_replay: None,
+                        prune_state: lash_core::PruneState::Intact,
+                        reasoning_meta: None,
+                        response_meta: None,
+                    }]
+                    .into(),
+                    origin: None,
+                }
+            }
+
+            let mut plugins = lash::PluginStack::new();
+            plugins.extend(lash_core::testing::test_code_protocol_factories());
+            let subagent_registry = Arc::new(lash_subagents::default_registry(&BTreeMap::new()));
+            configure_workbench_plugins(
+                &mut plugins,
+                String::new(),
+                mail::MailWorld::new(),
+                subagent_registry,
+            );
+            let host = lash::plugins::PluginHost::new(plugins.into_factories());
+            let session = host
+                .build_session("workbench-rolling-history-session", None)
+                .expect("build rolling history plugin session");
+            let messages = vec![
+                text_message("u1", lash_core::MessageRole::User, OLD_MARKER),
+                text_message("a1", lash_core::MessageRole::Assistant, "old response"),
+                text_message("u2", lash_core::MessageRole::User, CURRENT_MARKER),
+            ];
+            let policy = lash_core::SessionPolicy {
+                model: lash_core::ModelSpec::from_token_limits(
+                    "workbench-rolling-history-model",
+                    Default::default(),
+                    41_000,
+                    None,
+                )
+                .expect("rolling history model"),
+                ..Default::default()
+            };
+            let state = lash_core::SessionSnapshot {
+                session_id: "workbench-rolling-history-session".to_string(),
+                policy,
+                session_graph: lash_core::SessionGraph::from_active_read_state(&messages),
+                ..Default::default()
+            };
+            let manager = Arc::new(lash_core::testing::MockSessionManager::default());
+            let context_window_tokens = state.policy.context_window_tokens();
+            let ctx = lash::plugins::TurnTransformContext {
+                session_id: state.session_id.clone(),
+                state: state.read_view(),
+                prompt_usage: Some(lash::runtime::PromptUsage {
+                    prompt_context_tokens: 30_000,
+                    input_tokens: 30_000,
+                    cache_read_input_tokens: 0,
+                    cache_write_input_tokens: 0,
+                    context_budget_tokens: 30_000,
+                }),
+                max_context_tokens: Some(context_window_tokens),
+                sessions: manager.clone(),
+                session_lifecycle: manager.clone(),
+                session_graph: manager,
+                scoped_effect_controller: lash_core::ScopedEffectController::shared(
+                    Arc::new(
+                        lash_core::facade_support::InlineRuntimeEffectController::default(),
+                    ),
+                    lash_core::ExecutionScope::turn(
+                        "workbench-rolling-history-session",
+                        "workbench-rolling-history-turn",
+                    ),
+                )
+                .expect("build rolling history turn scope"),
+                direct_completions: lash_core::facade_support::DirectCompletionClient::from_fn(
+                    |_, _| {
+                        Err(lash_core::PluginError::Session(
+                            "direct completions are unavailable in this test".to_string(),
+                        ))
+                    },
+                ),
+            };
+            let prepared = lash::plugins::PreparedContext {
+                messages: messages.into(),
+                ..Default::default()
+            };
+            let projected = session
+                .prepare_turn_context(&ctx, prepared, None)
+                .await
+                .expect("run the workbench context transform pipeline")
+                .messages;
+            let second_prompt = serde_json::to_string(&projected)
+                .expect("serialize the projected prompt messages");
+
+            assert_eq!(context_window_tokens, 41_000);
+            assert!(
+                second_prompt.contains(CURRENT_MARKER),
+                "rolling history must retain the current user turn"
+            );
+            assert!(
+                !second_prompt.contains(OLD_MARKER),
+                "rolling history must project away the old turn once the prior 30,000-token prompt exceeds the 21,000-token threshold derived from the session's 41,000-token window; second prompt: {second_prompt}"
+            );
+        });
+    }
