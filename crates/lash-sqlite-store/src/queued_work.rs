@@ -195,9 +195,6 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
     now: u64,
     nonce: u64,
 ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
-    batch
-        .validate_process_wake_source()
-        .map_err(StoreError::Backend)?;
     let allocation_floor = if let Some(wake_source) = batch.process_wake_source.as_ref() {
         conn.query_row(
             "SELECT allocation_floor FROM wake_redelivery_fences

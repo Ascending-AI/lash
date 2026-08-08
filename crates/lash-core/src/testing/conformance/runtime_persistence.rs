@@ -251,6 +251,7 @@ where
     commit_rejects_non_derived_append_node_ids(make()).await;
     append_rejects_duplicate_batch_node_ids(make()).await;
     append_rejects_existing_node_id_collision(make()).await;
+    head_retirement_gate_distinguishes_leaf_change_from_same_leaf(make()).await;
     commit_rejects_unresolvable_leaf(make()).await;
     commit_rejects_missing_leaf(make()).await;
     empty_append_cannot_move_the_head(make()).await;
@@ -291,6 +292,80 @@ where
     active_turn_input_claim_reacquires_after_unrecorded_checkpoint(make()).await;
     pending_turn_input_cancel_covers_active_and_deferred_states(make()).await;
     pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make()).await;
+}
+
+async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let state = seed_append_receipt_state(&store).await;
+    let old_leaf = state.session_graph.leaf_node_id.clone().expect("seed leaf");
+
+    let same_leaf_commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let same_leaf_planner = crate::store::RuntimeCommitPlanner::prepare(same_leaf_commit.clone())
+        .expect("prepare same-leaf commit");
+    let same_leaf_plan = same_leaf_planner
+        .plan(crate::store::FreshRuntimeCommitFacts {
+            actual_head_revision: same_leaf_commit.expected_head_revision,
+            old_leaf_node_id: Some(old_leaf.clone()),
+            requested_ancestor_is_active: true,
+            occupied_node_ids: std::collections::HashSet::new(),
+            selected_leaf_is_live: true,
+            has_live_nodes: true,
+            old_leaf_is_live: true,
+            derived_frame_node_id: same_leaf_commit.current_frame_node_id.clone(),
+        })
+        .expect("plan same-leaf commit");
+    assert!(
+        !same_leaf_plan.head_changed(),
+        "a same-leaf commit must not prescribe ancestry retirement"
+    );
+    store
+        .commit_runtime_state(same_leaf_commit)
+        .await
+        .expect("same-leaf commit");
+    assert!(
+        store
+            .load_node(&old_leaf)
+            .await
+            .expect("load old leaf after same-leaf commit")
+            .is_some(),
+        "a same-leaf commit must tombstone nothing"
+    );
+
+    let mut changed_state = loaded_conformance_state(&store).await;
+    let nodes = vec![crate::SessionAppendNode::plugin(
+        "retirement-gate",
+        serde_json::json!({"leaf": "replacement"}),
+    )];
+    let (changed_commit, _) =
+        append_request_commit(&mut changed_state, "retirement-gate-change", &nodes, None);
+    let changed_planner = crate::store::RuntimeCommitPlanner::prepare(changed_commit.clone())
+        .expect("prepare leaf-changing commit");
+    let changed_plan = changed_planner
+        .plan(crate::store::FreshRuntimeCommitFacts {
+            actual_head_revision: changed_commit.expected_head_revision,
+            old_leaf_node_id: Some(old_leaf.clone()),
+            requested_ancestor_is_active: true,
+            occupied_node_ids: std::collections::HashSet::new(),
+            selected_leaf_is_live: false,
+            has_live_nodes: true,
+            old_leaf_is_live: true,
+            derived_frame_node_id: changed_commit.current_frame_node_id.clone(),
+        })
+        .expect("plan leaf-changing commit");
+    assert!(
+        changed_plan.head_changed(),
+        "a leaf-changing commit must prescribe retirement of its abandoned old head"
+    );
+    assert_eq!(
+        changed_plan.old_leaf_node_id(),
+        Some(old_leaf.as_str()),
+        "the retirement prescription must name the abandoned old head"
+    );
+    store
+        .commit_runtime_state(changed_commit)
+        .await
+        .expect("leaf-changing commit");
 }
 
 async fn load_retains_reasoning_only_usage(store: Arc<dyn RuntimePersistence>) {
@@ -942,6 +1017,89 @@ pub async fn append_request_receipt_replays_after_ancestor_superseded<F, Fut>(
         .expect("receipt replay must precede the fresh ancestor fence");
     assert!(replay.receipt_replayed);
     assert_eq!(replay.head_revision, first.head_revision);
+}
+
+/// Prove that an inactive append ancestor wins over a simultaneously stale
+/// head revision.
+///
+/// `supersede` atomically moves the durable head to the supplied earlier node
+/// and advances its revision, constructing both rejected conditions without
+/// creating a receipt.
+///
+/// Integrator class (ADR 0051): **conformance-suite embedders**.
+pub async fn inactive_append_ancestor_precedes_stale_head<F, Fut>(
+    store: Arc<dyn RuntimePersistence>,
+    supersede: F,
+) where
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let mut state = seed_append_receipt_state(&store).await;
+    let required = state.session_graph.leaf_node_id.clone().expect("seed leaf");
+    let superseding_leaf = state
+        .session_graph
+        .find_node(&required)
+        .and_then(|node| node.parent_node_id.clone())
+        .expect("seed append has the initial frame as parent");
+    let nodes = vec![crate::SessionAppendNode::plugin(
+        "append-precedence",
+        serde_json::json!({"value": "stale-head-and-ancestor"}),
+    )];
+    let (fresh, _) = append_request_commit(
+        &mut state,
+        "stale-head-and-ancestor",
+        &nodes,
+        Some(&required),
+    );
+
+    supersede(superseding_leaf).await;
+    let error = store
+        .commit_runtime_state(fresh)
+        .await
+        .expect_err("inactive ancestor must reject even when the head is also stale");
+    assert!(
+        matches!(
+            &error,
+            StoreError::AppendAncestorNotActive { required_node_id }
+                if required_node_id == &required
+        ),
+        "inactive ancestor must precede stale head, got {error:?}"
+    );
+}
+
+/// Prove that a head pointing at a tombstoned leaf is rejected as graph
+/// corruption instead of being treated as a valid same-leaf commit.
+///
+/// Integrator class (ADR 0051): **conformance-suite embedders**.
+pub async fn tombstoned_old_leaf_is_rejected<F, Fut>(
+    store: Arc<dyn RuntimePersistence>,
+    tombstone: F,
+) where
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let mut state = seed_append_receipt_state(&store).await;
+    let old_leaf = state.session_graph.leaf_node_id.clone().expect("seed leaf");
+    let nodes = vec![crate::SessionAppendNode::plugin(
+        "tombstoned-old-leaf",
+        serde_json::json!({"value": "must-not-append"}),
+    )];
+    let (append, _) = append_request_commit(&mut state, "tombstoned-old-leaf", &nodes, None);
+
+    tombstone(old_leaf.clone()).await;
+    let error = store
+        .commit_runtime_state(append)
+        .await
+        .expect_err("a tombstoned published leaf must reject the commit");
+    assert!(
+        matches!(
+            &error,
+            StoreError::InvalidGraphLeaf {
+                leaf_node_id: Some(leaf)
+            } if leaf == &old_leaf
+        ),
+        "tombstoned old leaf must be a typed invalid leaf, got {error:?}"
+    );
 }
 
 async fn legacy_append_receipt_keeps_exact_hash_semantics(store: Arc<dyn RuntimePersistence>) {
@@ -6455,7 +6613,10 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         .commit_runtime_state(changed)
         .await
         .expect_err("same provider turn id with a different commit hash must conflict");
-    assert!(matches!(err, StoreError::RuntimeTurnCommitConflict { .. }));
+    assert!(
+        matches!(&err, StoreError::RuntimeTurnCommitConflict { .. }),
+        "unexpected changed-hash error: {err:?}"
+    );
 }
 
 async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePersistence>) {
@@ -6510,7 +6671,10 @@ async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePersis
     let err = crate::store::commit_runtime_state_verified(store.as_ref(), divergent_replay)
         .await
         .expect_err("the store must reject a mutated commit reusing an operation id");
-    assert!(matches!(err, StoreError::RuntimeTurnCommitConflict { .. }));
+    assert!(
+        matches!(&err, StoreError::RuntimeTurnCommitConflict { .. }),
+        "unexpected mutated-commit error: {err:?}"
+    );
     let stored = store
         .load_node(&node_id)
         .await
@@ -6546,7 +6710,10 @@ async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePersis
     let err = commit_runtime_state_for_test(&store, commit, "node-guard")
         .await
         .expect_err("store must rederive append node ids before writing");
-    assert!(matches!(err, StoreError::NodeIdDerivationMismatch { .. }));
+    assert!(
+        matches!(&err, StoreError::NodeIdDerivationMismatch { .. }),
+        "unexpected node-derivation error: {err:?}"
+    );
     assert!(
         store
             .load_session()
@@ -6604,10 +6771,13 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
     let err = commit_runtime_state_for_test(&store, append, "collision-append")
         .await
         .expect_err("append must reject an id already present in durable history");
-    assert!(matches!(
-        err,
-        StoreError::NodeIdCollision { ref node_id } if node_id == &colliding_id
-    ));
+    assert!(
+        matches!(
+            &err,
+            StoreError::NodeIdCollision { node_id } if node_id == &colliding_id
+        ),
+        "unexpected durable collision error: {err:?}"
+    );
     let stored = store
         .load_node(&colliding_id)
         .await
@@ -6637,10 +6807,13 @@ async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersisten
     let err = commit_runtime_state_for_test(&store, commit, "duplicate-batch")
         .await
         .expect_err("a duplicate id in one append must abort the whole commit");
-    assert!(matches!(
-        err,
-        StoreError::NodeIdCollision { ref node_id } if node_id == &duplicate_node_id
-    ));
+    assert!(
+        matches!(
+            &err,
+            StoreError::NodeIdCollision { node_id } if node_id == &duplicate_node_id
+        ),
+        "unexpected duplicate-id error: {err:?}"
+    );
     assert!(
         store
             .load_session()
@@ -6667,12 +6840,15 @@ async fn commit_rejects_unresolvable_leaf(store: Arc<dyn RuntimePersistence>) {
     let err = commit_runtime_state_for_test(&store, commit, "invalid-leaf")
         .await
         .expect_err("commit leaf must resolve in the post-commit live graph");
-    assert!(matches!(
-        err,
-        StoreError::InvalidGraphLeaf {
-            leaf_node_id: Some(ref leaf)
-        } if leaf == "missing-leaf"
-    ));
+    assert!(
+        matches!(
+            &err,
+            StoreError::InvalidGraphLeaf {
+                leaf_node_id: Some(leaf)
+            } if leaf == "missing-leaf"
+        ),
+        "unexpected unresolved-leaf error: {err:?}"
+    );
     let valid_node_id = crate::frame_node_id("root", "valid-node");
     assert!(
         store
@@ -6700,10 +6876,10 @@ async fn commit_rejects_missing_leaf(store: Arc<dyn RuntimePersistence>) {
     let err = commit_runtime_state_for_test(&store, missing, "missing-leaf")
         .await
         .expect_err("a non-empty graph commit requires a resolving leaf");
-    assert!(matches!(
-        err,
-        StoreError::InvalidGraphLeaf { leaf_node_id: None }
-    ));
+    assert!(
+        matches!(&err, StoreError::InvalidGraphLeaf { leaf_node_id: None }),
+        "unexpected missing-leaf error: {err:?}"
+    );
     let node_without_leaf_id = crate::frame_node_id("root", "node-without-leaf");
     assert!(
         store
@@ -6740,10 +6916,10 @@ async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimePersistence>) {
         .commit_runtime_state(move_attempt)
         .await
         .expect_err("an empty append must not move the head");
-    assert!(matches!(
-        error,
-        StoreError::InvalidGraphLeaf { leaf_node_id: None }
-    ));
+    assert!(
+        matches!(&error, StoreError::InvalidGraphLeaf { leaf_node_id: None }),
+        "unexpected empty-append error: {error:?}"
+    );
     let loaded = store
         .load_session()
         .await

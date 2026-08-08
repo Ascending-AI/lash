@@ -811,19 +811,9 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         &self,
         commit: crate::store::RuntimeCommit,
     ) -> Result<crate::store::RuntimeCommitResult, crate::store::StoreError> {
-        commit.validate_budget()?;
-        commit.validate_operation_session()?;
+        let planner = crate::store::RuntimeCommitPlanner::prepare(commit)?;
+        let commit = planner.commit();
         let session_id = commit.session_id.clone();
-        let turn_commit_hash = commit.turn_commit_hash()?;
-        let turn_input_applications = commit.turn_input_applications();
-        let realized_node_timestamps = commit
-            .graph
-            .appended_nodes()
-            .map(|node| crate::session_graph::RealizedNodeTimestamp {
-                node_id: node.node_id.clone(),
-                timestamp: node.timestamp.clone(),
-            })
-            .collect::<Vec<_>>();
         let _transaction = self
             .write_transaction
             .lock()
@@ -831,6 +821,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         #[cfg(test)]
         self.commit_write_transaction_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.ensure_session_not_deleted(&session_id)?;
         #[cfg(test)]
         if let Some(error) = self
             .fail_next_runtime_commit
@@ -842,39 +833,15 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         }
         let mut meta = self.session_head_meta.lock().expect("lock store");
         let actual = meta.as_ref().map_or(0, |meta| meta.head_revision);
-        if let Some(bound) = meta.as_ref().map(|meta| meta.session_id.clone())
-            && bound != commit.session_id
-        {
-            return Err(crate::store::StoreError::SessionBindingMismatch {
-                bound_session_id: bound,
-                attempted_session_id: commit.session_id,
-            });
-        }
-        if let Some(batch) = commit
-            .enqueued_queue_batches
-            .iter()
-            .find(|batch| batch.session_id != commit.session_id)
-        {
-            return Err(crate::store::StoreError::SessionBindingMismatch {
-                bound_session_id: commit.session_id.clone(),
-                attempted_session_id: batch.session_id.clone(),
-            });
-        }
-        for batch in &commit.enqueued_queue_batches {
-            batch
-                .validate_process_wake_source()
-                .map_err(crate::store::StoreError::Backend)?;
-        }
+        planner.validate_session_binding(meta.as_ref().map(|meta| meta.session_id.as_str()))?;
         #[cfg(test)]
         let session_meta_before_commit =
             self.session_meta.lock().expect("lock session meta").clone();
-        self.ensure_session_metadata_for_commit(&commit)?;
+        self.ensure_session_metadata_for_commit(commit)?;
         #[cfg(test)]
         self.fail_after_first_runtime_commit_mutation_if_requested(session_meta_before_commit)?;
-        commit.validate_node_derivation()?;
-        let completed = &commit.turn_commit;
-        let operation_key = completed.operation.storage_key()?;
-        let key = (session_id.clone(), operation_key.clone());
+        planner.validate_node_derivation()?;
+        let key = (session_id.clone(), planner.operation_key().to_string());
         if let Some(stored) = self
             .runtime_turn_commits
             .lock()
@@ -882,27 +849,31 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .get(&key)
             .cloned()
         {
-            let result = receipts::replay_existing_runtime_commit(
-                stored,
-                &turn_commit_hash,
-                completed,
-                session_id,
-                operation_key,
-            )?;
-            if let Some(completion) = commit.release_session_execution_lease.as_ref() {
+            let stored_count = stored
+                .requested_node_count
+                .map(u64::try_from)
+                .transpose()
+                .map_err(|_| {
+                    crate::store::StoreError::Backend(
+                        "stored append requested-node count does not fit u64".to_string(),
+                    )
+                })?;
+            let prior = crate::store::RuntimeCommitReceiptRecord {
+                turn_commit_hash: stored.turn_commit_hash,
+                result: stored.result,
+                request_identity_hash: stored.request_identity_hash,
+                identity_encoding_version: stored.identity_encoding_version,
+                requested_node_count: stored_count,
+            };
+            let replay = planner
+                .decide_receipt(Some(prior))?
+                .expect("an existing receipt must produce replay or an error");
+            if let Some(completion) = replay.release_session_execution_lease() {
                 let _release_was_current =
                     self.release_session_execution_lease_in_memory(completion, false);
                 // FIG-884: ancillary stale release must never veto a replayed commit.
             }
-            return Ok(result);
-        }
-        receipts::enforce_fresh_append_ancestor(&self.session_graph, completed)?;
-        let expected = commit.expected_head_revision;
-        if expected != actual {
-            return Err(crate::store::StoreError::HeadRevisionConflict {
-                expected: commit.expected_head_revision,
-                actual,
-            });
+            return Ok(replay.into_result());
         }
         let (tool_state_ref, tool_state) = checkpoints::resolve_component(
             &self.tool_state_blobs,
@@ -932,118 +903,87 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             execution_state_ref,
             execution_state,
         };
-        commit.validate_append_node_ids_unique()?;
-        commit.graph.validate_append_topology()?;
         let incoming_nodes = commit.graph.nodes.as_slice();
         let mut global_node_owners = self
             .global_node_owners
             .lock()
             .expect("lock global in-memory node ids");
-        if let Some(node) = incoming_nodes
-            .iter()
-            .find(|node| global_node_owners.contains_key(&node.node_id))
-        {
-            return Err(crate::store::StoreError::NodeIdCollision {
-                node_id: node.node_id.clone(),
-            });
-        }
         let graph = self.global_session_graph.lock().expect("lock global graph");
         let tombstoned = self
             .tombstoned_node_ids
             .lock()
             .expect("lock tombstoned nodes");
-        if let Some(node) = incoming_nodes.iter().find(|node| {
-            graph.find_node(&node.node_id).is_some() || tombstoned.contains(&node.node_id)
-        }) {
-            return Err(crate::store::StoreError::NodeIdCollision {
-                node_id: node.node_id.clone(),
-            });
-        }
+        let occupied_node_ids = incoming_nodes
+            .iter()
+            .filter(|node| {
+                global_node_owners.contains_key(&node.node_id)
+                    || graph.find_node(&node.node_id).is_some()
+                    || tombstoned.contains(&node.node_id)
+            })
+            .map(|node| node.node_id.clone())
+            .collect();
         drop(graph);
         drop(tombstoned);
-        let (has_existing_live_nodes, existing_leaf_is_live) = {
+        let (has_existing_live_nodes, selected_leaf_is_live, old_leaf_is_live) = {
             let graph = self.global_session_graph.lock().expect("lock global graph");
             let tombstoned = self
                 .tombstoned_node_ids
                 .lock()
                 .expect("lock tombstoned nodes");
-            let has_existing_live_nodes = meta
-                .as_ref()
-                .and_then(|head| head.leaf_node_id.as_ref())
-                .is_some_and(|node_id| !tombstoned.contains(node_id));
-            let existing_leaf_is_live = commit.graph.leaf_node_id().is_some_and(|leaf_node_id| {
+            let has_existing_live_nodes = global_node_owners.iter().any(|(node_id, owner)| {
+                owner == &commit.session_id && !tombstoned.contains(node_id)
+            });
+            let selected_leaf_is_live = commit.graph.leaf_node_id().is_some_and(|leaf_node_id| {
                 !tombstoned.contains(leaf_node_id) && graph.find_node(leaf_node_id).is_some()
             });
-            (has_existing_live_nodes, existing_leaf_is_live)
+            let old_leaf_is_live = meta
+                .as_ref()
+                .and_then(|head| head.leaf_node_id.as_deref())
+                .is_none_or(|leaf_node_id| {
+                    !tombstoned.contains(leaf_node_id) && graph.find_node(leaf_node_id).is_some()
+                });
+            (
+                has_existing_live_nodes,
+                selected_leaf_is_live,
+                old_leaf_is_live,
+            )
         };
-        match commit.graph.leaf_node_id() {
-            Some(leaf_node_id)
-                if !commit
-                    .graph
-                    .appended_nodes()
-                    .any(|node| &node.node_id == leaf_node_id)
-                    && !existing_leaf_is_live =>
-            {
-                return Err(crate::store::StoreError::InvalidGraphLeaf {
-                    leaf_node_id: Some(leaf_node_id.clone()),
-                });
-            }
-            None if commit.graph.appended_nodes().next().is_some() || has_existing_live_nodes => {
-                return Err(crate::store::StoreError::InvalidGraphLeaf { leaf_node_id: None });
-            }
-            _ => {}
-        }
         let old_leaf_node_id = meta.as_ref().and_then(|head| head.leaf_node_id.clone());
-        match commit.graph.nodes.first() {
-            None if commit.graph.leaf_node_id != old_leaf_node_id => {
-                return Err(crate::StoreError::InvalidGraphLeaf {
-                    leaf_node_id: commit.graph.leaf_node_id.clone(),
-                });
-            }
-            Some(first) if first.parent_node_id.as_ref() != old_leaf_node_id.as_ref() => {
-                return Err(crate::StoreError::InvalidGraphParent {
-                    node_id: first.node_id.clone(),
-                    expected: old_leaf_node_id,
-                    actual: first.parent_node_id.clone(),
-                });
-            }
-            _ => {}
-        }
-        {
-            let mut proposed = self
-                .global_session_graph
-                .lock()
-                .expect("lock global graph")
-                .clone();
-            proposed.extend_node_records(commit.graph.nodes.iter().cloned());
-            proposed.set_leaf_node_id(commit.graph.leaf_node_id().cloned());
-            if let Some(leaf_node_id) = proposed.leaf_node_id.as_deref() {
-                let derived = proposed
-                    .nearest_frame_node_id(Some(leaf_node_id))
-                    .map(ToOwned::to_owned)
-                    .ok_or_else(|| crate::store::StoreError::MissingFrameOpenAncestor {
-                        leaf_node_id: leaf_node_id.to_string(),
-                    })?;
-                if commit.current_frame_node_id.as_deref() != Some(derived.as_str()) {
-                    return Err(crate::store::StoreError::Backend(format!(
-                        "current_frame_node_id {:?} does not match derived frame `{derived}`",
-                        commit.current_frame_node_id
-                    )));
-                }
-            } else if commit.current_frame_node_id.is_some() {
-                return Err(crate::store::StoreError::InvalidGraphLeaf { leaf_node_id: None });
-            }
-        }
+        let requested_ancestor_is_active = commit
+            .turn_commit
+            .requested_ancestor_node_id
+            .as_deref()
+            .is_none_or(|required| {
+                self.session_graph
+                    .lock()
+                    .expect("lock graph for append ancestor fence")
+                    .active_path_contains(required)
+            });
+        let mut proposed = self
+            .global_session_graph
+            .lock()
+            .expect("lock global graph")
+            .clone();
+        proposed.extend_node_records(commit.graph.nodes.iter().cloned());
+        proposed.set_leaf_node_id(commit.graph.leaf_node_id().cloned());
+        let derived_frame_node_id = match proposed.leaf_node_id.as_deref() {
+            Some(leaf_node_id) => proposed
+                .nearest_frame_node_id(Some(leaf_node_id))
+                .map(ToOwned::to_owned),
+            None => None,
+        };
+        let plan = planner.plan(crate::store::FreshRuntimeCommitFacts {
+            actual_head_revision: actual,
+            old_leaf_node_id,
+            requested_ancestor_is_active,
+            occupied_node_ids,
+            selected_leaf_is_live,
+            has_live_nodes: has_existing_live_nodes,
+            old_leaf_is_live,
+            derived_frame_node_id,
+        })?;
         let (staged_tombstoned_node_ids, staged_session_heads) = {
-            let mut proposed = self
-                .global_session_graph
-                .lock()
-                .expect("lock global graph")
-                .clone();
-            proposed.extend_node_records(commit.graph.nodes.iter().cloned());
             let new_leaf_node_id = commit.graph.leaf_node_id().cloned();
-            proposed.set_leaf_node_id(new_leaf_node_id.clone());
-            let old_leaf_node_id = meta.as_ref().and_then(|head| head.leaf_node_id.clone());
             let mut tombstoned = self
                 .tombstoned_node_ids
                 .lock()
@@ -1062,27 +1002,15 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 .keys()
                 .cloned()
                 .collect::<HashSet<_>>();
-            for node in incoming_nodes {
-                if let Some(parent_node_id) = &node.parent_node_id
-                    && (proposed.find_node(parent_node_id).is_none()
-                        || tombstoned.contains(parent_node_id))
-                {
-                    return Err(crate::store::StoreError::InvalidGraphParent {
-                        node_id: node.node_id.clone(),
-                        expected: node.parent_node_id.clone(),
-                        actual: None,
-                    });
-                }
-            }
             let mut live_child_counts = Self::live_child_counts(&proposed, &tombstoned);
-            if old_leaf_node_id != new_leaf_node_id
-                && let Some(old_leaf_node_id) = old_leaf_node_id
+            if plan.head_changed()
+                && let Some(old_leaf_node_id) = plan.old_leaf_node_id()
             {
                 Self::reclaim_unreachable_ancestry(
                     &proposed,
                     &mut live_child_counts,
                     &mut tombstoned,
-                    &old_leaf_node_id,
+                    old_leaf_node_id,
                     &session_heads,
                     &anchored_node_ids,
                 );
@@ -1195,7 +1123,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             ))
         })?;
         let checkpoint_ref = crate::BlobRef(crate::stable_hash::sha256_hex(&checkpoint_bytes));
-        let operation_key = commit.turn_commit.operation.storage_key()?;
         let (
             staged_queued_work,
             staged_wake_redelivery_fences,
@@ -1378,53 +1305,28 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         *self.checkpoint.lock().expect("lock checkpoint") = Some(hydrated_checkpoint);
         self.commit_attachment_refs_in_memory(&commit.session_id, &commit.committed_attachment_ids);
         self.commit_turn_attachment_intents(&commit.session_id, &commit.turn_commit);
-        let head_revision = actual + 1;
-        *meta = Some(crate::SessionHeadMeta::assemble(
-            crate::SessionHeadPayload {
-                schema_version: crate::store::SESSION_HEAD_META_SCHEMA_VERSION,
-                session_id: commit.session_id,
-                config: commit.config,
-                current_frame_node_id: commit.current_frame_node_id,
-            },
-            head_revision,
-            Some(checkpoint_ref.clone()),
-            leaf_node_id.clone(),
-        ));
+        *meta = Some(plan.head_meta(checkpoint_ref.clone()));
         *self
             .runtime_commit_count
             .lock()
             .expect("lock runtime commit count") += 1;
-        let result = crate::store::RuntimeCommitResult {
-            head_revision,
-            checkpoint_ref,
-            manifest,
-            committed_leaf_node_id: leaf_node_id,
-            realized_node_timestamps,
-            committed_usage_delta_identities: commit
-                .usage_deltas
-                .iter()
-                .map(|delta| delta.identity.clone())
-                .collect(),
-            enqueued_queue_batches: staged_enqueued_queue_batches,
-            turn_input_applications,
-            receipt_replayed: false,
-        };
+        let result = plan.result(checkpoint_ref, manifest, staged_enqueued_queue_batches);
+        let receipt = plan.receipt_write(&result);
         self.runtime_turn_commits
             .lock()
             .expect("lock runtime turn commits")
             .insert(
-                (session_id, operation_key),
+                (session_id, receipt.operation_key.to_string()),
                 RuntimeTurnCommitRecord {
-                    turn_commit_hash,
+                    turn_commit_hash: receipt.turn_commit_hash.to_string(),
                     result: result.clone(),
                     committed_at_ms: self.clock.timestamp_ms(),
-                    request_identity_hash: commit.turn_commit.request_identity_hash.clone(),
-                    requested_node_count: commit.turn_commit.requested_node_count,
-                    _requested_ancestor_node_id: commit
-                        .turn_commit
+                    request_identity_hash: receipt.request_identity_hash.map(str::to_string),
+                    requested_node_count: receipt.requested_node_count,
+                    _requested_ancestor_node_id: receipt
                         .requested_ancestor_node_id
-                        .clone(),
-                    identity_encoding_version: commit.turn_commit.identity_encoding_version,
+                        .map(str::to_string),
+                    identity_encoding_version: receipt.identity_encoding_version,
                 },
             );
         if let Some(completion) = commit.release_session_execution_lease.as_ref() {

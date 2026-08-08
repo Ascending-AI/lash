@@ -23,7 +23,6 @@ impl InMemorySessionStore {
         &self,
         commit: &crate::RuntimeCommit,
     ) -> Result<(), crate::StoreError> {
-        self.ensure_session_not_deleted(&commit.session_id)?;
         let mut session_meta = self.session_meta.lock().expect("lock session meta");
         session_meta.get_or_insert_with(|| crate::SessionMeta {
             session_id: commit.session_id.clone(),

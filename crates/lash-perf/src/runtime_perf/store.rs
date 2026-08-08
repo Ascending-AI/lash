@@ -9,7 +9,6 @@ use lash_core::runtime::{
 use lash_core::store;
 use lash_core::store::{
     PersistedSessionRead, RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
-    SessionHeadPayload,
 };
 use lash_core::{
     BlobRef, GcReport, LeaseOwnerIdentity, QueuedWorkStore, RuntimeCommit, RuntimePersistence,
@@ -603,48 +602,18 @@ impl SessionCommitStore for RuntimePerfStore {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, store::StoreError> {
-        let turn_commit_hash = commit.turn_commit_hash()?;
-        let realized_node_timestamps = commit
-            .graph
-            .appended_nodes()
-            .map(|node| lash_core::session_graph::RealizedNodeTimestamp {
-                node_id: node.node_id.clone(),
-                timestamp: node.timestamp.clone(),
-            })
-            .collect();
-        let RuntimeCommit {
-            session_id,
-            expected_head_revision,
-            config,
-            current_frame_node_id,
-            graph: graph_delta,
-            checkpoint,
-            usage_deltas,
-            turn_commit,
-            completed_queue_claims,
-            completed_turn_input_claims,
-            enqueued_queue_batches,
-            interrupted_turn_input_turn_id,
-            release_session_execution_lease,
-            committed_attachment_ids: _,
-        } = commit;
-        if let Some(batch) = enqueued_queue_batches
-            .iter()
-            .find(|batch| batch.session_id != session_id)
-        {
-            return Err(StoreError::SessionBindingMismatch {
-                bound_session_id: session_id.clone(),
-                attempted_session_id: batch.session_id.clone(),
-            });
-        }
+        let planner = store::RuntimeCommitPlanner::prepare(commit)?;
+        let commit = planner.commit();
+        let session_id = &commit.session_id;
         let mut meta_guard = self
             .session_head_meta
             .lock()
             .expect("lock perf session head meta");
+        planner
+            .validate_session_binding(meta_guard.as_ref().map(|meta| meta.session_id.as_str()))?;
+        planner.validate_node_derivation()?;
         let actual = meta_guard.as_ref().map_or(0, |meta| meta.head_revision);
-        let completed = &turn_commit;
-        let operation_key = completed.operation.storage_key()?;
-        let key = (session_id.clone(), operation_key.clone());
+        let key = (session_id.clone(), planner.operation_key().to_string());
         if let Some((stored_hash, result)) = self
             .runtime_turn_commits
             .lock()
@@ -652,42 +621,72 @@ impl SessionCommitStore for RuntimePerfStore {
             .get(&key)
             .cloned()
         {
-            if stored_hash == turn_commit_hash {
-                if let Some(completion) = release_session_execution_lease.as_ref() {
-                    let _release_was_current =
-                        self.release_session_execution_lease_in_memory(completion, false);
-                    // FIG-884: ancillary stale release must never veto a replayed commit.
-                }
-                return Ok(result);
+            let prior = store::RuntimeCommitReceiptRecord {
+                turn_commit_hash: stored_hash,
+                result,
+                request_identity_hash: None,
+                identity_encoding_version: None,
+                requested_node_count: None,
+            };
+            let replay = planner
+                .decide_receipt(Some(prior))?
+                .expect("an existing receipt must produce replay or an error");
+            if let Some(completion) = replay.release_session_execution_lease() {
+                let _release_was_current =
+                    self.release_session_execution_lease_in_memory(completion, false);
+                // FIG-884: ancillary stale release must never veto a replayed commit.
             }
-            return Err(StoreError::RuntimeTurnCommitConflict {
-                session_id,
-                turn_id: operation_key,
-            });
+            return Ok(replay.into_result());
         }
-        if let Some(required_node_id) = turn_commit.requested_ancestor_node_id.as_deref()
-            && !self
-                .session_graph
-                .lock()
-                .expect("lock perf graph for append ancestor fence")
-                .active_path_contains(required_node_id)
-        {
-            return Err(StoreError::AppendAncestorNotActive {
-                required_node_id: required_node_id.to_string(),
-            });
-        }
-        if expected_head_revision != actual {
-            return Err(store::StoreError::HeadRevisionConflict {
-                expected: expected_head_revision,
-                actual,
-            });
-        }
+        let graph_snapshot = self.session_graph.lock().expect("lock perf graph").clone();
+        let requested_ancestor_is_active = commit
+            .turn_commit
+            .requested_ancestor_node_id
+            .as_deref()
+            .is_none_or(|required| graph_snapshot.active_path_contains(required));
+        let occupied_node_ids = commit
+            .graph
+            .nodes
+            .iter()
+            .filter(|node| graph_snapshot.find_node(&node.node_id).is_some())
+            .map(|node| node.node_id.clone())
+            .collect();
+        let selected_leaf_is_live = commit
+            .graph
+            .leaf_node_id()
+            .is_some_and(|leaf| graph_snapshot.find_node(leaf).is_some());
+        let old_leaf_node_id = meta_guard
+            .as_ref()
+            .and_then(|meta| meta.leaf_node_id.clone());
+        let has_live_nodes = old_leaf_node_id.is_some();
+        let old_leaf_is_live = old_leaf_node_id
+            .as_deref()
+            .is_none_or(|leaf| graph_snapshot.find_node(leaf).is_some());
+        let mut proposed_graph = graph_snapshot;
+        proposed_graph.extend_node_records(commit.graph.nodes.iter().cloned());
+        proposed_graph.set_leaf_node_id(commit.graph.leaf_node_id.clone());
+        let derived_frame_node_id = match commit.graph.leaf_node_id.as_deref() {
+            Some(leaf_node_id) => proposed_graph
+                .nearest_frame_node_id(Some(leaf_node_id))
+                .map(str::to_string),
+            None => None,
+        };
+        let plan = planner.plan(store::FreshRuntimeCommitFacts {
+            actual_head_revision: actual,
+            old_leaf_node_id,
+            requested_ancestor_is_active,
+            occupied_node_ids,
+            selected_leaf_is_live,
+            has_live_nodes,
+            old_leaf_is_live,
+            derived_frame_node_id,
+        })?;
         {
             let pending = self
                 .pending_turn_inputs
                 .lock()
                 .expect("lock perf pending turn inputs");
-            for completed in &completed_turn_input_claims {
+            for completed in &commit.completed_turn_input_claims {
                 let matches = pending
                     .iter()
                     .filter(|entry| {
@@ -709,25 +708,21 @@ impl SessionCommitStore for RuntimePerfStore {
             }
         }
         let mut graph = self.session_graph.lock().expect("lock perf graph");
-        graph.extend_node_records(graph_delta.nodes);
-        let leaf_node_id = graph_delta.leaf_node_id;
+        graph.extend_node_records(commit.graph.nodes.iter().cloned());
+        let leaf_node_id = commit.graph.leaf_node_id.clone();
         graph.set_leaf_node_id(leaf_node_id.clone());
-        let committed_usage_delta_identities = usage_deltas
-            .iter()
-            .map(|delta| delta.identity.clone())
-            .collect::<Vec<_>>();
-        if !usage_deltas.is_empty() {
+        if !commit.usage_deltas.is_empty() {
             let mut stored_usage = self.usage_deltas.lock().expect("lock perf usage deltas");
-            for delta in usage_deltas {
+            for delta in &commit.usage_deltas {
                 if !stored_usage
                     .iter()
                     .any(|stored| stored.identity == delta.identity)
                 {
-                    stored_usage.push(delta);
+                    stored_usage.push(delta.clone());
                 }
             }
         }
-        for completed in &completed_queue_claims {
+        for completed in &commit.completed_queue_claims {
             let mut queued = self.queued_work.lock().expect("lock perf queued work");
             let matches = queued
                 .iter()
@@ -754,12 +749,14 @@ impl SessionCommitStore for RuntimePerfStore {
                     && completed.batch_ids.contains(&entry.batch.batch_id))
             });
         }
-        if !completed_turn_input_claims.is_empty() || interrupted_turn_input_turn_id.is_some() {
+        if !commit.completed_turn_input_claims.is_empty()
+            || commit.interrupted_turn_input_turn_id.is_some()
+        {
             let mut pending = self
                 .pending_turn_inputs
                 .lock()
                 .expect("lock perf pending turn inputs");
-            for completed in &completed_turn_input_claims {
+            for completed in &commit.completed_turn_input_claims {
                 for entry in pending.iter_mut() {
                     if entry.input.session_id == completed.session_id
                         && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
@@ -771,9 +768,9 @@ impl SessionCommitStore for RuntimePerfStore {
                     }
                 }
             }
-            if let Some(turn_id) = interrupted_turn_input_turn_id.as_deref() {
+            if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_deref() {
                 for entry in pending.iter_mut() {
-                    if entry.input.session_id == session_id
+                    if entry.input.session_id == *session_id
                         && entry.input.state == lash_core::TurnInputState::PendingActive
                         && entry.input.ingress.active_turn_id() == Some(turn_id)
                     {
@@ -792,65 +789,47 @@ impl SessionCommitStore for RuntimePerfStore {
             BlobRef(format!("perf-{kind}-{id}"))
         };
         let manifest = SessionCheckpoint::new(
-            checkpoint.turn_state,
-            if checkpoint.tool_state.is_some() {
+            commit.checkpoint.turn_state.clone(),
+            if commit.checkpoint.tool_state.is_some() {
                 Some(next_checkpoint_blob_ref("tool-state"))
             } else {
-                checkpoint.tool_state_ref
+                commit.checkpoint.tool_state_ref.clone()
             },
-            if checkpoint.plugin_snapshot.is_some() {
+            if commit.checkpoint.plugin_snapshot.is_some() {
                 Some(next_checkpoint_blob_ref("plugin-snapshot"))
             } else {
-                checkpoint.plugin_snapshot_ref
+                commit.checkpoint.plugin_snapshot_ref.clone()
             },
-            checkpoint.plugin_snapshot_revision,
-            if checkpoint.execution_state.is_some() {
+            commit.checkpoint.plugin_snapshot_revision,
+            if commit.checkpoint.execution_state.is_some() {
                 Some(next_checkpoint_blob_ref("execution-state"))
             } else {
-                checkpoint.execution_state_ref
+                commit.checkpoint.execution_state_ref.clone()
             },
         );
         drop(graph);
         let id = self.next_blob_id.fetch_add(1, Ordering::Relaxed);
         let checkpoint_ref = BlobRef(format!("perf-checkpoint-{id}"));
-        let head_revision = actual + 1;
-        *meta_guard = Some(SessionHeadMeta::assemble(
-            SessionHeadPayload {
-                schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
-                session_id: session_id.clone(),
-                config,
-                current_frame_node_id,
-            },
-            head_revision,
-            Some(checkpoint_ref.clone()),
-            leaf_node_id.clone(),
-        ));
-        let turn_input_applications = completed_turn_input_claims
-            .iter()
-            .flat_map(|completion| completion.applications.iter().cloned())
-            .collect();
-        let result = RuntimeCommitResult {
-            head_revision,
+        *meta_guard = Some(plan.head_meta(checkpoint_ref.clone()));
+        let result = plan.result(
             checkpoint_ref,
             manifest,
-            committed_leaf_node_id: leaf_node_id,
-            realized_node_timestamps,
-            committed_usage_delta_identities,
-            enqueued_queue_batches: enqueued_queue_batches
-                .into_iter()
+            commit
+                .enqueued_queue_batches
+                .iter()
+                .cloned()
                 .map(|batch| self.enqueue_queued_work_in_memory(batch))
                 .collect(),
-            turn_input_applications,
-            receipt_replayed: false,
-        };
+        );
+        let receipt = plan.receipt_write(&result);
         self.runtime_turn_commits
             .lock()
             .expect("lock perf runtime turn commits")
             .insert(
-                (session_id, completed.operation.storage_key()?),
-                (turn_commit_hash, result.clone()),
+                (session_id.clone(), receipt.operation_key.to_string()),
+                (receipt.turn_commit_hash.to_string(), result.clone()),
             );
-        if let Some(completion) = release_session_execution_lease.as_ref() {
+        if let Some(completion) = commit.release_session_execution_lease.as_ref() {
             let _release_was_current =
                 self.release_session_execution_lease_in_memory(completion, false);
             // FIG-884: head CAS is commit authority; release is ancillary.

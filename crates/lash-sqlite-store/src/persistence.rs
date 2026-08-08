@@ -262,41 +262,26 @@ impl SessionCommitStore for Store {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, StoreError> {
-        commit.validate_budget()?;
-        commit.validate_operation_session()?;
-        let turn_commit_hash = commit.turn_commit_hash()?;
-        self.bind_session(&commit.session_id)?;
-        let realized_node_timestamps = commit
-            .graph
-            .appended_nodes()
-            .map(|node| lash_core::session_graph::RealizedNodeTimestamp {
-                node_id: node.node_id.clone(),
-                timestamp: node.timestamp.clone(),
-            })
-            .collect::<Vec<_>>();
+        let planner = lash_core::store::RuntimeCommitPlanner::prepare(commit)?;
+        self.bind_session(&planner.commit().session_id)?;
         let blob_profile = self.options.blob_profile;
         let now = self.clock.timestamp_ms();
         let created_at = self.clock.timestamp_rfc3339();
         let enqueue_nonce_start = self.commit_count.fetch_add(
-            commit.enqueued_queue_batches.len() as u64,
+            planner.commit().enqueued_queue_batches.len() as u64,
             AtomicOrdering::Relaxed,
         );
         let result = self
             .conn
             .write_flow(move |tx| {
                 let outcome: Result<RuntimeCommitResult, StoreError> = (|| {
+                    let commit = planner.commit();
                     ensure_session_not_deleted_conn(tx, &commit.session_id)?;
                     let existing =
                         try_load_session_head_meta_from_conn(tx, &commit.session_id)?;
-                    if let Some(bound_session_id) =
-                        existing.as_ref().map(|meta| meta.session_id.as_str())
-                        && bound_session_id != commit.session_id
-                    {
-                        return Err(StoreError::SessionBindingMismatch {
-                            bound_session_id: bound_session_id.to_string(),
-                            attempted_session_id: commit.session_id.clone(),
-                        });
-                    }
+                    planner.validate_session_binding(
+                        existing.as_ref().map(|meta| meta.session_id.as_str()),
+                    )?;
                     tx.execute(
                         "INSERT OR IGNORE INTO session_meta
                          (session_id, session_name, created_at, model, cwd, relation_json)
@@ -310,9 +295,8 @@ impl SessionCommitStore for Store {
                         ],
                     )
                     .map_err(sqlite_error)?;
-                    commit.validate_node_derivation()?;
-                    { let completed = &commit.turn_commit;
-                        let operation_key = completed.operation.storage_key()?;
+                    planner.validate_node_derivation()?;
+                    {
                         let prior: Option<(
                             String,
                             String,
@@ -326,7 +310,7 @@ impl SessionCommitStore for Store {
                                         requested_node_count
                                  FROM runtime_turn_commits
                                  WHERE session_id = ?1 AND turn_id = ?2",
-                                params![commit.session_id, operation_key],
+                                params![commit.session_id, planner.operation_key()],
                                 |row| {
                                     Ok((
                                         row.get(0)?,
@@ -355,118 +339,73 @@ impl SessionCommitStore for Store {
                                         "stored append requested-node count is negative".to_string(),
                                     )
                                 })?;
-                            let attempted_count = completed
-                                .requested_node_count
-                                .map(u64::try_from)
-                                .transpose()
-                                .map_err(|_| {
-                                    StoreError::Backend(
-                                        "attempted append requested-node count does not fit u64"
-                                            .to_string(),
-                                    )
-                                })?;
-                            match lash_core::store::decide_runtime_commit_receipt(
-                                &stored_hash,
-                                &turn_commit_hash,
-                                stored_version.and_then(|version| u32::try_from(version).ok()),
-                                completed.identity_encoding_version,
-                                stored_identity.as_deref(),
-                                completed.request_identity_hash.as_deref(),
-                                stored_count,
-                                attempted_count,
-                            ) {
-                                lash_core::store::RuntimeCommitReceiptDecision::Replay => {
-                                    let mut result: RuntimeCommitResult =
-                                        serde_json::from_str(&result_json).map_err(|err| {
-                                            StoreError::Backend(format!(
-                                                "failed to decode runtime turn commit result: {err}"
-                                            ))
-                                        })?;
-                                    result.receipt_replayed = true;
-                                    if let Some(completion) =
-                                        commit.release_session_execution_lease.as_ref()
-                                    {
-                                        let _release_was_current =
-                                            release_session_execution_lease_conn(tx, completion)?;
-                                        // FIG-884: ancillary stale release must
-                                        // never veto a replayed commit.
-                                    }
-                                    return Ok(result);
+                            let result = serde_json::from_str(&result_json).map_err(|err| {
+                                StoreError::Backend(format!(
+                                    "failed to decode runtime turn commit result: {err}"
+                                ))
+                            })?;
+                            let prior = lash_core::store::RuntimeCommitReceiptRecord {
+                                turn_commit_hash: stored_hash,
+                                result,
+                                request_identity_hash: stored_identity,
+                                identity_encoding_version: stored_version
+                                    .and_then(|version| u32::try_from(version).ok()),
+                                requested_node_count: stored_count,
+                            };
+                            if let Some(replay) = planner.decide_receipt(Some(prior))? {
+                                if let Some(completion) =
+                                    replay.release_session_execution_lease()
+                                {
+                                    let _release_was_current =
+                                        release_session_execution_lease_conn(tx, completion)?;
+                                    // FIG-884: ancillary stale release must
+                                    // never veto a replayed commit.
                                 }
-                                lash_core::store::RuntimeCommitReceiptDecision::AppendIdentityConflict => {
-                                    return Err(StoreError::AppendOperationIdentityConflict {
-                                        session_id: commit.session_id.clone(),
-                                        operation_key,
-                                    });
-                                }
-                                lash_core::store::RuntimeCommitReceiptDecision::RuntimeCommitConflict => {
-                                    return Err(StoreError::RuntimeTurnCommitConflict {
-                                        session_id: commit.session_id.clone(),
-                                        turn_id: operation_key,
-                                    });
-                                }
-                                lash_core::store::RuntimeCommitReceiptDecision::CorruptRequestedNodeCount {
-                                    stored,
-                                    attempted,
-                                } => {
-                                    return Err(StoreError::AppendReceiptRequestedNodeCountCorrupt {
-                                        session_id: commit.session_id.clone(),
-                                        operation_key,
-                                        stored,
-                                        attempted,
-                                    });
-                                }
+                                return Ok(replay.into_result());
                             }
                         }
                     }
-                    if commit.turn_commit.request_identity_hash.is_some()
-                        && let Some(required) =
-                            commit.turn_commit.requested_ancestor_node_id.as_deref()
-                    {
-                        let active_graph = Self::load_active_path_session_graph_from_conn(
-                            tx,
-                            &commit.session_id,
-                            existing.as_ref().and_then(|meta| meta.leaf_node_id.clone()),
-                        )?;
-                        if !active_graph.active_path_contains(required) {
-                            return Err(StoreError::AppendAncestorNotActive {
-                                required_node_id: required.to_string(),
-                            });
-                        }
-                    }
                     let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
-                    let expected_revision = commit.expected_head_revision;
-                    if expected_revision != actual_revision {
-                        return Err(StoreError::HeadRevisionConflict {
-                            expected: commit.expected_head_revision,
-                            actual: actual_revision,
-                        });
-                    }
-                    commit.validate_append_node_ids_unique()?;
-                    commit.graph.validate_append_topology()?;
+                    let old_leaf_node_id = existing
+                        .as_ref()
+                        .and_then(|head| head.leaf_node_id.clone());
+                    let active_graph = commit
+                        .turn_commit
+                        .requested_ancestor_node_id
+                        .as_ref()
+                        .map(|_| {
+                            Self::load_active_path_session_graph_from_conn(
+                                tx,
+                                &commit.session_id,
+                                old_leaf_node_id.clone(),
+                            )
+                        })
+                        .transpose()?;
+                    let requested_ancestor_is_active = match (
+                        commit.turn_commit.requested_ancestor_node_id.as_deref(),
+                        active_graph.as_ref(),
+                    ) {
+                        (Some(required), Some(graph)) => graph.active_path_contains(required),
+                        (None, None) => true,
+                        _ => unreachable!("active graph is loaded exactly for ancestor-fenced appends"),
+                    };
+                    let mut occupied_node_ids = std::collections::HashSet::new();
                     for node in &commit.graph.nodes {
-                            let occupied = tx
+                        let occupied = tx
                                 .query_row(
                                     "SELECT 1 FROM graph_nodes WHERE node_id = ?1 LIMIT 1",
                                     params![node.node_id],
                                     |_| Ok(()),
                                 )
                                 .optional()
-                                .map_err(sqlite_error)?
-                                .is_some();
-                            if occupied {
-                                return Err(StoreError::NodeIdCollision {
-                                    node_id: node.node_id.clone(),
-                                });
-                            }
+                            .map_err(sqlite_error)?
+                            .is_some();
+                        if occupied {
+                            occupied_node_ids.insert(node.node_id.clone());
                         }
-                    if let Some(leaf_node_id) = commit.graph.leaf_node_id() {
-                        let appended = matches!(
-                            &commit.graph,
-                            GraphAppend { nodes, .. }
-                                if nodes.iter().any(|node| &node.node_id == leaf_node_id)
-                        );
-                        let live = tx
+                    }
+                    let selected_leaf_is_live = match commit.graph.leaf_node_id() {
+                        Some(leaf_node_id) => tx
                             .query_row(
                                 "SELECT 1 FROM graph_nodes
                                  WHERE node_id = ?1 AND tombstoned = 0
@@ -476,54 +415,63 @@ impl SessionCommitStore for Store {
                             )
                             .optional()
                             .map_err(sqlite_error)?
-                            .is_some();
-                        if !appended && !live {
-                            return Err(StoreError::InvalidGraphLeaf {
-                                leaf_node_id: Some(leaf_node_id.clone()),
-                            });
-                        }
-                    } else {
-                        let appends_nodes = matches!(
-                            &commit.graph,
-                            GraphAppend { nodes, .. } if !nodes.is_empty()
-                        );
-                        let has_live_nodes = tx
+                            .is_some(),
+                        None => false,
+                    };
+                    let has_live_nodes = tx
+                        .query_row(
+                            "SELECT 1 FROM graph_nodes
+                             WHERE session_id = ?1 AND tombstoned = 0
+                             LIMIT 1",
+                            params![commit.session_id],
+                            |_| Ok(()),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?
+                        .is_some();
+                    let old_leaf_is_live = match (old_leaf_node_id.as_deref(), active_graph.as_ref()) {
+                        (None, _) => true,
+                        (Some(_), Some(graph)) => !graph.nodes.is_empty(),
+                        (Some(old_leaf_node_id), None) => tx
                             .query_row(
                                 "SELECT 1 FROM graph_nodes
-                                 WHERE session_id = ?1 AND tombstoned = 0
+                                 WHERE node_id = ?1 AND tombstoned = 0
                                  LIMIT 1",
-                                params![commit.session_id],
+                                params![old_leaf_node_id],
                                 |_| Ok(()),
                             )
                             .optional()
                             .map_err(sqlite_error)?
-                            .is_some();
-                        if appends_nodes || has_live_nodes {
-                            return Err(StoreError::InvalidGraphLeaf { leaf_node_id: None });
-                        }
-                    }
+                            .is_some(),
+                    };
+                    let derived_frame_node_id = match commit
+                        .graph
+                        .nodes
+                        .iter()
+                        .rev()
+                        .find(|node| matches!(node.payload, lash_core::SessionNodePayload::FrameOpen { .. }))
+                    {
+                        Some(frame) => Some(frame.node_id.clone()),
+                        None => old_leaf_node_id
+                            .as_deref()
+                            .map(|leaf| nearest_frame_node_id_conn(tx, leaf))
+                            .transpose()?
+                            .flatten(),
+                    };
+                    let plan = planner.plan(lash_core::store::FreshRuntimeCommitFacts {
+                        actual_head_revision: actual_revision,
+                        old_leaf_node_id,
+                        requested_ancestor_is_active,
+                        occupied_node_ids,
+                        selected_leaf_is_live,
+                        has_live_nodes,
+                        old_leaf_is_live,
+                        derived_frame_node_id,
+                    })?;
                     for completed in &commit.completed_queue_claims {
-                        if completed.session_id != commit.session_id {
-                            return Err(StoreError::QueuedWorkClaimSuperseded {
-                                session_id: completed.session_id.clone(),
-                                claim_id: completed.claim_id.clone(),
-                                row_id: None,
-                                superseding_claim_id: None,
-                                superseding_session_lease_generation: None,
-                            });
-                        }
                         ensure_queued_work_completion_conn(tx, completed)?;
                     }
                     for completed in &commit.completed_turn_input_claims {
-                        if completed.session_id != commit.session_id {
-                            return Err(StoreError::TurnInputClaimSuperseded {
-                                session_id: completed.session_id.clone(),
-                                claim_id: completed.claim_id.clone(),
-                                row_id: None,
-                                superseding_claim_id: None,
-                                superseding_session_lease_generation: None,
-                            });
-                        }
                         for input_id in &completed.input_ids {
                             let authority = tx
                                 .query_row(
@@ -608,76 +556,26 @@ impl SessionCommitStore for Store {
                         }
                     }
 
-                    let old_leaf_node_id = existing
-                        .as_ref()
-                        .and_then(|head| head.leaf_node_id.clone());
-                    match commit.graph.nodes.first() {
-                        None if commit.graph.leaf_node_id != old_leaf_node_id => {
-                            return Err(StoreError::InvalidGraphLeaf {
-                                leaf_node_id: commit.graph.leaf_node_id.clone(),
-                            });
-                        }
-                        Some(first)
-                            if first.parent_node_id.as_ref() != old_leaf_node_id.as_ref() =>
-                        {
-                            return Err(StoreError::InvalidGraphParent {
-                                node_id: first.node_id.clone(),
-                                expected: old_leaf_node_id.clone(),
-                                actual: first.parent_node_id.clone(),
-                            });
-                        }
-                        _ => {}
+                    for node in &commit.graph.nodes {
+                        let node_json = node.encode_storage_body().map_err(|err| {
+                            StoreError::Backend(format!(
+                                "failed to encode graph node body: {err}"
+                            ))
+                        })?;
+                        tx.execute(
+                            "INSERT INTO graph_nodes
+                             (session_id, node_id, parent_node_id, node_json)
+                             VALUES (?1, ?2, ?3, ?4)",
+                            params![
+                                commit.session_id,
+                                node.node_id,
+                                node.parent_node_id,
+                                node_json
+                            ],
+                        )
+                        .map_err(sqlite_error)?;
                     }
-                    let leaf_node_id = {
-                            for node in &commit.graph.nodes {
-                                let node_json = node.encode_storage_body().map_err(|err| {
-                                    StoreError::Backend(format!(
-                                        "failed to encode graph node body: {err}"
-                                    ))
-                                })?;
-                                tx.execute(
-                                    "INSERT INTO graph_nodes
-                                     (session_id, node_id, parent_node_id, node_json)
-                                     VALUES (?1, ?2, ?3, ?4)",
-                                    params![
-                                        commit.session_id,
-                                        node.node_id,
-                                        node.parent_node_id,
-                                        node_json
-                                    ],
-                                )
-                                .map_err(sqlite_error)?;
-                            }
-                            commit.graph.leaf_node_id.clone()
-                    };
-                    let head_changed = old_leaf_node_id != leaf_node_id;
-                    let derived_frame_node_id = match leaf_node_id.as_deref() {
-                        Some(leaf_node_id) => Some(
-                            nearest_frame_node_id_conn(tx, leaf_node_id)?
-                                .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
-                                    leaf_node_id: leaf_node_id.to_string(),
-                                })?,
-                        ),
-                        None => None,
-                    };
-                    if commit.current_frame_node_id != derived_frame_node_id {
-                        return Err(StoreError::Backend(format!(
-                            "current_frame_node_id {:?} does not match nearest FrameOpen ancestor {:?}",
-                            commit.current_frame_node_id, derived_frame_node_id
-                        )));
-                    }
-                    let next_revision = actual_revision + 1;
-                    let meta = SessionHeadMeta::assemble(
-                        SessionHeadPayload {
-                            schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
-                            session_id: commit.session_id.clone(),
-                            config: commit.config.clone(),
-                            current_frame_node_id: derived_frame_node_id,
-                        },
-                        next_revision,
-                        Some(stored_checkpoint.checkpoint_ref.clone()),
-                        leaf_node_id,
-                    );
+                    let meta = plan.head_meta(stored_checkpoint.checkpoint_ref.clone());
                     tx.execute(
                         "INSERT OR REPLACE INTO session_head
                          (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
@@ -691,8 +589,8 @@ impl SessionCommitStore for Store {
                         ],
                     )
                     .map_err(sqlite_error)?;
-                    if head_changed
-                        && let Some(old_leaf_node_id) = &old_leaf_node_id
+                    if plan.head_changed()
+                        && let Some(old_leaf_node_id) = plan.old_leaf_node_id()
                     {
                         retire_unreachable_ancestry_conn(tx, old_leaf_node_id)?;
                     }
@@ -854,12 +752,6 @@ impl SessionCommitStore for Store {
                     }
                     let mut enqueued_queue_batches = Vec::new();
                     for (index, batch) in commit.enqueued_queue_batches.iter().enumerate() {
-                        if batch.session_id != commit.session_id {
-                            return Err(StoreError::SessionBindingMismatch {
-                                bound_session_id: commit.session_id.clone(),
-                                attempted_session_id: batch.session_id.clone(),
-                            });
-                        }
                         enqueued_queue_batches.push(enqueue_queued_work_conn(
                             tx,
                             batch,
@@ -867,23 +759,13 @@ impl SessionCommitStore for Store {
                             enqueue_nonce_start.saturating_add(index as u64),
                         )?);
                     }
-                    let result = RuntimeCommitResult {
-                        head_revision: next_revision,
-                        checkpoint_ref: stored_checkpoint.checkpoint_ref,
-                        manifest: stored_checkpoint.manifest,
-                        committed_leaf_node_id: commit.graph.leaf_node_id.clone(),
-                        realized_node_timestamps: realized_node_timestamps.clone(),
-                        committed_usage_delta_identities: commit
-                            .usage_deltas
-                            .iter()
-                            .map(|delta| delta.identity.clone())
-                            .collect(),
+                    let result = plan.result(
+                        stored_checkpoint.checkpoint_ref,
+                        stored_checkpoint.manifest,
                         enqueued_queue_batches,
-                        turn_input_applications: commit.turn_input_applications(),
-                        receipt_replayed: false,
-                    };
-                    { let completed = &commit.turn_commit;
-                        let operation_key = completed.operation.storage_key()?;
+                    );
+                    {
+                        let receipt = plan.receipt_write(&result);
                         tx.execute(
                             "INSERT INTO runtime_turn_commits (
                                 session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
@@ -892,15 +774,15 @@ impl SessionCommitStore for Store {
                              )
                              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                             params![
-                                commit.session_id,
-                                operation_key,
-                                turn_commit_hash,
-                                encode_json(&result),
+                                receipt.session_id,
+                                receipt.operation_key,
+                                receipt.turn_commit_hash,
+                                encode_json(receipt.result),
                                 now as i64,
-                                completed.request_identity_hash,
-                                completed.requested_node_count.map(|count| count as i64),
-                                completed.requested_ancestor_node_id,
-                                completed.identity_encoding_version.map(i64::from),
+                                receipt.request_identity_hash,
+                                receipt.requested_node_count.map(|count| count as i64),
+                                receipt.requested_ancestor_node_id,
+                                receipt.identity_encoding_version.map(i64::from),
                             ],
                         )
                         .map_err(sqlite_error)?;
@@ -1220,6 +1102,9 @@ impl QueuedWorkStore for Store {
         &self,
         batch: QueuedWorkBatchDraft,
     ) -> Result<QueuedWorkBatch, StoreError> {
+        batch
+            .validate_process_wake_source()
+            .map_err(StoreError::Backend)?;
         let nonce = self.commit_count.fetch_add(1, AtomicOrdering::Relaxed);
         let now = self.clock.timestamp_ms();
         self.conn
@@ -1241,6 +1126,9 @@ impl QueuedWorkStore for Store {
         &self,
         batch: QueuedWorkBatchDraft,
     ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
+        batch
+            .validate_process_wake_source()
+            .map_err(StoreError::Backend)?;
         let nonce = self.commit_count.fetch_add(1, AtomicOrdering::Relaxed);
         let now = self.clock.timestamp_ms();
         self.conn

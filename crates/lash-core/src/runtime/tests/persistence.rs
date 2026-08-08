@@ -171,6 +171,32 @@ async fn in_memory_append_receipt_replays_after_ancestor_superseded() {
 }
 
 #[tokio::test]
+async fn in_memory_inactive_append_ancestor_precedes_stale_head() {
+    let store = Arc::new(RecordingStore::default());
+    let mutation_store = Arc::clone(&store);
+    crate::testing::conformance::inactive_append_ancestor_precedes_stale_head(
+        Arc::clone(&store) as Arc<dyn crate::RuntimePersistence>,
+        move |leaf_node_id| async move {
+            mutation_store.force_active_leaf_for_testing(leaf_node_id);
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn in_memory_tombstoned_old_leaf_is_rejected() {
+    let store = Arc::new(RecordingStore::default());
+    let mutation_store = Arc::clone(&store);
+    crate::testing::conformance::tombstoned_old_leaf_is_rejected(
+        Arc::clone(&store) as Arc<dyn crate::RuntimePersistence>,
+        move |node_id| async move {
+            mutation_store.tombstone_node_for_testing(node_id);
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn in_memory_append_receipt_restores_mixed_usage_envelope() {
     crate::testing::conformance::append_receipt_mixed_usage_envelope(Arc::new(
         RecordingStore::default(),

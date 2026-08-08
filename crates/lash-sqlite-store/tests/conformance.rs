@@ -753,6 +753,48 @@ async fn sqlite_append_receipt_replays_after_ancestor_superseded() {
 }
 
 #[tokio::test]
+async fn sqlite_inactive_append_ancestor_precedes_stale_head() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("append-precedence.db");
+    let store = Arc::new(Store::open(&path).await.expect("open store"));
+    let mutation_path = path.clone();
+    lash_core::testing::conformance::inactive_append_ancestor_precedes_stale_head(
+        store as Arc<dyn RuntimePersistence>,
+        move |leaf_node_id| async move {
+            let conn = rusqlite::Connection::open(mutation_path).expect("open raw sqlite");
+            conn.execute(
+                "UPDATE session_head
+                 SET leaf_node_id = ?1, head_revision = head_revision + 1
+                 WHERE session_id = 'root'",
+                rusqlite::params![leaf_node_id],
+            )
+            .expect("switch sqlite active branch");
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn sqlite_tombstoned_old_leaf_is_rejected() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("tombstoned-old-leaf.db");
+    let store = Arc::new(Store::open(&path).await.expect("open store"));
+    let mutation_path = path.clone();
+    lash_core::testing::conformance::tombstoned_old_leaf_is_rejected(
+        store as Arc<dyn RuntimePersistence>,
+        move |node_id| async move {
+            let conn = rusqlite::Connection::open(mutation_path).expect("open raw sqlite");
+            conn.execute(
+                "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1",
+                rusqlite::params![node_id],
+            )
+            .expect("tombstone sqlite old leaf");
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn sqlite_append_receipt_restores_mixed_usage_envelope() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = Arc::new(

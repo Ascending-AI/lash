@@ -41,8 +41,8 @@ use lash_core::store::queued_work::{
     select_leading_session_command, select_turn_work_claim_prefix,
 };
 use lash_core::store::{
-    GraphAppend, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
-    RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
+    HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit, RuntimeCommitResult,
+    SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
 use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
