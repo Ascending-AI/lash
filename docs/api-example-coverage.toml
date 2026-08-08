@@ -49852,6 +49852,14 @@ disposition = "unused-justify"
 reason = "Concrete host class: conformance-suite embedders (ADR 0051). This is the executable contract that a session-execution-lease implementation, including an in-process double, reports the lapsed holder a claim displaced; without it a store silently disables session_execution_lease.taken_over. It is exercised by the durable backends' conformance runs plus the lash-perf and facade double tests, which is the integrator-class home for it rather than a host example."
 
 [[api]]
+symbol = "lash::testing::conformance::session_execution_lease_fence_authority"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: conformance-suite embedders (ADR 0051). This executable contract proves every RuntimePersistence backend and in-process double applies the core-owned session-execution fence, including current-token equality after same-owner rotation. Durable backend and lash-perf tests are its integrator-class home rather than a host example."
+
+[[api]]
 symbol = "lash::testing::conformance::session_graph_append_branch_liveness"
 kind = "function"
 availability = "all-features"

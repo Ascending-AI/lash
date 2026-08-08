@@ -457,8 +457,10 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
                 "owner_or_token_mismatch",
                 "facade_test_double_lock",
                 fence,
-                Some(&existing.owner),
-                Some(existing.lease_token.as_str()),
+                lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
+                    Some(&existing.owner),
+                    Some(existing.lease_token.as_str()),
+                ),
             );
             return Err(
                 lash_core::store::StoreError::SessionExecutionLeaseRenewalRefused {
@@ -498,8 +500,10 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
                 "token_scoped_release_did_not_match",
                 "facade_test_double_lock",
                 completion,
-                current.map(|lease| &lease.owner),
-                current.map(|lease| lease.lease_token.as_str()),
+                lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
+                    current.map(|lease| &lease.owner),
+                    current.map(|lease| lease.lease_token.as_str()),
+                ),
             );
             Err(
                 lash_core::store::StoreError::SessionExecutionLeaseReleaseRefused {

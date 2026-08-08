@@ -279,34 +279,24 @@ impl InMemorySessionStore {
         session_id: &str,
         fence: &crate::SessionExecutionLeaseAuthority,
     ) -> Result<(), crate::store::StoreError> {
-        if fence.session_id != session_id {
-            return Err(crate::store::StoreError::SessionExecutionLeaseExpired {
-                session_id: session_id.to_string(),
-            });
-        }
         let now = self.clock.timestamp_ms();
         let leases = self
             .session_execution_leases
             .lock()
             .expect("lock session execution leases");
-        let Some(current) = leases.get(&fence.session_id) else {
-            return Err(crate::store::StoreError::SessionExecutionLeaseExpired {
-                session_id: fence.session_id.clone(),
-            });
-        };
-        if current
-            .owner
-            .as_ref()
-            .is_some_and(|owner| owner.same_incarnation(&fence.owner))
-            && current.fencing_token == fence.fencing_token
-            && current.expires_at_epoch_ms > now
-        {
-            Ok(())
-        } else {
-            Err(crate::store::StoreError::SessionExecutionLeaseExpired {
-                session_id: fence.session_id.clone(),
-            })
-        }
+        crate::store::session_execution_lease::require_current_session_execution_lease(
+            session_id,
+            leases.get(session_id).map(|current| {
+                crate::store::session_execution_lease::SessionExecutionLeaseFenceFacts {
+                    owner: current.owner.as_ref(),
+                    lease_token: current.lease_token.as_deref(),
+                    fencing_token: current.fencing_token,
+                    expires_at_epoch_ms: current.expires_at_epoch_ms,
+                }
+            }),
+            fence,
+            now,
+        )
     }
 
     /// The fencing token of the session's currently-live execution lease, or
@@ -353,8 +343,10 @@ impl InMemorySessionStore {
                     "token_scoped_release_did_not_match",
                     "in_memory_write_transaction",
                     completion,
-                    current.and_then(|lease| lease.owner.as_ref()),
-                    current.and_then(|lease| lease.lease_token.as_deref()),
+                    crate::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
+                        current.and_then(|lease| lease.owner.as_ref()),
+                        current.and_then(|lease| lease.lease_token.as_deref()),
+                    ),
                 );
             }
             false

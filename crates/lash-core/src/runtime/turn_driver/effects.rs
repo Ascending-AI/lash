@@ -314,11 +314,12 @@ impl RuntimeTurnDriver<'_> {
                     .await
                 {
                     Ok(claims) => claims,
-                    Err(crate::StoreError::SessionExecutionLeaseExpired { .. }) => {
-                        tracing::debug!(
+                    Err(err @ crate::StoreError::SessionExecutionLeaseExpired { .. }) => {
+                        tracing::warn!(
                             session_id = %self.session_id,
                             turn_id = %self.turn_id,
                             event = "session_execution_lease.checkpoint_advisory",
+                            cause = %err,
                             "session execution lease expired; skipping advisory checkpoint claims"
                         );
                         self.session_execution_lease = None;

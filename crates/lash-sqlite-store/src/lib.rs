@@ -88,6 +88,11 @@ mod attachments;
 mod await_event;
 mod blobs;
 mod conn;
+
+fn commit_count_entropy_seed() -> u64 {
+    let (high, low) = uuid::Uuid::new_v4().as_u64_pair();
+    (high ^ low) & (u64::MAX >> 1)
+}
 mod effect_replay;
 mod forks;
 mod graph;

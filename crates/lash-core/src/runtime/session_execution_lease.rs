@@ -1024,7 +1024,7 @@ mod tests {
         ) {
             assert_eq!(event.target, "lash_core::session_execution_lease");
             assert_eq!(event.level, "WARN");
-            assert_eq!(event.field_count(), 15);
+            assert_eq!(event.field_count(), 23);
             for field in [
                 "event",
                 "operation",
@@ -1039,14 +1039,31 @@ mod tests {
                 "consulted_state",
                 "observation_freshness",
                 "outcome",
+                "refusal_cause",
             ] {
                 assert_eq!(event.field_kind(field), CapturedFieldKind::Str, "{field}");
             }
             for field in ["owner_matched", "token_matched"] {
                 assert_eq!(event.field_kind(field), CapturedFieldKind::Bool, "{field}");
             }
+            for field in [
+                "session_matched",
+                "current_fencing_token",
+                "generation_matched",
+                "current_expires_at_epoch_ms",
+                "observed_at_epoch_ms",
+                "expiry_matched",
+            ] {
+                assert_eq!(event.field_kind(field), CapturedFieldKind::Debug, "{field}");
+                assert_eq!(event.field(field), "None", "{field}");
+            }
+            assert_eq!(
+                event.field_kind("presented_fencing_token"),
+                CapturedFieldKind::U64
+            );
             assert_eq!(event.field("operation"), operation);
             assert_eq!(event.field("decision_basis"), decision_basis);
+            assert_eq!(event.field("refusal_cause"), decision_basis);
             assert_eq!(event.field("session_id"), presented.session_id);
             assert_eq!(event.field("presented_owner_id"), presented.owner.owner_id);
             assert_eq!(
@@ -1121,6 +1138,38 @@ mod tests {
             &presented,
             &current,
         );
+
+        let (_, execution_capture) = crate::runtime::tests::trace_capture::capturing(|| async {
+            crate::store_backend_support::require_current_session_execution_lease(
+                SESSION_ID,
+                Some(
+                    crate::store_backend_support::SessionExecutionLeaseFenceFacts {
+                        owner: Some(&current.owner),
+                        lease_token: Some(current.lease_token.as_str()),
+                        fencing_token: current.fencing_token,
+                        expires_at_epoch_ms: current.expires_at_epoch_ms,
+                    },
+                ),
+                &presented,
+                current.expires_at_epoch_ms - 1,
+            )
+            .expect_err("stale execution fence refused")
+        })
+        .await;
+        let execution_event =
+            execution_capture.exactly_one("session_execution_lease.execution_fence_refused");
+        assert_eq!(execution_event.field_count(), 23);
+        assert_eq!(execution_event.field("operation"), "execution_fence");
+        assert_eq!(
+            execution_event.field("decision_basis"),
+            "core_execution_fence_predicate"
+        );
+        assert_eq!(execution_event.field("refusal_cause"), "owner_mismatch");
+        assert_eq!(execution_event.field("session_matched"), "Some(true)");
+        assert_eq!(execution_event.field("owner_matched"), "false");
+        assert_eq!(execution_event.field("token_matched"), "false");
+        assert_eq!(execution_event.field("generation_matched"), "Some(true)");
+        assert_eq!(execution_event.field("expiry_matched"), "Some(true)");
 
         let (release_error, release_capture) =
             crate::runtime::tests::trace_capture::capturing(|| async {

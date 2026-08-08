@@ -1,4 +1,4 @@
-# Claim nonces scope session-lease lifecycle, not commit authority
+# Claim nonces scope session-lease lifecycle and execution fences, not commit authority
 
 ## Status
 
@@ -23,19 +23,18 @@ incarnation.
 
 The FIG-904 systems survey found three recurring roles: stable holder identity,
 claim-instance identity for lock lifecycle, and a monotonic fence checked by the
-resource at write time. Chubby, etcd, ZooKeeper, and HDFS QJM keep lifecycle
-identity separate from resource-side fencing. The DynamoDB lock client is the
-closest lifecycle mechanism: owner plus a random record-version nonce predicates
-heartbeat and release. Temporal layers task identity on top of write arbitration
-only because its row and shard fences are blind to a stale worker completing a
-superseded task. Lash's head CAS is not blind to same-generation overlap; it is
-the operation that already decides which overlapping commit publishes. Kafka
-and QJM displace writers with monotonic epochs, not random nonces.
+resource at write time. That comparison originally led Lash to keep the claim
+token out of execution-fence authority. The FIG-1064 ticket premise was
+inaccurate: PostgreSQL, SQLite, in-memory, and the perf store all accepted a
+retained same-generation guard on the execution fence after token rotation.
+PostgreSQL checked token equality only for renewal and release, just like the
+other backends.
 
 ## Decision
 
-Adopt position 1: the lease token is a per-claim nonce scoped exclusively to the
-lock lifecycle.
+The lease token is a per-claim nonce and one required component of
+execution-fence authority as well as lock lifecycle authority. It does not
+become session-head commit authority.
 
 - Every distinct claim, including same-incarnation reentry, mints a fresh
   `LeaseClaimNonce`. Retrying one ambiguous claim reuses the same nonce and must
@@ -56,10 +55,12 @@ lock lifecycle.
 - Same-incarnation rotation preserves the fencing generation and the original
   `claimed_at`. It changes which claim may renew or release, not when the holder
   first acquired the lane.
-- Execution writes deliberately ignore the nonce. Holder plus live fencing
-  generation and the session-head CAS remain the sole commit authority. Two
-  same-generation holders may overlap; either may win a current-head CAS and the
-  other loses through the ordinary head conflict.
+- Fenced execution operations require one core-owned predicate: the presented
+  authority is bound to the requested session, the durable row exists, the
+  holder incarnation and fencing generation match, the lease is unexpired, and
+  the current lease token matches. A retained guard from before same-owner token
+  rotation is rejected at its next fenced claim. Session-head commit authority
+  remains the independent head CAS.
 - A stale ancillary release carried by a valid commit never vetoes that commit
   and never clears the successor. A named in-band release refusal after commit
   is terminal and benign rather than `StoreCommitFailed`.
@@ -70,25 +71,37 @@ lock lifecycle.
 The claim and renewal paths use the same per-session serialization discipline on
 each backend: one in-memory transaction lock, one SQLite writer transaction, and
 one PostgreSQL advisory lock plus row lock. Release remains one atomic
-owner-and-token-predicated write. FIG-1064 tracks the SQLite/PostgreSQL predicate
-divergence in those enforcement paths.
+owner-and-token-predicated write. FIG-1064's SQLite/PostgreSQL predicate
+divergence is resolved by routing PostgreSQL, SQLite, in-memory, and perf-store
+execution checks through the core predicate.
 
-A rolling deployment must not let two binaries with different token-rotation
-semantics share one incarnation identity. Incarnation identifies one compatible
-execution authority; a host must mint a new incarnation when replacing such an
-authority across a protocol change.
+This predicate is the binding 2026-08-08 ruling. Any code that retains a guard
+across a same-owner nested fresh-lease commit now fails at its next fenced
+operation on every backend. The Agent Frame handoff transfer is the known
+legitimate boundary that establishes a current token; FIG-1063 owns any broader
+sanctioned nesting contract.
+
+A rolling deployment on any backend must not let two binaries with different
+token-rotation semantics share one incarnation identity. Incarnation identifies
+one compatible execution authority; a host must mint a new incarnation when
+replacing such an authority across a protocol change.
 
 ## Consequences
 
 - A retained completion names only its own claim. Drop may again attempt
   best-effort release immediately; a late attempt is refused without touching a
   successor, while TTL remains the fallback for backend failure.
-- A rotated or reclaimed lease can race a completed turn's cleanup without
-  turning a committed turn into a false store-commit failure.
+- A rotated or reclaimed lease cannot claim later runtime work, even when its
+  holder incarnation and fencing generation still match.
+- Same-owner `try_claim` always rotates the token and returns an acquisition,
+  never `Busy`. Incarnation-reusing hosts therefore fence overlapping attempts
+  at claim time; for example, Restate retries that reuse
+  `restate_process_execution` identity rotate each other's execution fence.
+  Default runtime owners use a per-runtime UUID and are unaffected.
 - Fresh-acquire and takeover retries cannot double-bump generation, and the
   public nonce type prevents stable host identity from silently defeating
   per-claim uniqueness.
-- Commit authority remains single-homed in the existing generation and head-CAS
-  model established by ADR 0029. No durable schema or serialized authority shape
-  changes: the existing opaque token column stores different values under a
-  stricter lifecycle contract.
+- Execution-fence authority is decided once in core from incarnation,
+  generation, expiry, and current-token equality. Commit authority remains the
+  ADR 0029 head CAS. No durable schema, existing ID, or serialized authority
+  shape changes.

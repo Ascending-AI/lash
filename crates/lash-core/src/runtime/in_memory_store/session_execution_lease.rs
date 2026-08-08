@@ -121,8 +121,10 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
                 "owner_or_token_mismatch",
                 "in_memory_write_transaction",
                 fence,
-                current.owner.as_ref(),
-                current.lease_token.as_deref(),
+                crate::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
+                    current.owner.as_ref(),
+                    current.lease_token.as_deref(),
+                ),
             );
             return Err(
                 crate::store::StoreError::SessionExecutionLeaseRenewalRefused {

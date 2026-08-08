@@ -70,6 +70,12 @@ async fn perf_store_reports_the_holder_a_claim_displaces() {
 }
 
 #[tokio::test]
+async fn perf_store_enforces_core_lease_fence_authority() {
+    let store = RuntimePerfStore::default();
+    lash_core::testing::conformance::session_execution_lease_fence_authority(&store).await;
+}
+
+#[tokio::test]
 async fn perf_store_pins_durable_claim_id_dialects() {
     let store = RuntimePerfStore::default();
     let session_id = "perf-claim-id-dialects";

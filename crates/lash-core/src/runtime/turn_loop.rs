@@ -1515,6 +1515,9 @@ impl LashRuntime {
         let Some(session_execution_lease) = self.claim_session_execution_lease().await? else {
             return Ok(None);
         };
+        // This snapshot stays current while leading commands drain because
+        // `RefreshToolCatalog` never acquires a fresh session lease; any later
+        // lease rotation happens only after this command-drain window.
         let session_execution_fence = session_execution_lease.fence();
         let Some(store) = self
             .session

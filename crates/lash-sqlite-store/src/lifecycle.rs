@@ -152,7 +152,7 @@ impl Store {
             clock,
             artifact_cache: Mutex::new(BTreeMap::new()),
             options,
-            commit_count: AtomicU64::new(0),
+            commit_count: AtomicU64::new(commit_count_entropy_seed()),
             process_registry_attached,
             #[cfg(test)]
             checkpoint_probe_count: AtomicUsize::new(0),
@@ -171,7 +171,7 @@ impl Store {
             clock: Arc::new(lash_core::facade_support::SystemClock),
             artifact_cache: Mutex::new(BTreeMap::new()),
             options: StoreOptions::default(),
-            commit_count: AtomicU64::new(0),
+            commit_count: AtomicU64::new(commit_count_entropy_seed()),
             process_registry_attached: false,
             #[cfg(test)]
             checkpoint_probe_count: AtomicUsize::new(0),
@@ -300,7 +300,7 @@ impl Store {
             clock,
             artifact_cache: Mutex::new(BTreeMap::new()),
             options,
-            commit_count: AtomicU64::new(0),
+            commit_count: AtomicU64::new(commit_count_entropy_seed()),
             process_registry_attached: false,
             #[cfg(test)]
             checkpoint_probe_count: AtomicUsize::new(0),

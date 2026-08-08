@@ -48,7 +48,7 @@ mod turn_commit_draft;
 pub(crate) mod turn_control;
 mod turn_driver;
 mod turn_graph_editor;
-mod turn_input_ingress;
+pub(crate) mod turn_input_ingress;
 mod turn_loop;
 mod turn_queue;
 mod usage;

@@ -1,4 +1,26 @@
 use crate::{CheckpointKind, PluginMessage, TurnCause, TurnInput};
+use sha2::{Digest, Sha256};
+
+/// Mint a newly created pending turn-input ID from explicit deterministic facts.
+///
+/// The stable format is `ti:<sha256-hex>`, where the digest input remains the
+/// FIG-886 continuity seed
+/// `{session_id}:{source_key:?}:{now_epoch_ms}:{nonce}`. Callers must supply a
+/// `(now_epoch_ms, nonce)` pair unique per `(session_id, source_key)` across
+/// every process writing the store; existing persisted IDs are never rewritten.
+#[doc(hidden)]
+#[must_use]
+pub fn derive_pending_turn_input_id(
+    session_id: &str,
+    source_key: Option<&str>,
+    now_epoch_ms: u64,
+    nonce: u64,
+) -> String {
+    format!(
+        "ti:{:x}",
+        Sha256::digest(format!("{session_id}:{source_key:?}:{now_epoch_ms}:{nonce}").as_bytes())
+    )
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "scope", rename_all = "snake_case")]
@@ -602,4 +624,21 @@ async fn committed_message_from_pending_input(
 
 pub(crate) fn ingress_message_id(input_id: &str) -> String {
     format!("m_ingress_{input_id}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_turn_input_id_mint_preserves_the_fig_886_format() {
+        assert_eq!(
+            derive_pending_turn_input_id("session", Some("source"), 123, 7),
+            "ti:57f04cf281275e1916bcbbb9b8541466110f642648709b4b45bb3d6bfcf68698"
+        );
+        assert_ne!(
+            derive_pending_turn_input_id("session", Some("source"), 123, 7),
+            derive_pending_turn_input_id("session", Some("source"), 123, 8)
+        );
+    }
 }
