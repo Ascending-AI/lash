@@ -1921,7 +1921,7 @@ aliases = ["lash::prelude::LashSession::read_view"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:796#.read_view()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2121#assistant_events.len(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2122#assistant_events.len(),"
 
 [[api]]
 symbol = "lash::LashSession::refresh_background_graph"
@@ -4638,8 +4638,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnBuilder::run", "lash::turn::TurnBuilder::run"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2027#.run()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2036#receipts.as_slice(),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2028#.run()"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2037#receipts.as_slice(),"
 
 [[api]]
 symbol = "lash::TurnBuilder::stream"
@@ -4709,8 +4709,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2038#outcome: lash::TurnCancelOutcome::CompletionWonRace,"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2054#done_ids.len(),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2039#outcome: lash::TurnCancelOutcome::CompletionWonRace,"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2055#done_ids.len(),"
 
 [[api]]
 symbol = "lash::TurnCancelOutcome::Requested"
@@ -4742,8 +4742,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2037#[TurnCancelReceipt {"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2054#done_ids.len(),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2038#[TurnCancelReceipt {"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2055#done_ids.len(),"
 
 [[api]]
 symbol = "lash::TurnCancelReceipt::outcome"
@@ -4751,8 +4751,8 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2038#outcome: lash::TurnCancelOutcome::CompletionWonRace,"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2054#done_ids.len(),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2039#outcome: lash::TurnCancelOutcome::CompletionWonRace,"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2055#done_ids.len(),"
 
 [[api]]
 symbol = "lash::TurnCancelRequest"
@@ -8183,7 +8183,7 @@ aliases = ["lash_core::LlmOutputPart::Reasoning"]
 area = "protocol"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1820#lash::direct::LlmOutputPart::Reasoning {"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1965#if text == \"durable reasoning disclosure\""
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1966#&& text == \"durable reasoning disclosure\""
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart::Reasoning::replay"
@@ -8193,7 +8193,7 @@ aliases = ["lash_core::LlmOutputPart::Reasoning::replay"]
 area = "protocol"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1822#replay: None,"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1965#if text == \"durable reasoning disclosure\""
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1966#&& text == \"durable reasoning disclosure\""
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart::Reasoning::text"
@@ -8203,7 +8203,7 @@ aliases = ["lash_core::LlmOutputPart::Reasoning::text"]
 area = "protocol"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1821#text: \"durable reasoning disclosure\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1965#if text == \"durable reasoning disclosure\""
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1966#&& text == \"durable reasoning disclosure\""
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart::Text"
@@ -15294,7 +15294,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionReadView::chronological_projection"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:146#.chronological_projection()"
+usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:171#.chronological_projection()"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:238, inside `transcript_rows_from_committed`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1121 asserts an unrelated expression in `send_turn_state_projection_stays_readable_and_settles_to_durable_truth`, and `transcript_rows_from_committed` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -15341,7 +15341,7 @@ aliases = ["lash_core::SessionReadView::messages"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:797#.messages()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2121#assistant_events.len(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2122#assistant_events.len(),"
 
 [[api]]
 symbol = "lash::persistence::SessionReadView::policy"
@@ -46810,7 +46810,7 @@ availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:5#let provider = lash::testing::TestProvider::builder()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2237#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2238#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProvider::builder"
@@ -46819,7 +46819,7 @@ availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:5#let provider = lash::testing::TestProvider::builder()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2237#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2238#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProvider::into_handle"
@@ -46828,7 +46828,7 @@ availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:13#.into_handle();"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2237#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2238#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProviderBuilder"
@@ -46837,7 +46837,7 @@ availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:12#.build()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2237#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2238#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProviderBuilder::build"
@@ -46846,7 +46846,7 @@ availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:12#.build()"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2237#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2238#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProviderBuilder::complete"
@@ -46862,8 +46862,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2210#.complete_error(INTERNAL_PROVIDER_FAILURE)"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2237#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2211#.complete_error(INTERNAL_PROVIDER_FAILURE)"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2238#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProviderBuilder::kind"
@@ -46871,8 +46871,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2209#.kind(\"recoverable-chat-provider-failure\")"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2237#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
+usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2210#.kind(\"recoverable-chat-provider-failure\")"
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2238#.any(|error| error.message.contains(INTERNAL_PROVIDER_FAILURE)),"
 
 [[api]]
 symbol = "lash::testing::TestProviderBuilder::new"

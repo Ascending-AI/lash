@@ -1817,18 +1817,11 @@ mod conformance {
         }
 
         fn conformance_spec(&self) -> ProviderConformanceSpec {
-            ProviderConformanceSpec::with_unsupported(&[(
-                Scenario::ReasoningReplayRoundTrip,
-                "RLM history drops Codex reasoning replay metadata (FIG-1081)",
-            )])
+            ProviderConformanceSpec::strict()
         }
 
         fn wire_for(&self, scenario: Scenario) -> Option<ProviderWire> {
-            if matches!(scenario, Scenario::ReasoningReplayRoundTrip) {
-                None
-            } else {
-                CodexNormalizer.wire_for(scenario)
-            }
+            CodexNormalizer.wire_for(scenario)
         }
 
         fn parts_from_wire(&self, body: &Value) -> Vec<LlmOutputPart> {
@@ -1848,8 +1841,14 @@ mod conformance {
         }
 
         fn build_next_request(&self, messages: Vec<LlmMessage>) -> Value {
-            let messages =
+            let rendered =
                 lash_protocol_rlm::project_conformance_messages_through_rlm_history(messages);
+            assert!(
+                rendered.is_ok(),
+                "RLM conformance history bridge failed: {}",
+                rendered.as_ref().err().map(String::as_str).unwrap_or("")
+            );
+            let messages = rendered.unwrap_or_default();
             CodexNormalizer.build_next_request(messages)
         }
     }

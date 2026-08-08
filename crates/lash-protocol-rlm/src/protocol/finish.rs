@@ -1,5 +1,8 @@
+use lash_core::facade_support::reasoning_part;
 use lash_core::session_model::{Message, MessageRole, Part, PartKind, PruneState, shared_parts};
 use serde_json::Value;
+
+use super::state::RlmReasoningPart;
 
 pub(crate) fn turn_limit_final_message(message_id: String, max_turns: usize) -> Message {
     Message {
@@ -27,23 +30,36 @@ pub(crate) fn turn_limit_final_message(message_id: String, max_turns: usize) -> 
     }
 }
 
-pub(super) fn internal_assistant_prose_message(message_id: String, content: String) -> Message {
+pub(super) fn internal_assistant_prose_message(
+    message_id: String,
+    content: String,
+    reasoning: &[RlmReasoningPart],
+) -> Message {
     prose_message(
         message_id,
         content,
+        reasoning,
         Some(lash_core::MessageOrigin::Plugin {
-            plugin_id: "rlm_protocol".to_string(),
+            plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
         }),
     )
 }
 
-fn prose_message(id: String, content: String, origin: Option<lash_core::MessageOrigin>) -> Message {
-    Message {
-        id: id.clone(),
-        role: MessageRole::Assistant,
-        parts: shared_parts(vec![Part {
-            id: format!("{id}.p0"),
+fn prose_message(
+    id: String,
+    content: String,
+    reasoning: &[RlmReasoningPart],
+    origin: Option<lash_core::MessageOrigin>,
+) -> Message {
+    let mut parts = reasoning
+        .iter()
+        .enumerate()
+        .map(|(index, part)| reasoning_part(&id, index, part.text.clone(), part.replay.clone()))
+        .collect::<Vec<_>>();
+    if !content.is_empty() {
+        parts.push(Part {
+            id: format!("{id}.p{}", parts.len()),
             kind: PartKind::Prose,
             content,
             attachment: None,
@@ -53,7 +69,12 @@ fn prose_message(id: String, content: String, origin: Option<lash_core::MessageO
             prune_state: PruneState::Intact,
             reasoning_meta: None,
             response_meta: None,
-        }]),
+        });
+    }
+    Message {
+        id,
+        role: MessageRole::Assistant,
+        parts: shared_parts(parts),
         origin,
     }
 }
@@ -80,7 +101,7 @@ pub(super) fn finish_required_reminder_message(id: String, requires_schema: bool
             response_meta: None,
         }]),
         origin: Some(lash_core::MessageOrigin::Plugin {
-            plugin_id: "rlm_protocol".to_string(),
+            plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
         }),
     }
@@ -105,7 +126,7 @@ pub(super) fn finish_schema_mismatch_message(id: String, error_text: &str) -> Me
             response_meta: None,
         }]),
         origin: Some(lash_core::MessageOrigin::Plugin {
-            plugin_id: "rlm_protocol".to_string(),
+            plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
         }),
     }
@@ -130,7 +151,7 @@ pub(super) fn invalid_lashlang_cell_message(id: String, error_text: &str) -> Mes
             response_meta: None,
         }]),
         origin: Some(lash_core::MessageOrigin::Plugin {
-            plugin_id: "rlm_protocol".to_string(),
+            plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
         }),
     }

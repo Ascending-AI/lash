@@ -1,9 +1,11 @@
 use lash_sansio::{AttachmentRef, TurnProtocol};
 
-/// Protocol-owned assistant context paired with an RLM trajectory entry.
+/// Read-only legacy protocol-owned assistant context paired with an RLM
+/// trajectory entry.
 ///
-/// This remains durable for later RLM prompts without entering the host-owned
-/// conversation message projection. Hosts commit their final transcript once.
+/// New sessions persist this context as ordinary durable assistant messages so
+/// provider reasoning replay metadata survives. This event must keep decoding
+/// for old session histories, but producers must not write new instances.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct RlmAssistantContent {
     pub id: String,

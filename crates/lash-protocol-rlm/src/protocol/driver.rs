@@ -5,7 +5,8 @@ use lash_core::sansio::{
     WaitingLlmState,
 };
 use lash_core::session_model::{
-    ConversationRecord, Message, SessionHistoryRecord, SessionStreamEvent, make_error_event,
+    ConversationRecord, Message, SessionHistoryRecord, SessionStreamEvent, make_error_envelope,
+    make_error_event,
 };
 use lash_core::{
     CheckpointKind, DriverAction, DriverContextView, ExecResponse, LlmOutputPart, LlmResponse,
@@ -13,9 +14,7 @@ use lash_core::{
     ToolValue, facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::TurnStop,
     facade_support::append_assistant_text_part, facade_support::normalized_response_parts,
 };
-use lash_rlm_types::{
-    RlmAssistantContent, RlmDiagnosticEvent, RlmProtocolEvent, RlmTermination, RlmTrajectoryEntry,
-};
+use lash_rlm_types::{RlmDiagnosticEvent, RlmProtocolEvent, RlmTermination, RlmTrajectoryEntry};
 use serde_json::Value;
 
 #[cfg(feature = "testing")]
@@ -31,7 +30,7 @@ use super::finish::{
     internal_assistant_prose_message, invalid_lashlang_cell_message, turn_limit_final_message,
     validate_finish_value,
 };
-use super::state::{RlmDriverState, decode_rlm_driver_state, rlm_driver_state};
+use super::state::{RlmDriverState, RlmReasoningPart, decode_rlm_driver_state, rlm_driver_state};
 
 pub struct RlmDriver;
 
@@ -63,10 +62,19 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             duration_ms: 0,
         })];
 
-        let (assistant_text, reasoning_text) =
-            project_response_texts(normalized_response_parts(&llm_response));
+        let projected = match project_response(normalized_response_parts(&llm_response)) {
+            Ok(projected) => projected,
+            Err(tool_call) => {
+                native_tool_call_failure_actions(&mut actions, ctx.protocol_iteration(), tool_call);
+                return actions;
+            }
+        };
+        let assistant_text = projected.assistant_text;
+        let reasoning = projected.reasoning;
 
-        if assistant_text.trim().is_empty() && reasoning_text.trim().is_empty() {
+        if assistant_text.trim().is_empty()
+            && reasoning.iter().all(|part| part.text.trim().is_empty())
+        {
             actions.push(DriverAction::Emit(make_error_event(
                 "llm_provider",
                 Some("empty_response"),
@@ -92,18 +100,28 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     llm_extraction_payload(
                         "invalid_lashlang_cell",
                         &termination,
-                        LlmExtractionCounts::prose_only(&assistant_text, &reasoning_text),
+                        LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
                     ),
                 )]));
-                if let Err(err) = continue_or_stop_after_nonterminal(
-                    &ctx,
-                    &mut actions,
-                    Vec::new(),
-                    vec![conversation_event(invalid_lashlang_cell_message(
-                        rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "invalid_cell"),
-                        err.message(),
-                    ))],
-                ) {
+                let mut retry_events = Vec::new();
+                if !assistant_text.trim().is_empty() || !reasoning.is_empty() {
+                    retry_events.push(conversation_event(internal_assistant_prose_message(
+                        rlm_message_id(
+                            ctx.turn_id(),
+                            ctx.protocol_iteration(),
+                            "assistant_response",
+                        ),
+                        assistant_text,
+                        &reasoning,
+                    )));
+                }
+                retry_events.push(conversation_event(invalid_lashlang_cell_message(
+                    rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "invalid_cell"),
+                    err.message(),
+                )));
+                if let Err(err) =
+                    continue_or_stop_after_nonterminal(&ctx, &mut actions, Vec::new(), retry_events)
+                {
                     return invalid_turn_options_actions(err);
                 }
                 return actions;
@@ -116,9 +134,22 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     llm_extraction_payload(
                         "finish_prose",
                         &termination,
-                        LlmExtractionCounts::prose_only(&assistant_text, &reasoning_text),
+                        LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
                     ),
                 )]));
+                if !reasoning.is_empty() {
+                    actions.push(DriverAction::AppendEvents(vec![conversation_event(
+                        internal_assistant_prose_message(
+                            rlm_message_id(
+                                ctx.turn_id(),
+                                ctx.protocol_iteration(),
+                                "assistant_response",
+                            ),
+                            assistant_text.clone(),
+                            &reasoning,
+                        ),
+                    )]));
+                }
                 actions.push(DriverAction::StartCheckpoint {
                     checkpoint: CheckpointKind::BeforeCompletion,
                     on_empty: CheckpointResumeAction::Finish(TurnOutcome::Finished(
@@ -137,7 +168,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 llm_extraction_payload(
                     "request_finish",
                     &termination,
-                    LlmExtractionCounts::prose_only(&assistant_text, &reasoning_text),
+                    LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
                 ),
             )]));
             let mut events = Vec::new();
@@ -145,6 +176,17 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 events.push(conversation_event(internal_assistant_prose_message(
                     rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "assistant_prose"),
                     assistant_text,
+                    &reasoning,
+                )));
+            } else if !reasoning.is_empty() {
+                events.push(conversation_event(internal_assistant_prose_message(
+                    rlm_message_id(
+                        ctx.turn_id(),
+                        ctx.protocol_iteration(),
+                        "assistant_reasoning",
+                    ),
+                    String::new(),
+                    &reasoning,
                 )));
             }
             events.push(conversation_event(finish_required_reminder_message(
@@ -164,7 +206,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             llm_extraction_payload(
                 "execute_lashlang",
                 &termination,
-                LlmExtractionCounts::cell(&assistant_text, &reasoning_text, &cell),
+                LlmExtractionCounts::cell(&assistant_text, &reasoning, &cell),
             ),
         )]));
 
@@ -176,7 +218,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             Err(err) => return invalid_driver_state_actions(err),
         };
         state.executed_code = Some(cell.code.clone());
-        state.reasoning = reasoning_text;
+        state.reasoning = reasoning;
         state.prose = cell.prose.clone();
 
         // Emit the raw lashlang source as a `Message` with kind
@@ -321,16 +363,27 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
     }
 }
 
-fn project_response_texts(parts: Vec<LlmOutputPart>) -> (String, String) {
+struct ProjectedResponse {
+    assistant_text: String,
+    reasoning: Vec<RlmReasoningPart>,
+}
+
+#[derive(Debug)]
+struct NativeToolCall {
+    call_id: String,
+    tool_name: String,
+}
+
+fn project_response(parts: Vec<LlmOutputPart>) -> Result<ProjectedResponse, NativeToolCall> {
     let mut assistant_text = String::new();
-    let mut reasoning_text = String::new();
+    let mut reasoning = Vec::new();
     for part in parts {
         match part {
             LlmOutputPart::Text { text, .. } => {
                 append_assistant_text_part(&mut assistant_text, &text);
             }
             LlmOutputPart::Reasoning { text, replay } => {
-                let reasoning = if text.trim().is_empty() {
+                let text = if text.trim().is_empty() {
                     replay
                         .as_ref()
                         .map(|meta| meta.summary.join("\n\n"))
@@ -338,26 +391,75 @@ fn project_response_texts(parts: Vec<LlmOutputPart>) -> (String, String) {
                 } else {
                     text
                 };
-                append_assistant_text_part(&mut reasoning_text, &reasoning);
+                if !text.trim().is_empty() || replay.as_ref().is_some_and(|meta| !meta.is_empty()) {
+                    reasoning.push(RlmReasoningPart { text, replay });
+                }
             }
-            LlmOutputPart::ToolCall { .. } => {}
+            LlmOutputPart::ToolCall {
+                call_id, tool_name, ..
+            } => {
+                return Err(NativeToolCall { call_id, tool_name });
+            }
         }
     }
-    (assistant_text, reasoning_text)
+    Ok(ProjectedResponse {
+        assistant_text,
+        reasoning,
+    })
+}
+
+fn native_tool_call_failure_actions(
+    actions: &mut Vec<DriverAction>,
+    protocol_iteration: usize,
+    tool_call: NativeToolCall,
+) {
+    let message = format!(
+        "RLM protocol received native provider tool call `{}`; RLM tools must flow through Lashlang, so native provider tool calls are not allowed",
+        tool_call.tool_name
+    );
+    let mut envelope = make_error_envelope(
+        "rlm_protocol",
+        Some("native_tool_call_not_allowed"),
+        None,
+        message.clone(),
+        Some(format!(
+            "tool_name={}, call_id={}, protocol_iteration={protocol_iteration}",
+            tool_call.tool_name, tool_call.call_id
+        )),
+    );
+    envelope.retryable = Some(false);
+    actions.extend([
+        DriverAction::AppendEvents(vec![diagnostic_event(
+            "protocol_contract_violation",
+            serde_json::json!({
+                "code": "native_tool_call_not_allowed",
+                "tool_name": tool_call.tool_name,
+                "call_id": tool_call.call_id,
+                "protocol_iteration": protocol_iteration,
+                "constraint": "RLM tools must flow through Lashlang",
+                "retryable": false,
+            }),
+        )]),
+        DriverAction::Emit(SessionStreamEvent::Error {
+            message,
+            envelope: Some(envelope),
+        }),
+        DriverAction::Finish(TurnOutcome::Stopped(TurnStop::RuntimeError)),
+    ]);
 }
 
 /// Test support for exercising the production RLM response-to-history seam.
-/// Reasoning blocks traverse the same collapse used by `RlmDriver`, becoming
-/// bare text without provider replay metadata before the next provider request.
+/// The bridge uses the same typed response projection, durable `Part`
+/// representation, JSON round trip, and RLM history renderer as production.
 #[cfg(feature = "testing")]
 pub fn project_conformance_messages_through_rlm_history(
     messages: Vec<LlmMessage>,
-) -> Vec<LlmMessage> {
+) -> Result<Vec<LlmMessage>, String> {
     messages
         .into_iter()
         .map(|message| {
             if !matches!(message.role, LlmRole::Assistant) {
-                return message;
+                return Ok(message);
             }
             let parts = message
                 .blocks
@@ -389,23 +491,24 @@ pub fn project_conformance_messages_through_rlm_history(
                     LlmContentBlock::Attachment { .. } | LlmContentBlock::ToolResult { .. } => None,
                 })
                 .collect();
-            let (assistant_text, reasoning_text) = project_response_texts(parts);
-            let mut blocks = Vec::new();
-            if !reasoning_text.is_empty() {
-                blocks.push(LlmContentBlock::Text {
-                    text: reasoning_text.into(),
-                    response_meta: None,
-                    cache_breakpoint: false,
-                });
-            }
-            if !assistant_text.is_empty() {
-                blocks.push(LlmContentBlock::Text {
-                    text: assistant_text.into(),
-                    response_meta: None,
-                    cache_breakpoint: false,
-                });
-            }
-            LlmMessage::new(LlmRole::Assistant, blocks)
+            let projected = project_response(parts).map_err(|tool_call| {
+                format!(
+                    "RLM conformance history fixture contains native tool call `{}` ({})",
+                    tool_call.tool_name, tool_call.call_id
+                )
+            })?;
+            let durable = internal_assistant_prose_message(
+                "conformance.rlm.assistant".to_string(),
+                projected.assistant_text,
+                &projected.reasoning,
+            );
+            let encoded = serde_json::to_string(&durable).map_err(|err| {
+                format!("RLM conformance history message did not serialize: {err}")
+            })?;
+            let durable: Message = serde_json::from_str(&encoded).map_err(|err| {
+                format!("RLM conformance history message did not deserialize: {err}")
+            })?;
+            crate::driver::render_conformance_history_message(durable)
         })
         .collect()
 }
@@ -433,6 +536,8 @@ fn continue_or_stop_after_nonterminal(
         .max_turns()
         .is_some_and(|max_turns| next_protocol_iteration >= ctx.protocol_run_offset() + max_turns);
     if reached_turn_limit {
+        // Final-turn-fresh doctrine: retry events, including the durable
+        // reasoning record, are deliberately dropped at the turn limit.
         match decode_rlm_termination_options(ctx.termination())? {
             RlmTermination::FinishRequired { .. } => {
                 actions.push(DriverAction::Finish(TurnOutcome::Stopped(
@@ -674,20 +779,17 @@ fn trajectory_events(
 fn assistant_content_event(
     turn_id: &str,
     protocol_iteration: usize,
-    reasoning: &str,
+    reasoning: &[RlmReasoningPart],
     prose: &str,
 ) -> Option<SessionHistoryRecord> {
     let id = rlm_message_id(turn_id, protocol_iteration, "assistant_content");
-    let reasoning = reasoning.trim();
     let prose = prose.trim();
     (!reasoning.is_empty() || !prose.is_empty()).then(|| {
-        SessionHistoryRecord::Protocol(rlm_protocol_event(RlmProtocolEvent::RlmAssistantContent(
-            RlmAssistantContent {
-                id,
-                reasoning: reasoning.to_string(),
-                prose: prose.to_string(),
-            },
-        )))
+        conversation_event(internal_assistant_prose_message(
+            id,
+            prose.to_string(),
+            reasoning,
+        ))
     })
 }
 
@@ -719,25 +821,38 @@ struct LlmExtractionCounts {
 }
 
 impl LlmExtractionCounts {
-    fn prose_only(assistant_text: &str, reasoning_text: &str) -> Self {
+    fn prose_only(assistant_text: &str, reasoning: &[RlmReasoningPart]) -> Self {
         Self {
             full_text_chars: assistant_text.chars().count(),
             prose_chars: assistant_text.chars().count(),
             code_chars: 0,
-            reasoning_chars: reasoning_text.chars().count(),
+            reasoning_chars: reasoning_diagnostic_chars(reasoning),
             lashlang_cell_count: 0,
         }
     }
 
-    fn cell(assistant_text: &str, reasoning_text: &str, cell: &CellExtraction) -> Self {
+    fn cell(assistant_text: &str, reasoning: &[RlmReasoningPart], cell: &CellExtraction) -> Self {
         Self {
             full_text_chars: assistant_text.chars().count(),
             prose_chars: cell.prose.chars().count(),
             code_chars: cell.code.chars().count(),
-            reasoning_chars: reasoning_text.chars().count(),
+            reasoning_chars: reasoning_diagnostic_chars(reasoning),
             lashlang_cell_count: cell.lashlang_cell_count,
         }
     }
+}
+
+fn reasoning_diagnostic_chars(reasoning: &[RlmReasoningPart]) -> usize {
+    reasoning
+        .iter()
+        .map(|part| {
+            part.text.chars().count().max(usize::from(
+                part.replay
+                    .as_ref()
+                    .is_some_and(|replay| !replay.is_empty()),
+            ))
+        })
+        .sum()
 }
 
 fn llm_extraction_payload(
@@ -794,6 +909,47 @@ mod tests {
 
         assert_eq!(first, replay);
         assert_ne!(first, next_turn);
+    }
+
+    #[test]
+    fn response_projection_preserves_reasoning_replay_byte_faithfully() {
+        let replay = lash_core::llm::types::ProviderReasoningReplay {
+            item_id: Some("reasoning-item".to_string()),
+            encrypted_content: Some(" \nopaque-replay-e\u{301}\n ".to_string()),
+            signature: Some("signed".to_string()),
+            redacted: true,
+            summary: vec!["summary".to_string()],
+        };
+
+        let projected = project_response(vec![LlmOutputPart::Reasoning {
+            text: "trajectory summary".to_string(),
+            replay: Some(replay.clone()),
+        }])
+        .expect("reasoning is valid in RLM");
+
+        assert_eq!(projected.reasoning.len(), 1);
+        assert_eq!(projected.reasoning[0].text, "trajectory summary");
+        assert_eq!(projected.reasoning[0].replay, Some(replay));
+    }
+
+    #[test]
+    fn extraction_counts_record_opaque_reasoning_replay_presence() {
+        let reasoning = [RlmReasoningPart {
+            text: String::new(),
+            replay: Some(lash_core::llm::types::ProviderReasoningReplay {
+                item_id: Some("opaque".to_string()),
+                encrypted_content: Some("encrypted-only".to_string()),
+                signature: None,
+                redacted: false,
+                summary: Vec::new(),
+            }),
+        }];
+
+        assert_eq!(reasoning_diagnostic_chars(&reasoning), 1);
+        assert_eq!(
+            LlmExtractionCounts::prose_only("", &reasoning).reasoning_chars,
+            1
+        );
     }
 
     fn record(index: usize, output: ToolCallOutput) -> ToolCallRecord {
