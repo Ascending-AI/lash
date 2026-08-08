@@ -10,6 +10,7 @@ use crate::{
     ToolCallRecord, TurnOutcome,
 };
 
+use super::turn_graph_editor::ReadProjectionDiagnostic;
 use super::{RuntimeError, RuntimeErrorCode, RuntimeSessionState, TurnCommitDraft};
 
 mod materialize;
@@ -143,7 +144,6 @@ impl TurnBoundary {
     pub(super) fn apply_prepared_messages(&mut self, messages: &MessageSequence) {
         self.draft_mut().apply_prepared_messages(messages);
     }
-
     pub(super) fn read_view(
         &self,
         policy: crate::SessionPolicy,
@@ -160,7 +160,9 @@ impl TurnBoundary {
     pub(super) fn message_sequence(&self) -> MessageSequence {
         self.draft_ref().message_sequence()
     }
-
+    pub(super) fn take_projection_diagnostics(&mut self) -> Vec<ReadProjectionDiagnostic> {
+        self.draft_mut().take_projection_diagnostics()
+    }
     pub(super) fn finalize_turn_read_state(
         &mut self,
         new_messages: MessageSequence,

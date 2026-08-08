@@ -339,6 +339,10 @@ pub struct SessionMessageTreeNode {
 pub(crate) struct ActiveReadReplacement {
     pub(crate) leaf_node_id: Option<String>,
     pub(crate) new_tail_nodes: Vec<SessionNodeRecord>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ActiveReadProjection {
     pub(crate) active_events: Vec<SessionHistoryRecord>,
     pub(crate) active_messages: Vec<Message>,
 }
@@ -359,28 +363,13 @@ pub(crate) struct SessionGraphAppendBuilder {
 }
 
 impl SessionGraphAppendBuilder {
-    pub(crate) fn draft_namespace(&self) -> &str {
-        &self.draft_namespace
-    }
-
     pub(crate) fn leaf_node_id(&self) -> Option<&String> {
         self.leaf_node_id.as_ref()
     }
 
+    #[cfg(test)]
     pub(crate) fn set_leaf_node_id(&mut self, leaf_node_id: Option<String>) {
         self.leaf_node_id = leaf_node_id;
-    }
-
-    pub(crate) fn register_existing_node_ids<'a>(
-        &mut self,
-        node_ids: impl IntoIterator<Item = &'a str>,
-    ) {
-        self.existing_ids
-            .extend(node_ids.into_iter().map(ToOwned::to_owned));
-    }
-
-    pub(crate) fn existing_node_ids(&self) -> &HashSet<String> {
-        &self.existing_ids
     }
 
     pub(crate) fn remap_node_ids(&mut self, mapping: &[(String, String)]) {
@@ -1212,25 +1201,24 @@ impl SessionGraph {
             .and_then(|idx| self.nodes.get(*idx))
     }
 
-    /// Replaces the active readable tail for protocol implementors while retaining historical
+    /// Rewrites the active readable tail and moves the resident leaf while retaining historical
     /// branches and excluding transient replacement messages.
-    pub fn replace_active_read_state(&mut self, messages: &[Message]) {
-        self.replace_active_read_state_from(None, messages);
+    ///
+    /// The resulting graph is a read projection. It must never be committed against an existing
+    /// session head because the rewritten tail is not parented from that durable head.
+    pub fn rewrite_active_read_tail(&mut self, messages: &[Message]) {
+        self.rewrite_active_read_tail_from(None, messages);
     }
 
-    pub(crate) fn replace_active_read_state_for_frame(
+    pub(crate) fn rewrite_active_read_tail_for_frame(
         &mut self,
         frame_node_id: &str,
         messages: &[Message],
     ) {
-        self.replace_active_read_state_from(Some(frame_node_id), messages);
+        self.rewrite_active_read_tail_from(Some(frame_node_id), messages);
     }
 
-    fn replace_active_read_state_from(
-        &mut self,
-        frame_node_id: Option<&str>,
-        messages: &[Message],
-    ) {
+    fn rewrite_active_read_tail_from(&mut self, frame_node_id: Option<&str>, messages: &[Message]) {
         let active_path = self.active_path_nodes();
         let current_nodes = frame_node_id.map_or(active_path.as_slice(), |frame_node_id| {
             active_path
@@ -1265,7 +1253,7 @@ impl SessionGraph {
     /// implementors while materializing, executing, or persisting a session turn.
     pub fn from_active_read_state(messages: &[Message]) -> Self {
         let mut graph = Self::default();
-        graph.replace_active_read_state(messages);
+        graph.rewrite_active_read_tail(messages);
         graph
     }
 
@@ -1392,8 +1380,6 @@ pub(crate) fn build_active_read_replacement<'a>(
         .filter(|message| !message.is_transient())
         .collect::<Vec<_>>();
 
-    let mut active_events = Vec::new();
-    let mut active_messages = Vec::new();
     let mut target_idx = 0usize;
     let mut leaf_node_id = None;
     for node in current_nodes {
@@ -1412,11 +1398,9 @@ pub(crate) fn build_active_read_replacement<'a>(
             {
                 break;
             }
-            push_active_read_node(node, &mut active_events, &mut active_messages);
             leaf_node_id = Some(node.node_id.clone());
             target_idx += 1;
         } else {
-            push_active_read_node(node, &mut active_events, &mut active_messages);
             leaf_node_id = Some(node.node_id.clone());
         }
     }
@@ -1440,13 +1424,58 @@ pub(crate) fn build_active_read_replacement<'a>(
         };
         new_node_ids.insert(node.node_id.clone());
         leaf_node_id = Some(node.node_id.clone());
-        push_active_read_node(&node, &mut active_events, &mut active_messages);
         new_tail_nodes.push(node);
     }
 
     ActiveReadReplacement {
         leaf_node_id,
         new_tail_nodes,
+    }
+}
+
+pub(crate) fn build_active_read_projection<'a>(
+    current_nodes: impl IntoIterator<Item = &'a SessionNodeRecord>,
+    messages: &[Message],
+) -> ActiveReadProjection {
+    let target = messages
+        .iter()
+        .filter(|message| !message.is_transient())
+        .collect::<Vec<_>>();
+
+    let mut active_events = Vec::new();
+    let mut active_messages = Vec::new();
+    let mut target_idx = 0usize;
+    for node in current_nodes {
+        if node
+            .message()
+            .map(|message| message.is_transient())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        if let Some(current_message) = node.message() {
+            let Some(target_item) = target.get(target_idx) else {
+                break;
+            };
+            if serde_json::to_value(&current_message).ok() != serde_json::to_value(target_item).ok()
+            {
+                break;
+            }
+            push_active_read_node(node, &mut active_events, &mut active_messages);
+            target_idx += 1;
+        } else {
+            push_active_read_node(node, &mut active_events, &mut active_messages);
+        }
+    }
+
+    for message in target.into_iter().skip(target_idx) {
+        active_events.push(SessionHistoryRecord::Conversation(
+            ConversationRecord::from_message(message.clone()),
+        ));
+        active_messages.push(message.clone());
+    }
+
+    ActiveReadProjection {
         active_events,
         active_messages,
     }

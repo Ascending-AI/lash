@@ -37,16 +37,16 @@ enum DirectiveAction {
 fn append_plugin_messages(
     messages: &mut crate::MessageSequence,
     plugin_messages: &[PluginMessage],
+    scope_id: &str,
+    next_ordinal: &mut usize,
 ) {
     let new_messages = plugin_messages
         .iter()
         .filter(|message| matches!(message.role, MessageRole::User | MessageRole::System))
-        .enumerate()
-        .map(|(ordinal, message)| {
-            // This fallback is a frame-local presentation coordinate, not a
-            // session-lifetime identity: opening or replacing a frame can
-            // legitimately reuse the same `m_plugin_{ordinal}` value.
-            plugin_message_to_message(message, &format!("m_plugin_{}", messages.len() + ordinal))
+        .map(|message| {
+            let ordinal = *next_ordinal;
+            *next_ordinal += 1;
+            plugin_message_to_message(message, &format!("m_plugin_{scope_id}_{ordinal}"))
         })
         .collect::<Vec<_>>();
     if !new_messages.is_empty() {
@@ -112,15 +112,22 @@ impl PluginSession {
         session_lifecycle: Arc<dyn SessionLifecycleService>,
         session_graph: Arc<dyn SessionGraphService>,
         policy: PluginDirectivePolicy,
+        message_scope_id: &str,
     ) -> Result<TurnPreparation, PluginError> {
         let mut events = Vec::new();
         let mut abort = None;
+        let mut next_message_ordinal = 0usize;
 
         for emitted in directives {
             match interpret_directive(emitted, &session_lifecycle, &session_graph, policy).await? {
                 DirectiveAction::Abort(next) => abort = Some(next),
                 DirectiveAction::EnqueueMessages(plugin_messages) => {
-                    append_plugin_messages(&mut messages, &plugin_messages);
+                    append_plugin_messages(
+                        &mut messages,
+                        &plugin_messages,
+                        message_scope_id,
+                        &mut next_message_ordinal,
+                    );
                 }
                 DirectiveAction::EmitRuntimeEvents(next_events) => events.extend(next_events),
                 DirectiveAction::None => {}
@@ -138,6 +145,7 @@ impl PluginSession {
         &self,
         request: PrepareTurnRequest,
         phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
+        turn_scope_id: &str,
     ) -> Result<TurnPreparation, PluginError> {
         let PrepareTurnRequest {
             session_id,
@@ -165,6 +173,7 @@ impl PluginSession {
             session_lifecycle,
             session_graph,
             PluginDirectivePolicy::BEFORE_TURN,
+            &format!("{turn_scope_id}:before_turn"),
         )
         .await
     }
@@ -208,6 +217,7 @@ impl PluginSession {
         session_lifecycle: Arc<dyn SessionLifecycleService>,
         session_graph: Arc<dyn SessionGraphService>,
         phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
+        turn_scope_id: &str,
     ) -> Result<TurnFinalization, PluginError> {
         let session_id = turn.state.session_id.clone();
         let directives = if self.contributions.after_turn_hooks.is_empty() {
@@ -225,6 +235,7 @@ impl PluginSession {
         };
         let mut events = Vec::new();
         let mut updated_messages: Option<crate::MessageSequence> = None;
+        let mut next_message_ordinal = 0usize;
         for emitted in directives {
             match interpret_directive(
                 emitted,
@@ -241,7 +252,12 @@ impl PluginSession {
                             turn.state.read_view().messages().to_vec().into(),
                         )
                     });
-                    append_plugin_messages(messages, &plugin_messages);
+                    append_plugin_messages(
+                        messages,
+                        &plugin_messages,
+                        &format!("{turn_scope_id}:after_turn"),
+                        &mut next_message_ordinal,
+                    );
                 }
                 DirectiveAction::EmitRuntimeEvents(next_events) => events.extend(next_events),
                 DirectiveAction::None => {}
@@ -271,16 +287,19 @@ mod identity_tests {
     use super::*;
 
     #[test]
-    fn plugin_fallback_message_id_uses_append_position() {
+    fn plugin_fallback_message_id_is_scoped_to_the_turn_phase() {
         let mut messages = crate::MessageSequence::default();
+        let mut next_ordinal = 0;
         append_plugin_messages(
             &mut messages,
             &[
                 PluginMessage::text(MessageRole::User, "same"),
                 PluginMessage::text(MessageRole::System, "same"),
             ],
+            "turn-42:before_turn",
+            &mut next_ordinal,
         );
-        assert_eq!(messages[0].id, "m_plugin_0");
-        assert_eq!(messages[1].id, "m_plugin_1");
+        assert_eq!(messages[0].id, "m_plugin_turn-42:before_turn_0");
+        assert_eq!(messages[1].id, "m_plugin_turn-42:before_turn_1");
     }
 }

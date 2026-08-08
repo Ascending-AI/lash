@@ -14699,13 +14699,13 @@ disposition = "unused-justify"
 reason = "Concrete consumer: bundled Postgres/SQLite stores and runtime projection uses lash_core::SessionGraph::push_node_record; retain the canonical host operation."
 
 [[api]]
-symbol = "lash::persistence::SessionGraph::replace_active_read_state"
+symbol = "lash::persistence::SessionGraph::rewrite_active_read_tail"
 kind = "function"
 availability = "default+all-features"
-aliases = ["lash_core::SessionGraph::replace_active_read_state"]
+aliases = ["lash_core::SessionGraph::rewrite_active_read_tail"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Concrete consumer: bundled Postgres/SQLite stores and runtime projection uses lash_core::SessionGraph::replace_active_read_state; retain the canonical host operation."
+reason = "Concrete consumer: bundled Postgres/SQLite stores and runtime projection uses lash_core::SessionGraph::rewrite_active_read_tail; retain the canonical host operation."
 
 [[api]]
 symbol = "lash::persistence::SessionGraph::set_leaf_node_id"

@@ -53,6 +53,7 @@ Thumbs.db
 /AGENTS.md
 /.tmp/
 /tmp/
+/scratchpad/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
