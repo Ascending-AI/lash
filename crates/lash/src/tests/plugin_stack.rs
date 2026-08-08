@@ -256,38 +256,43 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
             .expect("projected model observation");
         assert!(model_observation.contains("Full output saved to:"));
 
-        let rlm_core = explicit_ephemeral_facets(rlm_core_builder())
-            .provider(queued_text_provider(vec![lashlang_block(
-                r#"value = await tools.app_lookup({})?
+        #[cfg(feature = "rlm")]
+        {
+            let rlm_core = explicit_ephemeral_facets(rlm_core_builder())
+                .provider(queued_text_provider(vec![lashlang_block(
+                    r#"value = await tools.app_lookup({})?
 finish "done""#,
-            )]))
-            .model(mock_model_spec())
-            .tools(Arc::new(LongTextTools))
-            .store_factory(Arc::new(
-                lash_core::facade_support::InMemorySessionStoreFactory::new(),
-            ))
-            .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-            .configure_plugins(|plugins| {
-                plugins.replace(projection);
-            })
-            .build()?;
-        let rlm_session = rlm_core.session("rlm-projection").open().await?;
-        let rlm_events = RecordingEvents::default();
-        let _ = rlm_session
-            .turn(TurnInput::text("use tool"))
-            .stream_to(&rlm_events)
-            .await?;
-        let rlm_view = rlm_events
-            .snapshot()
-            .await
-            .into_iter()
-            .find_map(|event| match event.event {
-                TurnEvent::ToolCallCompleted { output, .. } => Some(output.value_for_projection()),
-                _ => None,
-            })
-            .expect("rlm tool completion");
+                )]))
+                .model(mock_model_spec())
+                .tools(Arc::new(LongTextTools))
+                .store_factory(Arc::new(
+                    lash_core::facade_support::InMemorySessionStoreFactory::new(),
+                ))
+                .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+                .configure_plugins(|plugins| {
+                    plugins.replace(projection);
+                })
+                .build()?;
+            let rlm_session = rlm_core.session("rlm-projection").open().await?;
+            let rlm_events = RecordingEvents::default();
+            let _ = rlm_session
+                .turn(TurnInput::text("use tool"))
+                .stream_to(&rlm_events)
+                .await?;
+            let rlm_view = rlm_events
+                .snapshot()
+                .await
+                .into_iter()
+                .find_map(|event| match event.event {
+                    TurnEvent::ToolCallCompleted { output, .. } => {
+                        Some(output.value_for_projection())
+                    }
+                    _ => None,
+                })
+                .expect("rlm tool completion");
 
-        assert_eq!(rlm_view, standard_view);
+            assert_eq!(rlm_view, standard_view);
+        }
         Ok(())
     })
 }

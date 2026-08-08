@@ -1135,7 +1135,7 @@ impl RunActivityCollector {
             .clone()
     }
 
-    #[cfg(all(test, feature = "rlm"))]
+    #[cfg(test)]
     pub(crate) fn snapshot(&self) -> Vec<TurnActivity> {
         self.activities
             .lock()

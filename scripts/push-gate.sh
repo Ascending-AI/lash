@@ -85,6 +85,9 @@ run_runtime_feature_boundary_check() {
   step "lash-runtime feature boundary"
   cargo check -p lash-runtime --no-default-features --locked
   cargo check -p lash-runtime --no-default-features --features testing --locked
+  cargo test -p lash-runtime --no-default-features --locked
+  count=$(cargo test -p lash-runtime --no-default-features --locked --lib -- --list | grep -c ': test$')
+  [ "$count" -ge 130 ] || { echo "default-build lash-runtime tests regressed: $count"; exit 1; }
 
   if cargo tree -p lash-runtime -e normal --no-default-features --locked \
     | grep -E 'lash-protocol-rlm|lash-lashlang-runtime|lashlang'; then

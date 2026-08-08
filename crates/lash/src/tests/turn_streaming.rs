@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(feature = "rlm")]
 use crate::rlm::RlmTurnBuilderExt as _;
 use futures_util::StreamExt as _;
 use std::collections::BTreeSet;
@@ -261,6 +262,7 @@ impl lash_core::EffectHost for DurableNoopEffectHost {
     }
 }
 
+#[cfg(feature = "rlm")]
 struct BlockingAppTools {
     entered_tx: StdMutex<Option<oneshot::Sender<()>>>,
     release_rx: TokioMutex<Option<oneshot::Receiver<()>>>,
@@ -300,6 +302,7 @@ impl ToolProvider for ContractRecordingTools {
     }
 }
 
+#[cfg(feature = "rlm")]
 impl BlockingAppTools {
     fn new(entered_tx: oneshot::Sender<()>, release_rx: oneshot::Receiver<()>) -> Self {
         Self {
@@ -309,6 +312,7 @@ impl BlockingAppTools {
     }
 }
 
+#[cfg(feature = "rlm")]
 #[async_trait]
 impl ToolProvider for BlockingAppTools {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
@@ -577,7 +581,7 @@ async fn turn_run_uses_configured_inline_effect_host_without_explicit_effects() 
 #[tokio::test]
 async fn durable_configured_effect_host_requires_explicit_handler_effects() -> Result<()> {
     let dir = tempfile::tempdir().expect("tempdir");
-    let core = LashCore::rlm_builder(rlm_factory())
+    let core = LashCore::standard_builder()
         .attachment_store(Arc::new(crate::persistence::FileAttachmentStore::new(
             dir.path().join("attachments"),
         )))
@@ -987,6 +991,7 @@ fn retrying_visible_stream_provider() -> ProviderHandle {
         .into_handle()
 }
 
+#[cfg(feature = "rlm")]
 fn retrying_rlm_prose_provider(
     transport_calls: Arc<AtomicUsize>,
     requests: Arc<StdMutex<Vec<lash_core::LlmRequest>>>,
@@ -1044,6 +1049,7 @@ fn retrying_rlm_prose_provider(
         .into_handle()
 }
 
+#[cfg(feature = "rlm")]
 fn provider_request_text(request: &lash_core::LlmRequest) -> String {
     request
         .messages
@@ -1057,6 +1063,7 @@ fn provider_request_text(request: &lash_core::LlmRequest) -> String {
         .join("\n")
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn rlm_provider_retry_commits_only_surviving_prose() -> Result<()> {
     run_async_test_on_stack_budget("rlm-provider-retry-prose-test", || async {
@@ -3123,6 +3130,7 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<()> {
     run_async_test_on_stack_budget("rlm-active-input-next-iteration", || async {
@@ -3841,6 +3849,7 @@ async fn stream_emits_chronological_tool_events_without_prose_pollution() -> Res
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_raw() -> Result<()> {
     run_async_test_on_stack_budget("rlm-streamed-cell-raw-final-test", || async {
@@ -3943,6 +3952,7 @@ fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_raw() -> Res
     })
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn rlm_tool_calls_stream_from_live_exec_boundary() -> Result<()> {
     run_async_test_on_stack_budget("rlm-live-exec-boundary-test", || {
@@ -3950,6 +3960,7 @@ fn rlm_tool_calls_stream_from_live_exec_boundary() -> Result<()> {
     })
 }
 
+#[cfg(feature = "rlm")]
 async fn rlm_tool_calls_stream_from_live_exec_boundary_inner() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
         .provider(queued_text_provider(vec![lashlang_block(
@@ -4097,6 +4108,7 @@ finish "done""#,
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn rlm_recovered_tool_failure_remains_in_turn_accounting() -> Result<()> {
     run_async_test_on_stack_budget("rlm-recovered-tool-failure-test", || async {
@@ -4133,6 +4145,7 @@ finish "recovered""#,
     })
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn rlm_code_block_aggregate_lists_every_collected_tool_call() -> Result<()> {
     run_async_test_on_stack_budget("rlm-aggregate-tool-ids-test", || {
@@ -4140,6 +4153,7 @@ fn rlm_code_block_aggregate_lists_every_collected_tool_call() -> Result<()> {
     })
 }
 
+#[cfg(feature = "rlm")]
 async fn rlm_code_block_aggregate_lists_every_collected_tool_call_inner() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
         .provider(queued_text_provider(vec![lashlang_block(
@@ -4201,6 +4215,7 @@ finish "done""#,
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn rlm_tool_calls_emit_typed_trace_pair_and_inline_boundary_protocol_step() -> Result<()> {
     run_async_test_on_stack_budget("rlm-tool-trace-test", || {
@@ -4208,6 +4223,7 @@ fn rlm_tool_calls_emit_typed_trace_pair_and_inline_boundary_protocol_step() -> R
     })
 }
 
+#[cfg(feature = "rlm")]
 async fn rlm_tool_calls_emit_typed_trace_pair_and_inline_boundary_protocol_step_inner() -> Result<()>
 {
     let trace_path = std::env::temp_dir().join(format!(
@@ -4337,6 +4353,7 @@ finish "done""#,
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn rlm_pending_host_tool_completion_resumes_lashlang_await() -> Result<()> {
     run_async_test_on_stack_budget("rlm-pending-host-tool-test", || {
@@ -4344,6 +4361,7 @@ fn rlm_pending_host_tool_completion_resumes_lashlang_await() -> Result<()> {
     })
 }
 
+#[cfg(feature = "rlm")]
 async fn rlm_pending_host_tool_completion_resumes_lashlang_await_inner() -> Result<()> {
     let (key_tx, key_rx) = oneshot::channel();
     let events = Arc::new(RecordingEvents::default());
@@ -4413,6 +4431,7 @@ async fn rlm_pending_host_tool_completion_resumes_lashlang_await_inner() -> Resu
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn rlm_process_pending_host_tool_completion_resumes_process_await() -> Result<()> {
     run_async_test_on_stack_budget("rlm-process-pending-host-tool-test", || {
@@ -4420,6 +4439,7 @@ fn rlm_process_pending_host_tool_completion_resumes_process_await() -> Result<()
     })
 }
 
+#[cfg(feature = "rlm")]
 async fn rlm_process_pending_host_tool_completion_resumes_process_await_inner() -> Result<()> {
     let (key_tx, key_rx) = oneshot::channel();
     let events = Arc::new(RecordingEvents::default());
@@ -4496,6 +4516,7 @@ finish result"#,
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn continue_as_observation_emits_frame_switch_then_commit() -> Result<()> {
     run_async_test_on_stack_budget("continue-as-observation-test", || {
@@ -4503,6 +4524,7 @@ fn continue_as_observation_emits_frame_switch_then_commit() -> Result<()> {
     })
 }
 
+#[cfg(feature = "rlm")]
 async fn continue_as_observation_emits_frame_switch_then_commit_inner() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
         .provider(queued_text_provider(vec![
@@ -4639,6 +4661,7 @@ async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commit
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn processes_lists_started_lashlang_process_until_awaited() -> Result<()> {
     run_async_test_on_stack_budget("process-control-lashlang-process-test", || {
@@ -4646,6 +4669,7 @@ fn processes_lists_started_lashlang_process_until_awaited() -> Result<()> {
     })
 }
 
+#[cfg(feature = "rlm")]
 async fn processes_lists_started_lashlang_process_until_awaited_inner() -> Result<()> {
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
@@ -4707,6 +4731,7 @@ finish value"#,
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 fn lashlang_execution_graph_store_observes_lashlang_process_from_facade() -> Result<()> {
     run_async_test_on_stack_budget("lashlang-graph-store-facade-test", || {
@@ -4714,6 +4739,7 @@ fn lashlang_execution_graph_store_observes_lashlang_process_from_facade() -> Res
     })
 }
 
+#[cfg(feature = "rlm")]
 async fn lashlang_execution_graph_store_observes_lashlang_process_from_facade_inner() -> Result<()>
 {
     let (entered_tx, entered_rx) = oneshot::channel();
@@ -4785,6 +4811,7 @@ finish value"#,
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[tokio::test]
 async fn natural_rlm_completion_emits_no_terminal_output() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
@@ -4821,6 +4848,7 @@ async fn natural_rlm_completion_emits_no_terminal_output() -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[tokio::test]
 async fn finish_required_rlm_completion_emits_terminal_output() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
@@ -4861,6 +4889,7 @@ async fn finish_required_rlm_completion_emits_terminal_output() -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[tokio::test]
 async fn rlm_failed_code_emits_failed_code_completion_without_fake_tools() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
