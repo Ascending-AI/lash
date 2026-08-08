@@ -64,7 +64,7 @@ and text token flips with the theme toggle.
 | `--ink-faint` | thin chrome, structural lines, faint labels |
 | `--rule` | hairline borders |
 | `--rule-strong` | hover/active borders, heavier dividers |
-| `--sodium` | the active edge — prompts, plan mode, key labels, plan updates |
+| `--sodium` | the active edge — prompts, key labels, active controls |
 | `--sodium-deep` | the brighter end of the sodium accent |
 | `--sodium-soft` | the soft accent wash (`color-mix` of sodium toward transparent) |
 | `--code-bg` | code-block background |
@@ -200,7 +200,7 @@ in the order you want them displayed.
   <li>
     <div>
       <h3>Accent Means Action</h3>
-      <p>Sodium is reserved for the active edge — prompts, plan mode…</p>
+      <p>Sodium is reserved for the active edge — prompts, key labels…</p>
     </div>
   </li>
   …
