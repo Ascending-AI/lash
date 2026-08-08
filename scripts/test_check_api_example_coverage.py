@@ -10,6 +10,7 @@ from check_api_example_coverage import (
     item_errors,
     lash_core_surface,
     machine_local_path,
+    missing_repository_path,
     primary_path,
     stale_disposition_reason,
     tautological_assertion,
@@ -480,6 +481,26 @@ class MachineLocalPathTests(unittest.TestCase):
             machine_local_path(r"see \\build-01\share\lash\src\lib.rs"),
             r"\\build-01\share\lash\src\lib.rs",
         )
+
+
+class RepositoryPathExistenceTests(unittest.TestCase):
+    def test_rejects_a_missing_repository_file_without_validating_its_line(self):
+        citation = "crates/lash-plugin-plan-mode/src/lib.rs:999999"
+        self.assertEqual(
+            missing_repository_path(f"Consumer evidence: removed at {citation}."),
+            citation,
+        )
+
+    def test_accepts_existing_files_with_or_without_line_anchors(self):
+        self.assertIsNone(
+            missing_repository_path(
+                "Checked by ./scripts/check_api_example_coverage.py:999999 and "
+                "recorded in docs/api-example-coverage.toml."
+            )
+        )
+
+    def test_ignores_prose_that_does_not_cite_a_repository_file(self):
+        self.assertIsNone(missing_repository_path("Keep this host-facing contract."))
 
 
 class FacadeMigrationTests(unittest.TestCase):
