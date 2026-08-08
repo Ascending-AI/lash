@@ -23,7 +23,7 @@ impl PluginSession {
     }
 
     /// Project every Tool Catalog member to a JSON record for host-owned
-    /// discovery (e.g. the reference `search_tools` example in `lash-cli`).
+    /// discovery (e.g. the production `tools.search` path in agent-workbench).
     pub fn tool_catalog(&self, session_id: &str) -> Result<Vec<serde_json::Value>, PluginError> {
         let catalog = self.resolved_tool_catalog(session_id)?;
         Ok(crate::tool_registry::project_tool_catalog(

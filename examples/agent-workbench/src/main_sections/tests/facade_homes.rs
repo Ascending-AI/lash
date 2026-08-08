@@ -405,6 +405,8 @@
                 String::new(),
                 mail::MailWorld::new(),
                 subagent_registry,
+                deferred_tools::WorkbenchDeferredTools::in_memory()
+                    .expect("open deferred-tool grants"),
             );
             let host = lash::plugins::PluginHost::new(plugins.into_factories());
             let session = host

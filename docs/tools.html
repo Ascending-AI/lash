@@ -209,11 +209,11 @@ async fn rank(call: ToolCall&lt;'_&gt;) -&gt; ToolResult {
             </div>
             <div class="listing__row">
               <div class="listing__label">projection</div>
-              <div class="listing__body"><p><code>ToolRegistry</code> resolves manifests and execution providers; <code>ToolCatalog</code> is the model-facing projection used by provider requests, host <code>search_tools</code>-style discovery, and Lashlang host surfaces. Membership changes advance the registry generation and refresh the session catalog. (lash ships no discovery tools itself; the <code>lash-cli</code> MCP-discovery example is the reference implementation.)</p></div>
+              <div class="listing__body"><p><code>ToolRegistry</code> resolves manifests and execution providers; <code>ToolCatalog</code> is the model-facing projection used by provider requests, host <code>search_tools</code>-style discovery, and Lashlang host surfaces. Membership changes advance the registry generation and refresh the session catalog. Lash ships no turnkey discovery tool; <code>examples/agent-workbench</code> is the production reference for composing one as host policy.</p></div>
             </div>
             <div class="listing__row">
               <div class="listing__label">MCP discovery example</div>
-              <div class="listing__body"><p>The CLI reference path keeps large MCP tool sets non-resident in RLM mode: <code>search_tools</code> indexes resident members plus an explicit deferred MCP catalog, the prompt renders a catalogue-preview contribution for that deferred tail, and chosen Lashlang call paths execute only through a recorded <code>DeferredToolResolver</code> grant. Validate the full loop with <code>cargo test -p lash-cli cli_mcp_discovery_loop_discovers_previews_searches_resolves_and_executes --features test-provider -- --nocapture</code>.</p></div>
+              <div class="listing__body"><p>The Workbench keeps six low-frequency data utilities non-resident in RLM mode: <code>tools.search</code> searches the explicit deferred catalog and persists returned grants in SQLite, the prompt renders a deterministically capped catalogue preview, and chosen Lashlang call paths execute only through a recorded <code>DeferredToolResolver</code> grant. Search and call are intentionally separate blocks because call paths are gathered before linking. Validate the full loop with <code>cargo test -p agent-workbench deferred_search_observation_enables_next_block_call -- --nocapture</code>.</p></div>
             </div>
             <div class="listing__row">
               <div class="listing__label">apply vs restore</div>

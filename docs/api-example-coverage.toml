@@ -15358,7 +15358,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionReadView::session_graph"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:330#if let Some(base_node_id) = ctx.state.session_graph().leaf_node_id.clone() {"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:351#if let Some(base_node_id) = ctx.state.session_graph().leaf_node_id.clone() {"
 assertion = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:93#assert_eq!(base_node_id, first_leaf);"
 
 [[api]]
@@ -17782,7 +17782,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AppendSessionNodesRequest::nodes"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:350#nodes: vec![lash::plugins::SessionAppendNode::plugin("
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:371#nodes: vec![lash::plugins::SessionAppendNode::plugin("
 assertion = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:94#assert_eq!(graph.leaf_node_id.as_deref(), Some(node_id.as_str()));"
 
 [[api]]
@@ -17792,7 +17792,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AppendSessionNodesRequest::operation_id"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:349#operation_id: format!(\"workbench-derived-note:{}\", note.base_node_id),"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:370#operation_id: format!(\"workbench-derived-note:{}\", note.base_node_id),"
 assertion = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:94#assert_eq!(graph.leaf_node_id.as_deref(), Some(node_id.as_str()));"
 
 [[api]]
@@ -17802,7 +17802,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AppendSessionNodesRequest::requires_ancestor_node_id"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:359#requires_ancestor_node_id: Some(note.base_node_id.clone()),"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:380#requires_ancestor_node_id: Some(note.base_node_id.clone()),"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/plugins.rs:359, inside `write_back`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/derived_notes.rs:92 asserts an unrelated expression in `derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inner`, and `write_back` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -17812,7 +17812,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AppendSessionNodesResult"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:366#Ok(lash::plugins::AppendSessionNodesResult::Appended {"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:387#Ok(lash::plugins::AppendSessionNodesResult::Appended {"
 assertion = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:94#assert_eq!(graph.leaf_node_id.as_deref(), Some(node_id.as_str()));"
 
 [[api]]
@@ -17822,7 +17822,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AppendSessionNodesResult::Appended"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:366#Ok(lash::plugins::AppendSessionNodesResult::Appended {"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:387#Ok(lash::plugins::AppendSessionNodesResult::Appended {"
 assertion = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:94#assert_eq!(graph.leaf_node_id.as_deref(), Some(node_id.as_str()));"
 
 [[api]]
@@ -17832,7 +17832,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AppendSessionNodesResult::Appended::leaf_node_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:368#leaf_node_id,"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:389#leaf_node_id,"
 assertion = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:94#assert_eq!(graph.leaf_node_id.as_deref(), Some(node_id.as_str()));"
 
 [[api]]
@@ -17842,7 +17842,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AppendSessionNodesResult::Appended::node_ids"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:367#node_ids,"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:388#node_ids,"
 assertion = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:94#assert_eq!(graph.leaf_node_id.as_deref(), Some(node_id.as_str()));"
 
 [[api]]
@@ -17852,7 +17852,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AppendSessionNodesResult::StaleBranch"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:377#Ok(lash::plugins::AppendSessionNodesResult::StaleBranch { required_node_id }) => {"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:398#Ok(lash::plugins::AppendSessionNodesResult::StaleBranch { required_node_id }) => {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/plugins.rs:377, inside `write_back`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/derived_notes.rs:92 asserts an unrelated expression in `derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inner`, and `write_back` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -17862,7 +17862,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AppendSessionNodesResult::StaleBranch::required_node_id"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:377#Ok(lash::plugins::AppendSessionNodesResult::StaleBranch { required_node_id }) => {"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:398#Ok(lash::plugins::AppendSessionNodesResult::StaleBranch { required_node_id }) => {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/plugins.rs:377, inside `write_back`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/derived_notes.rs:92 asserts an unrelated expression in `derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inner`, and `write_back` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -19097,7 +19097,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::PluginLifecycleEvent"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:134#lash::plugins::PluginLifecycleEvent::TurnPersisted(ctx) => {"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:155#lash::plugins::PluginLifecycleEvent::TurnPersisted(ctx) => {"
 assertion = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:94#assert_eq!(graph.leaf_node_id.as_deref(), Some(node_id.as_str()));"
 
 [[api]]
@@ -19107,7 +19107,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::PluginLifecycleEvent::SessionConfigChanged"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:137#lash::plugins::PluginLifecycleEvent::SessionConfigChanged(ctx) => {"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:158#lash::plugins::PluginLifecycleEvent::SessionConfigChanged(ctx) => {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/plugins.rs:137, inside `register`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/facade_homes.rs:243 asserts an unrelated expression in `workbench_plugin_observes_session_config_policy_transition`, and `register` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -19117,7 +19117,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::PluginLifecycleEvent::SessionConfigChanged::0"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:137#lash::plugins::PluginLifecycleEvent::SessionConfigChanged(ctx) => {"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:158#lash::plugins::PluginLifecycleEvent::SessionConfigChanged(ctx) => {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/plugins.rs:137, inside `register`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/facade_homes.rs:243 asserts an unrelated expression in `workbench_plugin_observes_session_config_policy_transition`, and `register` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -19163,7 +19163,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::PluginLifecycleEvent::TurnPersisted"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:134#lash::plugins::PluginLifecycleEvent::TurnPersisted(ctx) => {"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:155#lash::plugins::PluginLifecycleEvent::TurnPersisted(ctx) => {"
 assertion = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:94#assert_eq!(graph.leaf_node_id.as_deref(), Some(node_id.as_str()));"
 
 [[api]]
@@ -19173,7 +19173,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::PluginLifecycleEvent::TurnPersisted::0"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:134#lash::plugins::PluginLifecycleEvent::TurnPersisted(ctx) => {"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:155#lash::plugins::PluginLifecycleEvent::TurnPersisted(ctx) => {"
 assertion = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:94#assert_eq!(graph.leaf_node_id.as_deref(), Some(node_id.as_str()));"
 
 [[api]]
@@ -19426,7 +19426,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:114#reg.tools()"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:131#reg.tools()"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/plugins.rs:114, inside `register`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:184 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `register` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -19435,7 +19435,7 @@ kind = "function"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:102#reg.triggers().declare(TriggerEvent::new("
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:119#reg.triggers().declare(TriggerEvent::new("
 assertion = "examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs:57#assert_eq!(trigger_records.len(), 1);"
 
 [[api]]
@@ -20328,7 +20328,7 @@ availability = "default+all-features"
 aliases = ["lash_core::session_model::context::PreparedContext"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:195#input: lash::plugins::PreparedContext,"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:216#input: lash::plugins::PreparedContext,"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/plugins.rs:195, inside `transform`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/facade_homes.rs:338 asserts an unrelated expression in `workbench_context_transform_shapes_the_prompt_the_provider_receives`, and `transform` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -20338,7 +20338,7 @@ availability = "default+all-features"
 aliases = ["lash_core::session_model::context::PreparedContext::include_base_tools"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:170#include_base_tools: bool,"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:191#include_base_tools: bool,"
 assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:335#assert!(observation.include_base_tools);"
 
 [[api]]
@@ -20348,7 +20348,7 @@ availability = "default+all-features"
 aliases = ["lash_core::session_model::context::PreparedContext::messages"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:199#message_count: input.messages.len(),"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:220#message_count: input.messages.len(),"
 assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:333#assert_eq!(observation.message_count, 1);"
 
 [[api]]
@@ -20367,7 +20367,7 @@ availability = "default+all-features"
 aliases = ["lash_core::session_model::context::PreparedContext::tool_providers"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:201#tool_provider_count: input.tool_providers.len(),"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:222#tool_provider_count: input.tool_providers.len(),"
 assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:339#assert_eq!(observation.tool_provider_count, 0);"
 
 [[api]]
@@ -20431,7 +20431,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionAppendNode"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:350#nodes: vec![lash::plugins::SessionAppendNode::plugin("
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:371#nodes: vec![lash::plugins::SessionAppendNode::plugin("
 assertion = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:94#assert_eq!(graph.leaf_node_id.as_deref(), Some(node_id.as_str()));"
 
 [[api]]
@@ -20513,7 +20513,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionAppendNode::plugin"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:350#nodes: vec![lash::plugins::SessionAppendNode::plugin("
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:371#nodes: vec![lash::plugins::SessionAppendNode::plugin("
 assertion = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:94#assert_eq!(graph.leaf_node_id.as_deref(), Some(node_id.as_str()));"
 
 [[api]]
@@ -20532,7 +20532,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::SessionConfigChangedContext"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:253#ctx: &lash::plugins::SessionConfigChangedContext,"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:274#ctx: &lash::plugins::SessionConfigChangedContext,"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/plugins.rs:253, inside `observe`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/facade_homes.rs:243 asserts an unrelated expression in `workbench_plugin_observes_session_config_policy_transition`, and `observe` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -20542,7 +20542,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::SessionConfigChangedContext::current"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:262#current_model_id: ctx.current.model_id().to_string(),"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:283#current_model_id: ctx.current.model_id().to_string(),"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/plugins.rs:262, inside `observe`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/facade_homes.rs:243 asserts an unrelated expression in `workbench_plugin_observes_session_config_policy_transition`, and `observe` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -20552,7 +20552,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::SessionConfigChangedContext::previous"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:261#previous_model_id: ctx.previous.model_id().to_string(),"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:282#previous_model_id: ctx.previous.model_id().to_string(),"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/plugins.rs:261, inside `observe`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/facade_homes.rs:243 asserts an unrelated expression in `workbench_plugin_observes_session_config_policy_transition`, and `observe` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -20562,7 +20562,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::SessionConfigChangedContext::session_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:244#session_id: String,"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:187#session_id: String,"
 assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:240#session_id: \"workbench-config-change-session\".to_string(),"
 
 [[api]]
@@ -20572,7 +20572,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::SessionConfigChangedContext::sessions"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:255#let snapshot = ctx.sessions.snapshot_current().await?;"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:276#let snapshot = ctx.sessions.snapshot_current().await?;"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/plugins.rs:255, inside `observe`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/facade_homes.rs:243 asserts an unrelated expression in `workbench_plugin_observes_session_config_policy_transition`, and `observe` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -20705,7 +20705,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::SessionStateChangedContext"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:325#async fn on_turn_persisted(&self, ctx: &lash::plugins::SessionStateChangedContext<'_>) {"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:346#async fn on_turn_persisted(&self, ctx: &lash::plugins::SessionStateChangedContext<'_>) {"
 assertion = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:94#assert_eq!(graph.leaf_node_id.as_deref(), Some(node_id.as_str()));"
 
 [[api]]
@@ -20724,7 +20724,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::SessionStateChangedContext::session_graph"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:330#if let Some(base_node_id) = ctx.state.session_graph().leaf_node_id.clone() {"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:351#if let Some(base_node_id) = ctx.state.session_graph().leaf_node_id.clone() {"
 assertion = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:94#assert_eq!(graph.leaf_node_id.as_deref(), Some(node_id.as_str()));"
 
 [[api]]
@@ -20734,7 +20734,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::SessionStateChangedContext::session_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:363#.append_session_nodes(&ctx.session_id, request)"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:384#.append_session_nodes(&ctx.session_id, request)"
 assertion = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:94#assert_eq!(graph.leaf_node_id.as_deref(), Some(node_id.as_str()));"
 
 [[api]]
@@ -20753,7 +20753,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::SessionStateChangedContext::state"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:330#if let Some(base_node_id) = ctx.state.session_graph().leaf_node_id.clone() {"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:351#if let Some(base_node_id) = ctx.state.session_graph().leaf_node_id.clone() {"
 assertion = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:94#assert_eq!(graph.leaf_node_id.as_deref(), Some(node_id.as_str()));"
 
 [[api]]
@@ -21226,7 +21226,7 @@ kind = "trait"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:187#impl lash::plugins::TurnContextTransform for WorkbenchContextBudget {"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:208#impl lash::plugins::TurnContextTransform for WorkbenchContextBudget {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/plugins.rs:187, which is not inside a test function, so no assertion is scoped to this use. The anchor recorded for it, examples/agent-workbench/src/main_sections/tests/facade_homes.rs:338, asserts an unrelated expression in `workbench_context_transform_shapes_the_prompt_the_provider_receives`. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -21333,7 +21333,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::history::TurnTransformContext"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:194#ctx: &lash::plugins::TurnTransformContext<'_>,"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:215#ctx: &lash::plugins::TurnTransformContext<'_>,"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/plugins.rs:194, inside `transform`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/facade_homes.rs:338 asserts an unrelated expression in `workbench_context_transform_shapes_the_prompt_the_provider_receives`, and `transform` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -21352,7 +21352,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::history::TurnTransformContext::max_context_tokens"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:172#max_context_tokens: Option<usize>,"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:193#max_context_tokens: Option<usize>,"
 assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:343#assert_eq!(observation.max_context_tokens, Some(4_096));"
 
 [[api]]
@@ -21389,7 +21389,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::history::TurnTransformContext::session_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:166#session_id: String,"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:187#session_id: String,"
 assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:330#observation.session_id,"
 
 [[api]]
@@ -21417,7 +21417,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::history::TurnTransformContext::state"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:203#committed_message_count: ctx.state.messages().len(),"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:224#committed_message_count: ctx.state.messages().len(),"
 assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:334#assert_eq!(observation.committed_message_count, 0);"
 
 [[api]]
@@ -41382,8 +41382,10 @@ symbol = "lash::rlm::RlmProtocolPluginFactory::with_deferred_tool_resolver"
 kind = "function"
 availability = "all-features"
 area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::rlm::RlmProtocolPluginFactory::with_deferred_tool_resolver to the agent-workbench plugin/tool setup example and assert its externally observable result."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/bootstrap.rs:205#.with_deferred_tool_resolver(deferred_tools.resolver())"
+assertion = "examples/agent-workbench/src/main_sections/tests/deferred_tools.rs:118#\"6aaa2c8b150bc016006f9d88df2e273adea1965bc4e8c66f87357b62a8e3afc9\""
+reason = "The production Workbench wires its SQLite-backed resolver into the RLM factory; the scripted-provider example asserts the digest returned by a tool that is absent from the resident catalog and therefore can execute only through that resolver."
 
 [[api]]
 symbol = "lash::rlm::RlmProtocolPluginFactory::with_lashlang_execution_jsonl_path"
@@ -50341,24 +50343,30 @@ symbol = "lash::tools::DeferredToolResolver"
 kind = "trait"
 availability = "all-features"
 area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::tools::DeferredToolResolver to the agent-workbench plugin/tool setup example and assert its externally observable result."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/deferred_tools.rs:175#impl DeferredToolResolver for WorkbenchDeferredToolResolver {"
+assertion = "examples/agent-workbench/src/main_sections/tests/deferred_tools.rs:118#\"6aaa2c8b150bc016006f9d88df2e273adea1965bc4e8c66f87357b62a8e3afc9\""
+reason = "The Workbench implements the host policy trait over durable grants; the scripted-provider round trip asserts the externally returned digest from the resolved non-resident call."
 
 [[api]]
 symbol = "lash::tools::DeferredToolResolver::install_recorded_grant"
 kind = "function"
 availability = "all-features"
 area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::tools::DeferredToolResolver::install_recorded_grant to the agent-workbench plugin/tool setup example and assert its externally observable result."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/deferred_tools.rs:205#fn install_recorded_grant(&self, path: &str, grant: &DeferredToolGrant) {"
+assertion = "examples/agent-workbench/src/deferred_tools.rs:726#\"workbench:deferred:text_sha256\""
+reason = "The production resolver reinstalls recorded grants into its process-local route cache; the SQLite-reopen example asserts the reinstalled grant keeps the expected tool identity."
 
 [[api]]
 symbol = "lash::tools::DeferredToolResolver::resolve"
 kind = "function"
 availability = "all-features"
 area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::tools::DeferredToolResolver::resolve to the agent-workbench plugin/tool setup example and assert its externally observable result."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/deferred_tools.rs:176#async fn resolve(&self, paths: &[&str]) -> BTreeMap<String, DeferredToolResolution> {"
+assertion = "examples/agent-workbench/src/deferred_tools.rs:757#Some(DeferredToolResolution::NotAvailable)"
+reason = "The Workbench resolves deterministic path batches from SQLite and returns a typed unavailable outcome on a miss; the example asserts that negative outcome directly."
 
 [[api]]
 symbol = "lash::tools::LASHLANG_TOOL_BINDING_KEY"
@@ -50713,8 +50721,10 @@ symbol = "lash::tools::SharedDeferredToolResolver"
 kind = "type_alias"
 availability = "all-features"
 area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::tools::SharedDeferredToolResolver to the agent-workbench plugin/tool setup example and assert its externally observable result."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/deferred_tools.rs:60#pub(crate) fn resolver(&self) -> SharedDeferredToolResolver {"
+assertion = "examples/agent-workbench/src/main_sections/tests/deferred_tools.rs:118#\"6aaa2c8b150bc016006f9d88df2e273adea1965bc4e8c66f87357b62a8e3afc9\""
+reason = "The Workbench exposes its concrete resolver through the shared facade alias consumed by the RLM factory; the scripted-provider example asserts the resulting deferred execution."
 
 [[api]]
 symbol = "lash::tools::StaticToolExecute"
@@ -54100,7 +54110,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceContext"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main.rs:37#JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceContext, TraceEvent,"
+usage = "examples/agent-workbench/src/main.rs:38#JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceContext, TraceEvent,"
 
 [[api]]
 symbol = "lash::tracing::TraceContext::candidate_id"
@@ -54478,7 +54488,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main.rs:37#JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceContext, TraceEvent,"
+usage = "examples/agent-workbench/src/main.rs:38#JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceContext, TraceEvent,"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::Custom"
@@ -57311,7 +57321,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LashSchema::new"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:504#lash::triggers::LashSchema::new(serde_json::json!({"
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:525#lash::triggers::LashSchema::new(serde_json::json!({"
 
 [[api]]
 symbol = "lash::triggers::LashSchema::object"
@@ -58069,7 +58079,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:102#reg.triggers().declare(TriggerEvent::new("
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:119#reg.triggers().declare(TriggerEvent::new("
 assertion = "examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs:57#assert_eq!(trigger_records.len(), 1);"
 
 [[api]]
@@ -58102,7 +58112,7 @@ kind = "function"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/plugins.rs:102#reg.triggers().declare(TriggerEvent::new("
+usage = "examples/agent-workbench/src/main_sections/plugins.rs:119#reg.triggers().declare(TriggerEvent::new("
 assertion = "examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs:57#assert_eq!(trigger_records.len(), 1);"
 
 [[api]]

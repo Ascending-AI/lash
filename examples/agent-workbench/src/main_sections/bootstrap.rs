@@ -3,10 +3,13 @@ fn configure_workbench_plugins(
     tavily_api_key: String,
     mail_world: mail::MailWorld,
     subagent_registry: Arc<lash_subagents::CapabilityRegistry>,
+    deferred_tools: deferred_tools::WorkbenchDeferredTools,
 ) {
     plugins.push(Arc::new(RollingHistoryPluginFactory::default()));
     plugins.push(Arc::new(
-        WorkbenchPluginFactory::new(tavily_api_key).with_mail_world(mail_world),
+        WorkbenchPluginFactory::new(tavily_api_key)
+            .with_mail_world(mail_world)
+            .with_deferred_tools(deferred_tools),
     ));
     plugins.push(Arc::new(
         lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
@@ -132,6 +135,10 @@ async fn async_main() -> AnyhowResult<()> {
         SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)?;
     let restate_http = lash_http_transport::build_http_client();
     let active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))?;
+    let deferred_tools = deferred_tools::WorkbenchDeferredTools::open(
+        data_dir.join("deferred-tool-grants.db"),
+    )
+    .context("open workbench deferred-tool grants")?;
     // Best-effort freshness feed for appended process events (ADR 0017). The
     // sink is a freshness overlay on the durable event log, never truth: no
     // delivery guarantee, and a consumer needing completeness reconciles from
@@ -195,6 +202,7 @@ async fn async_main() -> AnyhowResult<()> {
             .with_lashlang_abilities(workbench_lashlang_abilities()),
         Arc::clone(&artifact_store),
     )
+    .with_deferred_tool_resolver(deferred_tools.resolver())
     .with_lashlang_execution_sink(Arc::clone(&lashlang_execution_sink));
     let core = LashCore::rlm_builder(factory)
         .provider(provider)
@@ -209,6 +217,7 @@ async fn async_main() -> AnyhowResult<()> {
                 tavily_api_key.clone(),
                 mail_world.clone(),
                 subagent_registry,
+                deferred_tools.clone(),
             );
         })
         .process_work_driver(process_work_driver.clone())

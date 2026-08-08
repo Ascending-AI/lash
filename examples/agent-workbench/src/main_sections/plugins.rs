@@ -4,6 +4,7 @@ struct WorkbenchPluginFactory {
     derived_notes: WorkbenchDerivedNotes,
     config_changes: WorkbenchConfigChanges,
     context_budget: WorkbenchContextBudget,
+    deferred_tools: deferred_tools::WorkbenchDeferredTools,
 }
 
 impl WorkbenchPluginFactory {
@@ -14,11 +15,21 @@ impl WorkbenchPluginFactory {
             derived_notes: WorkbenchDerivedNotes::default(),
             config_changes: WorkbenchConfigChanges::default(),
             context_budget: WorkbenchContextBudget::default(),
+            deferred_tools: deferred_tools::WorkbenchDeferredTools::in_memory()
+                .expect("open in-memory deferred-tool grants"),
         }
     }
 
     fn with_mail_world(mut self, mail_world: mail::MailWorld) -> Self {
         self.mail_world = mail_world;
+        self
+    }
+
+    fn with_deferred_tools(
+        mut self,
+        deferred_tools: deferred_tools::WorkbenchDeferredTools,
+    ) -> Self {
+        self.deferred_tools = deferred_tools;
         self
     }
 
@@ -68,6 +79,7 @@ impl PluginFactory for WorkbenchPluginFactory {
             derived_notes: self.derived_notes.clone(),
             config_changes: self.config_changes.clone(),
             context_budget: self.context_budget.clone(),
+            deferred_tools: self.deferred_tools.clone(),
         }))
     }
 }
@@ -78,6 +90,7 @@ struct WorkbenchSessionPlugin {
     derived_notes: WorkbenchDerivedNotes,
     config_changes: WorkbenchConfigChanges,
     context_budget: WorkbenchContextBudget,
+    deferred_tools: deferred_tools::WorkbenchDeferredTools,
 }
 
 impl SessionPlugin for WorkbenchSessionPlugin {
@@ -87,16 +100,20 @@ impl SessionPlugin for WorkbenchSessionPlugin {
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         let mail_world = self.mail_world.clone();
+        let deferred_preview = self.deferred_tools.clone();
         reg.prompt().contribute(Arc::new(move |_ctx| {
             let mail_world = mail_world.clone();
+            let deferred_preview = deferred_preview.clone();
             Box::pin(async move {
-                Ok(vec![PromptContribution::environment(
+                let mut contributions = vec![PromptContribution::environment(
                     "Agent Workbench",
                     format!(
                         "{WORKBENCH_PROMPT}\n\n{}",
                         connected_accounts_prompt(&mail_world)
                     ),
-                )])
+                )];
+                contributions.push(deferred_preview.preview_contribution());
+                Ok(contributions)
             })
         }));
         reg.triggers().declare(TriggerEvent::new(
@@ -119,6 +136,10 @@ impl SessionPlugin for WorkbenchSessionPlugin {
             .provider(Arc::new(lash_tools::web::fetch_url_provider(
                 self.tavily_api_key.clone(),
             )))?;
+        reg.tools()
+            .provider(self.deferred_tools.search_provider())?;
+        reg.tools()
+            .provider(self.deferred_tools.execution_provider())?;
         reg.tools().provider(Arc::new(mail::MockMailProvider::new(
             self.mail_world.clone(),
         )))?;

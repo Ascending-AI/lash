@@ -40,7 +40,7 @@ mod tests {
     include!("tests/recoverable_chat.rs");
     include!("tests/continue_as_projection.rs");
     include!("tests/tool_catalog.rs");
-
+    include!("tests/deferred_tools.rs");
     pub(super) fn explicit_durable_test_facets(
         data_dir: &std::path::Path,
     ) -> lash::LashCoreBuilder {
