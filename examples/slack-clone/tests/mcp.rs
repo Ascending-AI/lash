@@ -77,20 +77,21 @@ async fn users_list() -> Json<Value> {
     Json(json!({
         "ok": true,
         "members": [
-            user("UADA", "ada", false),
-            user("UBOT", "lashbot", true)
+            user("UADA", "ada", false, false),
+            user("UBOT", "lashbot", true, false),
+            user("UOLD", "former-member", false, true)
         ],
         "cache_ts": 1,
         "response_metadata": { "next_cursor": "" }
     }))
 }
 
-fn user(id: &str, name: &str, is_bot: bool) -> Value {
+fn user(id: &str, name: &str, is_bot: bool, deleted: bool) -> Value {
     json!({
         "id": id,
         "team_id": "TDEMO",
         "name": name,
-        "deleted": false,
+        "deleted": deleted,
         "color": "000000",
         "real_name": name,
         "tz": "UTC",
@@ -357,18 +358,26 @@ async fn server_death_is_a_typed_failure_and_the_next_turn_uses_a_respawned_serv
         .await
         .expect("workspace_stats reached the platform API");
     kill_process(original_pid);
-    tokio::time::timeout(Duration::from_secs(5), first)
+    let first_turn = tokio::time::timeout(Duration::from_secs(5), first)
         .await
         .expect("turn must not hang")
         .expect("turn task must not panic")
         .expect("the tool failure is model-visible, not a turn failure");
 
+    let failure = first_turn
+        .result
+        .tool_calls
+        .iter()
+        .map(|call| call.output.value_for_projection())
+        .find(|output| output.get("class").is_some())
+        .expect("the failed MCP call must retain structured failure evidence");
+    assert_eq!(failure["class"], "unavailable");
+    assert_eq!(failure["code"], "mcp_connection_lost");
+
     let requests = script.requests();
     assert!(
-        requests[1].contains("connection lost")
-            && requests[1].contains("Tool execution failed")
-            && requests[1].contains("reconnecting in the background"),
-        "the next model request must receive the typed transport failure: {}",
+        requests[1].contains("Tool execution failed"),
+        "the next model request must receive the transport failure: {}",
         requests[1]
     );
 
@@ -383,7 +392,8 @@ async fn server_death_is_a_typed_failure_and_the_next_turn_uses_a_respawned_serv
     let requests = script.requests();
     assert_eq!(requests.len(), 4);
     assert!(
-        requests[3].contains("\\\"channels\\\":1") && requests[3].contains("\\\"members\\\":2"),
+        requests[3].contains("\\\"active_members\\\":2")
+            && requests[3].contains("\\\"channels\\\":1"),
         "the respawned server result reaches the next turn: {}",
         requests[3]
     );

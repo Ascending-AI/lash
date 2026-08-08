@@ -45,8 +45,7 @@ struct ChannelSummaries {
 #[schemars(crate = "rmcp::schemars")]
 struct WorkspaceStats {
     channels: usize,
-    members: usize,
-    channel_memberships: u64,
+    active_members: usize,
 }
 
 /// The bundled server implementation, backed by the platform HTTP API.
@@ -114,7 +113,7 @@ impl WorkspaceMcpServer {
     /// Return aggregate workspace counts from the platform APIs.
     #[tool(
         name = "workspace_stats",
-        description = "Count workspace channels, active members, and channel memberships"
+        description = "Count workspace channels and active members"
     )]
     async fn workspace_stats(
         &self,
@@ -140,11 +139,7 @@ impl WorkspaceMcpServer {
         }
         Ok(Json(WorkspaceStats {
             channels: channels.len(),
-            members: members.len(),
-            channel_memberships: channels
-                .iter()
-                .map(|channel| u64::from(channel.num_members))
-                .sum(),
+            active_members: members.len(),
         }))
     }
 }

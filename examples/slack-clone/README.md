@@ -77,8 +77,9 @@ the same catalog as `list_channels` and `channel_history`:
 
 - `mcp__slack_clone__list_channels_summary` returns channel ids, names, topics,
   and member counts.
-- `mcp__slack_clone__workspace_stats` returns aggregate channel, member, and
-  channel-membership counts.
+- `mcp__slack_clone__workspace_stats` returns aggregate channel and active-member
+  counts. The explicit `active_members` field excludes deleted users; channel
+  summaries expose the platform's workspace-wide `num_members` value instead.
 
 The server uses the official `rmcp` server-side SDK. Its results are not fixtures:
 both tools call the platform's Slack-compatible HTTP API with the bot token. A
@@ -96,7 +97,9 @@ real deployment normally configures `McpServerConfig::streamable_http(...)`, put
 credentials in the HTTP `headers` map or the deployment's secret injection, and
 points at a separately operated MCP endpoint. `SLACK_CLONE_MCP_SERVER` can override
 the local server executable while developing this example; the bot passes the API
-origin and token to its child process without placing the token in argv.
+origin and token to its child process without placing the token in argv. Bot boot
+fails with a clear error when a configured stdio executable cannot be found, so
+an absent binary cannot leave the prompt advertising unavailable bundled tools.
 
 ## Session mapping doctrine
 
@@ -553,14 +556,16 @@ src/
   bot/slack_api.rs    the liftable client
   bot/tools.rs        native tools for the standard tool loop
   bot/webhook.rs      the Events API request URL
-  mcp_server.rs       rmcp server and read-only workspace tools
-  bin/mcp_server.rs   stdio server process entry point
+
+  mcp_server.rs     rmcp server and read-only workspace tools
+  bin/mcp_server.rs stdio server process entry point
 
   tests/platform_wire.rs     wire shapes, asserted on raw JSON keys
   tests/bot_events.rs        dedupe, ambient fold, isolation, tool loop
   tests/restart_recovery.rs  restart, every recovery stage, retries, client encoding
   tests/support.rs           harness: real sockets, scripted provider
-  ../tests/mcp.rs            live MCP catalog, loop, death/recovery, collision
+tests/
+  mcp.rs            live MCP catalog, loop, death/recovery, collision
 ```
 
 The two `/api/*` and `/platform/*` namespaces are kept visibly apart so a reader

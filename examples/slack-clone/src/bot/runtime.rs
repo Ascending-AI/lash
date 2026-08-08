@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use lash::persistence::LeaseOwnerIdentity;
 use lash::prompt::{PromptContribution, PromptLayer};
 use lash::provider::{ProviderHandle, ProviderOptions};
@@ -56,9 +56,11 @@ impl RuntimeConfig {
 
     /// Wire the bundled stdio server to the platform API used by this bot.
     pub fn with_demo_mcp_server(mut self, api_base_url: &str, bot_token: &str) -> Result<Self> {
-        let command = std::env::var("SLACK_CLONE_MCP_SERVER")
-            .map(PathBuf::from)
-            .unwrap_or(demo_mcp_server_binary()?);
+        let command = match std::env::var("SLACK_CLONE_MCP_SERVER") {
+            Ok(command) => PathBuf::from(command),
+            Err(std::env::VarError::NotPresent) => demo_mcp_server_binary()?,
+            Err(error) => return Err(error).context("read SLACK_CLONE_MCP_SERVER"),
+        };
         let mut env = BTreeMap::new();
         env.insert(API_BASE_URL_ENV.to_string(), api_base_url.to_string());
         env.insert(BOT_TOKEN_ENV.to_string(), bot_token.to_string());
@@ -105,6 +107,8 @@ pub async fn build_core(
     model: ModelSpec,
     api: Arc<SlackApi>,
 ) -> Result<LashCore> {
+    validate_stdio_commands(&config.mcp_servers)?;
+
     let data_dir = &config.data_dir;
     std::fs::create_dir_all(data_dir)
         .with_context(|| format!("create bot data dir {}", data_dir.display()))?;
@@ -131,7 +135,9 @@ pub async fn build_core(
         .provider(provider)
         // `session_spec` replaces the builder's whole spec, so it must precede
         // `model`, which writes into that same spec.
-        .session_spec(SessionSpec::new().prompt_layer(bot_prompt()))
+        .session_spec(SessionSpec::new().prompt_layer(bot_prompt(
+            config.mcp_servers.contains_key(DEMO_MCP_SERVER_NAME),
+        )))
         .model(model)
         .store_factory(store_factory)
         .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
@@ -166,9 +172,41 @@ fn demo_mcp_server_binary() -> Result<PathBuf> {
     Ok(binary)
 }
 
+fn validate_stdio_commands(servers: &BTreeMap<String, McpServerConfig>) -> Result<()> {
+    for (server_name, config) in servers {
+        let McpServerConfig::Stdio { command, cwd, .. } = config else {
+            continue;
+        };
+        if resolve_stdio_command(command, cwd.as_deref()).is_none() {
+            bail!(
+                "MCP server `{server_name}` executable `{command}` does not exist; \
+                 build it or correct SLACK_CLONE_MCP_SERVER before starting the bot"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn resolve_stdio_command(command: &str, cwd: Option<&Path>) -> Option<PathBuf> {
+    let command_path = Path::new(command);
+    if command_path.components().count() > 1 {
+        let candidate = if command_path.is_absolute() {
+            command_path.to_owned()
+        } else {
+            cwd.unwrap_or_else(|| Path::new(".")).join(command_path)
+        };
+        return candidate.is_file().then_some(candidate);
+    }
+
+    let search_path = std::env::var_os("PATH")?;
+    std::env::split_paths(&search_path)
+        .map(|directory| directory.join(command_path))
+        .find(|candidate| candidate.is_file())
+}
+
 /// The bot's system prompt, expressed as a session prompt layer.
-fn bot_prompt() -> PromptLayer {
-    PromptLayer::new()
+fn bot_prompt(include_demo_mcp: bool) -> PromptLayer {
+    let mut prompt = PromptLayer::new()
         .with_contribution(PromptContribution::intro(
             "Role",
             "You are a helpful assistant in a team chat workspace. Each conversation \
@@ -186,11 +224,17 @@ fn bot_prompt() -> PromptLayer {
             "Workspace tools",
             "Use `list_channels` and `channel_history` when a question is about the \
              workspace itself rather than about this channel's conversation. Do not guess \
-             at channel names or at what was said somewhere else. The bundled MCP server \
-             also exposes `mcp__slack_clone__list_channels_summary` and \
+             at channel names or at what was said somewhere else.",
+        ));
+    if include_demo_mcp {
+        prompt = prompt.with_contribution(PromptContribution::guidance(
+            "MCP workspace tools",
+            "The bundled MCP server exposes `mcp__slack_clone__list_channels_summary` and \
              `mcp__slack_clone__workspace_stats`; use those when the question asks for a \
              compact channel summary or aggregate workspace counts.",
-        ))
+        ));
+    }
+    prompt
 }
 
 /// Tee stderr and a JSONL file, matching the other examples' trace idiom.
@@ -264,4 +308,27 @@ fn fresh_incarnation() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_nanos().to_string())
         .unwrap_or_else(|_| "0".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_stdio_command_is_rejected_before_boot() {
+        let missing = std::env::temp_dir().join(format!(
+            "slack-clone-missing-mcp-server-{}",
+            std::process::id()
+        ));
+        let servers = BTreeMap::from([(
+            DEMO_MCP_SERVER_NAME.to_string(),
+            McpServerConfig::stdio(missing.display().to_string(), Vec::new()),
+        )]);
+
+        let error = validate_stdio_commands(&servers).expect_err("missing command must fail boot");
+        let message = error.to_string();
+        assert!(message.contains(DEMO_MCP_SERVER_NAME));
+        assert!(message.contains("does not exist"));
+        assert!(message.contains("SLACK_CLONE_MCP_SERVER"));
+    }
 }

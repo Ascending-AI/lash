@@ -255,13 +255,19 @@ impl McpConnectionPool {
                         .read()
                         .expect("MCP entry error lock poisoned")
                         .clone();
-                    return ToolResult::err_fmt(McpError::Protocol(match last_error {
+                    let message = McpError::Protocol(match last_error {
                         Some(last_error) => format!(
                             "MCP server `{server_name}` is not connected \
                              (reconnecting in the background; last error: {last_error})"
                         ),
                         None => format!("MCP server `{server_name}` is not connected"),
-                    }));
+                    });
+                    return ToolResult::retryable_failure(
+                        ToolFailureClass::Unavailable,
+                        "mcp_server_unavailable",
+                        message.to_string(),
+                        Some(RECONNECT_INITIAL_BACKOFF.as_millis() as u64),
+                    );
                 }
             }
         };
@@ -282,17 +288,29 @@ impl McpConnectionPool {
             Ok(Err(err)) => {
                 if is_connection_loss(&err) {
                     entry.mark_disconnected().await;
-                    return ToolResult::err_fmt(McpError::Protocol(format!(
-                        "MCP server `{server_name}` connection lost: {err}; \
-                         reconnecting in the background"
-                    )));
+                    return ToolResult::retryable_failure(
+                        ToolFailureClass::Unavailable,
+                        "mcp_connection_lost",
+                        McpError::Protocol(format!(
+                            "MCP server `{server_name}` connection lost: {err}; \
+                             reconnecting in the background"
+                        ))
+                        .to_string(),
+                        Some(RECONNECT_INITIAL_BACKOFF.as_millis() as u64),
+                    );
                 }
                 ToolResult::err_fmt(McpError::Protocol(err.to_string()))
             }
-            Err(_) => ToolResult::err_fmt(McpError::CallTimeout {
-                server: server_name,
-                timeout_ms: call_timeout.as_millis() as u64,
-            }),
+            Err(_) => ToolResult::retryable_failure(
+                ToolFailureClass::Timeout,
+                "mcp_call_timeout",
+                McpError::CallTimeout {
+                    server: server_name,
+                    timeout_ms: call_timeout.as_millis() as u64,
+                }
+                .to_string(),
+                None,
+            ),
         }
     }
 
@@ -932,9 +950,98 @@ mod tests {
                 recovered = true;
                 break;
             }
+            let output = result
+                .as_done_output()
+                .expect("a disconnected MCP call must complete with a failure");
+            let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
+                panic!("a disconnected MCP call must be a structured failure: {output:?}");
+            };
+            assert_eq!(failure.class, ToolFailureClass::Unavailable);
+            assert!(
+                matches!(
+                    failure.code.as_str(),
+                    "mcp_connection_lost" | "mcp_server_unavailable"
+                ),
+                "unexpected unavailable code: {}",
+                failure.code
+            );
+            assert_eq!(
+                failure.retry,
+                ToolRetryDisposition::Safe {
+                    after_ms: Some(RECONNECT_INITIAL_BACKOFF.as_millis() as u64)
+                }
+            );
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
         assert!(recovered, "pool must reconnect after the transport died");
+
+        pool.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn call_timeout_is_a_typed_retryable_failure() {
+        let initialize = json!({
+            "jsonrpc": "2.0",
+            "id": 0,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": { "tools": {} },
+                "serverInfo": { "name": "demo", "version": "1.0.0" }
+            }
+        });
+        let list = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "tools": [{
+                    "name": "hang",
+                    "description": "Never returns",
+                    "inputSchema": { "type": "object", "properties": {} }
+                }]
+            }
+        });
+        let script = "\
+            read -r _; printf '%s\\n' \"$RESP1\"; \
+            read -r _; \
+            read -r _; printf '%s\\n' \"$RESP2\"; \
+            read -r _; \
+            cat >/dev/null"
+            .to_string();
+        let servers = BTreeMap::from([(
+            "slow".to_string(),
+            McpServerConfig::Stdio {
+                command: "sh".to_string(),
+                args: vec!["-c".to_string(), script],
+                env: BTreeMap::from([
+                    ("RESP1".to_string(), initialize.to_string()),
+                    ("RESP2".to_string(), list.to_string()),
+                ]),
+                cwd: None,
+                startup_timeout_ms: 1_000,
+                call_timeout_ms: 50,
+                binary_content_attachments: false,
+            },
+        )]);
+        let pool = McpConnectionPool::connect(servers)
+            .await
+            .expect("connect to hanging mock");
+
+        let result = pool
+            .call_tool(
+                "mcp__slow__hang",
+                &json!({}),
+                &lash_core::testing::mock_tool_context(),
+            )
+            .await;
+        let output = result
+            .as_done_output()
+            .expect("timeout must complete with a failure");
+        let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
+            panic!("timeout must be a structured failure: {output:?}");
+        };
+        assert_eq!(failure.class, ToolFailureClass::Timeout);
+        assert_eq!(failure.code, "mcp_call_timeout");
+        assert_eq!(failure.retry, ToolRetryDisposition::Safe { after_ms: None });
 
         pool.shutdown_all().await;
     }

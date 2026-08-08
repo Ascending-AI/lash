@@ -7,7 +7,7 @@ The `slack-clone` example now exercises `lash-plugin-mcp` end to end. Its bot st
 The bundled tools are:
 
 - `mcp__slack_clone__list_channels_summary`, which returns channel IDs, names, topics, and member counts from the clone's HTTP API.
-- `mcp__slack_clone__workspace_stats`, which returns channel, active-member, and channel-membership totals from the clone's HTTP API.
+- `mcp__slack_clone__workspace_stats`, which returns channel and active-member totals from the clone's HTTP API.
 
 The child process receives the API base URL and bot token through environment variables. It does not receive credentials in argv. `SLACK_CLONE_MCP_SERVER` can override the sibling server-binary path for unusual development layouts.
 
@@ -26,7 +26,7 @@ The integration tests and source inspection established these exact behaviors:
 - A call clones the current peer and applies the configured call timeout. `TransportSend`, `TransportClosed`, and `Cancelled` failures mark the server disconnected, cancel the old service, and start background reconnection.
 - Reconnection begins after 500 ms and uses exponential backoff capped at 30 seconds. For stdio, reconnecting spawns a new child and rediscovers its tools.
 - The killed-server test observes a replacement PID, then proves a subsequent turn succeeds through the respawned server.
-- The failed in-flight call is returned as a typed MCP protocol failure and is recorded as a model-visible tool result; it does not hang or panic.
+- The failed in-flight call is returned as a typed, retryable `Unavailable` failure (`mcp_connection_lost`, with the reconnect backoff hint) and is recorded as a model-visible tool result; call timeouts are typed retryable `Timeout` failures (`mcp_call_timeout`). Neither path hangs or panics.
 - MCP import names are normalized and made unique within a server, while the server prefix prevents ordinary native-tool collisions. An exact full-name collision across providers is rejected by Lash's registry rather than renamed or shadowed.
 
 Two integration weaknesses were noticed but are outside this example's scope:
@@ -59,8 +59,8 @@ All required checks pass on current `origin/main` (`c399fc83`):
 - `cargo fmt --all -- --check`
 - `cargo check --workspace --all-targets --locked`
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`
-- `cargo test -p slack-clone --locked` — 61 unit tests and 3 MCP integration tests pass, plus bin/doc-test targets.
-- `cargo test -p lash-plugin-mcp --locked` — 14 tests pass.
+- `cargo test -p slack-clone --locked` — 62 unit tests and 3 MCP integration tests pass, plus bin/doc-test targets.
+- `cargo test -p lash-plugin-mcp --locked` — 15 tests pass.
 - `python3 scripts/check_api_example_coverage.py` — 7,522 entries pass.
 - `bash scripts/check-production-file-size.sh`
 - `prek run --hook-stage pre-commit --files <changed files>`
@@ -72,3 +72,27 @@ All required checks pass on current `origin/main` (`c399fc83`):
 ## Release note
 
 Release-Notes: Added: the slack-clone bot exercises MCP end-to-end via a bundled demo server (stdio), demonstrating catalog integration, typed failure on server death, and recovery.
+
+## Fix round
+
+The SHIP-WITH-FIXES items are resolved:
+
+- Removed the fabricated `channel_memberships` aggregate from the MCP payload, schema, description, README, and implementation report. `workspace_stats` now returns only `channels` and `active_members`. Its explicit field name documents that deleted users are excluded, while channel summaries retain the clone platform's workspace-wide `num_members`; the integration fixture includes a deleted user and proves the active count remains two.
+- MCP transport loss now returns retryable `Unavailable` failures: `mcp_connection_lost` for an in-flight disconnect and `mcp_server_unavailable` while reconnecting, both with the 500 ms reconnect hint. Call timeouts now return retryable `Timeout` failures with code `mcp_call_timeout`. The killed-server integration test asserts the structured class and code from the turn's tool-call record instead of matching connection-loss prose, and a plugin unit test covers timeout class, code, and retry disposition.
+- `SLACK_CLONE_MCP_SERVER` now uses an explicit match, so a configured override never evaluates the `current_exe()` fallback. Before creating bot state or constructing the MCP plugin, the example resolves every configured stdio executable (explicit path or `PATH`) and fails boot with a clear error when it is absent. The MCP-specific prompt contribution is installed only when the demo server is configured. The README documents the boot behavior.
+- Corrected the README layout map so `mcp_server.rs` and `bin/mcp_server.rs` are shown as top-level `src` modules and the integration test is rooted at `tests/mcp.rs` outside `src`.
+
+The lifecycle gaps assigned to FIG-1052 and the other ticketed follow-ups were not changed; `pool.rs` contains only the requested typed-failure edits and their focused tests. The Release-Notes line above is unchanged.
+
+Verification after the fixes:
+
+- `cargo fmt --all -- --check`
+- `cargo check --workspace --all-targets --locked`
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- `cargo test -p slack-clone --locked` — 62 unit tests and 3 MCP integration tests passed.
+- `cargo test -p lash-plugin-mcp --locked` — 15 tests passed.
+- The killed-server integration test passed 5/5 additional consecutive runs.
+- `bash scripts/check-production-file-size.sh`
+- `python3 scripts/lint_docs.py` — 46 HTML pages and 42 registry pages passed.
+- `prek run --hook-stage pre-commit --files <changed files>`
+- `git diff --check`
