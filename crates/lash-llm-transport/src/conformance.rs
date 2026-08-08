@@ -88,7 +88,6 @@ impl Scenario {
 /// bidirectional: adding or removing a declaration requires editing this list.
 const UNSUPPORTED_DECLARATION_INVENTORY: &[(&str, Scenario)] = &[
     ("codex-rlm-history", Scenario::ReasoningReplayRoundTrip),
-    ("google-gemini", Scenario::ReasoningReplayRoundTrip),
     ("google-gemini", Scenario::StreamingToolArgumentMerge),
     ("google-gemini", Scenario::StreamingUsageMerge),
 ];

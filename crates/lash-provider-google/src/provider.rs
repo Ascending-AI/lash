@@ -138,7 +138,7 @@ impl GoogleOAuthProvider {
         let mut full = String::new();
         let mut usage = LlmUsage::default();
         let mut provider_usage: Option<Value> = None;
-        let mut text_parts: Vec<LlmOutputPart> = Vec::new();
+        let mut output_parts: Vec<LlmOutputPart> = Vec::new();
         let mut tool_call_parts: Vec<LlmOutputPart> = Vec::new();
         let mut finish_event: Option<Value> = None;
         let origin_model = request
@@ -152,20 +152,29 @@ impl GoogleOAuthProvider {
             |raw| {
                 emit_provider_trace(provider_trace.as_ref(), "google", raw);
                 let mut text_deltas = Vec::new();
+                let mut reasoning_deltas = Vec::new();
                 let prev_usage = usage.clone();
                 Self::process_sse_event_with_text_parts(
                     raw,
                     SseTextPartSink {
                         full: &mut full,
                         text_deltas: &mut text_deltas,
+                        reasoning_deltas: &mut reasoning_deltas,
                         usage: &mut usage,
                         provider_usage: &mut provider_usage,
                         tool_call_parts: Some(&mut tool_call_parts),
-                        text_parts: Some(&mut text_parts),
+                        output_parts: Some(&mut output_parts),
                         finish_event: &mut finish_event,
                     },
                     origin_model.as_deref(),
                 )?;
+                if let Some(tx) = stream_events.as_ref()
+                    && self.options.expose_thinking
+                {
+                    for delta in reasoning_deltas {
+                        tx.send(LlmStreamEvent::ReasoningDelta(delta));
+                    }
+                }
                 emit_stream_progress(stream_events.as_ref(), text_deltas, &usage, &prev_usage);
                 Ok(())
             },
@@ -173,7 +182,7 @@ impl GoogleOAuthProvider {
         .await;
 
         let partial_response = || {
-            let mut parts = text_parts.clone();
+            let mut parts = output_parts.clone();
             if parts
                 .iter()
                 .filter_map(|part| match part {
@@ -219,7 +228,7 @@ impl GoogleOAuthProvider {
             );
         }
 
-        let mut parts = text_parts;
+        let mut parts = output_parts;
         if parts
             .iter()
             .filter_map(|part| match part {

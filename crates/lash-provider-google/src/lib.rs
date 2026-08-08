@@ -28,10 +28,17 @@ mod tests {
     use lash_core::provider::{
         ModelCapability, ProviderOptions, ReasoningCapability, ReasoningEncoding, StreamTermination,
     };
+    use lash_core::{Message, MessageRole, Part, PartKind, PruneState};
     use serde_json::{Value, json};
 
     #[derive(Debug)]
-    struct StaticSseTransport(&'static str);
+    struct StaticSseTransport(String);
+
+    impl StaticSseTransport {
+        fn new(body: impl Into<String>) -> Self {
+            Self(body.into())
+        }
+    }
 
     #[async_trait::async_trait]
     impl lash_llm_transport::LlmHttpTransport for StaticSseTransport {
@@ -44,7 +51,7 @@ mod tests {
             Ok(lash_llm_transport::LlmHttpResponse {
                 status: 200,
                 headers: vec![("content-type".to_string(), "text/event-stream".to_string())],
-                body: lash_llm_transport::LlmHttpBody::buffered(self.0),
+                body: lash_llm_transport::LlmHttpBody::buffered(self.0.clone()),
             })
         }
     }
@@ -85,7 +92,7 @@ mod tests {
         let body = "data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"legacy\"},{\"functionCall\":{\"id\":\"call-1\",\"name\":\"lookup\",\"args\":{\"q\":\"x\"}}}]}}],\"usageMetadata\":{\"promptTokenCount\":6,\"candidatesTokenCount\":2}}}\n\n";
         let wire_request = json!({ "model": "gemini-test" });
         let tolerant = GoogleOAuthProvider::new("access", "refresh", 0)
-            .with_transport(Arc::new(StaticSseTransport(body)));
+            .with_transport(Arc::new(StaticSseTransport::new(body)));
         let response = tolerant
             .execute_request(
                 "access",
@@ -102,7 +109,7 @@ mod tests {
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let event_sink = Arc::clone(&events);
         let strict = GoogleOAuthProvider::new("access", "refresh", 0)
-            .with_transport(Arc::new(StaticSseTransport(body)));
+            .with_transport(Arc::new(StaticSseTransport::new(body)));
         let error = strict
             .execute_request(
                 "access",
@@ -147,7 +154,7 @@ mod tests {
     async fn google_strict_policy_accepts_finish_reason() {
         let body = "data: {\"response\":{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"done\"}]}}]}}\n\n";
         let provider = GoogleOAuthProvider::new("access", "refresh", 0)
-            .with_transport(Arc::new(StaticSseTransport(body)));
+            .with_transport(Arc::new(StaticSseTransport::new(body)));
         let response = provider
             .execute_request(
                 "access",
@@ -161,6 +168,356 @@ mod tests {
             .expect("finishReason is terminal evidence");
         assert_eq!(response.full_text, "done");
         assert_eq!(response.terminal_reason, LlmTerminalReason::Stop);
+    }
+
+    const REASONING_SIGNATURE_1: &str = "U0lHLTE=";
+    const REASONING_SIGNATURE_2: &str = "U0lHLTI=";
+
+    fn streaming_reasoning_events() -> Vec<Value> {
+        vec![
+            json!({"response":{"candidates":[{"content":{"parts":[{
+                "text": "plan é",
+                "thought": true,
+                "thoughtSignature": REASONING_SIGNATURE_1
+            }]}}]}}),
+            json!({"response":{"candidates":[{"content":{"parts":[{
+                "text": "carefully",
+                "thought": true,
+                "thoughtSignature": REASONING_SIGNATURE_2
+            }]}}]}}),
+            json!({"response":{"candidates":[{
+                "content":{"parts":[{"text":"answer"}]},
+                "finishReason":"STOP"
+            }]}}),
+        ]
+    }
+
+    fn sse_body(events: &[Value]) -> String {
+        events
+            .iter()
+            .map(|event| format!("data: {event}\n\n"))
+            .collect()
+    }
+
+    fn batch_response_from_stream_events(events: &[Value]) -> Value {
+        let mut parts = Vec::new();
+        let mut finish_reason = None;
+        for event in events {
+            let Some(candidate) = event
+                .pointer("/response/candidates/0")
+                .and_then(Value::as_object)
+            else {
+                continue;
+            };
+            if let Some(event_parts) = candidate
+                .get("content")
+                .and_then(|content| content.get("parts"))
+                .and_then(Value::as_array)
+            {
+                parts.extend(event_parts.iter().cloned());
+            }
+            if let Some(reason) = candidate.get("finishReason") {
+                finish_reason = Some(reason.clone());
+            }
+        }
+        let mut candidate = json!({"content": {"parts": parts}});
+        if let Some(reason) = finish_reason {
+            candidate["finishReason"] = reason;
+        }
+        json!({"candidates": [candidate]})
+    }
+
+    fn next_request_from_response_parts(parts: &[LlmOutputPart]) -> Value {
+        let assistant_id = "google-regression.assistant";
+        let mut durable_parts = Vec::new();
+        for part in parts {
+            match part {
+                LlmOutputPart::Text {
+                    text,
+                    response_meta,
+                } => durable_parts.push(Part {
+                    id: format!("{assistant_id}.p{}", durable_parts.len()),
+                    kind: PartKind::Prose,
+                    content: text.clone(),
+                    attachment: None,
+                    tool_call_id: None,
+                    tool_name: None,
+                    tool_replay: None,
+                    prune_state: PruneState::Intact,
+                    reasoning_meta: None,
+                    response_meta: response_meta.clone(),
+                }),
+                LlmOutputPart::Reasoning { text, replay } => durable_parts.push(Part {
+                    id: format!("{assistant_id}.p{}", durable_parts.len()),
+                    kind: PartKind::Reasoning,
+                    content: text.clone(),
+                    attachment: None,
+                    tool_call_id: None,
+                    tool_name: None,
+                    tool_replay: None,
+                    prune_state: PruneState::Intact,
+                    reasoning_meta: replay.clone(),
+                    response_meta: None,
+                }),
+                LlmOutputPart::ToolCall {
+                    call_id,
+                    tool_name,
+                    input_json,
+                    replay,
+                } => durable_parts.push(Part {
+                    id: format!("{assistant_id}.p{}", durable_parts.len()),
+                    kind: PartKind::ToolCall,
+                    content: input_json.clone(),
+                    attachment: None,
+                    tool_call_id: Some(call_id.clone()),
+                    tool_name: Some(tool_name.clone()),
+                    tool_replay: replay.clone(),
+                    prune_state: PruneState::Intact,
+                    reasoning_meta: None,
+                    response_meta: None,
+                }),
+            }
+        }
+        let history = vec![
+            Message {
+                id: assistant_id.to_string(),
+                role: MessageRole::Assistant,
+                parts: Arc::new(durable_parts),
+                origin: None,
+            },
+            Message {
+                id: "google-regression.user".to_string(),
+                role: MessageRole::User,
+                parts: Arc::new(vec![Part {
+                    id: "google-regression.user.p0".to_string(),
+                    kind: PartKind::Text,
+                    content: "continue".to_string(),
+                    attachment: None,
+                    tool_call_id: None,
+                    tool_name: None,
+                    tool_replay: None,
+                    prune_state: PruneState::Intact,
+                    reasoning_meta: None,
+                    response_meta: None,
+                }]),
+                origin: None,
+            },
+        ];
+        let durable_json = serde_json::to_string(&history).expect("history serializes");
+        let durable_history: Vec<Message> =
+            serde_json::from_str(&durable_json).expect("history deserializes");
+        let mut req = request(None);
+        req.messages = lash_core::session_model::render_prompt(&durable_history).messages;
+        let contents = GoogleOAuthProvider::build_contents_with_attachment_parts(&req, &[]);
+        GoogleOAuthProvider::build_request(
+            &GoogleOAuthProvider::new("access", "refresh", 0),
+            &req,
+            contents,
+            None,
+        )
+    }
+
+    async fn streaming_reasoning_response(
+        wire_events: &[Value],
+        expose_thinking: bool,
+    ) -> (lash_core::llm::types::LlmResponse, Vec<LlmStreamEvent>) {
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let event_sink = Arc::clone(&events);
+        let provider = GoogleOAuthProvider::new("access", "refresh", 0)
+            .with_options(ProviderOptions {
+                expose_thinking,
+                ..ProviderOptions::default()
+            })
+            .with_transport(Arc::new(StaticSseTransport::new(sse_body(wire_events))));
+        let response = provider
+            .execute_request(
+                "access",
+                json!({ "model": "gemini-test" }),
+                Some(LlmEventSender::new(move |event| {
+                    event_sink.lock().expect("event lock").push(event);
+                })),
+                None,
+                StreamTermination::RequireTerminalEvidence,
+                None,
+            )
+            .await
+            .expect("streaming reasoning response");
+        let events = events.lock().expect("event lock").clone();
+        (response, events)
+    }
+
+    #[tokio::test]
+    async fn google_streaming_reasoning_preserves_signature_and_gates_deltas() {
+        let wire_events = streaming_reasoning_events();
+        let (exposed, exposed_events) = streaming_reasoning_response(&wire_events, true).await;
+        assert_eq!(exposed.full_text, "answer");
+        let exposed_deltas = exposed_events
+            .iter()
+            .filter_map(|event| match event {
+                LlmStreamEvent::ReasoningDelta(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(exposed_deltas, ["plan é", "carefully"]);
+        let reasoning = exposed
+            .parts
+            .iter()
+            .filter_map(|part| match part {
+                LlmOutputPart::Reasoning { text, replay } => Some((text, replay)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(reasoning.len(), 2);
+        assert_eq!(reasoning[0].0, "plan é");
+        assert_eq!(
+            reasoning[0]
+                .1
+                .as_ref()
+                .and_then(|meta| meta.signature.as_deref()),
+            Some(REASONING_SIGNATURE_1)
+        );
+        assert_eq!(reasoning[1].0, "carefully");
+        assert_eq!(
+            reasoning[1]
+                .1
+                .as_ref()
+                .and_then(|meta| meta.signature.as_deref()),
+            Some(REASONING_SIGNATURE_2)
+        );
+        let replayed = next_request_from_response_parts(&exposed.parts);
+        assert_eq!(
+            replayed.pointer("/request/contents/0/parts/0/thoughtSignature"),
+            Some(&json!(REASONING_SIGNATURE_1))
+        );
+        assert_eq!(
+            replayed.pointer("/request/contents/0/parts/1/thoughtSignature"),
+            Some(&json!(REASONING_SIGNATURE_2))
+        );
+
+        let (hidden, hidden_events) = streaming_reasoning_response(&wire_events, false).await;
+        assert_eq!(hidden.parts, exposed.parts);
+        assert!(!hidden.full_text.contains("plan é"));
+        assert!(!hidden.full_text.contains("carefully"));
+        assert!(
+            hidden_events
+                .iter()
+                .all(|event| !matches!(event, LlmStreamEvent::ReasoningDelta(_)))
+        );
+        for events in [&exposed_events, &hidden_events] {
+            assert!(events.iter().all(|event| {
+                !matches!(
+                    event,
+                    LlmStreamEvent::Delta(text)
+                        if text.contains("plan é") || text.contains("carefully")
+                )
+            }));
+        }
+    }
+
+    #[tokio::test]
+    async fn google_streaming_reasoning_matches_non_streaming_parts() {
+        let wire_events = streaming_reasoning_events();
+        let (streaming, _) = streaming_reasoning_response(&wire_events, true).await;
+        let batch_value = batch_response_from_stream_events(&wire_events);
+        let non_streaming =
+            GoogleOAuthProvider::response_parts_from_value(&batch_value, Some("gemini-test"));
+        let non_streaming_terminal =
+            GoogleOAuthProvider::terminal_reason_from_value(&batch_value, &non_streaming);
+
+        assert_eq!(streaming.parts, non_streaming);
+        assert_eq!(streaming.terminal_reason, non_streaming_terminal);
+    }
+
+    #[tokio::test]
+    async fn google_streaming_signed_then_unsigned_reasoning_retains_signature() {
+        let wire_events = vec![
+            json!({"response":{"candidates":[{"content":{"parts":[{
+                "text":"signed unsigned",
+                "thought":true,
+                "thoughtSignature":REASONING_SIGNATURE_1
+            }]}}]}}),
+            // A shorter cumulative snapshot is not new text and must not erase
+            // the signature already attached to this reasoning run.
+            json!({"response":{"candidates":[{"content":{"parts":[{
+                "text":"signed",
+                "thought":true
+            }]}}]}}),
+            json!({"response":{"candidates":[{
+                "content":{"parts":[{"text":" tail","thought":true}]},
+                "finishReason":"STOP"
+            }]}}),
+        ];
+        let (response, _) = streaming_reasoning_response(&wire_events, true).await;
+        assert!(matches!(
+            response.parts.as_slice(),
+            [LlmOutputPart::Reasoning {
+                text,
+                replay: Some(replay),
+            }] if text == "signed unsigned tail"
+                && replay.signature.as_deref() == Some(REASONING_SIGNATURE_1)
+        ));
+    }
+
+    #[tokio::test]
+    async fn google_streaming_same_event_thought_parts_stay_distinct_and_precede_text() {
+        let wire_events = vec![json!({"response":{"candidates":[{
+            "content":{"parts":[
+                {"text":"first", "thought":true, "thoughtSignature":REASONING_SIGNATURE_1},
+                {"text":"second", "thought":true, "thoughtSignature":REASONING_SIGNATURE_2},
+                {"text":"answer"}
+            ]},
+            "finishReason":"STOP"
+        }]}})];
+        let (response, events) = streaming_reasoning_response(&wire_events, true).await;
+        let reasoning = response
+            .parts
+            .iter()
+            .filter(|part| matches!(part, LlmOutputPart::Reasoning { .. }))
+            .collect::<Vec<_>>();
+        assert_eq!(reasoning.len(), 2);
+        assert!(matches!(
+            events.as_slice(),
+            [
+                LlmStreamEvent::ReasoningDelta(first),
+                LlmStreamEvent::ReasoningDelta(second),
+                LlmStreamEvent::Delta(answer),
+            ] if first == "first" && second == "second" && answer == "answer"
+        ));
+    }
+
+    #[tokio::test]
+    async fn google_streaming_reasoning_does_not_merge_across_an_intervening_tool_call() {
+        let wire_events = vec![
+            json!({"response":{"candidates":[{"content":{"parts":[{
+                "text":"before",
+                "thought":true,
+                "thoughtSignature":REASONING_SIGNATURE_1
+            }]}}]}}),
+            json!({"response":{"candidates":[{"content":{"parts":[{
+                "functionCall":{"id":"call-1","name":"lookup","args":{"q":"x"}}
+            }]}}]}}),
+            json!({"response":{"candidates":[{
+                "content":{"parts":[{
+                    "text":"after",
+                    "thought":true,
+                    "thoughtSignature":REASONING_SIGNATURE_2
+                }]},
+                "finishReason":"STOP"
+            }]}}),
+        ];
+        let (response, _) = streaming_reasoning_response(&wire_events, true).await;
+        let signatures = response
+            .parts
+            .iter()
+            .filter_map(|part| match part {
+                LlmOutputPart::Reasoning {
+                    replay: Some(replay),
+                    ..
+                } => replay.signature.as_deref(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(signatures, [REASONING_SIGNATURE_1, REASONING_SIGNATURE_2]);
     }
 
     fn effort_capability(efforts: &[&str]) -> ModelCapability {
@@ -376,6 +733,7 @@ mod tests {
     fn streaming_captures_raw_usage_metadata_sidecar() {
         let mut full = String::new();
         let mut text_deltas = Vec::new();
+        let mut reasoning_deltas = Vec::new();
         let mut usage = LlmUsage::default();
         let mut provider_usage: Option<Value> = None;
         let mut finish_event: Option<Value> = None;
@@ -392,10 +750,11 @@ mod tests {
                 crate::support::SseTextPartSink {
                     full: &mut full,
                     text_deltas: &mut text_deltas,
+                    reasoning_deltas: &mut reasoning_deltas,
                     usage: &mut usage,
                     provider_usage: &mut provider_usage,
                     tool_call_parts: None,
-                    text_parts: None,
+                    output_parts: None,
                     finish_event: &mut finish_event,
                 },
                 None,
@@ -405,6 +764,37 @@ mod tests {
         assert_eq!(provider_usage, Some(meta));
         assert_eq!(usage.input_tokens, 6);
         assert_eq!(usage.output_tokens, 4);
+    }
+
+    #[test]
+    fn streaming_populates_reasoning_deltas_without_an_output_part_sink() {
+        let mut full = String::new();
+        let mut text_deltas = Vec::new();
+        let mut reasoning_deltas = Vec::new();
+        let mut usage = LlmUsage::default();
+        let mut provider_usage = None;
+        let mut finish_event = None;
+        GoogleOAuthProvider::process_sse_event_with_text_parts(
+            &json!({"response":{"candidates":[{"content":{"parts":[{
+                "text":"thought",
+                "thought":true
+            }]}}]}})
+            .to_string(),
+            crate::support::SseTextPartSink {
+                full: &mut full,
+                text_deltas: &mut text_deltas,
+                reasoning_deltas: &mut reasoning_deltas,
+                usage: &mut usage,
+                provider_usage: &mut provider_usage,
+                tool_call_parts: None,
+                output_parts: None,
+                finish_event: &mut finish_event,
+            },
+            None,
+        )
+        .expect("reasoning event parses");
+
+        assert_eq!(reasoning_deltas, ["thought"]);
     }
 
     #[test]
@@ -617,6 +1007,72 @@ mod tests {
     }
 
     #[test]
+    fn google_function_call_thought_signature_round_trips_from_streaming_and_batch() {
+        let signature = "ZnVuY3Rpb24tY2FsbC1zaWduYXR1cmU=";
+        let function_part = json!({
+            "functionCall": {
+                "id": "call-1",
+                "name": "lookup",
+                "args": {"q": "x"}
+            },
+            "thoughtSignature": signature
+        });
+        let streaming_event = json!({"response":{"candidates":[{
+            "content":{"parts":[function_part.clone()]},
+            "finishReason":"STOP"
+        }]}});
+        let mut full = String::new();
+        let mut text_deltas = Vec::new();
+        let mut reasoning_deltas = Vec::new();
+        let mut usage = LlmUsage::default();
+        let mut provider_usage = None;
+        let mut output_parts = Vec::new();
+        let mut streaming_parts = Vec::new();
+        let mut finish_event = None;
+        GoogleOAuthProvider::process_sse_event_with_text_parts(
+            &streaming_event.to_string(),
+            crate::support::SseTextPartSink {
+                full: &mut full,
+                text_deltas: &mut text_deltas,
+                reasoning_deltas: &mut reasoning_deltas,
+                usage: &mut usage,
+                provider_usage: &mut provider_usage,
+                tool_call_parts: Some(&mut streaming_parts),
+                output_parts: Some(&mut output_parts),
+                finish_event: &mut finish_event,
+            },
+            None,
+        )
+        .expect("streaming function call parses");
+        let batch_parts = GoogleOAuthProvider::response_parts_from_value(
+            &json!({"candidates":[{
+                "content":{"parts":[function_part]},
+                "finishReason":"STOP"
+            }]}),
+            None,
+        );
+
+        for (path, parts) in [("streaming", streaming_parts), ("batch", batch_parts)] {
+            assert!(
+                matches!(
+                    parts.as_slice(),
+                    [LlmOutputPart::ToolCall {
+                        replay: Some(replay),
+                        ..
+                    }] if replay.opaque.as_deref() == Some(signature)
+                ),
+                "{path} parser must retain the functionCall thoughtSignature"
+            );
+            let request = next_request_from_response_parts(&parts);
+            assert_eq!(
+                request.pointer("/request/contents/0/parts/0/thoughtSignature"),
+                Some(&json!(signature)),
+                "{path} replay projection must restore the functionCall thoughtSignature"
+            );
+        }
+    }
+
+    #[test]
     fn google_text_thought_signature_replay_rejects_invalid_or_cross_origin_metadata() {
         let valid = base64::engine::general_purpose::STANDARD.encode("sig");
         for meta in [
@@ -712,7 +1168,7 @@ mod tests {
         use super::*;
         use lash_llm_transport::conformance::{
             CanonicalUsage as U, ProviderConformanceSpec, ProviderNormalizer, ProviderWire,
-            Scenario, StreamAssembly, provider_conformance,
+            Scenario, StreamAssembly, provider_conformance, strong_replay_payload,
         };
 
         struct GoogleNormalizer;
@@ -731,10 +1187,6 @@ mod tests {
                     (
                         Scenario::StreamingUsageMerge,
                         "Gemini usage events replace aggregate usage instead of incremental SSE deltas",
-                    ),
-                    (
-                        Scenario::ReasoningReplayRoundTrip,
-                        "Gemini streaming drops thought parts and their thoughtSignature (FIG-1082)",
                     ),
                 ])
             }
@@ -813,7 +1265,35 @@ mod tests {
                         }]
                     }))
                     .with_reasoning_text("thinking about it"),
-                    Scenario::ReasoningReplayRoundTrip => return None,
+                    Scenario::ReasoningReplayRoundTrip => {
+                        let signature = strong_replay_payload("google-gemini");
+                        ProviderWire::body(json!({})).with_reasoning_replay_round_trip(
+                            vec![
+                                json!({
+                                    "response": { "candidates": [{
+                                        "content": { "parts": [{
+                                            "text": "thinking ",
+                                            "thought": true
+                                        }] }
+                                    }] }
+                                })
+                                .to_string(),
+                                json!({
+                                    "response": { "candidates": [{
+                                        "content": { "parts": [{
+                                            "text": "carefully",
+                                            "thought": true,
+                                            "thoughtSignature": signature
+                                        }] },
+                                        "finishReason": "STOP"
+                                    }] }
+                                })
+                                .to_string(),
+                            ],
+                            signature,
+                            "/request/contents/0/parts/0/thoughtSignature",
+                        )
+                    }
                     Scenario::StreamingUsageMerge => return None,
                 };
                 Some(wire)
@@ -848,27 +1328,30 @@ mod tests {
             ) -> StreamAssembly {
                 let mut full = String::new();
                 let mut text_deltas = Vec::new();
+                let mut reasoning_deltas = Vec::new();
                 let mut usage = LlmUsage::default();
+                let mut provider_usage = None;
+                let mut output_parts = Vec::new();
                 let mut tool_calls = Vec::new();
                 let mut finish_event = None;
                 for raw in sse_events {
-                    GoogleOAuthProvider::process_sse_event(
+                    GoogleOAuthProvider::process_sse_event_with_text_parts(
                         raw,
-                        &mut full,
-                        &mut text_deltas,
-                        &mut usage,
-                        Some(&mut tool_calls),
-                        &mut finish_event,
+                        crate::support::SseTextPartSink {
+                            full: &mut full,
+                            text_deltas: &mut text_deltas,
+                            reasoning_deltas: &mut reasoning_deltas,
+                            usage: &mut usage,
+                            provider_usage: &mut provider_usage,
+                            tool_call_parts: Some(&mut tool_calls),
+                            output_parts: Some(&mut output_parts),
+                            finish_event: &mut finish_event,
+                        },
+                        None,
                     )
                     .expect("google sse event parses");
                 }
-                let mut parts = text_deltas
-                    .into_iter()
-                    .map(|text| LlmOutputPart::Text {
-                        text,
-                        response_meta: None,
-                    })
-                    .collect::<Vec<_>>();
+                let mut parts = output_parts;
                 parts.extend(tool_calls);
                 StreamAssembly { parts, usage }
             }
