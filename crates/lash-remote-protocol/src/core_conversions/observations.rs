@@ -353,6 +353,9 @@ pub fn replay_collected_activities(
         .collect()
 }
 
+/// Writes one remote activity as a newline-terminated JSON record and flushes
+/// the writer before returning. Serialization, framing, and flushing share one
+/// writer lock; write failures are retained for the host to inspect.
 pub struct RemoteTurnActivitySink<W: Write + Send + 'static> {
     writer: Mutex<W>,
     next_sequence: AtomicU64,
@@ -389,17 +392,19 @@ impl<W: Write + Send + 'static> lash_core::facade_support::TurnActivitySink for 
         Box::pin(async move {
             let sequence = self.next_sequence.fetch_add(1, Ordering::SeqCst);
             let remote = RemoteTurnActivity::from_core(sequence, activity);
-            let result = serde_json::to_writer(
-                &mut *self.writer.lock().expect("remote sink writer lock"),
-                &remote,
-            )
-            .and_then(|_| {
-                self.writer
+            let result = {
+                let mut writer = self
+                    .writer
                     .lock()
-                    .expect("remote sink writer lock")
-                    .write_all(b"\n")
-                    .map_err(serde_json::Error::io)
-            });
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                serde_json::to_writer(&mut *writer, &remote)
+                    .and_then(|_| {
+                        writer
+                            .write_all(b"\n")
+                            .map_err(serde_json::Error::io)
+                    })
+                    .and_then(|_| writer.flush().map_err(serde_json::Error::io))
+            };
             if let Err(err) = result {
                 self.errors
                     .lock()

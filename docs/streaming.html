@@ -217,6 +217,7 @@ async fn reconnect_session(
     <p>Production chat hosts should keep the Lash observation lane separate from their product-event lane. Product rows need their own durable source, ordering identity, replay cursor, lag-resynchronization policy, and authorization. The Lash lane uses <code>RemoteSessionObservationEvent</code>, <code>RemoteSessionObservation</code>, and <code>RemoteLiveReplayGap</code> so cursors, revisions, event payloads, and gap snapshots keep the same remote contract across HTTP, queues, and workflow callbacks. Internal stream errors belong in host telemetry, not in the product transcript.</p>
     <pre data-lang="rust" data-snippet="streaming#remote-ndjson-sink"><code>use lash_remote_protocol::RemoteTurnActivitySink;
 
+// agent-service exercises this sink live at POST /api/chats/{chat_id}/activities.
 async fn stream_turn_as_ndjson(session: &amp;LashSession) -&gt; anyhow::Result&lt;Vec&lt;u8&gt;&gt; {
     let sink = RemoteTurnActivitySink::new(Vec::&lt;u8&gt;::new(), 0);
 

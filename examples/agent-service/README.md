@@ -10,6 +10,26 @@ Run it:
 OPENROUTER_API_KEY=... cargo run -p agent-service
 ```
 
+## Raw turn activities
+
+`POST /api/chats/{chat_id}/activities` accepts `{"text":"..."}` and returns
+`application/x-ndjson; charset=utf-8`. Each line is exactly one
+`RemoteTurnActivity` JSON record. Sequence numbers are scoped to the request and
+start at `0`; a complete response contains exactly one `final_value`, and it is
+the last line.
+
+This is a raw lane: its response contains no app-owned product rows and no replay
+envelope. The fanout sends each activity to the remote sink before the
+persistence sink, so a client can observe an activity before its corresponding
+app row exists; clients must not perform read-after-see database reads. Once the
+HTTP 200 stream has started, a failed turn or a client that disconnects produces
+a silently truncated stream, with the error reported only in the server logs.
+That behavior is deliberate for this raw transport lane.
+
+In Restate mode the endpoint returns 501. Restate clients must use the app-owned
+turn outbox keyed by `turn_id` that the progress stream reads, as described in
+the Restate section below.
+
 Validate the example build and unit tests:
 
 ```bash
