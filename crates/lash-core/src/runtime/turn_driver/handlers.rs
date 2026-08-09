@@ -27,6 +27,12 @@ impl RuntimeTurnDriver<'_> {
     ) -> Result<(), RuntimeError> {
         match self.before_llm_call(machine, &request).await {
             Ok(Some(crate::ProtocolLlmCallAction::SwitchAgentFrame { frame_id, task })) => {
+                if frame_id.trim().is_empty() {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::InvalidAgentFrameSwitchFrameId,
+                        "protocol before_llm_call returned SwitchAgentFrame with an empty frame_id",
+                    ));
+                }
                 machine.finish_with_outcome(crate::TurnOutcome::AgentFrameSwitch {
                     frame_id,
                     task,

@@ -7,6 +7,16 @@ use crate::{
 
 use super::RuntimeSessionState;
 
+pub(super) fn agent_frame_switch_materializes(
+    session_id: &str,
+    requested_frame_id: &str,
+    current_frame_node_id: Option<&str>,
+) -> bool {
+    !requested_frame_id.trim().is_empty()
+        && current_frame_node_id
+            != Some(crate::session_graph::frame_node_id(session_id, requested_frame_id).as_str())
+}
+
 pub(super) fn committed_attachment_ids(
     state: &RuntimeSessionState,
     tool_calls: &[ToolCallRecord],
@@ -70,6 +80,7 @@ pub(super) fn materialize_agent_frame_switch(
     state: &mut RuntimeSessionState,
     outcome: &TurnOutcome,
     clock: &dyn crate::Clock,
+    materializes: bool,
 ) {
     let TurnOutcome::AgentFrameSwitch {
         frame_id,
@@ -79,10 +90,17 @@ pub(super) fn materialize_agent_frame_switch(
     else {
         return;
     };
-    let requested_frame_node_id = crate::session_graph::frame_node_id(&state.session_id, frame_id);
-    if frame_id.trim().is_empty()
-        || state.current_frame_node_id.as_deref() == Some(requested_frame_node_id.as_str())
-    {
+    // The pre-snapshot decision and this post-snapshot state must never diverge;
+    // fail in debug/tests instead of silently clearing the wrong frame's state.
+    debug_assert_eq!(
+        materializes,
+        agent_frame_switch_materializes(
+            &state.session_id,
+            frame_id,
+            state.current_frame_node_id.as_deref(),
+        )
+    );
+    if !materializes {
         return;
     }
     super::super::open_agent_frame_in_state_with_clock(

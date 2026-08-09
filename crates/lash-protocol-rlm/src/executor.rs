@@ -635,6 +635,8 @@ mod tests {
     use serde_json::Value;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    static EXECUTION_BOUND_EXHAUSTION_MODE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[derive(Default)]
     struct NoopHost;
 
@@ -802,6 +804,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "confidence execution exhausted a required Lashlang bound")]
     fn confidence_execution_fails_loudly_on_bound_exhaustion() {
+        let _mode = EXECUTION_BOUND_EXHAUSTION_MODE.lock_recover();
         block_on(async {
             let _ = execute_code_with_bounds(
                 RlmExecutionState::new().expect("state"),
@@ -828,6 +831,7 @@ mod tests {
 
     #[test]
     fn exhaustion_response_remains_testable_when_loudness_is_temporarily_disabled() {
+        let _mode = EXECUTION_BOUND_EXHAUSTION_MODE.lock_recover();
         block_on(async {
             let previous = set_execution_bound_exhaustion_loud(false);
             let result = execute_code_with_bounds(

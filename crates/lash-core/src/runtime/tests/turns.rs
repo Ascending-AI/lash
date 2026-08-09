@@ -273,6 +273,88 @@ struct RestoreExecutorFromRuntimeState {
     executor: Arc<FailingCaptureExecutor>,
 }
 
+struct SwitchBeforeLlmProtocol {
+    executor: Option<Arc<FailingCaptureExecutor>>,
+    frame_id: String,
+    switch_next: AtomicBool,
+}
+
+struct ResetExecutorOnSwitchProtocol {
+    executor: Arc<FailingCaptureExecutor>,
+    frame_id: String,
+    switch_next: AtomicBool,
+}
+
+#[async_trait::async_trait]
+impl crate::plugin::ProtocolSessionPlugin for ResetExecutorOnSwitchProtocol {
+    async fn restore_session(
+        &self,
+        ctx: crate::plugin::ProtocolSessionContext<'_>,
+        state: &crate::RuntimeSessionState,
+    ) -> Result<(), crate::SessionError> {
+        let snapshot = state
+            .execution_state_snapshot
+            .as_deref()
+            .unwrap_or(b"fresh-frame-execution-state");
+        crate::plugin::CodeExecutorPlugin::restore_execution_state(
+            self.executor.as_ref(),
+            ctx,
+            snapshot,
+        )
+        .await
+    }
+
+    async fn before_llm_call(
+        &self,
+        _ctx: crate::plugin::ProtocolBeforeLlmCallContext,
+        _request: &crate::LlmRequest,
+    ) -> Result<Option<crate::ProtocolLlmCallAction>, crate::PluginError> {
+        if !self.switch_next.swap(false, Ordering::SeqCst) {
+            return Ok(None);
+        }
+        Ok(Some(crate::ProtocolLlmCallAction::SwitchAgentFrame {
+            frame_id: self.frame_id.clone(),
+            task: "reset the resident executor".to_string(),
+        }))
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::plugin::ProtocolSessionPlugin for SwitchBeforeLlmProtocol {
+    async fn restore_session(
+        &self,
+        ctx: crate::plugin::ProtocolSessionContext<'_>,
+        state: &crate::RuntimeSessionState,
+    ) -> Result<(), crate::SessionError> {
+        if let (Some(executor), Some(snapshot)) = (
+            self.executor.as_ref(),
+            state.execution_state_snapshot.as_deref(),
+        ) {
+            crate::plugin::CodeExecutorPlugin::restore_execution_state(
+                executor.as_ref(),
+                ctx,
+                snapshot,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn before_llm_call(
+        &self,
+        _ctx: crate::plugin::ProtocolBeforeLlmCallContext,
+        _request: &crate::LlmRequest,
+    ) -> Result<Option<crate::ProtocolLlmCallAction>, crate::PluginError> {
+        if !self.switch_next.swap(false, Ordering::SeqCst) {
+            return Ok(None);
+        }
+        Ok(Some(crate::ProtocolLlmCallAction::SwitchAgentFrame {
+            frame_id: self.frame_id.clone(),
+            task: "protocol-directed switch".to_string(),
+        }))
+    }
+}
+
 #[async_trait::async_trait]
 impl crate::plugin::ProtocolSessionPlugin for RestoreExecutorFromRuntimeState {
     async fn restore_session(
@@ -841,6 +923,237 @@ async fn dirty_execution_state_capture_failure_aborts_commit_and_cold_reopens_pr
         executor.restored.lock_recover().last().map(Vec::as_slice),
         Some(b"committed-before-failure".as_slice())
     );
+}
+
+#[tokio::test]
+async fn already_current_protocol_frame_switch_preserves_dirty_execution_state_on_cold_reopen() {
+    let executor = Arc::new(FailingCaptureExecutor {
+        dirty: AtomicBool::new(true),
+        fail_capture: AtomicBool::new(false),
+        snapshot: std::sync::Mutex::new(b"live-frame-execution-state".to_vec()),
+        restored: std::sync::Mutex::new(Vec::new()),
+    });
+    let protocol: Arc<dyn crate::plugin::ProtocolSessionPlugin> =
+        Arc::new(SwitchBeforeLlmProtocol {
+            executor: Some(Arc::clone(&executor)),
+            frame_id: "initial-frame".to_string(),
+            switch_next: AtomicBool::new(true),
+        });
+    let code_executor: Arc<dyn crate::plugin::CodeExecutorPlugin> = executor.clone();
+    let protocol_factory = crate::testing::test_standard_protocol_factory_with_runtime_state(
+        protocol,
+        Some(code_executor),
+    );
+    let store = Arc::new(RecordingStore::default());
+    let runtime_store: Arc<dyn crate::RuntimePersistence> = store.clone();
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(|_| async move {
+            Ok(LlmResponse {
+                full_text: "follow-on must fail before commit".to_string(),
+                parts: vec![LlmOutputPart::Text {
+                    text: "follow-on must fail before commit".to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            })
+        })
+        .build();
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![protocol_factory],
+        Arc::new(EmptyTools),
+        transport,
+        test_host_config(),
+        Arc::clone(&runtime_store),
+    )
+    .await;
+    runtime.set_turn_phase_probe(Arc::new(FailCaptureAfterFirstCommittedTurn {
+        executor: Arc::clone(&executor),
+        committed_turns: AtomicUsize::new(0),
+    }));
+    let initial_frame_node_id = runtime
+        .state
+        .current_frame_node_id
+        .clone()
+        .expect("runtime initializes the current frame");
+
+    let switched = runtime
+        .run_turn_assembled(
+            TurnInput::text("redrive an already materialized frame switch"),
+            CancellationToken::new(),
+            named_turn_scope("root", "already-current-frame-switch"),
+        )
+        .await
+        .expect("an already-current frame switch remains an idempotent no-op");
+    assert!(
+        matches!(switched.outcome, TurnOutcome::AgentFrameSwitch { .. }),
+        "unexpected no-op switch outcome: {switched:?}"
+    );
+    assert_eq!(
+        runtime.state.current_frame_node_id.as_deref(),
+        Some(initial_frame_node_id.as_str())
+    );
+
+    let durable = crate::store::load_persisted_session_state(store.as_ref())
+        .await
+        .expect("load no-op switch state")
+        .expect("no-op switch state is durable");
+    assert_eq!(
+        durable.execution_state_snapshot.as_deref(),
+        Some(b"live-frame-execution-state".as_slice())
+    );
+    drop(runtime);
+
+    let reopened_executor = Arc::new(FailingCaptureExecutor {
+        dirty: AtomicBool::new(false),
+        fail_capture: AtomicBool::new(false),
+        snapshot: std::sync::Mutex::new(Vec::new()),
+        restored: std::sync::Mutex::new(Vec::new()),
+    });
+    let reopen_protocol: Arc<dyn crate::plugin::ProtocolSessionPlugin> =
+        Arc::new(SwitchBeforeLlmProtocol {
+            executor: Some(Arc::clone(&reopened_executor)),
+            frame_id: "initial-frame".to_string(),
+            switch_next: AtomicBool::new(true),
+        });
+    let reopen_code_executor: Arc<dyn crate::plugin::CodeExecutorPlugin> =
+        reopened_executor.clone();
+    let reopen_factory = crate::testing::test_standard_protocol_factory_with_runtime_state(
+        reopen_protocol,
+        Some(reopen_code_executor),
+    );
+    let plugins = crate::PluginHost::new(vec![reopen_factory])
+        .build_session("root", None)
+        .expect("cold-reopen plugins");
+    let _reopened = LashRuntime::from_persistent_embedded_state(
+        standard_test_policy(),
+        test_host_config(),
+        crate::PersistentRuntimeServices::new(plugins, runtime_store),
+        durable,
+    )
+    .await
+    .expect("cold reopen restores the still-live frame execution state");
+    assert_eq!(
+        reopened_executor
+            .restored
+            .lock_recover()
+            .last()
+            .map(Vec::as_slice),
+        Some(b"live-frame-execution-state".as_slice())
+    );
+}
+
+#[tokio::test]
+async fn materialized_frame_switch_clears_checkpoint_and_resets_resident_executor() {
+    let executor = Arc::new(FailingCaptureExecutor {
+        dirty: AtomicBool::new(true),
+        fail_capture: AtomicBool::new(false),
+        snapshot: std::sync::Mutex::new(b"abandoned-frame-execution-state".to_vec()),
+        restored: std::sync::Mutex::new(Vec::new()),
+    });
+    let protocol: Arc<dyn crate::plugin::ProtocolSessionPlugin> =
+        Arc::new(ResetExecutorOnSwitchProtocol {
+            executor: Arc::clone(&executor),
+            frame_id: "materialized-next-frame".to_string(),
+            switch_next: AtomicBool::new(true),
+        });
+    let code_executor: Arc<dyn crate::plugin::CodeExecutorPlugin> = executor.clone();
+    let protocol_factory = crate::testing::test_standard_protocol_factory_with_runtime_state(
+        protocol,
+        Some(code_executor),
+    );
+    let store = Arc::new(RecordingStore::default());
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(|_| async move {
+            panic!("a protocol-directed frame switch must finish before provider execution")
+        })
+        .build();
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![protocol_factory],
+        Arc::new(EmptyTools),
+        transport,
+        test_host_config(),
+        store.clone() as Arc<dyn crate::RuntimePersistence>,
+    )
+    .await;
+    runtime.set_turn_phase_probe(Arc::new(FailCaptureAfterFirstCommittedTurn {
+        executor: Arc::clone(&executor),
+        committed_turns: AtomicUsize::new(0),
+    }));
+    executor.restored.lock_recover().clear();
+
+    let switched = runtime
+        .run_turn_assembled(
+            TurnInput::text("switch to a distinct frame"),
+            CancellationToken::new(),
+            named_turn_scope("root", "materialized-frame-switch"),
+        )
+        .await
+        .expect("materialized frame switch commits");
+    assert!(matches!(
+        switched.outcome,
+        TurnOutcome::AgentFrameSwitch { .. }
+    ));
+
+    let durable = crate::store::load_persisted_session_state(store.as_ref())
+        .await
+        .expect("load materialized switch state")
+        .expect("materialized switch state is durable");
+    assert!(
+        durable.execution_state_ref.is_none()
+            && durable.execution_state_snapshot.is_none()
+            && executor.restored.lock_recover().last().map(Vec::as_slice)
+                == Some(b"fresh-frame-execution-state".as_slice()),
+        "one committed switch must durably clear the checkpoint and reset the resident executor"
+    );
+}
+
+#[tokio::test]
+async fn empty_protocol_frame_switch_id_fails_with_typed_action_error() {
+    let protocol: Arc<dyn crate::plugin::ProtocolSessionPlugin> =
+        Arc::new(SwitchBeforeLlmProtocol {
+            executor: None,
+            frame_id: " \t".to_string(),
+            switch_next: AtomicBool::new(true),
+        });
+    let protocol_factory =
+        crate::testing::test_standard_protocol_factory_with_runtime_state(protocol, None);
+    let store = Arc::new(RecordingStore::default());
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(|_| async move {
+            panic!("an invalid agent-frame action must fail before invoking the provider")
+        })
+        .build();
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![protocol_factory],
+        Arc::new(EmptyTools),
+        transport,
+        test_host_config(),
+        store.clone() as Arc<dyn crate::RuntimePersistence>,
+    )
+    .await;
+
+    let error = runtime
+        .run_turn_assembled(
+            TurnInput::text("reject an empty frame identity"),
+            CancellationToken::new(),
+            named_turn_scope("root", "invalid-frame-switch"),
+        )
+        .await
+        .expect_err("an empty SwitchAgentFrame frame_id must fail the turn");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::InvalidAgentFrameSwitchFrameId
+    );
+    assert!(error.message.contains("SwitchAgentFrame"));
+    assert!(error.message.contains("frame_id"));
+    assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
 }
 
 #[tokio::test]

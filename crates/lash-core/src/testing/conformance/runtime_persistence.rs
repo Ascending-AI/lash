@@ -267,6 +267,7 @@ where
     load_rejects_token_usage_overflow(make()).await;
     usage_delta_identity_is_idempotent_across_commits(make()).await;
     usage_ordinal_reuse_with_different_payload_survives_receipt_replay(make()).await;
+    execution_state_replace_then_clear_removes_the_live_checkpoint_ref(make()).await;
     checkpoint_rejects_unknown_component_ref(make()).await;
     session_read_loads_persisted_history(make()).await;
     session_metadata_round_trips(make()).await;
@@ -331,6 +332,57 @@ where
     active_turn_input_claim_reacquires_after_unrecorded_checkpoint(make()).await;
     pending_turn_input_cancel_covers_active_and_deferred_states(make()).await;
     pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make()).await;
+}
+
+async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let mut state = RuntimeSessionState {
+        session_id: "execution-state-replace-then-clear".to_string(),
+        execution_state_snapshot: Some(b"initial-execution-state".to_vec()),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+
+    let initial = commit_runtime_state_for_test(
+        &store,
+        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        "execution-state-initial",
+    )
+    .await
+    .expect("commit initial execution state");
+    state.apply_persisted_commit_result(initial);
+
+    state.set_execution_state_snapshot(Some(b"replacement-execution-state".to_vec()));
+    let replacement = commit_runtime_state_for_test(
+        &store,
+        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        "execution-state-replacement",
+    )
+    .await
+    .expect("replace execution state");
+    assert!(replacement.manifest.execution_state_ref.is_some());
+    state.apply_persisted_commit_result(replacement);
+
+    state.set_execution_state_snapshot(None);
+    let cleared = commit_runtime_state_for_test(
+        &store,
+        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        "execution-state-clear",
+    )
+    .await
+    .expect("clear replacement execution state");
+    assert!(cleared.manifest.execution_state_ref.is_none());
+
+    let durable = store
+        .load_session()
+        .await
+        .expect("load replace-then-clear session")
+        .expect("replace-then-clear session is durable");
+    let checkpoint = durable
+        .checkpoint
+        .expect("replace-then-clear session has a checkpoint");
+    assert!(checkpoint.execution_state_ref.is_none());
+    assert!(checkpoint.execution_state.is_none());
 }
 
 async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(

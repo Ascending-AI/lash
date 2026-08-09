@@ -311,6 +311,9 @@ impl RuntimeSessionState {
     /// Updates execution state snapshot state for protocol and process-engine implementors while
     /// materializing or restoring protocol session state.
     pub fn set_execution_state_snapshot(&mut self, execution_state_snapshot: Option<Vec<u8>>) {
+        // A materialized frame-switch outcome passes `None` here to clear the checkpoint. Clear
+        // the durable ref with the resident body: every store interprets an absent body with a
+        // present ref as an unchanged component, which would otherwise restore the old frame.
         if execution_state_snapshot.is_none() {
             self.execution_state_ref = None;
         }

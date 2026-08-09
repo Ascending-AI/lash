@@ -39,6 +39,8 @@ use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
 use sqlx::{Connection, PgConnection, PgPool};
 
+#[path = "cross_backend_store_differential/checkpoint_cases.rs"]
+mod checkpoint_cases;
 #[path = "cross_backend_store_differential/generated_surface.rs"]
 mod generated_surface;
 #[path = "cross_backend_store_differential/observations.rs"]
@@ -62,6 +64,7 @@ enum CaseName {
     IdenticalAndMutatedTurnCommitReplay,
     SettleClaimBeforeSuccessorReclaim,
     CheckpointBodiesThenRefOnly,
+    CheckpointBodiesThenCleared,
     MissingCheckpointComponentRef,
     PinForkUnpin,
     AttachmentAdoption,
@@ -83,6 +86,7 @@ impl CaseName {
                 "settle_claim_after_session_lease_handoff_before_reclaim"
             }
             Self::CheckpointBodiesThenRefOnly => "checkpoint_bodies_then_ref_only",
+            Self::CheckpointBodiesThenCleared => "checkpoint_bodies_then_cleared",
             Self::MissingCheckpointComponentRef => "missing_checkpoint_component_ref",
             Self::PinForkUnpin => "pin_fork_unpin_moves_node_anchor",
             Self::AttachmentAdoption => "attachment_intent_adopted_by_commit",
@@ -287,6 +291,7 @@ enum CheckpointSpec {
     Empty,
     Bodies,
     PriorRefs,
+    ClearedComponents,
     MissingExecutionStateRef,
 }
 
@@ -476,37 +481,8 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 },
             ],
         },
-        GeneratedCase {
-            name: CaseName::CheckpointBodiesThenRefOnly,
-            operations: vec![
-                StoreOperation::Commit {
-                    label: "commit_checkpoint_component_bodies",
-                    expected_head_revision: 0,
-                    graph: append(
-                        vec![NodeSpec::new("active-frame", None, "checkpoint")],
-                        Some("active-frame"),
-                    ),
-                    turn_commit: Some(TurnCommitSpec {
-                        turn_id: "checkpoint-bodies",
-                    }),
-                    checkpoint: CheckpointSpec::Bodies,
-                    usage: true,
-                    adopt_attachment: false,
-                },
-                StoreOperation::Commit {
-                    label: "commit_checkpoint_refs_with_clean_source",
-                    expected_head_revision: 1,
-                    graph: append(Vec::new(), Some("active-frame")),
-                    turn_commit: Some(TurnCommitSpec {
-                        turn_id: "checkpoint-refs",
-                    }),
-                    checkpoint: CheckpointSpec::PriorRefs,
-                    usage: false,
-                    adopt_attachment: false,
-                },
-                StoreOperation::ColdReopenSession,
-            ],
-        },
+        checkpoint_cases::bodies_then_ref_only(),
+        checkpoint_cases::bodies_then_cleared(),
         GeneratedCase {
             name: CaseName::MissingCheckpointComponentRef,
             operations: vec![StoreOperation::Commit {
@@ -726,6 +702,17 @@ fn checkpoint_from_spec(
                 plugin_snapshot_ref: refs.plugin_snapshot.clone(),
                 plugin_snapshot_revision: Some(11),
                 execution_state_ref: refs.execution_state.clone(),
+                ..Default::default()
+            }
+        }
+        CheckpointSpec::ClearedComponents => {
+            let refs = prior_refs.expect("body commit recorded component refs");
+            HydratedSessionCheckpoint {
+                turn_state: checkpoint_bodies().turn_state,
+                tool_state_ref: refs.tool_state.clone(),
+                plugin_snapshot_ref: refs.plugin_snapshot.clone(),
+                plugin_snapshot_revision: Some(11),
+                execution_state_ref: None,
                 ..Default::default()
             }
         }
@@ -1429,6 +1416,7 @@ struct BackendRunner {
     current_frame_node_id: Option<String>,
     current_leaf_node_id: Option<String>,
     checkpoint_component_refs: Option<CheckpointComponentRefs>,
+    expected_execution_state: Option<Vec<u8>>,
 }
 
 impl BackendRunner {
@@ -1553,6 +1541,16 @@ impl BackendRunner {
                                 plugin_snapshot: result.manifest.plugin_snapshot_ref.clone(),
                                 execution_state: result.manifest.execution_state_ref.clone(),
                             });
+                        }
+                        match checkpoint {
+                            CheckpointSpec::Bodies => {
+                                self.expected_execution_state = checkpoint_bodies().execution_state;
+                            }
+                            CheckpointSpec::PriorRefs => {}
+                            CheckpointSpec::Empty | CheckpointSpec::ClearedComponents => {
+                                self.expected_execution_state = None;
+                            }
+                            CheckpointSpec::MissingExecutionStateRef => {}
                         }
                         Ok(Some(result.into()))
                     }
@@ -1874,7 +1872,7 @@ impl BackendRunner {
                     self.name
                 );
                 assert_eq!(
-                    checkpoint.execution_state, expected.execution_state,
+                    checkpoint.execution_state, self.expected_execution_state,
                     "{} cold reopen must rehydrate the execution-state body",
                     self.name
                 );
@@ -2287,6 +2285,7 @@ async fn runners_for_case(
             current_frame_node_id: None,
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
+            expected_execution_state: None,
         },
         BackendRunner {
             name: "sqlite",
@@ -2312,6 +2311,7 @@ async fn runners_for_case(
             current_frame_node_id: None,
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
+            expected_execution_state: None,
         },
         BackendRunner {
             name: "postgres",
@@ -2337,6 +2337,7 @@ async fn runners_for_case(
             current_frame_node_id: None,
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
+            expected_execution_state: None,
         },
     ]
 }
@@ -2371,7 +2372,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 14);
+    assert_eq!(cases.len(), 15);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -2387,6 +2388,7 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "identical_and_mutated_turn_commit_replay",
             "settle_claim_after_session_lease_handoff_before_reclaim",
             "checkpoint_bodies_then_ref_only",
+            "checkpoint_bodies_then_cleared",
             "missing_checkpoint_component_ref",
             "pin_fork_unpin_moves_node_anchor",
             "attachment_intent_adopted_by_commit",

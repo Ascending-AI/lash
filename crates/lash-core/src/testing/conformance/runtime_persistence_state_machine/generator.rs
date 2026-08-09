@@ -2,6 +2,30 @@ use super::*;
 
 const GENERATED_PREFIX_OPS: usize = 60;
 
+pub(super) struct ComponentSelection {
+    pub(super) store_tool: bool,
+    pub(super) store_plugin: bool,
+    pub(super) store_execution: bool,
+    pub(super) clear_execution: bool,
+}
+
+pub(super) fn component_selection(mode: u8) -> ComponentSelection {
+    let (store_tool, store_plugin, store_execution, clear_execution) = match mode % 6 {
+        0 => (false, false, false, false),
+        1 => (true, true, true, false),
+        2 => (true, false, false, false),
+        3 => (false, true, false, false),
+        4 => (false, false, true, false),
+        _ => (false, false, false, true),
+    };
+    ComponentSelection {
+        store_tool,
+        store_plugin,
+        store_execution,
+        clear_execution,
+    }
+}
+
 pub(super) fn generated_case() -> impl Strategy<Value = GeneratedCase> {
     (
         any::<u64>(),
@@ -181,7 +205,7 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
         ClaimLease { owner: 3 },
         SettleStaleWork,
         Commit {
-            component_mode: 0,
+            component_mode: 5,
             value: 0,
             settle_work: false,
             settle_inputs: false,
@@ -243,7 +267,7 @@ fn operation() -> impl Strategy<Value = RuntimePersistenceOp> {
         2 => any::<u8>().prop_map(|selection| ReplayAttachmentCommit { selection }),
         2 => any::<u8>().prop_map(|selection| ReclaimAttachmentSession { selection }),
         2 => Just(ProbeAttachmentGc),
-        6 => (0_u8..5, any::<u8>(), any::<bool>(), any::<bool>(), any::<bool>())
+        6 => (0_u8..6, any::<u8>(), any::<bool>(), any::<bool>(), any::<bool>())
             .prop_map(|(component_mode, value, settle_work, settle_inputs, stale_head)| Commit {
                 component_mode, value, settle_work, settle_inputs, stale_head,
             }),
