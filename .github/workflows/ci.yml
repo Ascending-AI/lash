@@ -719,7 +719,7 @@ jobs:
           cache-dependency-path: examples/workflow-graph-roundtrip/frontend/package-lock.json
 
       - name: Install just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v4
 
       # Each recipe owns its dependencies and any container lifecycle, so the
       # matrix legs run independently without cross-job coordination.
