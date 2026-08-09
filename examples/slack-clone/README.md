@@ -85,7 +85,11 @@ the same catalog as `list_channels` and `channel_history`:
   bot, whose host-owned handler runs its configured provider through
   `DirectLlmClient` and returns the sampled summary to the still-open tool call.
 - `mcp__slack_clone__elicit_confirmation` sends a typed form elicitation; this
-  example's host UI policy auto-answers `{ "answer": "yes" }`.
+  example's host policy checks the requesting server, prompt, and schema, then
+  builds `{ "answer": "yes" }` from the requested string property.
+- `mcp__slack_clone__elicit_via_url` sends URL elicitation and then
+  `notifications/elicitation/complete`; the host checks the URL policy and logs
+  the matching elicitation id when completion arrives.
 - `mcp__slack_clone__list_host_roots` sends `roots/list` and returns the static
   workspace root supplied by the bot host.
 
@@ -95,12 +99,21 @@ mention asking for one of these summaries therefore traverses the standard model
 tool loop, `lash-plugin-mcp`, stdio JSON-RPC, the separate server process, and the
 platform HTTP API before the result reaches the transcript.
 
-The three server-to-client features follow the same ownership rule: Lash routes
+The server-to-client features follow the same ownership rule: Lash routes
 the MCP request but supplies no model, answer, or root. The bot wires all three
 handlers explicitly with `McpPluginFactory::builder`; removing one handler also
 removes its capability from the initialize handshake. Sampling uses a direct
 provider call inside the outer MCP tool attempt. It does not open a nested Lash
 turn or emit another durable command.
+
+Handler work must stop when its request cancellation token fires. These seams
+are in-attempt host I/O and must not emit journaled Lash effects. Host-owned
+sampling is billed by the host: its usage is visible in provider/host traces,
+not in the session usage ledger or `TurnResult` usage.
+
+[Run the judged MCP client-depth walkthrough](../../runbooks/slack-clone-mcp-client-depth/runbook.md)
+to reconcile the rendered flow, durable tool results, host completion log, and
+trace.
 
 `lash-plugin-mcp` prefixes imported tools as `mcp__<server>__<tool>`. Ordinary
 native names therefore do not collide. If a host deliberately registers the exact
@@ -139,6 +152,11 @@ the flat shape shown below.
 Deployments whose servers emit matching progress can therefore run beyond that
 duration, up to the default 600-second `call_max_total_timeout_ms` cap. Set the
 wall cap explicitly when that longer upper bound is not appropriate.
+Interactive elicitation is the sharp edge: the 60-second idle default collides
+with a prompt a person leaves open for a minute. Raise both
+`call_timeout_ms` and `call_max_total_timeout_ms` above the longest supported
+interaction (with the wall cap strictly greater than the idle timeout), and
+dismiss the host prompt when its cancellation token fires.
 
 Tool-call expiry uses rmcp's cancellable request path, so a timeout sends the MCP
 `notifications/cancelled` notification. Under the default `ping_probe` policy, an

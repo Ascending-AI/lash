@@ -207,11 +207,19 @@ async fn subagents_core(
     Ok(())
 }
 
-async fn mcp_core(provider: ProviderHandle, model: String) -> anyhow::Result<()> {
+async fn mcp_core(
+    provider: ProviderHandle,
+    model: String,
+    sampling: Arc<dyn lash_plugin_mcp::McpSamplingHandler>,
+    elicitation: Arc<dyn lash_plugin_mcp::McpElicitationHandler>,
+    roots: Arc<dyn lash_plugin_mcp::McpRootsProvider>,
+) -> anyhow::Result<()> {
     // docs:start:mcp-core
     use std::collections::BTreeMap;
 
-    use lash_plugin_mcp::{McpPluginFactory, McpServerConfig};
+    use lash_plugin_mcp::{MCP_PROTOCOL_VERSION, McpPluginFactory, McpServerConfig};
+
+    println!("Lash MCP handshake protocol: {MCP_PROTOCOL_VERSION}");
 
     let mut servers = BTreeMap::new();
     servers.insert(
@@ -223,7 +231,14 @@ async fn mcp_core(provider: ProviderHandle, model: String) -> anyhow::Result<()>
         McpServerConfig::streamable_http("https://mcp.example.com/rpc"),
     );
 
-    let mcp = McpPluginFactory::new(servers).await?;
+    // Capabilities are advertised only for handlers installed here. Lash
+    // routes server requests; the host still owns model, UI, and root policy.
+    let mcp = McpPluginFactory::builder(servers)
+        .sampling_handler(sampling)
+        .elicitation_handler(elicitation)
+        .roots_provider(roots)
+        .build()
+        .await?;
 
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::new(
@@ -263,6 +278,9 @@ async fn mcp_hot_swap(mcp: &McpPluginFactory) -> anyhow::Result<()> {
     .await?;
 
     mcp.detach_server("old-tool").await?;
+
+    // Call this after the host's dynamic roots change.
+    mcp.notify_roots_changed().await?;
     // docs:end:mcp-hot-swap
     Ok(())
 }

@@ -1318,8 +1318,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::shutdown"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/slack-clone/src/bot.rs:194#let shutdown_result = core.shutdown().await.context(\"shut down Lash plugins\");"
-assertion = "examples/slack-clone/tests/mcp.rs:355#!process_exists(pid),"
+usage = "examples/slack-clone/src/bot.rs:195#let shutdown_result = core.shutdown().await.context(\"shut down Lash plugins\");"
+assertion = "examples/slack-clone/tests/mcp.rs:451#!process_exists(pid),"
 
 [[api]]
 symbol = "lash::LashCore::standard_builder"
@@ -1689,7 +1689,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCoreBuilder::turn_budget"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_advanced.rs:298#.turn_budget(lash::TurnBudget::bounded(50))"
+usage = "examples/docs-snippets/src/embedding_advanced.rs:316#.turn_budget(lash::TurnBudget::bounded(50))"
 
 [[api]]
 symbol = "lash::LashCoreBuilder::wake_turn_policy"
@@ -2260,7 +2260,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::ModelSpec::with_capability", "lash_core::ModelSpec::with_capability"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/slack-clone/src/bot/runtime.rs:296#.with_capability(lash::provider::ModelCapability {"
+usage = "examples/slack-clone/src/bot/runtime.rs:309#.with_capability(lash::provider::ModelCapability {"
 
 [[api]]
 symbol = "lash::ModelSpec::with_limits"
