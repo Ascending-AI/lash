@@ -34,7 +34,7 @@ fn realistic_commit(
                         frame_key: "benchmark-frame".to_string(),
                         reason: lash_core::AgentFrameReason::initial(),
                         assignment: lash_core::AgentFrameAssignment::from_policy(
-                            SessionPolicy::default(),
+                            SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                         ),
                         protocol_turn_options: Default::default(),
                     }
@@ -67,15 +67,18 @@ fn realistic_commit(
                 .context_window_tokens(200_000)
                 .build()
                 .expect("benchmark model"),
-            ..SessionPolicy::default()
+            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
     commit.current_frame_node_id = Some(format!("{session_id}:node:0"));
     commit.config = PersistedSessionConfig {
         provider_id: "benchmark".to_string(),
         model: state.policy.model,
+        turn_budget: state.policy.turn_budget,
     };
     commit.graph = GraphAppend {
         leaf_node_id: nodes.last().map(|node| node.node_id.clone()),
@@ -113,7 +116,7 @@ async fn time_commit(store: Arc<dyn RuntimePersistence>, commit: RuntimeCommit) 
     store
         .admit_and_bind_session(&lash_core::SessionBinding::root(
             commit.session_id.clone(),
-            &SessionPolicy::default(),
+            &SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         ))
         .await
         .expect("bind benchmark session to store");
@@ -186,7 +189,7 @@ async fn measured_commit_size_curve() {
                             .create_store(&SessionStoreCreateRequest {
                                 session_id: session_id.clone(),
                                 relation: SessionRelation::Root,
-                                policy: SessionPolicy::default(),
+                                policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                             })
                             .await
                             .expect("create SQLite benchmark store"),

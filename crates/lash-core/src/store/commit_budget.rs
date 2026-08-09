@@ -101,7 +101,9 @@ mod tests {
     fn rejects_node_count_over_limit() {
         let state = crate::RuntimeSessionState {
             session_id: "budget-nodes".to_string(),
-            ..Default::default()
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
         };
         let node = crate::SessionNodeRecord {
             node_id: "node".to_string(),
@@ -139,7 +141,9 @@ mod tests {
     fn reports_each_byte_component() {
         let state = crate::RuntimeSessionState {
             session_id: "budget-bytes".to_string(),
-            ..Default::default()
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
         };
         let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
         let node = crate::SessionNodeRecord {

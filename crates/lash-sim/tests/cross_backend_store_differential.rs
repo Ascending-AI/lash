@@ -239,7 +239,7 @@ impl NodeSpec {
                     frame_key,
                     reason: lash_core::AgentFrameReason::initial(),
                     assignment: lash_core::AgentFrameAssignment::from_policy(
-                        lash_core::SessionPolicy::default(),
+                        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                     ),
                     protocol_turn_options: Default::default(),
                 }
@@ -633,7 +633,9 @@ fn runtime_commit(
 ) -> RuntimeCommit {
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     let mut commit = RuntimeCommit::persisted_state_for_test(&state, &usage_deltas);
     commit.expected_head_revision = expected_head_revision;
@@ -1450,7 +1452,7 @@ impl BackendRunner {
         SessionStoreCreateRequest {
             session_id: self.session_id.clone(),
             relation: SessionRelation::Root,
-            policy: lash_core::SessionPolicy::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         }
     }
 
@@ -1473,7 +1475,7 @@ impl BackendRunner {
             &transport,
         )
         .expect("build differential lifecycle provider");
-        lash::LashCore::standard_builder()
+        lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
             .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
             .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
             .process_env_store(Arc::new(
@@ -1599,7 +1601,7 @@ impl BackendRunner {
                             observer_inheritance: lash_core::ObserverInheritance::None,
                             pending_observer_process_ids: Vec::new(),
                         },
-                        policy: lash_core::SessionPolicy::default(),
+                        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                     })
                     .await?;
                 Ok(None)
@@ -2011,7 +2013,9 @@ impl BackendRunner {
                     .expect("generated sequence creates handle before commit");
                 let state = RuntimeSessionState {
                     session_id: self.session_id.clone(),
-                    ..RuntimeSessionState::default()
+                    ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                    ))
                 };
                 let error = handle
                     .store
@@ -2183,7 +2187,7 @@ async fn runners_for_case(
     let create_request = SessionStoreCreateRequest {
         session_id: session_id.clone(),
         relation: SessionRelation::Root,
-        policy: lash_core::SessionPolicy::default(),
+        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
     let expected_meta = SessionMeta {
         session_id: session_id.clone(),

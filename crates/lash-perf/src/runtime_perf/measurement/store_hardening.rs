@@ -570,7 +570,9 @@ async fn load_store_hardening_state(
             .await?
             .unwrap_or_else(|| RuntimeSessionState {
                 session_id: session_id.to_string(),
-                ..RuntimeSessionState::default()
+                ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                ))
             }),
     )
 }
@@ -579,7 +581,7 @@ fn store_hardening_create_request(session_id: &str) -> lash_core::SessionStoreCr
     lash_core::SessionStoreCreateRequest {
         session_id: session_id.to_string(),
         relation: lash_core::SessionRelation::Root,
-        policy: lash_core::SessionPolicy::default(),
+        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     }
 }
 

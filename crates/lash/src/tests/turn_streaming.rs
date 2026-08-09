@@ -645,7 +645,7 @@ fn runtime_batch_provider() -> ProviderHandle {
 async fn turn_run_uses_configured_inline_effect_host_without_explicit_effects() -> Result<()> {
     let recorder = Arc::new(RecordingInlineEffectController::default());
     let effect_controller: Arc<dyn lash_core::RuntimeEffectController> = recorder.clone();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::new(
             effect_controller,
         )))
@@ -675,7 +675,7 @@ async fn turn_run_uses_configured_inline_effect_host_without_explicit_effects() 
 #[tokio::test]
 async fn durable_configured_effect_host_requires_explicit_handler_effects() -> Result<()> {
     let dir = tempfile::tempdir().expect("tempdir");
-    let core = LashCore::standard_builder()
+    let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
         .attachment_store(Arc::new(crate::persistence::FileAttachmentStore::new(
             dir.path().join("attachments"),
         )))
@@ -703,7 +703,7 @@ async fn durable_configured_effect_host_requires_explicit_handler_effects() -> R
 async fn turn_id_sets_execution_scope_and_trace_identity() -> Result<()> {
     let recorder = Arc::new(RecordingInlineEffectController::default());
     let effect_controller: Arc<dyn lash_core::RuntimeEffectController> = recorder.clone();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::new(
             effect_controller,
         )))
@@ -774,7 +774,7 @@ async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle() -> Resul
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -811,7 +811,7 @@ async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle() -> Resul
 
 #[tokio::test]
 async fn idle_queued_input_emits_typed_remote_application_and_durable_identity() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -891,7 +891,7 @@ async fn idle_queued_input_emits_typed_remote_application_and_durable_identity()
 
 #[tokio::test]
 async fn durable_application_read_survives_a_trimmed_live_replay_window() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -953,7 +953,7 @@ async fn durable_application_read_survives_a_trimmed_live_replay_window() -> Res
 #[tokio::test]
 async fn queued_turn_explicit_effects_create_queue_drain_scope_internally() -> Result<()> {
     let recorder = RecordingInlineEffectController::default();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -1210,17 +1210,20 @@ fn rlm_provider_retry_commits_only_surviving_prose() -> Result<()> {
         const EXEC_ERROR: &str = "unknown name `retry_missing_name`\n--> line 1, column 1\nretry_missing_name\n^~~~~~~~~~~~~~~~~~";
         let transport_calls = Arc::new(AtomicUsize::new(0));
         let requests = Arc::new(StdMutex::new(Vec::new()));
-        let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-            .provider(retrying_rlm_prose_provider(
-                Arc::clone(&transport_calls),
-                Arc::clone(&requests),
-            ))
-            .model(mock_model_spec())
-            .store_factory(Arc::new(
-                lash_core::facade_support::InMemorySessionStoreFactory::new(),
-            ))
-            .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-            .build()?;
+        let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+            crate::TurnBudget::Unbounded,
+            rlm_factory(),
+        ))
+        .provider(retrying_rlm_prose_provider(
+            Arc::clone(&transport_calls),
+            Arc::clone(&requests),
+        ))
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+        .build()?;
         let session = core.session("rlm-provider-retry-prose").open().await?;
 
         let first = session
@@ -1373,14 +1376,17 @@ fn rlm_natural_prose_completion_is_single_copy_in_next_request() -> Result<()> {
     run_async_test_on_stack_budget("rlm-natural-prose-single-copy-test", || async {
         const MARKER: &str = "natural completion single-copy marker";
         let requests = Arc::new(StdMutex::new(Vec::new()));
-        let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-            .provider(natural_prose_reasoning_provider(Arc::clone(&requests)))
-            .model(mock_model_spec())
-            .store_factory(Arc::new(
-                lash_core::facade_support::InMemorySessionStoreFactory::new(),
-            ))
-            .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-            .build()?;
+        let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+            lash_core::TurnBudget::Unbounded,
+            rlm_factory(),
+        ))
+        .provider(natural_prose_reasoning_provider(Arc::clone(&requests)))
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+        .build()?;
         let session = core.session("rlm-natural-prose-single-copy").open().await?;
 
         let first = session
@@ -1522,7 +1528,7 @@ async fn session_observation_envelopes_scope_activity_and_commit_to_the_turn() -
 #[tokio::test]
 async fn session_observation_retracts_two_retried_visible_attempts_live_and_on_replay() -> Result<()>
 {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(retrying_visible_stream_provider())
         .model(mock_model_spec())
         .build()?;
@@ -1747,7 +1753,7 @@ async fn session_observation_remote_subscription_replays_dto_events() -> Result<
 
 #[tokio::test]
 async fn session_observation_remote_recovery_stream_yields_dto_gap() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .live_replay_store(Arc::new(
@@ -1791,7 +1797,7 @@ async fn session_observation_remote_recovery_stream_yields_dto_gap() -> Result<(
 
 #[tokio::test]
 async fn session_observation_recovery_stream_yields_gap_for_trimmed_cursor() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .live_replay_store(Arc::new(
@@ -1972,7 +1978,7 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn recoverable_chat_snapshot_handoff_never_loses_concurrent_terminal_commit() -> Result<()> {
     let replay_store = Arc::new(PausedCommitReplayStore::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .live_replay_store(replay_store.clone())
@@ -2074,11 +2080,12 @@ async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Resu
 async fn recoverable_chat_restart_identity_does_not_depend_on_gap_clearing() -> Result<()> {
     let session_id = "recoverable-chat-restart-cursor";
     let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let bootstrap_core = explicit_ephemeral_facets(LashCore::standard_builder())
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .build()?;
+    let bootstrap_core =
+        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+            .provider(mock_provider())
+            .model(mock_model_spec())
+            .store_factory(store_factory.clone())
+            .build()?;
     bootstrap_core
         .session(session_id)
         .open()
@@ -2087,14 +2094,15 @@ async fn recoverable_chat_restart_identity_does_not_depend_on_gap_clearing() -> 
         .await?;
     drop(bootstrap_core);
 
-    let first_core = explicit_ephemeral_facets(LashCore::standard_builder())
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .live_replay_store(Arc::new(
-            lash_core::facade_support::InMemoryLiveReplayStore::default(),
-        ))
-        .build()?;
+    let first_core =
+        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+            .provider(mock_provider())
+            .model(mock_model_spec())
+            .store_factory(store_factory.clone())
+            .live_replay_store(Arc::new(
+                lash_core::facade_support::InMemoryLiveReplayStore::default(),
+            ))
+            .build()?;
     let first_session = first_core.session(session_id).open().await?;
     let initial_cursor = first_session.observe().recoverable_chat_snapshot().cursor;
     first_session.observe().runtime.record_turn_activity(
@@ -2115,14 +2123,15 @@ async fn recoverable_chat_restart_identity_does_not_depend_on_gap_clearing() -> 
     drop(first_session);
     drop(first_core);
 
-    let second_core = explicit_ephemeral_facets(LashCore::standard_builder())
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(store_factory)
-        .live_replay_store(Arc::new(
-            lash_core::facade_support::InMemoryLiveReplayStore::default(),
-        ))
-        .build()?;
+    let second_core =
+        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+            .provider(mock_provider())
+            .model(mock_model_spec())
+            .store_factory(store_factory)
+            .live_replay_store(Arc::new(
+                lash_core::facade_support::InMemoryLiveReplayStore::default(),
+            ))
+            .build()?;
     let second_session = second_core.session(session_id).open().await?;
     let restarted_at = second_session.observe().recoverable_chat_snapshot().cursor;
     let mut retained_applied_ids = second_session
@@ -2195,7 +2204,7 @@ async fn recoverable_chat_restart_identity_does_not_depend_on_gap_clearing() -> 
 
 #[tokio::test]
 async fn recoverable_chat_conformance_forwards_trimmed_gap_and_continues() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .live_replay_store(Arc::new(
@@ -2273,7 +2282,7 @@ async fn recoverable_chat_conformance_disconnect_does_not_cancel_server_work() -
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
         .model(mock_model_spec())
         .build()?;
@@ -2332,7 +2341,7 @@ fn remote_observation_assistant_delta(
 
 #[tokio::test]
 async fn turn_stream_finish_returns_committed_assistant_prose() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(semantic_group_provider())
         .model(mock_model_spec())
         .build()?;
@@ -2354,7 +2363,7 @@ async fn turn_stream_finish_returns_committed_assistant_prose() -> Result<()> {
 
 #[tokio::test]
 async fn turn_run_collects_activities_and_returns_committed_assistant_prose() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(semantic_group_provider())
         .model(mock_model_spec())
         .build()?;
@@ -2376,7 +2385,7 @@ async fn turn_run_collects_activities_and_returns_committed_assistant_prose() ->
 
 #[tokio::test]
 async fn retry_status_streams_as_semantic_turn_event() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(retry_once_provider())
         .model(mock_model_spec())
         .build()?;
@@ -2431,7 +2440,7 @@ async fn control_turn_accepts_prebuilt_turn_input() -> Result<()> {
 async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Result<()> {
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(checkpoint_gated_provider(entered_tx, release_rx))
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -2560,7 +2569,7 @@ async fn cancel_running_turns_stops_inflight_turn() -> Result<()> {
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
         .model(mock_model_spec())
         .build()
@@ -2645,7 +2654,7 @@ async fn next_turn_notification_during_a_live_turn_has_bounded_hydrations() -> R
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -2726,7 +2735,7 @@ async fn create_only_factory_returns_to_idle_after_draining_unknown_claimability
     let store_factory = Arc::new(CreateOnlySessionStoreFactory {
         inner: lash_core::facade_support::InMemorySessionStoreFactory::new(),
     });
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
@@ -2755,7 +2764,7 @@ async fn create_only_factory_returns_to_idle_after_draining_unknown_claimability
     let request = lash_core::SessionStoreCreateRequest {
         session_id: "create-only-factory-idles".to_string(),
         relation: lash_core::SessionRelation::Root,
-        policy: lash_core::SessionPolicy::default(),
+        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
     let store = lash_core::SessionStoreFactory::open_existing_store(&store_factory.inner, &request)
         .await
@@ -2849,7 +2858,7 @@ async fn inline_queued_work_burst_reuses_one_hydrated_runtime() -> Result<()> {
         .build()
         .into_handle();
     let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
@@ -2900,7 +2909,7 @@ async fn inline_queued_work_burst_reuses_one_hydrated_runtime() -> Result<()> {
     let request = lash_core::SessionStoreCreateRequest {
         session_id: "queued-work-hydration-burst".to_string(),
         relation: lash_core::SessionRelation::Root,
-        policy: lash_core::SessionPolicy::default(),
+        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
     let store =
         lash_core::SessionStoreFactory::open_existing_store(store_factory.as_ref(), &request)
@@ -2953,7 +2962,7 @@ async fn cancel_running_turns_sweeps_lock_queued_turns() -> Result<()> {
     // instead of starting a fresh provider call after the user pressed stop.
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
         .model(mock_model_spec())
         .build()
@@ -2986,7 +2995,7 @@ async fn cancel_running_turns_does_not_cross_separately_opened_handles() -> Resu
     // scope of cancel_running_turns is the opened handle and its clones.
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -3022,7 +3031,7 @@ async fn cancel_running_turns_reaches_queued_turn_drains() -> Result<()> {
     // turns, so a stop sweep reaches them too.
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -3094,7 +3103,7 @@ async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -3239,7 +3248,7 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -3355,15 +3364,18 @@ fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<()> {
             })
             .build()
             .into_handle();
-        let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-            .provider(provider)
-            .model(mock_model_spec())
-            .store_factory(Arc::new(
-                lash_core::facade_support::InMemorySessionStoreFactory::new(),
-            ))
-            .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-            .disable_queued_work_driver()
-            .build()?;
+        let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+            crate::TurnBudget::Unbounded,
+            rlm_factory(),
+        ))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+        .disable_queued_work_driver()
+        .build()?;
         let session = core
             .session("rlm-active-input-next-iteration")
             .open()
@@ -3437,7 +3449,7 @@ fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<()> {
 
 #[tokio::test]
 async fn await_queued_work_batch_resolves_when_drained() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -3475,7 +3487,7 @@ async fn await_queued_work_batch_resolves_when_drained() -> Result<()> {
 
 #[tokio::test]
 async fn await_queued_work_batch_resolves_immediately_for_unknown_batch() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -3556,7 +3568,7 @@ async fn run_collects_ordered_assistant_prose_activity() -> Result<()> {
 #[tokio::test]
 async fn core_catalog_and_actual_turn_resolve_the_identical_contract() -> Result<()> {
     let tools = ContractRecordingTools::default();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(tool_roundtrip_provider())
         .model(mock_model_spec())
         .tools(Arc::new(tools.clone()))
@@ -3654,7 +3666,7 @@ async fn private_run_collector_records_ordered_activities() -> Result<()> {
 #[tokio::test]
 async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Result<()> {
     let live = Arc::new(RecordingEvents::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(tool_roundtrip_provider())
         .model(mock_model_spec())
         .tools(Arc::new(AppTools))
@@ -3700,15 +3712,16 @@ fn turn_run_batch_tool_runs_every_call_concurrently_and_preserves_order() -> Res
     run_async_test_on_stack_size("runtime-batch-tool-order-test", 8 * 1024 * 1024, || async {
         let tools = Arc::new(RuntimeBatchTools::new());
         let tool_provider: Arc<dyn ToolProvider> = tools.clone();
-        let core = explicit_ephemeral_facets(LashCore::standard_builder())
-            .provider(runtime_batch_provider())
-            .model(mock_model_spec())
-            .tools(tool_provider)
-            .store_factory(Arc::new(
-                lash_core::facade_support::InMemorySessionStoreFactory::new(),
-            ))
-            .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-            .build()?;
+        let core =
+            explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+                .provider(runtime_batch_provider())
+                .model(mock_model_spec())
+                .tools(tool_provider)
+                .store_factory(Arc::new(
+                    lash_core::facade_support::InMemorySessionStoreFactory::new(),
+                ))
+                .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+                .build()?;
         let session = core.session("runtime-batch-tool-order").open().await?;
 
         let output = session.turn(TurnInput::text("run batch")).run().await?;
@@ -3770,15 +3783,16 @@ fn batch_child_tool_calls_carry_parent_call_id_linkage() -> Result<()> {
         || async {
             let tools = Arc::new(RuntimeBatchTools::new());
             let tool_provider: Arc<dyn ToolProvider> = tools.clone();
-            let core = explicit_ephemeral_facets(LashCore::standard_builder())
-                .provider(runtime_batch_provider())
-                .model(mock_model_spec())
-                .tools(tool_provider)
-                .store_factory(Arc::new(
-                    lash_core::facade_support::InMemorySessionStoreFactory::new(),
-                ))
-                .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-                .build()?;
+            let core =
+                explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+                    .provider(runtime_batch_provider())
+                    .model(mock_model_spec())
+                    .tools(tool_provider)
+                    .store_factory(Arc::new(
+                        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+                    ))
+                    .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+                    .build()?;
             let session = core.session("batch-child-parent-linkage").open().await?;
 
             let output = session.turn(TurnInput::text("run batch")).run().await?;
@@ -3858,7 +3872,7 @@ fn batch_child_tool_calls_carry_parent_call_id_linkage() -> Result<()> {
 async fn pending_host_tool_completion_parks_turn_and_resolves_through_core_ingress() -> Result<()> {
     let (key_tx, key_rx) = oneshot::channel();
     let events = Arc::new(RecordingEvents::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(tool_roundtrip_provider())
         .model(mock_model_spec())
         .tools(Arc::new(PendingAppTools::new(key_tx)))
@@ -3976,7 +3990,7 @@ async fn stream_returns_terminal_metadata_without_prose() -> Result<()> {
 
 #[tokio::test]
 async fn stream_emits_chronological_tool_events_without_prose_pollution() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(tool_roundtrip_provider())
         .model(mock_model_spec())
         .tools(Arc::new(AppTools))
@@ -4064,14 +4078,17 @@ fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_raw() -> Res
             .build()
             .into_handle();
 
-        let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-            .provider(provider)
-            .model(mock_model_spec())
-            .store_factory(Arc::new(
-                lash_core::facade_support::InMemorySessionStoreFactory::new(),
-            ))
-            .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-            .build()?;
+        let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+            crate::TurnBudget::Unbounded,
+            rlm_factory(),
+        ))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+        .build()?;
         let session = core.session("rlm-streamed-raw-final-cell").open().await?;
         let events = Arc::new(RecordingEvents::default());
 
@@ -4131,14 +4148,17 @@ fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_raw() -> Res
 
 #[cfg(feature = "rlm")]
 fn rlm_abort_drain_core(provider: ProviderHandle) -> Result<LashCore> {
-    explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-        .provider(provider)
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()
+    explicit_ephemeral_facets(LashCore::rlm_builder(
+        lash_core::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .store_factory(Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    ))
+    .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+    .build()
 }
 
 #[cfg(feature = "rlm")]
@@ -4281,18 +4301,21 @@ fn rlm_tool_calls_stream_from_live_exec_boundary() -> Result<()> {
 
 #[cfg(feature = "rlm")]
 async fn rlm_tool_calls_stream_from_live_exec_boundary_inner() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-        .provider(queued_text_provider(vec![lashlang_block(
-            r#"value = await tools.app_lookup({})?
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(queued_text_provider(vec![lashlang_block(
+        r#"value = await tools.app_lookup({})?
 finish "done""#,
-        )]))
-        .model(mock_model_spec())
-        .tools(Arc::new(AppTools))
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()?;
+    )]))
+    .model(mock_model_spec())
+    .tools(Arc::new(AppTools))
+    .store_factory(Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    ))
+    .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+    .build()?;
     let session = core.session("rlm-live-tool-events").open().await?;
     let events = Arc::new(RecordingEvents::default());
 
@@ -4431,18 +4454,21 @@ finish "done""#,
 #[test]
 fn rlm_recovered_tool_failure_remains_in_turn_accounting() -> Result<()> {
     run_async_test_on_stack_budget("rlm-recovered-tool-failure-test", || async {
-        let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-            .provider(queued_text_provider(vec![lashlang_block(
-                r#"failure = await tools.app_lookup({})
+        let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+            crate::TurnBudget::Unbounded,
+            rlm_factory(),
+        ))
+        .provider(queued_text_provider(vec![lashlang_block(
+            r#"failure = await tools.app_lookup({})
 finish "recovered""#,
-            )]))
-            .model(mock_model_spec())
-            .tools(Arc::new(FailingAppTools))
-            .store_factory(Arc::new(
-                lash_core::facade_support::InMemorySessionStoreFactory::new(),
-            ))
-            .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-            .build()?;
+        )]))
+        .model(mock_model_spec())
+        .tools(Arc::new(FailingAppTools))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+        .build()?;
         let session = core.session("rlm-recovered-tool-failure").open().await?;
 
         let result = session
@@ -4474,19 +4500,22 @@ fn rlm_code_block_aggregate_lists_every_collected_tool_call() -> Result<()> {
 
 #[cfg(feature = "rlm")]
 async fn rlm_code_block_aggregate_lists_every_collected_tool_call_inner() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-        .provider(queued_text_provider(vec![lashlang_block(
-            r#"a = await tools.app_lookup({})?
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(queued_text_provider(vec![lashlang_block(
+        r#"a = await tools.app_lookup({})?
 b = await tools.app_lookup({})?
 finish "done""#,
-        )]))
-        .model(mock_model_spec())
-        .tools(Arc::new(AppTools))
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()?;
+    )]))
+    .model(mock_model_spec())
+    .tools(Arc::new(AppTools))
+    .store_factory(Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    ))
+    .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+    .build()?;
     let session = core.session("rlm-aggregate-tool-ids").open().await?;
     let events = Arc::new(RecordingEvents::default());
 
@@ -4553,19 +4582,22 @@ async fn rlm_tool_calls_emit_typed_trace_pair_and_inline_boundary_protocol_step_
             .expect("clock")
             .as_nanos()
     ));
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-        .provider(queued_text_provider(vec![lashlang_block(
-            r#"value = await tools.app_lookup({})?
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(queued_text_provider(vec![lashlang_block(
+        r#"value = await tools.app_lookup({})?
 finish "done""#,
-        )]))
-        .model(mock_model_spec())
-        .tools(Arc::new(AppTools))
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .trace_jsonl_path(trace_path.clone())
-        .build()?;
+    )]))
+    .model(mock_model_spec())
+    .tools(Arc::new(AppTools))
+    .store_factory(Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    ))
+    .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+    .trace_jsonl_path(trace_path.clone())
+    .build()?;
     let session = core.session("rlm-tool-trace").open().await?;
 
     let result = session.turn(TurnInput::text("use tool")).run().await?;
@@ -4684,15 +4716,18 @@ fn rlm_native_provider_tool_call_is_a_traced_non_retryable_turn_issue() -> Resul
                 .expect("clock")
                 .as_nanos()
         ));
-        let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-            .provider(native_tool_call_provider())
-            .model(mock_model_spec())
-            .store_factory(Arc::new(
-                lash_core::facade_support::InMemorySessionStoreFactory::new(),
-            ))
-            .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-            .trace_jsonl_path(trace_path.clone())
-            .build()?;
+        let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+            lash_core::TurnBudget::Unbounded,
+            rlm_factory(),
+        ))
+        .provider(native_tool_call_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+        .trace_jsonl_path(trace_path.clone())
+        .build()?;
         let session = core.session("rlm-native-tool-contract").open().await?;
 
         let turn = session
@@ -4763,17 +4798,20 @@ fn rlm_pending_host_tool_completion_resumes_lashlang_await() -> Result<()> {
 async fn rlm_pending_host_tool_completion_resumes_lashlang_await_inner() -> Result<()> {
     let (key_tx, key_rx) = oneshot::channel();
     let events = Arc::new(RecordingEvents::default());
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-        .provider(queued_text_provider(vec![lashlang_block(
-            "value = await tools.app_lookup({})?\nfinish value",
-        )]))
-        .model(mock_model_spec())
-        .tools(Arc::new(PendingAppTools::new(key_tx)))
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()?;
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(queued_text_provider(vec![lashlang_block(
+        "value = await tools.app_lookup({})?\nfinish value",
+    )]))
+    .model(mock_model_spec())
+    .tools(Arc::new(PendingAppTools::new(key_tx)))
+    .store_factory(Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    ))
+    .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+    .build()?;
     let session = core.session("rlm-pending-host-tool").open().await?;
     let turn_session = session.clone();
     let turn_events = Arc::clone(&events);
@@ -4841,9 +4879,12 @@ fn rlm_process_pending_host_tool_completion_resumes_process_await() -> Result<()
 async fn rlm_process_pending_host_tool_completion_resumes_process_await_inner() -> Result<()> {
     let (key_tx, key_rx) = oneshot::channel();
     let events = Arc::new(RecordingEvents::default());
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-        .provider(queued_text_provider(vec![lashlang_block(
-            r#"
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(queued_text_provider(vec![lashlang_block(
+        r#"
 process lookup(tools: Tools) {
   value = await tools.app_lookup({})?
   finish value
@@ -4851,14 +4892,14 @@ process lookup(tools: Tools) {
 handle = start lookup(tools: tools)
 result = (await handle)?
 finish result"#,
-        )]))
-        .model(mock_model_spec())
-        .tools(Arc::new(PendingAppTools::new(key_tx)))
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()?;
+    )]))
+    .model(mock_model_spec())
+    .tools(Arc::new(PendingAppTools::new(key_tx)))
+    .store_factory(Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    ))
+    .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+    .build()?;
     let session = core.session("rlm-process-pending-host-tool").open().await?;
     let turn_session = session.clone();
     let turn_events = Arc::clone(&events);
@@ -4924,16 +4965,19 @@ fn continue_as_observation_emits_frame_switch_then_commit() -> Result<()> {
 
 #[cfg(feature = "rlm")]
 async fn continue_as_observation_emits_frame_switch_then_commit_inner() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-        .provider(queued_text_provider(vec![
-            lashlang_block(r#"await control.continue_as({ task: "finish in a fresh frame" })?"#),
-            lashlang_block(r#"finish "done after continue_as""#),
-        ]))
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .build()?;
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(queued_text_provider(vec![
+        lashlang_block(r#"await control.continue_as({ task: "finish in a fresh frame" })?"#),
+        lashlang_block(r#"finish "done after continue_as""#),
+    ]))
+    .model(mock_model_spec())
+    .store_factory(Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    ))
+    .build()?;
     let session = core.session("continue-as-observation").open().await?;
     let cursor = session.observe().current_observation().cursor;
 
@@ -4975,20 +5019,23 @@ async fn lane_less_post_commit_from_plain_turn_does_not_affect_next_turn_inner()
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         dir.path().join("sessions"),
     ));
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-        .provider(queued_text_provider(vec![
-            lashlang_block(r#"finish "plain turn complete""#),
-            lashlang_block(r#"await control.continue_as({ task: "finish turn two" })?"#),
-            lashlang_block(r#"finish "turn two complete""#),
-        ]))
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .plugin(Arc::new(TurnPersistedGraphAppendFactory {
-            append_count: Arc::clone(&append_count),
-            max_appends: 1,
-        }))
-        .disable_queued_work_driver()
-        .build()?;
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(queued_text_provider(vec![
+        lashlang_block(r#"finish "plain turn complete""#),
+        lashlang_block(r#"await control.continue_as({ task: "finish turn two" })?"#),
+        lashlang_block(r#"finish "turn two complete""#),
+    ]))
+    .model(mock_model_spec())
+    .store_factory(store_factory.clone())
+    .plugin(Arc::new(TurnPersistedGraphAppendFactory {
+        append_count: Arc::clone(&append_count),
+        max_appends: 1,
+    }))
+    .disable_queued_work_driver()
+    .build()?;
     let session = core.session(session_id).open().await?;
 
     let first = session
@@ -5031,19 +5078,22 @@ async fn probe_inprocess_continue_as_survives_post_commit_graph_append_inner() -
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         dir.path().join("sessions"),
     ));
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-        .provider(queued_text_provider(vec![
-            lashlang_block(r#"await control.continue_as({ task: "finish in process" })?"#),
-            lashlang_block(r#"finish "done after in-process handoff""#),
-        ]))
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .plugin(Arc::new(TurnPersistedGraphAppendFactory {
-            append_count: Arc::clone(&append_count),
-            max_appends: 1,
-        }))
-        .disable_queued_work_driver()
-        .build()?;
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(queued_text_provider(vec![
+        lashlang_block(r#"await control.continue_as({ task: "finish in process" })?"#),
+        lashlang_block(r#"finish "done after in-process handoff""#),
+    ]))
+    .model(mock_model_spec())
+    .store_factory(store_factory.clone())
+    .plugin(Arc::new(TurnPersistedGraphAppendFactory {
+        append_count: Arc::clone(&append_count),
+        max_appends: 1,
+    }))
+    .disable_queued_work_driver()
+    .build()?;
     let session = core.session(session_id).open().await?;
 
     let output = session
@@ -5077,21 +5127,22 @@ async fn durable_queued_continue_as_survives_post_commit_graph_append_inner() ->
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         dir.path().join("sessions"),
     ));
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-        .provider(queued_text_provider(vec![
-            lashlang_block(
-                r#"await control.continue_as({ task: "finish from durable handoff" })?"#,
-            ),
-            lashlang_block(r#"finish "done after durable handoff""#),
-        ]))
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .plugin(Arc::new(TurnPersistedGraphAppendFactory {
-            append_count: Arc::clone(&append_count),
-            max_appends: 1,
-        }))
-        .disable_queued_work_driver()
-        .build()?;
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(queued_text_provider(vec![
+        lashlang_block(r#"await control.continue_as({ task: "finish from durable handoff" })?"#),
+        lashlang_block(r#"finish "done after durable handoff""#),
+    ]))
+    .model(mock_model_spec())
+    .store_factory(store_factory.clone())
+    .plugin(Arc::new(TurnPersistedGraphAppendFactory {
+        append_count: Arc::clone(&append_count),
+        max_appends: 1,
+    }))
+    .disable_queued_work_driver()
+    .build()?;
     let session = core.session(session_id).open().await?;
     session
         .enqueue(TurnInput::text("switch frames from queued work"))
@@ -5182,12 +5233,15 @@ finish { established: control.total }"#,
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         dir.path().join("sessions"),
     ));
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-        .provider(provider)
-        .model(mock_model_spec())
-        .store_factory(store_factory)
-        .disable_queued_work_driver()
-        .build()?;
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        lash_core::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .store_factory(store_factory)
+    .disable_queued_work_driver()
+    .build()?;
     let session = core.session(session_id).open().await?;
     let established = session
         .turn(TurnInput::text(
@@ -5260,20 +5314,23 @@ async fn durable_queued_chained_continue_as_survives_nested_commit_handoff_inner
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         dir.path().join("sessions"),
     ));
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-        .provider(queued_text_provider(vec![
-            lashlang_block(r#"await control.continue_as({ task: "switch again" })?"#),
-            lashlang_block(r#"await control.continue_as({ task: "finish chain" })?"#),
-            lashlang_block(r#"finish "done after chained handoffs""#),
-        ]))
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .plugin(Arc::new(TurnPersistedGraphAppendFactory {
-            append_count: Arc::clone(&append_count),
-            max_appends: 2,
-        }))
-        .disable_queued_work_driver()
-        .build()?;
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(queued_text_provider(vec![
+        lashlang_block(r#"await control.continue_as({ task: "switch again" })?"#),
+        lashlang_block(r#"await control.continue_as({ task: "finish chain" })?"#),
+        lashlang_block(r#"finish "done after chained handoffs""#),
+    ]))
+    .model(mock_model_spec())
+    .store_factory(store_factory.clone())
+    .plugin(Arc::new(TurnPersistedGraphAppendFactory {
+        append_count: Arc::clone(&append_count),
+        max_appends: 2,
+    }))
+    .disable_queued_work_driver()
+    .build()?;
     let session = core.session(session_id).open().await?;
     session
         .enqueue(TurnInput::text("start chained frame handoff"))
@@ -5317,7 +5374,7 @@ async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commit
         lash_core::ExecutionScope::turn(session_id, root_turn_id),
     )
     .expect("scoped durable effect controller");
-    let core = LashCore::standard_builder()
+    let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
         .provider(agent_frame_switch_provider())
         .model(mock_model_spec())
         .tools(Arc::new(AgentFrameSwitchTools))
@@ -5408,9 +5465,12 @@ fn processes_lists_started_lashlang_process_until_awaited() -> Result<()> {
 async fn processes_lists_started_lashlang_process_until_awaited_inner() -> Result<()> {
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-        .provider(queued_text_provider(vec![lashlang_block(
-            r#"
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(queued_text_provider(vec![lashlang_block(
+        r#"
 process lookup(tools: Tools) {
   value = await tools.app_lookup({})?
   finish value
@@ -5418,17 +5478,17 @@ process lookup(tools: Tools) {
 h = start lookup(tools: tools)
 value = await h
 finish value"#,
-        )]))
-        .model(mock_model_spec())
-        .tools(Arc::new(BlockingAppTools::new(entered_tx, release_rx)))
-        // A started (`start lookup(...)`) process runs in the lease-protected
-        // worker's rebuilt runtime, which needs a session store factory; the
-        // explicit in-memory factory backs ephemeral process execution.
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build()?;
+    )]))
+    .model(mock_model_spec())
+    .tools(Arc::new(BlockingAppTools::new(entered_tx, release_rx)))
+    // A started (`start lookup(...)`) process runs in the lease-protected
+    // worker's rebuilt runtime, which needs a session store factory; the
+    // explicit in-memory factory backs ephemeral process execution.
+    .store_factory(Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    ))
+    .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+    .build()?;
     let session = core.session("rlm-process-control-tool").open().await?;
     let turn_session = session.clone();
     let scoped_effect_controller = turn_scope(&turn_session.session_id());
@@ -5481,6 +5541,7 @@ async fn lashlang_execution_graph_store_observes_lashlang_process_from_facade_in
     let (release_tx, release_rx) = oneshot::channel();
     let graph_store = Arc::new(crate::tracing::TraceLashlangGraphStore::default());
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
         rlm_factory().with_lashlang_execution_sink(
             Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
         ),
@@ -5549,10 +5610,13 @@ finish value"#,
 #[cfg(feature = "rlm")]
 #[tokio::test]
 async fn natural_rlm_completion_emits_no_terminal_output() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-        .provider(queued_text_provider(vec!["done in prose"]))
-        .model(mock_model_spec())
-        .build()?;
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(queued_text_provider(vec!["done in prose"]))
+    .model(mock_model_spec())
+    .build()?;
     let session = core.session("rlm-prose-completion").open().await?;
     let events = Arc::new(RecordingEvents::default());
 
@@ -5586,12 +5650,15 @@ async fn natural_rlm_completion_emits_no_terminal_output() -> Result<()> {
 #[cfg(feature = "rlm")]
 #[tokio::test]
 async fn finish_required_rlm_completion_emits_terminal_output() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-        .provider(queued_text_provider(vec![lashlang_block(
-            r#"finish "done via finish""#,
-        )]))
-        .model(mock_model_spec())
-        .build()?;
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(queued_text_provider(vec![lashlang_block(
+        r#"finish "done via finish""#,
+    )]))
+    .model(mock_model_spec())
+    .build()?;
     let session = core
         .session("rlm-finish-required-completion")
         .open()
@@ -5627,14 +5694,17 @@ async fn finish_required_rlm_completion_emits_terminal_output() -> Result<()> {
 #[cfg(feature = "rlm")]
 #[tokio::test]
 async fn rlm_failed_code_emits_failed_code_completion_without_fake_tools() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(rlm_factory()))
-        .provider(queued_text_provider(vec![
-            lashlang_block("this is not valid lashlang"),
-            lashlang_block(r#"finish "recovered""#),
-        ]))
-        .model(mock_model_spec())
-        .tools(Arc::new(AppTools))
-        .build()?;
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(queued_text_provider(vec![
+        lashlang_block("this is not valid lashlang"),
+        lashlang_block(r#"finish "recovered""#),
+    ]))
+    .model(mock_model_spec())
+    .tools(Arc::new(AppTools))
+    .build()?;
     let session = core.session("rlm-failed-code-event").open().await?;
     let events = RecordingEvents::default();
 

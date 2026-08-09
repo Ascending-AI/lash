@@ -21,7 +21,7 @@ async fn inmemory_core(provider: ProviderHandle, model: ModelSpec) -> anyhow::Re
         ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(model)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
@@ -52,7 +52,7 @@ async fn sqlite_core(
         ),
         artifact_store,
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(model)
         .store_factory(store_factory)
@@ -155,7 +155,7 @@ async fn process_registry_core(
         ),
         artifact_store,
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(model)
         .store_factory(store_factory)
@@ -180,8 +180,9 @@ async fn subagents_core(
 
     let registry = Arc::new(default_registry(&tier_models));
 
-    let subagents = SubagentsPluginFactory::new(registry)
-        .with_session_spec(SessionSpec::inherit().max_turns(8));
+    let child_spec = SessionSpec::inherit().turn_budget(lash::TurnBudget::bounded(8));
+    let _configured_turn_budget = child_spec.turn_budget;
+    let subagents = SubagentsPluginFactory::new(registry).with_session_spec(child_spec);
 
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::new(
@@ -190,7 +191,7 @@ async fn subagents_core(
         ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model.clone())
@@ -231,7 +232,7 @@ async fn mcp_core(provider: ProviderHandle, model: String) -> anyhow::Result<()>
         ),
         std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model.clone())
@@ -279,7 +280,7 @@ async fn durable_stores_core(
         ),
         std::sync::Arc::new(lash_sqlite_store::Store::open(&data_dir.join("artifacts.db")).await?),
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(
             lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")
@@ -294,6 +295,7 @@ async fn durable_stores_core(
         .attachment_store(std::sync::Arc::new(
             lash::persistence::FileAttachmentStore::new(data_dir.join("attachments")),
         ))
+        .turn_budget(lash::TurnBudget::bounded(50))
         .build()?;
     // docs:end:durable-stores-core
     Ok(())

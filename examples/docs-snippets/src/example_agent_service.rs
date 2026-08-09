@@ -45,7 +45,7 @@ async fn service_core(
         ),
         artifact_store,
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model.clone())

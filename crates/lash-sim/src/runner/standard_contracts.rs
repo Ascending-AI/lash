@@ -366,7 +366,9 @@ pub(super) fn run_standard_protocol_contract(
     steps: Vec<StandardContractStep>,
 ) -> Result<Value, FixedScriptRunnerError> {
     let mut config = standard_contract_turn_machine_config();
-    config.max_turns = max_turns;
+    config.turn_budget = max_turns
+        .map(lash_core::TurnBudget::bounded)
+        .unwrap_or(lash_core::TurnBudget::Unbounded);
     let mut machine = lash_core::TurnMachine::new(
         config,
         vec![contract_user_message(user_message)],

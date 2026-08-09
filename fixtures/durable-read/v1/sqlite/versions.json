@@ -1,6 +1,6 @@
 {
-  "durable_core": 26,
-  "processes": 21,
-  "triggers": 4,
+  "durable_core": 27,
+  "processes": 22,
+  "triggers": 5,
   "effects": 8
 }

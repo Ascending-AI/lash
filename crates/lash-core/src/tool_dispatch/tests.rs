@@ -345,7 +345,7 @@ fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatchContex
         parent_invocation: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
-            crate::SessionPolicy::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: "session".to_string(),
         agent_frame_id: String::new(),
@@ -396,7 +396,7 @@ fn dispatch_context() -> ToolDispatchContext<'static> {
         parent_invocation: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
-            crate::SessionPolicy::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: "session".to_string(),
         agent_frame_id: String::new(),
@@ -454,7 +454,7 @@ fn projection_policy_dispatch_context(
         parent_invocation: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
-            crate::SessionPolicy::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: "session".to_string(),
         agent_frame_id: String::new(),
@@ -645,7 +645,7 @@ fn lazy_contract_dispatch_context(
         parent_invocation: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
-            crate::SessionPolicy::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: "session".to_string(),
         agent_frame_id: String::new(),
@@ -703,7 +703,7 @@ fn hidden_member_dispatch_context(provider: Arc<dyn ToolProvider>) -> ToolDispat
         parent_invocation: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
-            crate::SessionPolicy::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: "session".to_string(),
         agent_frame_id: String::new(),
@@ -748,7 +748,7 @@ fn exact_dispatch_context_with_plugins(
         parent_invocation: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
-            crate::SessionPolicy::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: "session".to_string(),
         agent_frame_id: String::new(),
@@ -874,7 +874,7 @@ fn pending_dispatch_context(
         parent_invocation: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
-            crate::SessionPolicy::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: "session".to_string(),
         agent_frame_id: String::new(),
@@ -937,7 +937,7 @@ fn parallel_dispatch_context(
         parent_invocation: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
-            crate::SessionPolicy::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: "session".to_string(),
         agent_frame_id: String::new(),

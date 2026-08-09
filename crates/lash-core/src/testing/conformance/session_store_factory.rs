@@ -314,7 +314,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         .expect("stale handle metadata");
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..Default::default()
+        ..crate::RuntimeSessionState::new(request.policy.clone())
     };
     state.ensure_agent_frame_initialized();
     stale
@@ -506,7 +506,7 @@ pub async fn process_prune_deletes_owned_session_stores(
         let request = crate::SessionStoreCreateRequest {
             session_id: session_id.clone(),
             relation: crate::SessionRelation::default(),
-            policy: crate::SessionPolicy::default(),
+            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         };
         let store = factory
             .create_store(&request)
@@ -724,7 +724,7 @@ pub(crate) fn session_store_request(
             provider_id: "conformance-provider".to_string(),
             session_id: Some(session_id.to_string()),
             autonomous: false,
-            max_turns: None,
+            turn_budget: crate::TurnBudget::Unbounded,
             prompt: crate::PromptLayer::new(),
             generation: crate::GenerationOptions::default(),
         },
@@ -750,7 +750,8 @@ async fn session_admission_contract(
     factory: Arc<dyn crate::SessionStoreFactory>,
     unbound: Arc<dyn crate::RuntimePersistence>,
 ) {
-    let empty = crate::SessionBinding::root("", &crate::SessionPolicy::default());
+    let empty =
+        crate::SessionBinding::root("", &crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
     assert!(matches!(
         unbound
             .admit_and_bind_session(&empty)
@@ -947,7 +948,7 @@ async fn session_store_factory_rejects_writes_after_delete(
 
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..Default::default()
+        ..crate::RuntimeSessionState::new(request.policy.clone())
     };
     state.ensure_agent_frame_initialized();
     assert_deleted_write(
@@ -1115,7 +1116,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         .expect("create graph parent intruder");
     let mut first_state = crate::RuntimeSessionState {
         session_id: first_request.session_id.clone(),
-        ..Default::default()
+        ..crate::RuntimeSessionState::new(first_request.policy.clone())
     };
     first_state.ensure_agent_frame_initialized();
     first
@@ -1131,7 +1132,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         .expect("owner frame node id");
     let mut second_state = crate::RuntimeSessionState {
         session_id: second_request.session_id.clone(),
-        ..Default::default()
+        ..crate::RuntimeSessionState::new(second_request.policy.clone())
     };
     second_state.ensure_agent_frame_initialized();
     let second_result = second
@@ -1166,7 +1167,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         persisted_node_ids: second_state.persisted_node_ids,
         session_id: second_state.session_id,
         current_frame_node_id: Some(foreign_parent),
-        ..Default::default()
+        ..crate::RuntimeSessionState::new(second_request.policy.clone())
     };
     let commit = crate::RuntimeCommit::persisted_state_with_graph_commit(
         &state,
@@ -1214,7 +1215,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
     let mut state = crate::RuntimeSessionState {
         session_id: source_request.session_id.clone(),
         execution_state_snapshot: Some(vec![0xFA, 0xCE]),
-        ..Default::default()
+        ..crate::RuntimeSessionState::new(source_request.policy.clone())
     };
     state.ensure_agent_frame_initialized();
     let root_ids = state
@@ -1482,7 +1483,7 @@ async fn session_store_factory_vacuums_organic_retained_tombstone(
         .expect("create retained-tombstone source");
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..Default::default()
+        ..crate::RuntimeSessionState::new(request.policy.clone())
     };
     state.ensure_agent_frame_initialized();
     let leaf_node_id = state
@@ -1559,7 +1560,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .expect("create deleted session");
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..Default::default()
+        ..crate::RuntimeSessionState::new(request.policy.clone())
     };
     state.ensure_agent_frame_initialized();
     let frame = state

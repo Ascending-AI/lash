@@ -104,7 +104,7 @@ async fn main() -&gt; anyhow::Result&lt;()&gt; {
         .build()?;
 
     // one LashCore per app, cloned freely.
-    let core = LashCore::standard_builder()
+    let core = LashCore::standard_builder(lash::TurnBudget::bounded(50))
         .provider(provider)
         .model(model)
         .instructions("Answer in one short sentence. Skip preamble.")
@@ -166,7 +166,7 @@ async fn main() -&gt; anyhow::Result&lt;()&gt; {
         <div class="listing__row">
           <div class="listing__label">rlm core</div>
           <div class="listing__body">
-            <p>Use <code>LashCore::rlm_builder(factory)</code> for Lashlang-driven agentic turns with structured finish / AgentFrame switch semantics. See the <a href="./rlm.html">RLM protocol guide</a>.</p>
+            <p>Use <code>LashCore::rlm_builder(turn_budget, factory)</code> for Lashlang-driven agentic turns with structured finish / AgentFrame switch semantics. See the <a href="./rlm.html">RLM protocol guide</a>.</p>
           </div>
         </div>
         <div class="listing__row">

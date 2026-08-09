@@ -1210,7 +1210,7 @@ fn runtime_policy() -> crate::SessionPolicy {
             .context_window_tokens(16_000)
             .build()
             .expect("valid conformance model"),
-        ..Default::default()
+        ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
     }
 }
 

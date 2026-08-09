@@ -58,9 +58,8 @@ struct FinalizedTurnCommitStage {
 impl TurnCommitStage {
     /// Throwaway value used to move out of `&mut self` during finalization.
     fn placeholder() -> Self {
-        Self::Finalized(Box::new(FinalizedTurnCommitStage {
-            state: RuntimeSessionState::default(),
-        }))
+        let state = RuntimeSessionState::new(SessionPolicy::new(crate::TurnBudget::Unbounded));
+        Self::Finalized(Box::new(FinalizedTurnCommitStage { state }))
     }
 }
 
@@ -621,7 +620,7 @@ mod tests {
     use crate::session_model::{ConversationRecord, MessageRole, Part, PartKind, PruneState};
     use crate::store::SessionExecutionLeaseStore;
     use crate::{Message, SessionGraph, TokenUsage, shared_parts};
-
+    const UNBOUNDED: crate::TurnBudget = crate::TurnBudget::Unbounded;
     struct FixedAttachmentRoots(std::collections::BTreeSet<crate::AttachmentId>);
 
     #[async_trait::async_trait]
@@ -780,7 +779,7 @@ mod tests {
     fn state_with_graph(graph: SessionGraph) -> RuntimeSessionState {
         let mut state = RuntimeSessionState {
             session_id: "session-1".to_string(),
-            ..RuntimeSessionState::default()
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED))
         };
         state.ensure_agent_frame_initialized();
         if !graph.nodes.is_empty() {
@@ -992,7 +991,7 @@ mod tests {
         let clock = crate::SystemClock;
         let mut state = RuntimeSessionState {
             session_id: "frame-switch-back".to_string(),
-            ..RuntimeSessionState::default()
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED))
         };
         state.ensure_agent_frame_initialized_with_clock(&clock);
         let frame_a = super::super::open_agent_frame_in_state_with_clock(
@@ -1043,7 +1042,7 @@ mod tests {
         let mut pipeline = TurnBoundary::from_state(state_with_graph(SessionGraph::default()));
         pipeline
             .prepared_checkpoint(
-                SessionPolicy::default(),
+                SessionPolicy::new(UNBOUNDED),
                 0,
                 &MessageSequence::from_base(vec![user.clone()].into()),
                 None,
@@ -1057,7 +1056,7 @@ mod tests {
 
         let boundary = pipeline
             .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
-                policy: SessionPolicy::default(),
+                policy: SessionPolicy::new(UNBOUNDED),
                 turn_index: 1,
                 messages: MessageSequence::from_base(vec![user, assistant].into()),
                 event_delta,
@@ -1082,7 +1081,7 @@ mod tests {
             leased_boundary(&store, state_with_graph(SessionGraph::default())).await;
         pipeline
             .prepared_checkpoint(
-                SessionPolicy::default(),
+                SessionPolicy::new(UNBOUNDED),
                 0,
                 &MessageSequence::from_base(vec![user.clone()].into()),
                 None,
@@ -1091,7 +1090,7 @@ mod tests {
             .expect("prepare checkpoint in memory");
         pipeline
             .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
-                policy: SessionPolicy::default(),
+                policy: SessionPolicy::new(UNBOUNDED),
                 turn_index: 1,
                 messages: MessageSequence::from_base(vec![user, assistant.clone()].into()),
                 event_delta: vec![
@@ -1154,7 +1153,7 @@ mod tests {
             leased_boundary(&store, state_with_graph(SessionGraph::default())).await;
         pipeline
             .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
-                policy: SessionPolicy::default(),
+                policy: SessionPolicy::new(UNBOUNDED),
                 turn_index: 1,
                 messages: MessageSequence::from_base(messages.into()),
                 event_delta: Vec::new(),
@@ -1202,7 +1201,7 @@ mod tests {
     #[test]
     fn committed_attachment_ids_merge_tool_outputs_with_message_refs() {
         let tool_ref = attachment_ref("tool-output");
-        let mut state = RuntimeSessionState::default();
+        let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
         let message = crate::Message {
             id: "message".to_string(),
             role: crate::MessageRole::User,
@@ -1264,7 +1263,8 @@ mod tests {
             )),
             duration_ms: 1,
         }];
-        let committed = committed_attachment_ids(&RuntimeSessionState::default(), &tool_calls);
+        let state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
+        let committed = committed_attachment_ids(&state, &tool_calls);
         assert_eq!(committed, vec![attachment.id.clone()]);
 
         let roots = FixedAttachmentRoots(committed.into_iter().collect());

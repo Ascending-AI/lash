@@ -14,7 +14,7 @@ pub use lash_sansio::format_tool_output_content;
 pub use lash_sansio::session_model::{
     ConversationRecord, ErrorEnvelope, MAIN_AGENT_INTRO, Message, MessageRole, Part, PartKind,
     PromptBuiltin, PromptSlot, PromptTemplate, PromptTemplateEntry, PromptTemplateSection,
-    ProtocolEvent, PruneState, SessionStreamEvent, TokenUsage, TokenUsageOverflow,
+    ProtocolEvent, PruneState, SessionStreamEvent, TokenUsage, TokenUsageOverflow, TurnBudget,
     TurnTerminationPolicyState, default_prompt_template, make_error_envelope, make_error_event,
     reassign_part_ids, render_prompt, render_transcript_prompt, shared_parts,
 };
@@ -113,13 +113,15 @@ pub(crate) fn plugin_message_to_message(
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionPolicy {
     pub model: ModelSpec,
     pub provider_id: String,
     pub session_id: Option<String>,
     pub autonomous: bool,
-    pub max_turns: Option<usize>,
+    /// Required turn-budget decision. A host must choose either a non-zero
+    /// bound or explicit unbounded execution; absence is never interpreted.
+    pub turn_budget: TurnBudget,
     pub prompt: crate::PromptLayer,
     /// Caller-owned generation intent applied to every LLM call this session
     /// makes. It lives on the policy rather than on a single turn because it
@@ -138,6 +140,20 @@ pub struct SessionPolicy {
 }
 
 impl SessionPolicy {
+    /// Construct a policy with an explicit turn budget and otherwise neutral
+    /// settings.
+    pub fn new(turn_budget: TurnBudget) -> Self {
+        Self {
+            model: ModelSpec::default(),
+            provider_id: String::new(),
+            session_id: None,
+            autonomous: false,
+            turn_budget,
+            prompt: crate::PromptLayer::new(),
+            generation: crate::GenerationOptions::default(),
+        }
+    }
+
     /// Exposes the provider ID captured in policy for protocol implementors restoring the same
     /// provider/model assignment on replay.
     pub fn recorded_provider_id(&self) -> &str {
@@ -182,7 +198,7 @@ impl serde::Serialize for SessionPolicy {
         state.serialize_field("provider_id", self.recorded_provider_id())?;
         state.serialize_field("session_id", &self.session_id)?;
         state.serialize_field("autonomous", &self.autonomous)?;
-        state.serialize_field("max_turns", &self.max_turns)?;
+        state.serialize_field("turn_budget", &self.turn_budget)?;
         if !self.prompt.is_empty() {
             state.serialize_field("prompt", &self.prompt)?;
         }
@@ -209,8 +225,7 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             session_id: Option<String>,
             #[serde(default)]
             autonomous: bool,
-            #[serde(default)]
-            max_turns: Option<usize>,
+            turn_budget: TurnBudget,
             #[serde(default)]
             prompt: crate::PromptLayer,
             #[serde(default)]
@@ -232,7 +247,7 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             provider_id: wire.provider_id,
             session_id: wire.session_id,
             autonomous: wire.autonomous,
-            max_turns: wire.max_turns,
+            turn_budget: wire.turn_budget,
             prompt: wire.prompt,
             generation: wire.generation,
         })
@@ -240,7 +255,7 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
 }
 
 /// Runtime-only policy resolved against host-owned live dependencies.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeSessionPolicy {
     pub policy: SessionPolicy,
     pub binding: ProviderBinding,
@@ -315,7 +330,7 @@ pub struct SessionSpec {
     inherit: bool,
     pub provider_id: Option<String>,
     pub model: Option<ModelSpec>,
-    pub max_turns: Option<Option<usize>>,
+    pub turn_budget: Option<TurnBudget>,
     pub prompt: Option<crate::PromptLayer>,
     /// Generation intent for every LLM call the session makes. `None` inherits
     /// the base policy's options unchanged; `Some` applies a
@@ -332,7 +347,7 @@ impl SessionSpec {
             inherit: false,
             provider_id: None,
             model: None,
-            max_turns: None,
+            turn_budget: None,
             prompt: None,
             generation: None,
         }
@@ -357,8 +372,8 @@ impl SessionSpec {
         self
     }
 
-    pub fn max_turns(mut self, max_turns: usize) -> Self {
-        self.max_turns = Some(Some(max_turns));
+    pub fn turn_budget(mut self, turn_budget: TurnBudget) -> Self {
+        self.turn_budget = Some(turn_budget);
         self
     }
 
@@ -402,8 +417,8 @@ impl SessionSpec {
         if let Some(model) = self.model.as_ref() {
             policy.model = model.clone();
         }
-        if let Some(max_turns) = self.max_turns {
-            policy.max_turns = max_turns;
+        if let Some(turn_budget) = self.turn_budget {
+            policy.turn_budget = turn_budget;
         }
         if let Some(prompt) = self.prompt.as_ref() {
             policy.prompt = prompt.clone();
@@ -477,6 +492,23 @@ mod tests {
     }
 
     #[test]
+    fn session_policy_rejects_missing_turn_budget() {
+        let mut value = serde_json::to_value(SessionPolicy::new(crate::TurnBudget::Unbounded))
+            .expect("serialize complete policy");
+        value
+            .as_object_mut()
+            .expect("policy is a JSON object")
+            .remove("turn_budget");
+        let err = serde_json::from_value::<SessionPolicy>(value)
+            .expect_err("missing turn_budget must fail");
+
+        assert!(
+            err.to_string().contains("missing field `turn_budget`"),
+            "missing policy field should name turn_budget: {err}"
+        );
+    }
+
+    #[test]
     fn session_policy_serializes_provider_id_without_provider_handle() {
         let policy = SessionPolicy {
             provider_id: "mock-provider".to_string(),
@@ -484,7 +516,7 @@ mod tests {
                 .context_window_tokens(200_000)
                 .build()
                 .expect("valid test model"),
-            ..SessionPolicy::default()
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
         };
 
         let value = serde_json::to_value(&policy).expect("serialize policy");
@@ -495,7 +527,7 @@ mod tests {
 
     #[test]
     fn session_policy_persists_generation_options_only_when_set() {
-        let mut policy = SessionPolicy::default();
+        let mut policy = SessionPolicy::new(crate::TurnBudget::Unbounded);
         let value = serde_json::to_value(&policy).expect("serialize policy");
         assert!(
             value.get("generation").is_none(),
@@ -532,7 +564,7 @@ mod tests {
                 seed: Some(9),
                 ..Default::default()
             },
-            ..SessionPolicy::default()
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
         }
     }
 
@@ -571,7 +603,7 @@ mod tests {
                 stop_sequences: Vec::new(),
                 ..Default::default()
             },
-            ..SessionPolicy::default()
+            ..SessionPolicy::new(crate::TurnBudget::Unbounded)
         };
 
         let child = SessionSpec::inherit()

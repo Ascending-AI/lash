@@ -169,7 +169,7 @@ fn root_state(session_id: &str) -> RuntimeSessionState {
     RuntimeSessionState {
         session_id: session_id.to_string(),
         policy: standard_test_policy(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     }
 }
 
@@ -708,7 +708,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
         .open_existing_store(&crate::SessionStoreCreateRequest {
             session_id: "observer-child".to_string(),
             relation: crate::SessionRelation::Root,
-            policy: crate::SessionPolicy::default(),
+            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         })
         .await
         .expect("open child store")

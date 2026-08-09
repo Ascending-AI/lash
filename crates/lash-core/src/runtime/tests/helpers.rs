@@ -7,7 +7,8 @@ use lash_sansio::sync::MutexExt;
 pub(crate) use crate::runtime::in_memory_store::InMemorySessionStore as RecordingStore;
 
 pub(crate) fn default_state() -> RuntimeSessionState {
-    let mut state = RuntimeSessionState::default();
+    let mut state =
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
     state.ensure_agent_frame_initialized();
     state
 }
@@ -267,7 +268,7 @@ pub(crate) fn standard_test_policy() -> SessionPolicy {
             .context_window_tokens(200_000)
             .build()
             .expect("valid model spec"),
-        ..SessionPolicy::default()
+        ..SessionPolicy::new(crate::TurnBudget::Unbounded)
     }
 }
 
@@ -394,7 +395,7 @@ pub(crate) async fn standard_runtime_with_transport(transport: TestProvider) -> 
         standard_test_policy(),
         test_host_config(),
         crate::RuntimeServices::new(plugin_session_with_tools("root", tools)),
-        RuntimeSessionState::default(),
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
     )
     .await
     .expect("runtime");
@@ -497,7 +498,7 @@ pub(crate) async fn runtime_with_plugins_and_tools_and_host(
         standard_test_policy(),
         host,
         crate::RuntimeServices::new(plugin_session),
-        RuntimeSessionState::default(),
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
     )
     .await
     .expect("runtime");
@@ -526,7 +527,7 @@ pub(crate) async fn runtime_with_plugins_and_tools_and_host_and_store(
         standard_test_policy(),
         host,
         services,
-        RuntimeSessionState::default(),
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
     )
     .await
     .expect("runtime");
@@ -771,7 +772,7 @@ pub(crate) async fn standard_runtime_with_transport_and_host(
         standard_test_policy(),
         host,
         crate::RuntimeServices::new(plugin_session_with_tools("root", tools)),
-        RuntimeSessionState::default(),
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
     )
     .await
     .expect("runtime");

@@ -318,6 +318,7 @@ pub(super) async fn fork_at_in_catalog(
             let config = lash_core::PersistedSessionConfig {
                 provider_id: request.policy.recorded_provider_id().to_string(),
                 model: request.policy.model.clone(),
+                turn_budget: request.policy.turn_budget,
             };
             let meta = lash_core::store::SessionHeadMeta::assemble(
                 lash_core::store::SessionHeadPayload {

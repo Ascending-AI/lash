@@ -9,6 +9,8 @@ pub enum PluginError {
     Invoke(String),
     #[error("plugin session error: {0}")]
     Session(String),
+    #[error(transparent)]
+    Runtime(crate::RuntimeError),
     /// A turn-scoped plugin write presented a lapsed or superseded borrowed
     /// session-execution guard.
     #[error("session execution lease for `{session_id}` was lost before plugin commit")]

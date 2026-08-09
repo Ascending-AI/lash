@@ -59,7 +59,7 @@ fn restore(&amp;self, _meta: &amp;PluginSnapshotMeta, _reader: &amp;dyn Snapshot
           </div>
           <pre data-lang="rust" data-snippet="plugins_runtime#plugin-install"><code>use std::sync::Arc;
 
-let core = lash::LashCore::standard_builder()
+let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
     .provider(provider)
     .model(
         lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")

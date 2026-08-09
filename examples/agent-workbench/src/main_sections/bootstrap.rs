@@ -204,7 +204,7 @@ async fn async_main() -> AnyhowResult<()> {
     )
     .with_deferred_tool_resolver(deferred_tools.resolver())
     .with_lashlang_execution_sink(Arc::clone(&lashlang_execution_sink));
-    let core = LashCore::rlm_builder(factory)
+    let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(model_spec)
         .store_factory(Arc::clone(&core_store_factory))

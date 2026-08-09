@@ -8,7 +8,9 @@ async fn runtime_commit_rejects_cross_session_queue_batches_atomically() {
     let state = RuntimeSessionState {
         session_id: "root".to_string(),
         turn_index: 1,
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
     commit.enqueued_queue_batches = vec![QueuedWorkBatchDraft::new(

@@ -25,7 +25,7 @@ fn test_session_policy() -> crate::SessionPolicy {
             .context_window_tokens(16_384)
             .build()
             .expect("valid model spec"),
-        ..crate::SessionPolicy::default()
+        ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
     }
 }
 

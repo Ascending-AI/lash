@@ -327,7 +327,7 @@ finish "done through raw activities"
                     .expect("artifact store"),
             ),
         );
-        let core = LashCore::rlm_builder(factory)
+        let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .provider(provider)
             .model(
                 lash::ModelSpec::builder("scripted-model")

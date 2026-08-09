@@ -200,7 +200,7 @@ let lease_timings = LeaseTimings::new(
 )
 .expect("ttl &gt;= 3 * renew_interval");
 
-let core = LashCore::rlm_builder(factory)
+let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .provider(provider)
     .model(
         lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")

@@ -151,7 +151,7 @@ impl RuntimeScenarioContext {
     ) -> Self {
         let mut state = RuntimeSessionState {
             session_id: session_id.to_string(),
-            ..RuntimeSessionState::default()
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         state.ensure_agent_frame_initialized();
         let clock = Arc::new(crate::testing::TestClock::new(10_000));

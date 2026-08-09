@@ -65,8 +65,8 @@
           <div class="listing__body"><p>The smallest prompt and the fewest protocol rules: the right default for chat-shaped and single-step tool turns.</p></div>
         </div>
       </div>
-<pre data-lang="rust" data-snippet="execution_modes#standard-core"><code>// `LashCore::standard_builder()` selects native provider tool-calling, the default mode.
-let core = lash::LashCore::standard_builder()
+<pre data-lang="rust" data-snippet="execution_modes#standard-core"><code>// `LashCore::standard_builder(lash::TurnBudget::Unbounded)` selects native provider tool-calling, the default mode.
+let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
     .provider(provider)
     .model(model)
     .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
@@ -105,7 +105,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     ),
     Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 );
-let core = lash::LashCore::rlm_builder(factory)
+let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .provider(provider)
     .model(model)
     .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))

@@ -38,10 +38,9 @@ pub enum SessionObservedProcessOutcome {
     },
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionSnapshot {
     pub session_id: String,
-    #[serde(default)]
     pub policy: SessionPolicy,
     /// Derived convenience view of `session_graph` FrameOpen nodes.
     #[serde(skip)]
@@ -72,6 +71,30 @@ pub struct SessionSnapshot {
     pub token_ledger: Vec<crate::TokenLedgerEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_ref: Option<crate::store::BlobRef>,
+}
+
+impl SessionSnapshot {
+    /// Construct an empty snapshot with an explicitly chosen session policy.
+    pub fn new(policy: SessionPolicy) -> Self {
+        Self {
+            session_id: String::new(),
+            policy,
+            agent_frames: Vec::new(),
+            current_frame_node_id: None,
+            session_graph: crate::SessionGraph::default(),
+            turn_index: 0,
+            token_usage: crate::TokenUsage::default(),
+            last_prompt_usage: None,
+            protocol_turn_options: ProtocolTurnOptions::default(),
+            tool_state_ref: None,
+            tool_state_generation: None,
+            plugin_snapshot_ref: None,
+            plugin_snapshot_revision: None,
+            execution_state_ref: None,
+            token_ledger: Vec::new(),
+            checkpoint_ref: None,
+        }
+    }
 }
 
 impl SessionSnapshot {

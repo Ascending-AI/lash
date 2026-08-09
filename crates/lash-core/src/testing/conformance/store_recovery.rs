@@ -124,7 +124,7 @@ where
 fn committed_state(session_id: &str, marker: &str) -> crate::RuntimeSessionState {
     let mut state = crate::RuntimeSessionState {
         session_id: session_id.to_string(),
-        ..Default::default()
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
     append_conformance_event_node(&mut state, &format!("{session_id}:{marker}"), marker);

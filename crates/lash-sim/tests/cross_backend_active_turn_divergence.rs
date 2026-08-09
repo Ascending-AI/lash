@@ -64,7 +64,7 @@ async fn build_core_with_effect_host(
     let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts(scripts));
     let (provider_handle, model, _kind) =
         runtime_provider_components(PROVIDER_KIND, &transport).expect("provider components");
-    let core = LashCore::standard_builder()
+    let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .effect_host(effect_host)
         .attachment_store(attachment_store)
         .process_env_store(process_env_store)

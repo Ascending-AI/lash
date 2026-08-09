@@ -235,7 +235,7 @@ async fn summarize_compaction_prefix(
     }
 
     let mut snapshot = lash_core::runtime::RuntimeSessionState::from_snapshot(state.clone());
-    snapshot.policy.max_turns = Some(1);
+    snapshot.policy.turn_budget = lash_core::TurnBudget::bounded(1);
     let mut messages = prefix_messages;
     strip_all_attachments(&mut messages, COMPACTED_ATTACHMENT_PLACEHOLDER);
     snapshot.execution_state_snapshot = None;
@@ -245,7 +245,7 @@ async fn summarize_compaction_prefix(
 
     let compaction_session_id = format!("{session_id}-compaction");
     let mut policy = snapshot.policy.clone();
-    policy.max_turns = Some(1);
+    policy.turn_budget = lash_core::TurnBudget::bounded(1);
     let request = SessionCreateRequest::child(
         session_id,
         SessionStartPoint::Snapshot {
@@ -294,7 +294,8 @@ async fn summarize_compaction_prefix(
         },
         compaction_effect_controller,
     )
-    .map_err(|err| ContextError::Session(err.to_string()))?;
+    .map_err(|err| ContextError::Session(err.to_string()))?
+    .with_runtime_internal_compaction_admission();
     let turn = session_lifecycle.start_turn(request).await;
     let _ = session_lifecycle.close_session(&handle.session_id).await;
     let turn = turn.map_err(ContextError::from)?;
@@ -767,7 +768,9 @@ mod tests {
             text_message("u2", MessageRole::User, "latest"),
         ];
 
-        let state = SessionSnapshot::default();
+        let state = SessionSnapshot::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ));
         let manager = Arc::new(mock_manager());
         let transform = RollingTurnTransform::new(RollingHistoryConfig);
         let ctx = build_turn_ctx(
@@ -805,8 +808,8 @@ mod tests {
         let transform = RollingTurnTransform::new(RollingHistoryConfig);
         let state = SessionSnapshot {
             session_id: "root".to_string(),
-            policy: SessionPolicy::default(),
-            ..Default::default()
+            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
         };
         let ctx = build_turn_ctx(
             "root",
@@ -862,8 +865,8 @@ mod tests {
         let transform = RollingTurnTransform::new(RollingHistoryConfig);
         let state = SessionSnapshot {
             session_id: "root".to_string(),
-            policy: SessionPolicy::default(),
-            ..Default::default()
+            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
         };
         let ctx = build_turn_ctx_with_graph(
             "root",
@@ -927,8 +930,8 @@ mod tests {
         let transform = RollingTurnTransform::new(RollingHistoryConfig);
         let state = SessionSnapshot {
             session_id: "root".to_string(),
-            policy: SessionPolicy::default(),
-            ..Default::default()
+            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
         };
         let ctx = build_turn_ctx_with_graph(
             "root",
@@ -982,9 +985,9 @@ mod tests {
         ];
         let state = SessionSnapshot {
             session_id: "root".to_string(),
-            policy: SessionPolicy::default(),
+            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             session_graph: SessionGraph::from_active_read_state(&messages),
-            ..Default::default()
+            ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
         };
         let ctx = build_compaction_ctx_with_graph(
             "root",
@@ -1061,8 +1064,8 @@ mod tests {
         let trace = Arc::new(RecordingSessionGraph::default());
         let state = SessionSnapshot {
             session_id: "root".to_string(),
-            policy: SessionPolicy::default(),
-            ..Default::default()
+            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
         };
         let ctx = build_compaction_ctx_with_graph("root", state, None, manager, trace.clone());
 
@@ -1089,9 +1092,9 @@ mod tests {
         ];
         let state = SessionSnapshot {
             session_id: "root".to_string(),
-            policy: SessionPolicy::default(),
+            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             session_graph: SessionGraph::from_active_read_state(&messages),
-            ..Default::default()
+            ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
         };
         let sessions = manager as Arc<dyn SessionStateService>;
         let ctx = build_compaction_ctx_with_services(

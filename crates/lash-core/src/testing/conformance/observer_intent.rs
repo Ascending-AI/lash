@@ -31,7 +31,7 @@ pub async fn fork_observer_intent_transient_failure(factory: Arc<dyn crate::Sess
                 observer_inheritance: crate::ObserverInheritance::All,
                 pending_observer_process_ids: vec![PROCESS_ID.to_string()],
             },
-            policy: crate::SessionPolicy::default(),
+            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         })
         .await
         .expect("create fork session with pending observer intent");

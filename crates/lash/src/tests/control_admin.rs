@@ -116,7 +116,7 @@ async fn session_operations_delegate_to_runtime() -> Result<()> {
 
 #[tokio::test]
 async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .plugin(Arc::new(StaticPluginFactory::new(
@@ -232,7 +232,7 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
 
 #[tokio::test]
 async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -267,7 +267,7 @@ async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
 
 #[tokio::test]
 async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -317,7 +317,7 @@ async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> 
 
 #[tokio::test]
 async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -399,7 +399,7 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
 
 #[tokio::test]
 async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -459,7 +459,7 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
         "pressed",
         lash_core::LashSchema::any(),
     );
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .plugin(Arc::new(StaticPluginFactory::new(
@@ -517,7 +517,7 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
 async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(checkpoint_gated_provider(entered_tx, release_rx))
         .model(mock_model_spec())
         .tools(Arc::new(AppTools))
@@ -583,7 +583,7 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
 #[tokio::test]
 async fn processes_cancel_cancels_visible_process() -> Result<()> {
     let runtime_host = RuntimeHostConfig::in_memory();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -634,7 +634,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
 
 #[tokio::test]
 async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -718,7 +718,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
         Arc::clone(&registry),
         Arc::new(NoopProcessRunHandle),
     );
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -780,7 +780,7 @@ async fn observation_updates_after_completed_turn() -> Result<()> {
 
 #[tokio::test]
 async fn config_and_tool_mutations_publish_observation_immediately() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .tools(Arc::new(AppTools))
@@ -879,10 +879,11 @@ async fn managed_create_publishes_create_and_fork_observers_before_returning() -
             registry.clone(),
             Arc::new(NoopProcessRunHandle),
         );
-        let mut builder = explicit_ephemeral_facets(LashCore::standard_builder())
-            .provider(mock_provider())
-            .model(mock_model_spec())
-            .process_work_driver(driver);
+        let mut builder =
+            explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+                .provider(mock_provider())
+                .model(mock_model_spec())
+                .process_work_driver(driver);
         if let Some(store_factory) = store_factory.clone() {
             builder = builder.store_factory(store_factory);
         }
@@ -967,7 +968,7 @@ async fn managed_create_publishes_create_and_fork_observers_before_returning() -
                 .open_existing_store(&lash_core::SessionStoreCreateRequest {
                     session_id: child_session_id,
                     relation: lash_core::SessionRelation::Root,
-                    policy: lash_core::SessionPolicy::default(),
+                    policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                 })
                 .await
                 .expect("open managed child store")

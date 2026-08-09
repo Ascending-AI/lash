@@ -19,7 +19,10 @@ pub struct ReopenableProcessExecutionEnvStore {
 }
 
 fn sample_env_spec() -> crate::ProcessExecutionEnvSpec {
-    crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), SessionPolicy::default())
+    crate::ProcessExecutionEnvSpec::new(
+        crate::PluginOptions::default(),
+        SessionPolicy::new(crate::TurnBudget::Unbounded),
+    )
 }
 
 /// Run the [`crate::ProcessExecutionEnvStore`] contract against the store

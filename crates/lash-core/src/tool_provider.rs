@@ -374,7 +374,7 @@ impl<'run> ToolContext<'run> {
             parent_invocation: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
-                crate::SessionPolicy::default(),
+                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             child_execution_trace_hook: None,
         }

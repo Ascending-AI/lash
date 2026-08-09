@@ -308,10 +308,27 @@ pub enum SessionNodePayload {
     },
 }
 
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct PersistedSessionConfig {
     pub provider_id: String,
     pub model: crate::ModelSpec,
+    pub turn_budget: crate::TurnBudget,
+}
+
+impl PersistedSessionConfig {
+    /// Builds an empty persisted config carrying the required per-turn budget.
+    ///
+    /// Store implementors reading durable session heads populate the provider
+    /// and model fields from the row; the budget has no default by doctrine,
+    /// so every construction names `TurnBudget::Bounded(n)` or `Unbounded`
+    /// explicitly.
+    pub fn new(turn_budget: crate::TurnBudget) -> Self {
+        Self {
+            provider_id: String::new(),
+            model: crate::ModelSpec::default(),
+            turn_budget,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -762,6 +779,7 @@ impl SessionNodeRecord {
         Some(PersistedSessionConfig {
             provider_id: assignment.policy.recorded_provider_id().to_string(),
             model: assignment.policy.model.clone(),
+            turn_budget: assignment.policy.turn_budget,
         })
     }
 

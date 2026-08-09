@@ -50,7 +50,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     ),
     Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 );
-let core = lash::LashCore::rlm_builder(factory)
+let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .provider(provider)
     .model(model)
     .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
@@ -71,7 +71,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     ),
     artifact_store,
 );
-let core = lash::LashCore::rlm_builder(factory)
+let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .provider(provider)
     .model(model)
     .store_factory(store_factory)
@@ -123,7 +123,7 @@ let core = lash::LashCore::rlm_builder(factory)
     ),
     artifact_store,
 );
-let core = lash::LashCore::rlm_builder(factory)
+let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .provider(provider)
     .model(model)
     .store_factory(store_factory)
@@ -225,8 +225,9 @@ use lash_subagents::{SubagentsPluginFactory, default_registry};
 
 let registry = Arc::new(default_registry(&amp;tier_models));
 
-let subagents = SubagentsPluginFactory::new(registry)
-    .with_session_spec(SessionSpec::inherit().max_turns(8));
+let child_spec = SessionSpec::inherit().turn_budget(lash::TurnBudget::bounded(8));
+let _configured_turn_budget = child_spec.turn_budget;
+let subagents = SubagentsPluginFactory::new(registry).with_session_spec(child_spec);
 
 let factory = lash::rlm::RlmProtocolPluginFactory::new(
     lash::rlm::RlmProtocolPluginConfig::new(
@@ -235,7 +236,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     ),
     Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 );
-let core = lash::LashCore::rlm_builder(factory)
+let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .provider(provider)
     .model(
         lash::ModelSpec::builder(model.clone())
@@ -295,7 +296,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     ),
     std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 );
-let core = lash::LashCore::rlm_builder(factory)
+let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .provider(provider)
     .model(
         lash::ModelSpec::builder(model.clone())
@@ -338,7 +339,7 @@ mcp.detach_server("old-tool").await?;</code></pre>
     ),
     std::sync::Arc::new(lash_sqlite_store::Store::open(&amp;data_dir.join("artifacts.db")).await?),
 );
-let core = lash::LashCore::rlm_builder(factory)
+let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .provider(provider)
     .model(
         lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")
@@ -353,6 +354,7 @@ let core = lash::LashCore::rlm_builder(factory)
     .attachment_store(std::sync::Arc::new(
         lash::persistence::FileAttachmentStore::new(data_dir.join("attachments")),
     ))
+    .turn_budget(lash::TurnBudget::bounded(50))
     .build()?;</code></pre>
           <p>Streaming is semantic: <code>TurnBuilder::stream</code> emits <code>TurnActivity</code> and resolves to a <code>TurnResult</code>. Raw runtime telemetry belongs in tracing, not the app surface.</p>
         </div>

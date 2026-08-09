@@ -255,7 +255,7 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
             Arc::clone(&plugins),
             store.clone() as Arc<dyn crate::store::RuntimePersistence>,
         ),
-        RuntimeSessionState::default(),
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
     )
     .await
     .expect("runtime");
@@ -313,7 +313,7 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
     let mut state = RuntimeSessionState {
         session_id: "preopened-session".to_string(),
         policy: policy.clone(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
     let provisional_frame = state
@@ -381,7 +381,7 @@ async fn park_returns_error_when_final_commit_fails() {
         RuntimeSessionState {
             session_id: "park-session".to_string(),
             policy: standard_test_policy(),
-            ..RuntimeSessionState::default()
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         },
     )
     .await
@@ -418,7 +418,7 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
             plugins,
             store as Arc<dyn crate::store::RuntimePersistence>,
         ),
-        RuntimeSessionState::default(),
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
     )
     .await
     .expect("runtime");
@@ -470,7 +470,7 @@ async fn storeless_append_rejects_inactive_ancestor_before_mutation() {
         standard_test_policy(),
         test_host_config(),
         crate::RuntimeServices::new(plugins),
-        RuntimeSessionState::default(),
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
     )
     .await
     .expect("storeless runtime");
@@ -541,7 +541,7 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
             plugins,
             store as Arc<dyn crate::store::RuntimePersistence>,
         ),
-        RuntimeSessionState::default(),
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
     )
     .await
     .expect("runtime");
@@ -657,7 +657,7 @@ async fn replay_refresh_failure_restores_pre_append_runtime_and_protocol_state()
             plugins,
             Arc::clone(&store) as Arc<dyn crate::store::RuntimePersistence>,
         ),
-        RuntimeSessionState::default(),
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
     )
     .await
     .expect("runtime");
@@ -725,7 +725,7 @@ async fn failed_append_rollback_preserves_a_deleted_session_cause() {
         ),
         RuntimeSessionState {
             session_id: session_id.to_string(),
-            ..RuntimeSessionState::default()
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         },
     )
     .await
@@ -819,7 +819,7 @@ async fn completed_turns_are_persisted_in_session_graph() {
             Arc::clone(&plugins),
             store.clone() as Arc<dyn crate::store::RuntimePersistence>,
         ),
-        RuntimeSessionState::default(),
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
     )
     .await
     .expect("runtime");

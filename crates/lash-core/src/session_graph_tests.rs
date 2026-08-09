@@ -310,7 +310,9 @@ fn storage_body_excludes_indexed_graph_identity_and_parent_edge() {
 
 #[test]
 fn nearest_frame_is_derived_from_ancestry() {
-    let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::default());
+    let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+    ));
     let mut graph = SessionGraph::default();
     let first = frame_node_id("session", "first-frame");
     assert!(graph.append_frame_open_with_id_at(

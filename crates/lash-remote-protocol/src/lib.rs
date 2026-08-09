@@ -32,6 +32,11 @@ pub use turn_input::*;
 pub use turn_result::*;
 pub use usage_activity::*;
 
+// Bumped to 31: process execution policies require an explicit `turn_budget`,
+// and their content-addressed environment refs use the v3 family prefix
+// (FIG-1087). 29 was provisionally assigned to this change but 30 (the
+// stop-sequence disposition) released first; the check is exact-equality, so
+// the gap is harmless.
 // Bumped to 30: generation disposition reports when a protocol replaces a
 // caller's stop-sequence list with protocol-owned response boundaries. Version
 // 29 belongs to the concurrent registry-union wire change (#316), so this
@@ -41,9 +46,7 @@ pub use usage_activity::*;
 // clean version rejection.
 // Bumped to 27: `RemoteGenerationDisposition` gained an always-serialized
 // `cache` field (FIG-1101); older peers reject the unknown field on every
-// disposition, so the shape change requires a clean version rejection. (26 is
-// taken by the FIG-1087 turn-budget wire change, which may land before or
-// after this bump; a gap is harmless because the check is exact-equality.)
+// disposition, so the shape change requires a clean version rejection.
 // Bumped to 25: residual process/trigger/effect identities use the FIG-915
 // structural and shared-framing families; older peers cannot safely replay
 // their durable names.
@@ -60,7 +63,7 @@ pub use usage_activity::*;
 // generation options, mirroring `SessionPolicy.generation`. A version 19 peer
 // would drop them on the way in and resume a session with uncontrolled
 // sampling instead of the caller's.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 30;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 31;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {

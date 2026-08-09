@@ -115,19 +115,19 @@ fn conflicting_reopen_state(session_id: &str) -> RuntimeSessionState {
     let historical_policy = lash_core::SessionPolicy {
         provider_id: "persisted-provider".to_string(),
         model: model_spec("historical-model", None, 11_111),
-        ..Default::default()
+        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let current_policy = lash_core::SessionPolicy {
         provider_id: "persisted-provider".to_string(),
         model: model_spec("current-frame-model", None, 22_222),
-        ..Default::default()
+        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let mut state = RuntimeSessionState {
         session_id: session_id.to_string(),
         policy: historical_policy.clone(),
         agent_frames: Vec::new(),
         current_frame_node_id: None,
-        ..Default::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
     let frame_node_id = format!("agent-frame:{session_id}:current");
@@ -149,7 +149,7 @@ fn conflicting_reopen_state(session_id: &str) -> RuntimeSessionState {
     state.policy = lash_core::SessionPolicy {
         provider_id: "persisted-provider".to_string(),
         model: model_spec("top-level-model", None, 33_333),
-        ..Default::default()
+        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     state
 }
@@ -301,7 +301,7 @@ async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable(
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
@@ -339,7 +339,7 @@ async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable(
 
 #[test]
 fn typed_core_builders_require_explicit_store_choice() {
-    let err = match LashCore::standard_builder()
+    let err = match LashCore::standard_builder(crate::TurnBudget::Unbounded)
         .provider(mock_provider())
         .model(mock_model_spec())
         .build()
@@ -349,7 +349,7 @@ fn typed_core_builders_require_explicit_store_choice() {
     };
     assert!(matches!(err, EmbedError::MissingEffectHost));
 
-    let err = match LashCore::standard_builder()
+    let err = match LashCore::standard_builder(crate::TurnBudget::Unbounded)
         .provider(mock_provider())
         .model(mock_model_spec())
         .effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
@@ -379,7 +379,7 @@ fn typed_core_builders_require_explicit_store_choice() {
 
 #[test]
 fn generic_lash_core_builder_requires_protocol_plugin() {
-    let err = match explicit_ephemeral_facets(LashCore::builder())
+    let err = match explicit_ephemeral_facets(LashCore::builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .build()
@@ -394,7 +394,7 @@ fn generic_lash_core_builder_requires_protocol_plugin() {
 #[tokio::test]
 async fn prompt_layers_apply_across_core_session_turn_and_mutation_scopes() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(recording_prompt_provider(Arc::clone(&seen)))
         .model(mock_model_spec())
         .instructions("Zulu core instruction.")
@@ -458,7 +458,7 @@ async fn prompt_layers_apply_across_core_session_turn_and_mutation_scopes() -> R
 
 #[tokio::test]
 async fn provider_overrides_apply_at_core_session_turn_and_config_scopes() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(text_provider("core-provider", "core-model", "core"))
         .model(model_spec("core-model", None, 200_000))
         .build()
@@ -508,7 +508,7 @@ async fn provider_overrides_apply_at_core_session_turn_and_config_scopes() -> Re
 #[tokio::test]
 async fn provider_only_overrides_keep_session_model_and_variant() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(recording_text_provider(
             "core-provider",
             "core-model",
@@ -621,7 +621,7 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
     }))
     .expect("rlm config");
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(config, inmem_artifact_store());
-    let core = LashCore::rlm_builder(factory)
+    let core = LashCore::rlm_builder(crate::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(mock_model_spec())
         .effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
@@ -860,7 +860,7 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
         "compile-surface",
         lash_core::ProcessExecutionEnvSpec::new(
             plugin_options(),
-            lash_core::SessionPolicy::default(),
+            lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         ),
     );
 
@@ -900,7 +900,7 @@ finish value
 "#,
                 lash_core::ProcessExecutionEnvSpec::new(
                     plugin_options(),
-                    lash_core::SessionPolicy::default(),
+                    lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                 ),
             ),
         )
@@ -1038,16 +1038,16 @@ async fn store_factory_reopens_persisted_session_state() -> Result<()> {
         policy: lash_core::SessionPolicy {
             provider_id: mock_provider().kind().to_string(),
             model: mock_model_spec(),
-            ..Default::default()
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
-        ..Default::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     state.append_active_conversation_messages(&[text_message(
         lash_core::MessageRole::User,
         "already stored",
     )]);
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(ReusableStoreFactory { store }))
@@ -1062,7 +1062,7 @@ async fn store_factory_reopens_persisted_session_state() -> Result<()> {
 
 #[tokio::test]
 async fn park_then_resume_preserves_session_transcript() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
@@ -1110,7 +1110,7 @@ async fn park_then_resume_preserves_session_transcript() -> Result<()> {
 
 #[tokio::test]
 async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
@@ -1144,7 +1144,7 @@ fn session_policy_serializes_provider_id_without_provider_config() -> Result<()>
     let policy = lash_core::SessionPolicy {
         provider_id: provider.kind().to_string(),
         model: mock_model_spec(),
-        ..Default::default()
+        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
 
     let value = serde_json::to_value(&policy)?;
@@ -1164,11 +1164,11 @@ async fn persisted_provider_id_rebinds_to_live_provider_on_open() -> Result<()> 
         policy: lash_core::SessionPolicy {
             provider_id: "embed-test".to_string(),
             model: mock_model_spec(),
-            ..Default::default()
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
         current_frame_node_id: None,
         agent_frames: Vec::new(),
-        ..Default::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
     state.append_active_conversation_messages(&[text_message(
@@ -1176,7 +1176,7 @@ async fn persisted_provider_id_rebinds_to_live_provider_on_open() -> Result<()> 
         "stored",
     )]);
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(ReusableStoreFactory { store }))
@@ -1202,15 +1202,15 @@ async fn persisted_provider_id_mismatch_fails_at_turn_execution() -> Result<()> 
         policy: lash_core::SessionPolicy {
             provider_id: "other-provider".to_string(),
             model: mock_model_spec(),
-            ..Default::default()
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
         current_frame_node_id: None,
         agent_frames: Vec::new(),
-        ..Default::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(ReusableStoreFactory { store }))
@@ -1241,11 +1241,11 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
         policy: lash_core::SessionPolicy {
             provider_id: "embed-test".to_string(),
             model: mock_model_spec(),
-            ..Default::default()
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
         current_frame_node_id: None,
         agent_frames: Vec::new(),
-        ..Default::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
     let leaf_node_id = state.session_graph.leaf_node_id.clone();
@@ -1261,7 +1261,7 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
     state.session_graph = lash_core::SessionGraph::from_nodes(nodes, leaf_node_id);
     state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(ReusableStoreFactory { store }))
@@ -1286,15 +1286,15 @@ async fn refreshed_head_provider_id_mismatch_fails_before_turn() -> Result<()> {
         policy: lash_core::SessionPolicy {
             provider_id: "embed-test".to_string(),
             model: mock_model_spec(),
-            ..Default::default()
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
         current_frame_node_id: None,
         agent_frames: Vec::new(),
-        ..Default::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
     let store = Arc::new(SnapshotStore::with_state(state));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .build()?;
@@ -1325,7 +1325,7 @@ async fn refreshed_head_provider_id_mismatch_fails_before_turn() -> Result<()> {
 #[tokio::test]
 async fn explicit_provider_persists_reopens_and_runs_second_turn() -> Result<()> {
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .build()?;
@@ -1356,7 +1356,7 @@ async fn explicit_provider_persists_reopens_and_runs_second_turn() -> Result<()>
 #[tokio::test]
 async fn core_delete_session_removes_factory_backed_session_state() -> Result<()> {
     let factory = Arc::new(DeletingStoreFactory::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(factory)
@@ -1386,7 +1386,7 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
 async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Result<()> {
     let factory = Arc::new(DeletingStoreFactory::default());
     let effect_host = Arc::new(lash_core::testing::conformance::RecordingEffectHost::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(factory)
@@ -1412,7 +1412,7 @@ async fn core_delete_session_retires_the_deleted_session_effect_journal() -> Res
 #[tokio::test]
 async fn public_session_state_appends_preserve_concurrent_retirement_refusals() -> Result<()> {
     let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(factory.clone())
@@ -1477,12 +1477,12 @@ async fn store_session_id_mismatch_is_rejected() -> Result<()> {
         policy: lash_core::SessionPolicy {
             provider_id: mock_provider().kind().to_string(),
             model: mock_model_spec(),
-            ..Default::default()
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
-        ..Default::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(ReusableStoreFactory { store }))
@@ -1510,16 +1510,16 @@ async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<(
         policy: lash_core::SessionPolicy {
             provider_id: mock_provider().kind().to_string(),
             model: mock_model_spec(),
-            ..Default::default()
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
-        ..Default::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     state.append_active_conversation_messages(&[text_message(
         lash_core::MessageRole::User,
         "manual input",
     )]);
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .tools(Arc::new(AppTools))
@@ -1726,7 +1726,7 @@ async fn open_with_state_reconciles_live_policy_without_rewriting_frame_history(
     let persisted = conflicting_reopen_state(session_id);
     let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
     let builder_model = model_spec("builder-model", None, 77_777);
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(builder_model.clone())
         .build()?;
@@ -1775,7 +1775,7 @@ async fn queued_worker_state_load_reconciles_live_policy_without_rewriting_histo
         provider_id: "builder-provider".to_string(),
         model: model_spec("builder-model", None, 77_777),
         session_id: Some(session_id.to_string()),
-        ..Default::default()
+        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
 
     let state = crate::session::load_state_from_store(session_id, &policy, &store).await?;
@@ -1808,7 +1808,7 @@ async fn queued_worker_state_load_reconciles_live_policy_without_rewriting_histo
 #[tokio::test]
 async fn core_store_factory_is_used_for_managed_child_sessions() -> Result<()> {
     let factory = Arc::new(RecordingStoreFactory::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(factory.clone())
@@ -1852,7 +1852,7 @@ async fn reused_root_store_factory_reports_child_store_guidance() -> Result<()> 
     let reused_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(BoundSessionStore {
         session_id: "root-store".to_string(),
     });
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(ReusableStoreFactory {
@@ -1895,7 +1895,7 @@ async fn reused_root_store_factory_reports_child_store_guidance() -> Result<()> 
 async fn explicit_root_store_keeps_configured_child_store_factory() -> Result<()> {
     let factory = Arc::new(RecordingStoreFactory::default());
     let explicit_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(factory.clone())
@@ -1942,9 +1942,9 @@ async fn explicit_session_store_takes_precedence_over_core_store_factory() -> Re
         policy: lash_core::SessionPolicy {
             provider_id: mock_provider().kind().to_string(),
             model: mock_model_spec(),
-            ..Default::default()
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
-        ..Default::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     explicit_state.append_active_conversation_messages(&[text_message(
         lash_core::MessageRole::User,
@@ -1959,7 +1959,7 @@ async fn explicit_session_store_takes_precedence_over_core_store_factory() -> Re
         Arc::new(SnapshotStore::with_state(explicit_state));
     let factory_store: Arc<dyn lash_core::RuntimePersistence> =
         Arc::new(SnapshotStore::with_state(factory_state));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder())
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(ReusableStoreFactory {
@@ -1988,8 +1988,8 @@ fn turn_result_total_usage_sums_parent_and_children() {
     let result = TurnResult {
         state: SessionSnapshot {
             session_id: "s".to_string(),
-            policy: SessionPolicy::default(),
-            ..Default::default()
+            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            ..lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
         },
         outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
             text: "ok".to_string(),

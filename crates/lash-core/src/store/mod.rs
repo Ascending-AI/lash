@@ -1,7 +1,5 @@
 //! The runtime's settled-session persistence contract and shared store types.
-
 use crate::facade_support::SessionGraphFacadeOps;
-
 mod attachment_manifest;
 mod claim_settlement;
 mod commit_budget;
@@ -57,8 +55,7 @@ pub use work_claim::{WorkClaim, WorkCompletion};
 fn default_root_session_id() -> String {
     "root".to_string()
 }
-
-pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 2;
+pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 3;
 pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 1;
 
 #[cfg(test)]
@@ -76,6 +73,7 @@ mod persisted_state_tests {
                 config: crate::PersistedSessionConfig {
                     provider_id: "stored-provider".to_string(),
                     model: crate::ModelSpec::default(),
+                    turn_budget: crate::TurnBudget::Unbounded,
                 },
                 checkpoint_ref: None,
                 token_ledger: Vec::new(),
@@ -84,7 +82,6 @@ mod persisted_state_tests {
         )
         .expect("valid persisted state");
 
-        assert_eq!(state.policy.recorded_provider_id(), "stored-provider");
         assert_eq!(state.policy.recorded_provider_id(), "stored-provider");
         assert_eq!(state.head_revision, 7);
     }
@@ -442,6 +439,7 @@ fn persisted_session_config_from_state(
     crate::PersistedSessionConfig {
         provider_id: state.policy.recorded_provider_id().to_string(),
         model: state.policy.model.clone(),
+        turn_budget: state.policy.turn_budget,
     }
 }
 
@@ -1000,7 +998,7 @@ fn persisted_session_state_from_head(
     let agent_frames = graph.agent_frame_records(&head.session_id);
     let mut state = crate::RuntimeSessionState {
         session_id: head.session_id,
-        policy: crate::SessionPolicy::default(),
+        policy: crate::SessionPolicy::new(head.config.turn_budget),
         agent_frames,
         current_frame_node_id: head.current_frame_node_id,
         session_graph: graph,
@@ -1027,6 +1025,7 @@ fn persisted_session_state_from_head(
     Ok(state)
 }
 
+#[cfg(any(test, feature = "testing"))]
 impl Default for SessionHead {
     fn default() -> Self {
         Self {
@@ -1034,19 +1033,20 @@ impl Default for SessionHead {
             head_revision: 0,
             current_frame_node_id: None,
             graph: crate::SessionGraph::default(),
-            config: crate::PersistedSessionConfig::default(),
+            config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
             checkpoint_ref: None,
             token_ledger: Vec::new(),
         }
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
 impl Default for SessionHeadPayload {
     fn default() -> Self {
         Self {
             schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
             session_id: default_root_session_id(),
-            config: crate::PersistedSessionConfig::default(),
+            config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
             current_frame_node_id: None,
         }
     }

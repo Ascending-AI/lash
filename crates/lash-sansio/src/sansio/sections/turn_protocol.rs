@@ -429,8 +429,8 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
         &self.config.turn_id
     }
 
-    pub fn max_turns(&self) -> Option<usize> {
-        self.config.max_turns
+    pub fn turn_budget(&self) -> crate::TurnBudget {
+        self.config.turn_budget
     }
 
     pub fn generation(&self) -> &crate::llm::types::GenerationOptions {
@@ -453,7 +453,7 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
         self.termination.turn_limit_final_to_schedule(
             self.protocol_iteration,
             self.protocol_run_offset,
-            self.config.max_turns,
+            self.config.turn_budget,
         )
     }
 
@@ -611,7 +611,7 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     /// `ContextOverflow` when the prompt nearly filled the window. `None`
     /// disables that refinement.
     pub max_context_tokens: Option<usize>,
-    pub max_turns: Option<usize>,
+    pub turn_budget: crate::TurnBudget,
     pub model_variant: crate::ReasoningSelection,
     pub model_capability: crate::llm::capability::ModelCapability,
     pub generation: crate::llm::types::GenerationOptions,

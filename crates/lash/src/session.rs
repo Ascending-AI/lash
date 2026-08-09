@@ -166,10 +166,8 @@ impl SessionBuilder {
         let state = match store {
             Some(store) => {
                 let loaded = self.load_persisted_state(store).await?;
-                let mut state = loaded.unwrap_or_else(|| RuntimeSessionState {
-                    session_id: self.session_id.clone(),
-                    policy: policy.clone(),
-                    ..RuntimeSessionState::default()
+                let mut state = loaded.unwrap_or_else(|| {
+                    RuntimeSessionState::empty_for(self.session_id.clone(), policy.clone())
                 });
                 if state.session_id != self.session_id {
                     return Err(EmbedError::StoreSessionMismatch {
@@ -180,11 +178,7 @@ impl SessionBuilder {
                 reconcile_loaded_state_policy(&mut state, policy);
                 state
             }
-            None => RuntimeSessionState {
-                session_id: self.session_id.clone(),
-                policy: policy.clone(),
-                ..RuntimeSessionState::default()
-            },
+            None => RuntimeSessionState::empty_for(self.session_id.clone(), policy.clone()),
         };
         Ok(state)
     }
@@ -305,11 +299,7 @@ pub(crate) async fn load_state_from_store(
 ) -> Result<RuntimeSessionState> {
     let mut state = load_persisted_state(store)
         .await?
-        .unwrap_or_else(|| RuntimeSessionState {
-            session_id: session_id.to_string(),
-            policy: policy.clone(),
-            ..RuntimeSessionState::default()
-        });
+        .unwrap_or_else(|| RuntimeSessionState::empty_for(session_id, policy.clone()));
     if state.session_id != session_id {
         return Err(EmbedError::StoreSessionMismatch {
             loaded: state.session_id,
@@ -1276,9 +1266,11 @@ mod reconcile_tests {
                     seed: Some(7),
                     ..Default::default()
                 },
-                ..SessionPolicy::default()
+                ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
             },
-            ..RuntimeSessionState::default()
+            ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+            ))
         };
         let host = SessionPolicy {
             provider_id: "host-provider".to_string(),
@@ -1287,7 +1279,7 @@ mod reconcile_tests {
                 seed: Some(11),
                 ..Default::default()
             },
-            ..SessionPolicy::default()
+            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
 
         reconcile_loaded_state_policy(&mut state, &host);

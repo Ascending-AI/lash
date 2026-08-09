@@ -40,7 +40,7 @@ pub async fn refresh_persisted_session_state(
 ) -> Result<(), StoreError> {
     if let Some(mut fresh) = load_persisted_session_state(store).await? {
         fresh.policy.session_id = state.policy.session_id.clone();
-        fresh.policy.max_turns = state.policy.max_turns;
+        fresh.policy.turn_budget = state.policy.turn_budget;
         *state = fresh;
     }
     Ok(())

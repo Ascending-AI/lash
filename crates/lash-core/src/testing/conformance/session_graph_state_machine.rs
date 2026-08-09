@@ -1322,7 +1322,7 @@ async fn property_runtime(
         .unwrap_or_else(|| crate::RuntimeSessionState {
             session_id: request.session_id.clone(),
             policy: request.policy.clone(),
-            ..Default::default()
+            ..crate::RuntimeSessionState::new(request.policy.clone())
         });
     let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
         .build_session(request.session_id.clone(), state.plugin_snapshot.as_ref())

@@ -386,7 +386,7 @@ async fn append_conformance_runtime(
         .unwrap_or_else(|| crate::RuntimeSessionState {
             session_id: request.session_id.clone(),
             policy: request.policy.clone(),
-            ..Default::default()
+            ..crate::RuntimeSessionState::new(request.policy.clone())
         });
     // The protocol-session capability is embedder-supplied; the in-tree fake is
     // enough here because this suite never runs a turn.

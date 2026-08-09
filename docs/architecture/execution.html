@@ -33,7 +33,7 @@ flowchart LR
   Turn --> Result["events + TurnResult"]
   Result --> Host
       </div></div></div>
-      <pre data-lang="rust" data-snippet="architecture_execution#facade-turn"><code>let core = lash::LashCore::standard_builder()
+      <pre data-lang="rust" data-snippet="architecture_execution#facade-turn"><code>let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
     .provider(provider)
     .model(
         lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")

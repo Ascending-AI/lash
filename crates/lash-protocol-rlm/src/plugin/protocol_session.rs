@@ -380,7 +380,9 @@ mod tests {
                 input_tokens: 120_292,
                 ..Default::default()
             },
-            ..Default::default()
+            ..lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+            ))
         };
         let directives = session
             .soft_warn_directives(lash_core::plugin::CheckpointHookContext {

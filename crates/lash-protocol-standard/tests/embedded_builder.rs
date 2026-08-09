@@ -43,7 +43,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
         policy: SessionPolicy {
             provider_id: "openai-compatible".into(),
             model: test_model_spec(),
-            ..SessionPolicy::default()
+            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
         turn_index: 3,
         token_usage: TokenUsage {
@@ -53,7 +53,9 @@ async fn embedded_runtime_builder_loads_state_from_store() {
             cache_write_input_tokens: 0,
             reasoning_output_tokens: 1,
         },
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     state.ensure_agent_frame_initialized();
     store
@@ -98,9 +100,11 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
         policy: SessionPolicy {
             provider_id: "openai-compatible".into(),
             model: test_model_spec(),
-            ..SessionPolicy::default()
+            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     store
         .admit_and_bind_session(&lash_core::SessionBinding::root(

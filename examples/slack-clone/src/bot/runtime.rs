@@ -1,6 +1,6 @@
 //! Building the bot's `LashCore` — the standard-mode embedding.
 //!
-//! `LashCore::standard_builder()` gives a native tool loop and plain chat turns:
+//! `LashCore::standard_builder(lash::TurnBudget::Unbounded)` gives a native tool loop and plain chat turns:
 //! the model answers in prose and calls host tools directly. That is the classic
 //! chat-bot shape and the reason this example, not `agent-workbench`, is the
 //! repo's standard-mode reference. Nothing here touches Lashlang, code cells,
@@ -144,13 +144,17 @@ pub async fn build_core(
         }
         Some(mcp)
     };
-    let mut builder = LashCore::standard_builder()
+    let mut builder = LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .provider(provider)
         // `session_spec` replaces the builder's whole spec, so it must precede
         // `model`, which writes into that same spec.
-        .session_spec(SessionSpec::new().prompt_layer(bot_prompt(
-            config.mcp_servers.contains_key(DEMO_MCP_SERVER_NAME),
-        )))
+        .session_spec(
+            SessionSpec::new()
+                .turn_budget(lash::TurnBudget::Unbounded)
+                .prompt_layer(bot_prompt(
+                    config.mcp_servers.contains_key(DEMO_MCP_SERVER_NAME),
+                )),
+        )
         .model(model)
         .store_factory(store_factory)
         .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(

@@ -53,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
         .build()?;
 
     // one LashCore per app, cloned freely.
-    let core = LashCore::standard_builder()
+    let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .provider(provider)
         .model(model)
         .instructions("Answer in one short sentence. Skip preamble.")

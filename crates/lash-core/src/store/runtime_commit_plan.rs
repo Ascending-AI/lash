@@ -541,7 +541,9 @@ mod tests {
     fn lease_plan_rejects_borrow_xor_release_violation_with_typed_error() {
         let state = crate::RuntimeSessionState {
             session_id: "lease-plan-conflict".to_string(),
-            ..crate::RuntimeSessionState::default()
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
         };
         let authority = crate::SessionExecutionLeaseAuthority {
             session_id: state.session_id.clone(),
@@ -569,7 +571,9 @@ mod tests {
         let state = crate::RuntimeSessionState {
             session_id: "revision-overflow".to_string(),
             head_revision: i64::MAX as u64,
-            ..crate::RuntimeSessionState::default()
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
         };
         let commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
         let planner = RuntimeCommitPlanner::prepare(commit).expect("prepare commit");

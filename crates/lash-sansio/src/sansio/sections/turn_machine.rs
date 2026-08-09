@@ -330,7 +330,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         let Some(_max_turns) = self.termination.turn_limit_final_to_schedule(
             self.protocol_iteration,
             self.protocol_run_offset,
-            self.config.max_turns,
+            self.config.turn_budget,
         ) else {
             return false;
         };
@@ -343,7 +343,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         let Some(max_turns) = self.termination.turn_limit_final_to_schedule(
             self.protocol_iteration,
             self.protocol_run_offset,
-            self.config.max_turns,
+            self.config.turn_budget,
         ) else {
             return false;
         };

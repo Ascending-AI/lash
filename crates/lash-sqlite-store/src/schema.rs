@@ -285,7 +285,10 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// identities as part of the coordinated cutover.
 /// Version 26 rejects pre-FIG-915 usage identities and session rows carrying
 /// the former tool-batch or plugin-message names.
-pub(crate) const SCHEMA_VERSION: i32 = 26;
+/// Version 27 adds the required per-turn budget to session-head configuration,
+/// frame policy snapshots, and process execution environment artifacts. Older
+/// databases are rejected and recreated; there is no compatibility read path.
+pub(crate) const SCHEMA_VERSION: i32 = 27;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -443,7 +446,9 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
 // process-environment content addresses.
 // Version 21 stores shared-framing wake identities and compares replayed event
 // payloads structurally instead of retaining a payload-hash column.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 21;
+// Version 22 stores v3 process-environment refs whose content-addressed policy
+// payload includes the required per-turn budget.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 22;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -510,7 +515,9 @@ CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_subscription
 // Version 4 stores FIG-915 trigger identities and compares occurrence requests
 // structurally instead of retaining a request-hash column. There is
 // deliberately no compatibility read path.
-pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 4;
+// Version 5 stores v3 process-environment refs and the resulting trigger
+// definition fingerprints after the required per-turn budget cutover.
+pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 5;
 
 pub(crate) const EFFECT_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS runtime_effect_replay (

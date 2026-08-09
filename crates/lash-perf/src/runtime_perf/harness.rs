@@ -594,15 +594,17 @@ pub(crate) fn build_embed_core(
         lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
     );
     match scenario {
-        RuntimePerfScenario::EmbedStandard => lash::LashCore::standard_builder()
-            .with_explicit_ephemeral_facets()
-            .effect_host(effect_host.clone())
-            .provider(benchmark_provider(scenario).into_handle())
-            .model(benchmark_model_spec())
-            .store_factory(Arc::new(RuntimePerfStoreFactory::new(store)))
-            .build()
-            .map(BenchmarkCore::Standard)
-            .map_err(anyhow::Error::from),
+        RuntimePerfScenario::EmbedStandard => {
+            lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+                .with_explicit_ephemeral_facets()
+                .effect_host(effect_host.clone())
+                .provider(benchmark_provider(scenario).into_handle())
+                .model(benchmark_model_spec())
+                .store_factory(Arc::new(RuntimePerfStoreFactory::new(store)))
+                .build()
+                .map(BenchmarkCore::Standard)
+                .map_err(anyhow::Error::from)
+        }
         RuntimePerfScenario::EmbedRlm => {
             let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
                 lash_protocol_rlm::RlmProtocolPluginConfig::new(
@@ -611,14 +613,14 @@ pub(crate) fn build_embed_core(
                 ),
                 Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
             );
-            lash::LashCore::rlm_builder(factory)
+            lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
                 .with_explicit_ephemeral_facets()
                 .effect_host(effect_host.clone())
                 .tools(Arc::new(BenchmarkEchoTool::new(effect_host)))
                 .provider(benchmark_provider(scenario).into_handle())
                 .model(benchmark_model_spec())
                 .store_factory(Arc::new(RuntimePerfStoreFactory::new(store)))
-                .max_turns(RUNTIME_PERF_MAX_TURNS)
+                .turn_budget(lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS))
                 .build()
                 .map(BenchmarkCore::Rlm)
                 .map_err(anyhow::Error::from)
@@ -727,7 +729,7 @@ pub(crate) async fn build_runtime_with_store(
     }
     let core = match execution_mode {
         ExecutionMode::Standard => {
-            let mut builder = lash::LashCore::standard_builder()
+            let mut builder = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
                 .with_explicit_ephemeral_facets()
                 .effect_host(Arc::clone(&effect_host))
                 .provider(provider)
@@ -763,13 +765,13 @@ pub(crate) async fn build_runtime_with_store(
             {
                 factory = factory.with_lashlang_execution_jsonl_path(path);
             }
-            let mut builder = lash::LashCore::rlm_builder(factory)
+            let mut builder = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
                 .with_explicit_ephemeral_facets()
                 .effect_host(Arc::clone(&effect_host))
                 .provider(provider)
                 .model(benchmark_model_spec())
                 .plugins(plugin_stack)
-                .max_turns(RUNTIME_PERF_MAX_TURNS);
+                .turn_budget(lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS));
             if let Some(config) = trace_config {
                 if let Some(path) = config.trace_jsonl_path {
                     builder = builder.trace_jsonl_path(path);
@@ -1032,7 +1034,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     ));
     let core = match mode_id {
         ExecutionMode::Standard => BenchmarkCore::Standard(
-            lash::LashCore::standard_builder()
+            lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
                 .provider(provider)
                 .model(benchmark_model_spec())
                 .effect_host(effect_host.clone())
@@ -1058,7 +1060,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                 artifact_store,
             );
             BenchmarkCore::Rlm(
-                lash::LashCore::rlm_builder(factory)
+                lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
                     .provider(provider)
                     .model(benchmark_model_spec())
                     .effect_host(effect_host.clone())
@@ -1068,7 +1070,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                     .trigger_store(trigger_store.clone())
                     .store_factory(store_factory.clone())
                     .plugins(plugin_stack)
-                    .max_turns(RUNTIME_PERF_MAX_TURNS)
+                    .turn_budget(lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS))
                     .build()?,
             )
         }

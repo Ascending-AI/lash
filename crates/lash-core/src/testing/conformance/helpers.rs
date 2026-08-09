@@ -49,7 +49,7 @@ pub(crate) async fn bind_conformance_session(
 ) {
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     store
         .admit_and_bind_session(&crate::SessionBinding::root(session_id, &state.policy))

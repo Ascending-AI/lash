@@ -637,7 +637,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
 
         actions.push(DriverAction::AdvanceProtocolIteration);
         let next_protocol_iteration = ctx.protocol_iteration() + 1;
-        if let Some(max_turns) = ctx.max_turns()
+        if let Some(max_turns) = ctx.turn_budget().max_turns()
             && next_protocol_iteration >= ctx.protocol_run_offset() + max_turns
         {
             let message_id =
@@ -1024,7 +1024,7 @@ mod tests {
                 .context_window_tokens(200_000)
                 .build()
                 .expect("valid model"),
-            ..lash_core::SessionPolicy::default()
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
         let controller = CountingEffectController::default();
         let scoped_controller = lash_core::ScopedEffectController::shared(

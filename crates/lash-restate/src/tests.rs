@@ -5323,7 +5323,7 @@ async fn restate_enqueue_never_errors_after_commit() {
         recovered: tokio::sync::Notify::new(),
     });
     let recovered = queued_work.recovered.notified();
-    let core = lash::LashCore::standard_builder()
+    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .provider(provider)
         .model(lash_core::ModelSpec::new(
             "fig-430-model",
@@ -5419,7 +5419,9 @@ fn replay_test_state(
     lash_core::RuntimeSessionState {
         session_id: session_id.to_string(),
         policy: policy.clone(),
-        ..lash_core::RuntimeSessionState::default()
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     }
 }
 
@@ -8099,7 +8101,7 @@ fn recovery_session_policy() -> lash_core::SessionPolicy {
             .context_window_tokens(200_000)
             .build()
             .expect("model spec"),
-        ..lash_core::SessionPolicy::default()
+        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     }
 }
 
@@ -8309,7 +8311,7 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
                     .context_window_tokens(200_000)
                     .build()
                     .expect("model spec"),
-                ..lash_core::SessionPolicy::default()
+                ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
             },
         })
         .await

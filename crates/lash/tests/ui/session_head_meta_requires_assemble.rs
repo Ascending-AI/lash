@@ -5,7 +5,7 @@ fn main() {
         schema_version: 1,
         session_id: "session".to_string(),
         head_revision: 1,
-        config: PersistedSessionConfig::default(),
+        config: PersistedSessionConfig::new(lash_core::TurnBudget::Unbounded),
         current_frame_node_id: None,
         checkpoint_ref: None,
         leaf_node_id: None,

@@ -7,8 +7,8 @@ use lash::provider::ProviderHandle;
 
 async fn standard_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Result<()> {
     // docs:start:standard-core
-    // `LashCore::standard_builder()` selects native provider tool-calling, the default mode.
-    let core = lash::LashCore::standard_builder()
+    // `LashCore::standard_builder(lash::TurnBudget::Unbounded)` selects native provider tool-calling, the default mode.
+    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .provider(provider)
         .model(model)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
@@ -31,7 +31,7 @@ async fn rlm_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Result<
         ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(model)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))

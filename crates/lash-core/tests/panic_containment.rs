@@ -412,7 +412,7 @@ fn policy(provider_id: &str) -> SessionPolicy {
             .context_window_tokens(32_000)
             .build()
             .expect("valid model"),
-        ..SessionPolicy::default()
+        ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     }
 }
 

@@ -109,7 +109,9 @@ mod tests {
         let store = NonValidatingFacadeStore::default();
         let mut state = crate::RuntimeSessionState {
             session_id: "loose-store-session".to_string(),
-            ..crate::RuntimeSessionState::default()
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
         };
         state.ensure_agent_frame_initialized();
         let binding = crate::SessionBinding::root(state.session_id.clone(), &state.policy);
@@ -145,7 +147,9 @@ mod tests {
         let store = NonValidatingFacadeStore::default();
         let state = crate::RuntimeSessionState {
             session_id: "boundary-budget".to_string(),
-            ..crate::RuntimeSessionState::default()
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
         };
         let node = crate::SessionNodeRecord {
             node_id: "node".to_string(),

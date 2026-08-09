@@ -53,7 +53,7 @@ where
         let state = RuntimeSessionState {
             session_id: SESSION_ID.to_string(),
             tool_state_snapshot: Some(ToolState::default().with_generation(61)),
-            ..RuntimeSessionState::default()
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[])
             .releasing_session_execution_lease(stale_lease.completion());
@@ -164,7 +164,7 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
     let successor_state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
         tool_state_snapshot: Some(ToolState::default().with_generation(32)),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let successor_result = store
         .commit_runtime_state(
@@ -181,7 +181,7 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
     let predecessor_state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
         tool_state_snapshot: Some(ToolState::default().with_generation(33)),
-        ..RuntimeSessionState::default()
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let predecessor_result = store
         .commit_runtime_state(

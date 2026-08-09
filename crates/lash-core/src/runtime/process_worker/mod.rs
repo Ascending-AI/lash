@@ -113,7 +113,7 @@ impl DurableProcessWorkerConfig {
         Self {
             plugin_host,
             runtime_host,
-            session_policy: crate::SessionPolicy::default(),
+            session_policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             session_store_factory,
             process_registry,
             process_change_hub: None,

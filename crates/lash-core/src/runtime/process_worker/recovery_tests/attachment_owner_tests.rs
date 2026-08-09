@@ -35,7 +35,7 @@ async fn parent_bound_session_store(policy: crate::SessionPolicy) -> Arc<InMemor
     let state = crate::RuntimeSessionState {
         session_id: PARENT_SESSION_ID.to_string(),
         policy,
-        ..crate::RuntimeSessionState::default()
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     store
         .admit_and_bind_session(&crate::SessionBinding::root(
@@ -146,7 +146,7 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
             .context_window_tokens(16_384)
             .build()
             .expect("valid model spec"),
-        ..crate::SessionPolicy::default()
+        ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
     };
     let parent_store = parent_bound_session_store(policy.clone()).await;
     let factory: Arc<dyn SessionStoreFactory> = Arc::new(ParentBoundSessionStoreFactory {
@@ -226,7 +226,7 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
             .context_window_tokens(16_384)
             .build()
             .expect("valid model spec"),
-        ..crate::SessionPolicy::default()
+        ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
     };
     let env_ref = crate::persist_process_execution_env(
         runtime_host.durability.process_env_store.as_ref(),
@@ -269,7 +269,7 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
     let request = crate::SessionStoreCreateRequest {
         session_id: format!("process-env:{PROCESS_ID}"),
         relation: crate::SessionRelation::default(),
-        policy: crate::SessionPolicy::default(),
+        policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     };
     let store = factory
         .open_existing_store(&request)

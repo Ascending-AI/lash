@@ -61,7 +61,7 @@ pub async fn wake_delivery_crash_matrix(
             provider_id: "conformance-provider".to_string(),
             session_id: Some(target_session_id.to_string()),
             autonomous: false,
-            max_turns: None,
+            turn_budget: crate::TurnBudget::Unbounded,
             prompt: crate::PromptLayer::new(),
             generation: crate::GenerationOptions::default(),
         },
@@ -665,7 +665,7 @@ async fn sender_floor_lifetime(
         .create_store(&crate::SessionStoreCreateRequest {
             session_id: target_session_id.to_string(),
             relation: crate::SessionRelation::Root,
-            policy: crate::SessionPolicy::default(),
+            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         })
         .await
         .expect("create sender-floor lifetime target");
@@ -786,7 +786,9 @@ async fn settle_queued_batch(
         &crate::RuntimeSessionState {
             session_id: session_id.to_string(),
             head_revision,
-            ..crate::RuntimeSessionState::default()
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
         },
         &[],
     )
@@ -1301,7 +1303,7 @@ async fn target_gone_is_a_typed_discard(
     let target_request = crate::SessionStoreCreateRequest {
         session_id: target_session_id.to_string(),
         relation: crate::SessionRelation::Root,
-        policy: crate::SessionPolicy::default(),
+        policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     };
     factory
         .create_store(&target_request)

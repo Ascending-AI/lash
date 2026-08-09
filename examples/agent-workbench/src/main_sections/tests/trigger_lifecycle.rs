@@ -212,7 +212,7 @@
                 .create_store(&lash::persistence::SessionStoreCreateRequest {
                     session_id: session_id.clone(),
                     relation: lash::persistence::SessionRelation::Root,
-                    policy: lash::runtime::SessionPolicy::default(),
+                    policy: lash::runtime::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                 })
                 .await
                 .expect("open session store");

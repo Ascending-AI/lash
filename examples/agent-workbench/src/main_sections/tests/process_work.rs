@@ -415,13 +415,16 @@ mod process_work_tests {
         assert_eq!(identity.kind, "report-export");
         assert_eq!(identity.label.as_deref(), Some("Nightly invoice export"));
         assert_eq!(identity.definition.as_ref().unwrap()["revision"], 7);
-        let execution_env_ref = ProcessExecutionEnvSpec::new(Default::default(), Default::default())
+        let execution_env_ref = ProcessExecutionEnvSpec::new(
+            Default::default(),
+            lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        )
             .stable_ref()
             .expect("derive process execution environment identity");
         let execution_env_digest = execution_env_ref
             .as_str()
-            .strip_prefix("process-env:v2:sha256:")
-            .expect("process execution environment uses the v2 identity family");
+            .strip_prefix("process-env:v3:sha256:")
+            .expect("process execution environment uses the v3 identity family");
         assert_eq!(execution_env_digest.len(), 64);
         assert!(execution_env_digest
             .bytes()

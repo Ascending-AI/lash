@@ -39,7 +39,7 @@ pub(crate) async fn enqueue_wake_delivery(
         let request = crate::SessionStoreCreateRequest {
             session_id: target_session_id.clone(),
             relation: crate::SessionRelation::default(),
-            policy: crate::SessionPolicy::default(),
+            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         };
         if let Ok(Some(store)) = factory.open_existing_store(&request).await {
             let source_key =

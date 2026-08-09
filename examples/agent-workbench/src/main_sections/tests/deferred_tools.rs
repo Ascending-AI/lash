@@ -33,7 +33,7 @@ fn deferred_tools_test_core(
         artifact_store,
     )
     .with_deferred_tool_resolver(deferred.resolver());
-    LashCore::rlm_builder(factory)
+    LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(test_model())
         .store_factory(Arc::new(

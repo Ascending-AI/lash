@@ -788,7 +788,9 @@ mod tests {
         RuntimeCommit::persisted_state_for_test(
             &crate::RuntimeSessionState {
                 session_id: session_id.to_string(),
-                ..crate::RuntimeSessionState::default()
+                ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                ))
             },
             &[],
         )
@@ -802,7 +804,7 @@ mod tests {
         store
             .admit_and_bind_session(&crate::SessionBinding::root(
                 "borrow-valid",
-                &crate::SessionPolicy::default(),
+                &crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ))
             .await
             .expect("bind borrowed-commit session");
@@ -842,7 +844,7 @@ mod tests {
         store
             .admit_and_bind_session(&crate::SessionBinding::root(
                 "borrow-lapsed",
-                &crate::SessionPolicy::default(),
+                &crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ))
             .await
             .expect("bind lapsed borrowed-commit session");

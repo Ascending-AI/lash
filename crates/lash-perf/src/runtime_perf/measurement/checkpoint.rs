@@ -299,7 +299,7 @@ fn checkpoint_config(
         sync_execution_environment: false,
         model: "mock-model".to_string(),
         max_context_tokens: None,
-        max_turns: Some(8),
+        turn_budget: lash_core::TurnBudget::bounded(8),
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
         generation: lash_core::GenerationOptions::default(),

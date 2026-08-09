@@ -214,7 +214,8 @@ async fn in_memory_append_receipt_restores_mixed_usage_envelope() {
 #[tokio::test]
 async fn in_memory_append_receipt_rolls_back_failure_after_first_mutation() {
     let store = Arc::new(RecordingStore::default());
-    let mut state = RuntimeSessionState::default();
+    let mut state =
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
     let nodes = vec![crate::SessionAppendNode::plugin(
         "in-memory-post-mutation-atomicity",
         serde_json::json!({"value": 1}),

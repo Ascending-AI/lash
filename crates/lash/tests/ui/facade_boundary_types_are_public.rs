@@ -10,7 +10,8 @@ use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
     CheckpointKind, GcReport, GraphAppend, LeaseClaimNonce, LeaseOwnerIdentity, OperationId,
-    PersistedSessionRead, PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft,
+    PersistedSessionConfig, PersistedSessionRead, PendingTurnInputDraft, QueuedWorkBatch,
+    QueuedWorkBatchDraft,
     QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkStore, RealizedNodeTimestamp, RuntimeCommit,
     RuntimeCommitResult, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
     RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionCommitStore,
@@ -327,7 +328,7 @@ fn persistence_types_are_nameable(
         expected_head_revision: 0,
         session_execution_lease_fence: None,
         release_session_execution_lease: None,
-        config: Default::default(),
+        config: PersistedSessionConfig::new(lash::TurnBudget::Unbounded),
         current_frame_node_id: None,
         graph,
         checkpoint: Default::default(),
@@ -579,7 +580,17 @@ fn assert_store_object(_: Arc<dyn RuntimePersistence>) {}
 
 fn main() {
     assert_store_object(Arc::new(FacadeStore));
-    let _ = SessionHeadMeta::assemble(SessionHeadPayload::default(), 0, None, None);
+    let _ = SessionHeadMeta::assemble(
+        SessionHeadPayload {
+            schema_version: 1,
+            session_id: "facade".to_string(),
+            config: PersistedSessionConfig::new(lash::TurnBudget::Unbounded),
+            current_frame_node_id: None,
+        },
+        0,
+        None,
+        None,
+    );
     let _ = persistence_types_are_nameable(
         GraphAppend { nodes: Vec::new(), leaf_node_id: None },
         Vec::new(),

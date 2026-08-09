@@ -1,5 +1,5 @@
 {
-  "fixture_schema_version": 1,
+  "fixture_schema_version": 2,
   "head_revision": 3,
   "node_ids_in_read_order": [
     "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
@@ -17,7 +17,8 @@
         "limits": {
           "context_window_tokens": 1
         }
-      }
+      },
+      "turn_budget": "unbounded"
     },
     "current_frame_node_id": "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
     "graph": {
@@ -40,7 +41,7 @@
               "provider_id": "",
               "session_id": null,
               "autonomous": false,
-              "max_turns": null
+              "turn_budget": "unbounded"
             },
             "plugin_options": {}
           },
@@ -138,7 +139,8 @@
         "limits": {
           "context_window_tokens": 1
         }
-      }
+      },
+      "turn_budget": "unbounded"
     },
     "current_frame_node_id": "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
     "graph": {
@@ -240,7 +242,7 @@
   },
   "queue_batch_id": "qwb:e0ebf551aa55f4bd6f675e408989489cf0a1de244951ae78c18d851b96bf1317",
   "pending_input_id": "durable-read-pending-input",
-  "process_env_ref": "process-env:v2:sha256:02f6585f92aa774919cc2d3b51f1853eb4ff3d9b25d441936d7742ed58f8ba7e",
+  "process_env_ref": "process-env:v3:sha256:3889c03ef030a2c50f57de91cb03927423b8a83a5c9f29bbf8a5be3b9722b1b7",
   "await_event_key": {
     "scope": {
       "type": "turn",

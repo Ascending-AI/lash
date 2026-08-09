@@ -815,7 +815,7 @@ mod tests {
             .create_store(&SessionStoreCreateRequest {
                 session_id: "observed-usage".to_string(),
                 relation: crate::SessionRelation::Root,
-                policy: Default::default(),
+                policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             })
             .await
             .expect("create observed store");
@@ -836,7 +836,9 @@ mod tests {
             .expect("stage recorded usage");
         let mut state = crate::RuntimeSessionState {
             session_id: "observed-usage".to_string(),
-            ..crate::RuntimeSessionState::default()
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
         };
         let (commit, _) = RuntimeCommit::persisted_state_with_operation_and_staged_usage(
             &mut state,
@@ -877,7 +879,9 @@ mod tests {
     fn commit_observer_projects_typed_usage_buckets() {
         let state = crate::RuntimeSessionState {
             session_id: "observed-usage".to_string(),
-            ..crate::RuntimeSessionState::default()
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
         };
         let commit = RuntimeCommit::persisted_state_for_test(
             &state,

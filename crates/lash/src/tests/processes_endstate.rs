@@ -125,7 +125,7 @@ fn process_env_spec() -> lash_core::ProcessExecutionEnvSpec {
         lash_core::PluginOptions::default(),
         lash_core::SessionPolicy {
             model: mock_model_spec(),
-            ..lash_core::SessionPolicy::default()
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
     )
 }
@@ -213,6 +213,7 @@ fn process_test_core(
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
 ) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::new(
                 lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
@@ -1057,6 +1058,7 @@ fn process_test_core_with_sink(
     sink: Arc<dyn lash_core::facade_support::ProcessEventSink>,
 ) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::new(
                 lash_protocol_rlm::ExecutionBound::instructions(1_000_000),

@@ -55,7 +55,7 @@ pub enum TurnFinish {
                 <tr><td><code>InvalidInput</code></td><td>Host-driven</td><td>Input normalization rejected the <code>TurnInput</code> (e.g. missing attachment, malformed image ref).</td></tr>
                 <tr><td><code>Incomplete</code></td><td>Provider</td><td>The LLM hit its output limit mid-message without finishing.</td></tr>
                 <tr><td><code>ProviderError</code></td><td>Provider</td><td>The provider returned an error, a content-filter refusal, or a context-overflow terminal reason.</td></tr>
-                <tr><td><code>MaxTurns</code></td><td>Runtime</td><td>The protocol turn loop hit <code>session_spec.max_turns</code> and the final forced-reply turn finished without a terminal.</td></tr>
+                <tr><td><code>MaxTurns</code></td><td>Runtime</td><td>The protocol turn loop exhausted a required <code>TurnBudget::Bounded(n)</code> at iteration <code>n</code>, and the final forced-reply turn finished without a terminal. <code>TurnBudget::Unbounded</code> never produces this stop.</td></tr>
                 <tr><td><code>ToolFailure</code></td><td>Runtime</td><td>A tool returned <code>ToolResult::err(...)</code> and turn assembly flagged the turn as failed.</td></tr>
                 <tr><td><code>PluginAbort</code></td><td>Runtime</td><td>A plugin's turn-preparation or checkpoint hook returned an abort directive.</td></tr>
                 <tr><td><code>RuntimeError</code></td><td>Fatal</td><td>Internal runtime failure or a strict-termination policy with no <code>Done</code> event. Treat as a bug or environmental fault.</td></tr>

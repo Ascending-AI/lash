@@ -1042,7 +1042,7 @@ impl From<lash_core::SessionPolicy> for RemoteProcessExecutionPolicy {
             provider_id,
             session_id,
             autonomous,
-            max_turns,
+            turn_budget,
             prompt,
             generation,
         } = value;
@@ -1051,9 +1051,27 @@ impl From<lash_core::SessionPolicy> for RemoteProcessExecutionPolicy {
             provider_id,
             session_id,
             autonomous,
-            max_turns,
+            turn_budget: turn_budget.into(),
             prompt: prompt.into(),
             generation: generation.into(),
+        }
+    }
+}
+
+impl From<lash_core::TurnBudget> for RemoteTurnBudget {
+    fn from(value: lash_core::TurnBudget) -> Self {
+        match value {
+            lash_core::TurnBudget::Bounded(limit) => Self::Bounded(limit),
+            lash_core::TurnBudget::Unbounded => Self::Unbounded,
+        }
+    }
+}
+
+impl From<RemoteTurnBudget> for lash_core::TurnBudget {
+    fn from(value: RemoteTurnBudget) -> Self {
+        match value {
+            RemoteTurnBudget::Bounded(limit) => Self::Bounded(limit),
+            RemoteTurnBudget::Unbounded => Self::Unbounded,
         }
     }
 }
@@ -1067,7 +1085,7 @@ impl TryFrom<RemoteProcessExecutionPolicy> for lash_core::SessionPolicy {
             provider_id,
             session_id,
             autonomous,
-            max_turns,
+            turn_budget,
             prompt,
             generation,
         } = value;
@@ -1076,7 +1094,7 @@ impl TryFrom<RemoteProcessExecutionPolicy> for lash_core::SessionPolicy {
             provider_id,
             session_id,
             autonomous,
-            max_turns,
+            turn_budget: turn_budget.into(),
             prompt: prompt.into(),
             generation: generation.try_into()?,
         })

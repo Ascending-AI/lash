@@ -161,7 +161,7 @@ async fn create_sessions(storage: &PostgresStorage) -> Result<()> {
             .create_store(&SessionStoreCreateRequest {
                 session_id: session_id.to_string(),
                 relation: SessionRelation::Root,
-                policy: lash_core::SessionPolicy::default(),
+                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             })
             .await
             .with_context(|| format!("create session store `{session_id}`"))?;
@@ -196,7 +196,7 @@ async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str)
         ),
         Arc::new(storage.lashlang_artifact_store()),
     );
-    let core = lash::LashCore::rlm_builder(factory)
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(
             lash::ModelSpec::builder("version-bump-mock")
@@ -274,7 +274,7 @@ async fn fire_trigger(storage: &PostgresStorage, tag: &str) -> Result<FiredTrigg
     let env_store = storage.process_env_store();
     let spec = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::default(),
-        lash_core::SessionPolicy::default(),
+        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     );
     let env_ref = spec.stable_ref().context("stable process env ref")?;
     env_store

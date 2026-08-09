@@ -908,7 +908,7 @@ finish "done through route"
                     .expect("artifact store"),
             ),
         );
-        let core = LashCore::rlm_builder(factory)
+        let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .provider(provider)
             .model(
                 lash::ModelSpec::builder("mock-model")

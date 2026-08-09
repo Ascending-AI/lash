@@ -224,15 +224,22 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
-    fn resolve_state_from_defaults(&self) -> RuntimeSessionState {
-        let mut state = self.initial_state.clone().unwrap_or_default();
+    fn resolve_state_from_defaults(&self) -> Result<RuntimeSessionState, SessionError> {
+        let policy = self.policy.clone().ok_or_else(|| {
+            SessionError::Protocol(
+                "embedded runtime policy is required; construct SessionPolicy with an explicit TurnBudget"
+                    .to_string(),
+            )
+        })?;
+        let mut state = self
+            .initial_state
+            .clone()
+            .unwrap_or_else(|| RuntimeSessionState::new(policy.clone()));
         if let Some(session_id) = &self.session_id {
             state.session_id = session_id.clone();
         }
-        if let Some(policy) = &self.policy {
-            state.policy = policy.clone();
-        }
-        state
+        state.policy = policy;
+        Ok(state)
     }
 
     async fn resolve_state(&self) -> Result<RuntimeSessionState, SessionError> {
@@ -276,13 +283,13 @@ impl EmbeddedRuntimeBuilder {
                 }
                 return Ok(state);
             }
-            let mut state = self.resolve_state_from_defaults();
+            let mut state = self.resolve_state_from_defaults()?;
             if let Some(policy) = &self.policy {
                 state.policy = policy.clone();
             }
             return Ok(state);
         }
-        Ok(self.resolve_state_from_defaults())
+        self.resolve_state_from_defaults()
     }
 
     fn resolve_plugins(

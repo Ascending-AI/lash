@@ -329,7 +329,7 @@ fn fig790_process_await_context(
         parent_invocation: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
-            crate::SessionPolicy::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: "fig790-session".to_string(),
         agent_frame_id: String::new(),

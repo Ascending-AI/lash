@@ -42,6 +42,7 @@ fn remote_process_start_request() -> anyhow::Result<()> {
         RemoteProcessExecutionEnvSpec, RemoteProcessExecutionPolicy, RemoteProcessInput,
         RemoteProcessModelLimits, RemoteProcessModelSpec, RemoteProcessOriginator,
         RemoteProcessPluginOptions, RemoteProcessStartRequest, RemoteRecoveryDisposition,
+        RemoteTurnBudget,
     };
     use serde_json::json;
 
@@ -71,7 +72,7 @@ fn remote_process_start_request() -> anyhow::Result<()> {
                         output_token_capacity: Some(8_192),
                     },
                 },
-                ..Default::default()
+                ..RemoteProcessExecutionPolicy::new(RemoteTurnBudget::Unbounded)
             },
         }),
         originator: RemoteProcessOriginator::Host { scope: None },
@@ -109,7 +110,7 @@ mod asserted_process_examples {
         RemoteProcessWaitState, RemoteProcessWake, RemoteProcessWakeSpec, RemoteProcessWorkItem,
         RemoteProcessWorkSnapshot, RemoteRecoveryDisposition, RemoteRuntimeEffectKind,
         RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeScope, RemoteRuntimeSubject,
-        RemoteSessionScope, RemoteToolFailureClass,
+        RemoteSessionScope, RemoteToolFailureClass, RemoteTurnBudget,
     };
     use lash::remote::turn_result::RemoteCausalRef;
     use lash_remote_protocol::processes::{RemoteProcessIdentity, RemoteProcessRecord};
@@ -328,6 +329,9 @@ mod asserted_process_examples {
             )]),
         };
         assert!(!plugin_options.is_empty());
+        let expected_budget = RemoteTurnBudget::Bounded(
+            std::num::NonZeroUsize::new(8).expect("non-zero turn budget"),
+        );
         let policy = RemoteProcessExecutionPolicy {
             model: RemoteProcessModelSpec {
                 id: "example-model".to_string(),
@@ -341,18 +345,20 @@ mod asserted_process_examples {
             provider_id: "example-provider".to_string(),
             session_id: Some("process-session-invoice-export".to_string()),
             autonomous: true,
-            max_turns: Some(8),
+            turn_budget: expected_budget,
             prompt: Default::default(),
             generation: Default::default(),
         };
-        assert!(!policy.is_empty());
+        assert_eq!(policy.turn_budget, expected_budget);
+        assert_eq!(policy.prompt, Default::default());
+        assert_eq!(policy.generation, Default::default());
         let env_spec = RemoteProcessExecutionEnvSpec {
             plugin_options,
             policy,
         };
         RemoteProcessExecutionEnvSpec::validate(&env_spec, "RemoteProcessExecutionEnvSpec")
             .expect("valid captured environment");
-        assert!(!env_spec.is_empty());
+        assert_eq!(env_spec.policy.turn_budget, expected_budget);
 
         let request = RemoteProcessStartRequest {
             protocol_version: REMOTE_PROTOCOL_VERSION,
@@ -433,7 +439,10 @@ mod asserted_process_examples {
             "process-session-invoice-export"
         );
         assert_eq!(request_json["env_spec"]["policy"]["autonomous"], true);
-        assert_eq!(request_json["env_spec"]["policy"]["max_turns"], 8);
+        assert_eq!(
+            request_json["env_spec"]["policy"]["turn_budget"],
+            json!({ "bounded": 8 })
+        );
         assert_eq!(
             request_json["env_spec"]["policy"]["model"]["id"],
             "example-model"
@@ -946,6 +955,7 @@ mod asserted_process_examples {
             RemoteRuntimeEffectKind::AwaitEvent,
             RemoteRuntimeEffectKind::PeekAwaitEvent,
         ];
+        assert!(matches!(effect_kinds[4], RemoteRuntimeEffectKind::Process));
         assert_eq!(
             serde_json::to_value(effect_kinds).expect("effect kinds serialize"),
             json!([
@@ -1293,5 +1303,41 @@ mod asserted_tool_examples {
     fn remote_io_failure_class_has_a_stable_wire_label() {
         let class = lash::remote::processes::RemoteToolFailureClass::Io;
         assert_eq!(serde_json::to_value(class).unwrap(), "io");
+    }
+
+    #[test]
+    fn explicit_turn_budget_surfaces_are_observable() {
+        let remote_budget = lash::remote::processes::RemoteTurnBudget::Bounded(
+            std::num::NonZeroUsize::new(8).expect("non-zero turn budget"),
+        );
+        let minimal_policy =
+            lash::remote::processes::RemoteProcessExecutionPolicy::new(remote_budget);
+        assert_eq!(minimal_policy.turn_budget, remote_budget);
+        let minimal_env =
+            lash::remote::processes::RemoteProcessExecutionEnvSpec::new(remote_budget);
+        assert_eq!(minimal_env.policy.turn_budget, remote_budget);
+
+        let core_budget = lash::TurnBudget::bounded(8);
+        assert!(matches!(
+            core_budget,
+            lash::TurnBudget::Bounded(limit) if limit.get() == 8
+        ));
+        let persisted = lash::persistence::PersistedSessionConfig {
+            provider_id: String::new(),
+            model: lash::ModelSpec::default(),
+            turn_budget: core_budget,
+        };
+        assert_eq!(persisted.turn_budget, core_budget);
+
+        let cap_code = lash::runtime::RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded;
+        assert!(cap_code.is_retryable());
+        let cap_error = lash::plugins::PluginError::Runtime(lash::runtime::RuntimeError::new(
+            cap_code,
+            "managed-turn cap reached",
+        ));
+        assert!(matches!(
+            cap_error,
+            lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()
+        ));
     }
 }

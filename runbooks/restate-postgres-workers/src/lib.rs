@@ -647,7 +647,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
             trace_dir.join(format!("{}.lashlang.jsonl", config.worker_id)),
         );
     }
-    let mut builder = lash::LashCore::rlm_builder(factory)
+    let mut builder = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(
             lash::ModelSpec::builder("e2e-mock")
