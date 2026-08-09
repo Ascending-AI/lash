@@ -1,0 +1,141 @@
+# Checkpoint components generalize to a keyed set
+
+## Status
+
+Accepted.
+
+## Context
+
+The RLM execution-state snapshot currently re-serializes every live global,
+scratch file, and deferred resolution whenever any of them changes. It encodes
+that state as JSON and then embeds the JSON string in another JSON document.
+Three research sessions consequently reached commit with 1.52 MiB, 1.32 MiB,
+and 1.24 MiB checkpoints against the 1 MiB budget even though a turn had
+changed only part of the retained state. Binary scratch files are also reduced
+to empty strings, and collection failures can discard the file set without a
+diagnostic.
+
+[ADR 0048](0048-checkpoint-component-identity-is-a-backend-contract.md)
+establishes a backend-independent content-addressed identity and hydration
+contract for three fixed checkpoint components. A body mints a ref, a ref
+without a body means unchanged, and an unknown ref is an error. The stores
+already write deduplicated component blobs in the checkpoint commit
+transaction and exclude unchanged bodies from the commit budget. Execution
+state needs that mechanism at a finer granularity, rather than an attachment
+store whose writes are outside the transaction and whose references do not
+have the required session visibility or retention semantics.
+
+The precedent survey supports one contract across backends. Git trees and
+blobs provide the root-manifest and reusable-leaf shape. LangGraph's Postgres
+saver deduplicates blobs by channel and version, while its SQLite saver writes
+one whole checkpoint blob; that divergence is precisely what a store-level
+contract must prevent. Restate addresses state cells by key rather than
+rewriting a whole map.
+
+## Decision
+
+The checkpoint-component contract is a keyed set rather than three fixed
+slots. An execution-state root is a small typed component with sections for
+globals, files, and deferred resolutions. The root contains every stable
+logical key and either its inline value or a content-addressed leaf descriptor.
+The logical key exists only in the root; a leaf ref contains the content hash,
+not the logical key.
+
+Each keyed component has three commit states: a present body, an unchanged ref
+without a body, or deletion by absence from the new root's complete key set.
+Stores mint refs for present bodies and hydrate unchanged refs as required by
+ADR 0048. A ref that the store cannot resolve fails with the typed
+missing-component error, extended to carry the dynamic component key. No
+backend may collapse the keyed set back into one opaque execution-state blob.
+
+Execution state uses hybrid granularity:
+
+- byte and file bodies are always leaves;
+- scalar values are always inline in the root; and
+- only composite values cross the inline-versus-leaf size line.
+
+That line is structural and profile-driven. Its threshold comes from the
+existing blob-profile machinery; this decision introduces no fixed size
+constant. Small composites stay inline, while oversized composites become
+leaves under stable logical keys. Content-defined chunking is deferred. It may
+later operate inside one oversized leaf, as Git added packfile deltas beneath
+its tree/blob model, without changing the checkpoint contract.
+
+Root and value leaves use typed MessagePack. File leaves contain their verbatim
+raw bytes. Encoding observes these normative rules:
+
+- non-finite floats round-trip, and every NaN is normalized at encode time to
+  one bit pattern;
+- values that cannot be represented fail at encode time with a typed error
+  naming the path to the offending value; they are never silently replaced
+  with null and never first discovered during restore;
+- dynamic maps are sorted, only typed structs are encoded, and
+  `#[serde(flatten)]` is forbidden;
+- byte fields use `serde_bytes` rather than MessagePack integer arrays; and
+- the minimum encoder version is pinned, including the rmp-serde fix from PR
+  257, and named-field encoding is pinned by conformance test.
+
+The canonicalization conformance test encodes the same logical state across
+runs and dependency bumps and asserts byte equality. It is the authority for
+the named struct representation despite rmp-serde accepting both map and
+sequence struct encodings. Recursive value decoding is depth-bounded. Typed
+structs only also structurally exclude the arbitrary-type reconstruction that
+caused LangGraph's GHSA-fjqc-hq36-qh5p deserialize-code-execution class.
+
+MessagePack does not preserve unknown fields. The complete serde evolution
+toolkit is therefore append-only optional fields expressed as `Option` with
+`#[serde(default)]`; there is no tolerant-read or unknown-field-preservation
+contract. Each persisted component descriptor carries its own encoding
+version. A version mismatch is a typed error that identifies the component and
+names drain or recreation as the remedy, allowing any later cutover to be
+scoped per component.
+
+Component hashes remain SHA-256 over the uncompressed logical bytes;
+compression happens only after hashing. The commit budget counts the root body
+plus the bodies of changed leaves. Unchanged leaf refs are free. Leaves and the
+root commit in the same transaction. Git's loose-object design admits a race
+in which garbage collection can remove an object after it is written but
+before a ref makes it reachable; the single checkpoint transaction admits no
+equivalent window.
+
+Reclamation remains host-owned operational policy under
+[ADR 0014](0014-operational-policy-stays-with-the-host.md) and
+[ADR 0023](0023-retention-stays-a-parameterized-host-lever.md). The root
+provides the leaf reachability manifest, but Lash does not infer a collection
+horizon or introduce an internal garbage-collection policy.
+
+Encoding follows the surveyed fail-early practice: Temporal rejects when no
+converter exists, Metaflow names an unpicklable artifact, and Ray identifies
+the nested attribute path. It rejects LangGraph's restore-time decode-to-null
+behavior. Migration follows platform practice instead of embedded-checkpointer
+practice: Temporal, Restate, and DBOS pin deployments and drain incompatible
+state, while LangGraph and Metaflow retain read-side compatibility decoders.
+Lash takes the platform side.
+
+The cutover raises the RLM snapshot version and changes the store schema. Hosts
+must drain or recreate retained execution state before deploying it, following
+the discipline in
+[ADR 0055](0055-lashlang-execution-bounds-span-durable-process-lifetimes.md).
+The record-schema-version reject pins old records to the old deployment and
+prevents them from being interpreted under the new schema. There are no
+compatibility decoders; the record and per-component version checks make that
+policy enforceable.
+
+## Consequences
+
+- A commit grows with its changed execution state rather than every value the
+  session retains, and all backends provide the same keyed deduplication
+  behavior.
+- Binary file contents remain exact, non-finite floats remain values, and
+  unsupported state fails before commit with a path-specific typed error.
+- Canonical bytes make content identity stable across runs and supported
+  dependency bumps; canonicalization changes require an explicit component
+  version cutover.
+- The snapshot-version bump and store-schema change are breaking changes.
+  Retained sessions must be drained or recreated; old records are rejected
+  rather than decoded through a compatibility path.
+- Content-defined chunking inside a large leaf remains available as a later
+  storage optimization and is not part of this decision.
+- Keyed leaves make Restate-style lazy hydration possible: a resumed execution
+  could load a value only when it is accessed, reducing restore I/O and working
+  state. The payoff is preserved, but lazy hydration itself is deferred.
