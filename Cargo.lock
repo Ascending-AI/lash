@@ -2101,6 +2101,7 @@ dependencies = [
  "fastrand",
  "futures-util",
  "http",
+ "jsonschema",
  "lash-core",
  "lash-lashlang-runtime",
  "lash-sansio",
@@ -2111,6 +2112,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
 ]
@@ -3699,6 +3701,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tracing",
+ "url",
 ]
 
 [[package]]

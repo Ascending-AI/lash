@@ -519,6 +519,7 @@ async fn dropped_pool_releases_entry_and_keepalive_task() {
                 ..MockOptions::default()
             },
         ),
+        McpHostServices::default(),
     ));
     let weak = Arc::downgrade(&entry);
     let keepalive = entry

@@ -17,7 +17,8 @@ use serde_json::{Value, json};
 use slack_clone::bot::runtime::{self, RuntimeConfig};
 use slack_clone::bot::slack_api::SlackApi;
 use slack_clone::mcp_server::{
-    API_BASE_URL_ENV, BOT_TOKEN_ENV, LIST_CHANNELS_SUMMARY_TOOL, WORKSPACE_STATS_TOOL,
+    API_BASE_URL_ENV, BOT_TOKEN_ENV, ELICIT_CONFIRMATION_TOOL, LIST_CHANNELS_SUMMARY_TOOL,
+    LIST_HOST_ROOTS_TOOL, SAMPLE_SUMMARY_TOOL, URL_ELICITATION_TOOL, WORKSPACE_STATS_TOOL,
 };
 use tokio::sync::Notify;
 
@@ -134,6 +135,7 @@ async fn fake_api(state: FakeApiState) -> (String, tokio::task::JoinHandle<()>) 
 #[derive(Clone)]
 enum Step {
     Tool(&'static str),
+    ToolWithInput(&'static str, &'static str),
     Text(&'static str),
 }
 
@@ -174,6 +176,15 @@ impl Script {
                             }],
                             ..LlmResponse::default()
                         },
+                        Step::ToolWithInput(name, input_json) => LlmResponse {
+                            parts: vec![LlmOutputPart::ToolCall {
+                                call_id: "mcp-call".to_string(),
+                                tool_name: name.to_string(),
+                                input_json: input_json.to_string(),
+                                replay: None,
+                            }],
+                            ..LlmResponse::default()
+                        },
                         Step::Text(text) => LlmResponse {
                             full_text: text.to_string(),
                             parts: vec![LlmOutputPart::Text {
@@ -192,6 +203,91 @@ impl Script {
     fn requests(&self) -> Vec<String> {
         self.requests.lock_recover().clone()
     }
+}
+
+#[tokio::test]
+async fn bundled_server_exercises_sampling_both_elicitation_modes_and_roots_through_host_seams() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let state = FakeApiState::normal();
+    let (api_base_url, _server) = fake_api(state).await;
+    let script = Script::new([
+        Step::ToolWithInput(
+            SAMPLE_SUMMARY_TOOL,
+            r#"{"text":"Lash keeps MCP policy with the embedding host."}"#,
+        ),
+        Step::Text("Host-generated summary."),
+        Step::Tool(ELICIT_CONFIRMATION_TOOL),
+        Step::Tool(URL_ELICITATION_TOOL),
+        Step::Tool(LIST_HOST_ROOTS_TOOL),
+        Step::Text("All MCP client features completed."),
+    ]);
+    let core = build_core(
+        scratch.path(),
+        &api_base_url,
+        &script,
+        direct_server_config(&api_base_url),
+    )
+    .await;
+    let session = core
+        .session("mcp-client-depth")
+        .open()
+        .await
+        .expect("open session");
+
+    let turn = session
+        .turn(TurnInput::text("@lashbot exercise MCP client depth"))
+        .run()
+        .await
+        .expect("run MCP client-depth turn");
+    assert_eq!(turn.result.tool_calls.len(), 4);
+    assert_eq!(
+        turn.result
+            .tool_calls
+            .iter()
+            .map(|call| call.tool.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            SAMPLE_SUMMARY_TOOL,
+            ELICIT_CONFIRMATION_TOOL,
+            URL_ELICITATION_TOOL,
+            LIST_HOST_ROOTS_TOOL
+        ]
+    );
+
+    let requests = script.requests();
+    assert_eq!(requests.len(), 6, "main loop plus one nested host sample");
+    assert!(
+        requests[1].contains("Summarize this in one short sentence")
+            && requests[1].contains("Lash keeps MCP policy"),
+        "the MCP server's sampling prompt reaches the host model: {}",
+        requests[1]
+    );
+    assert!(
+        requests[2].contains("Host-generated summary.") && requests[2].contains("mock/model"),
+        "the sampled result returns to the outer tool attempt: {}",
+        requests[2]
+    );
+    assert!(
+        requests[3].contains("\\\"action\\\":\\\"accept\\\"")
+            && requests[3].contains("\\\"answer\\\":\\\"yes\\\""),
+        "the host's structured elicitation answer returns to the server: {}",
+        requests[3]
+    );
+    assert!(
+        requests[4].contains("slack-clone-demo-url-1")
+            && requests[4].contains("\\\"completion_notified\\\":true"),
+        "the URL request is accepted and its completion is notified: {}",
+        requests[4]
+    );
+    assert!(
+        requests[5].contains("file://") && requests[5].contains("slack-clone"),
+        "the host-supplied workspace root returns to the server: {}",
+        requests[5]
+    );
+
+    slack_clone::bot::shutdown_core(&core)
+        .await
+        .expect("shut down bot core");
 }
 
 fn direct_server_config(api_base_url: &str) -> McpServerConfig {

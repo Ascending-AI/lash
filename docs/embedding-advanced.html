@@ -275,7 +275,9 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
           </div>
           <pre data-lang="rust" data-snippet="embedding_advanced#mcp-core"><code>use std::collections::BTreeMap;
 
-use lash_plugin_mcp::{McpPluginFactory, McpServerConfig};
+use lash_plugin_mcp::{MCP_PROTOCOL_VERSION, McpPluginFactory, McpServerConfig};
+
+println!("Lash MCP handshake protocol: {MCP_PROTOCOL_VERSION}");
 
 let mut servers = BTreeMap::new();
 servers.insert(
@@ -287,7 +289,14 @@ servers.insert(
     McpServerConfig::streamable_http("https://mcp.example.com/rpc"),
 );
 
-let mcp = McpPluginFactory::new(servers).await?;
+// Capabilities are advertised only for handlers installed here. Lash
+// routes server requests; the host still owns model, UI, and root policy.
+let mcp = McpPluginFactory::builder(servers)
+    .sampling_handler(sampling)
+    .elicitation_handler(elicitation)
+    .roots_provider(roots)
+    .build()
+    .await?;
 
 let factory = lash::rlm::RlmProtocolPluginFactory::new(
     lash::rlm::RlmProtocolPluginConfig::new(
@@ -313,6 +322,14 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .plugin(std::sync::Arc::new(mcp))
     .build()?;</code></pre>
           <p>Tools appear as <code>mcp__&lt;server&gt;__&lt;tool&gt;</code> with original schemas preserved. <code>attach_server</code> / <code>detach_server</code> mutate the live pool without rebuilding the core.</p>
+          <h3>Server-to-client requests: host owns policy</h3>
+          <p>MCP <code>2025-11-25</code> sampling, elicitation, and roots are available through three dyn-compatible host seams: <code>McpSamplingHandler</code>, <code>McpElicitationHandler</code>, and <code>McpRootsProvider</code>. Each callback receives one request struct whose sealed context identifies the server and exposes a cancellation token; interactive UI and model work must stop when that token fires. Lash validates accepted form content against the server's requested schema before writing it to the wire. Decline and cancel carry no content. URL-capable elicitation handlers also receive the matching <code>notifications/elicitation/complete</code> id.</p>
+          <p>Lash never picks a model, fabricates user input, or guesses workspace roots. The initialize handshake advertises each capability only when its handler was installed on <code>McpPluginFactory::builder</code>; an elicitation handler declares its exact form and URL modes. Call <code>notify_roots_changed()</code> after a dynamic roots provider changes. Connected servers receive <code>notifications/roots/list_changed</code>; a server that reconnects reads the current value through <code>roots/list</code>.</p>
+          <p>Sampling and elicitation execute as ordinary host I/O inside the open MCP tool attempt. Handler seams <strong>must not emit journaled effects or submit nested Lash commands</strong>: the outer attempt is the single durable journal unit. A sampling handler owns its model and billing. Its spend belongs in the host/provider trace only; it is not added to the Lash session usage ledger or <code>TurnResult</code> usage.</p>
+          <aside class="gotcha">
+            <strong>Interactive timeout</strong>
+            <p>The default <code>call_timeout_ms</code> is 60 seconds. That collides with a human-facing elicitation left open for a minute: Lash cancels the outer call and the host must dismiss the prompt. Interactive deployments must raise both <code>call_timeout_ms</code> and <code>call_max_total_timeout_ms</code> above the longest supported interaction, keeping the wall cap strictly greater than the idle timeout.</p>
+          </aside>
           <h3>Lifecycle and failure isolation</h3>
           <p>Servers connect once at <code>McpPluginFactory::new(...)</code>. Built session plugins clone the shared <code>Arc&lt;McpConnectionPool&gt;</code>, so startup cost is one-per-process, not one-per-chat.</p>
           <p>After <code>attach_server</code>, new tools are visible to sessions on their next tool-catalog refresh (start of next turn). <code>detach_server</code> shuts the server down and removes its tools; in-flight calls fail rather than hang.</p>
@@ -323,7 +340,10 @@ mcp.attach_server(
 )
 .await?;
 
-mcp.detach_server("old-tool").await?;</code></pre>
+mcp.detach_server("old-tool").await?;
+
+// Call this after the host's dynamic roots change.
+mcp.notify_roots_changed().await?;</code></pre>
           <p>Failures are isolated: an exited child, a 500ing endpoint, or a dropped SSE stream surfaces as <code>ToolResult::err(...)</code> on the affected tool; other servers keep working. If a server is unreachable at <code>new</code> time, the call fails; use <code>McpPluginFactory::empty()</code> plus runtime <code>attach_server</code> when initial connectivity is unreliable.</p>
         </div>
 

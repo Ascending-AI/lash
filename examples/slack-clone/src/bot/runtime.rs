@@ -20,6 +20,7 @@ use lash::{LashCore, ModelSpec, SessionSpec};
 use lash_plugin_mcp::{McpPluginFactory, McpServerConfig};
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 
+use super::mcp_client::{DemoElicitationHandler, DemoRootsProvider, DemoSamplingHandler};
 use super::slack_api::SlackApi;
 use super::tools;
 use crate::mcp_server::{API_BASE_URL_ENV, BOT_TOKEN_ENV};
@@ -128,8 +129,17 @@ pub async fn build_core(
     let mcp = if config.mcp_servers.is_empty() {
         None
     } else {
+        let workspace = std::env::current_dir()
+            .context("resolve workspace root for the demo MCP roots provider")?;
         let mcp = Arc::new(
-            McpPluginFactory::new(config.mcp_servers.clone())
+            McpPluginFactory::builder(config.mcp_servers.clone())
+                .sampling_handler(Arc::new(DemoSamplingHandler::new(
+                    provider.clone(),
+                    model.clone(),
+                )))
+                .elicitation_handler(Arc::new(DemoElicitationHandler))
+                .roots_provider(Arc::new(DemoRootsProvider::new(&workspace)))
+                .build()
                 .await
                 .context("connect slack-clone MCP servers")?,
         );
@@ -246,9 +256,12 @@ fn bot_prompt(include_demo_mcp: bool) -> PromptLayer {
     if include_demo_mcp {
         prompt = prompt.with_contribution(PromptContribution::guidance(
             "MCP workspace tools",
-            "The bundled MCP server exposes `mcp__slack_clone__list_channels_summary` and \
-             `mcp__slack_clone__workspace_stats`; use those when the question asks for a \
-             compact channel summary or aggregate workspace counts.",
+            "The bundled MCP server exposes workspace reads plus four client-depth demos: \
+             `mcp__slack_clone__sample_summary` asks the host model to summarize, \
+             `mcp__slack_clone__elicit_confirmation` asks the host a structured question, \
+             `mcp__slack_clone__elicit_via_url` exercises a URL flow and completion, and \
+             `mcp__slack_clone__list_host_roots` reads host-supplied workspace roots. Use the \
+             exact tool the request names; do not fabricate any of their results.",
         ));
     }
     prompt
