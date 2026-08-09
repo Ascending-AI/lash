@@ -16620,6 +16620,33 @@ disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
+symbol = "lash::persistence::StoreError::GraphGenerationCollision"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::GraphGenerationCollision"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: graph generation uniqueness failures remain typed instead of leaking backend constraint errors."
+
+[[api]]
+symbol = "lash::persistence::StoreError::GraphGenerationCollision::generation"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::GraphGenerationCollision::generation"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: the typed conflict identifies the colliding graph generation."
+
+[[api]]
+symbol = "lash::persistence::StoreError::GraphGenerationCollision::session_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::GraphGenerationCollision::session_id"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete durable-store integrator class: the typed conflict identifies the session whose generation was already occupied."
+
+[[api]]
 symbol = "lash::persistence::StoreError::MonotonicCounterOverflow"
 kind = "variant"
 availability = "default+all-features"
@@ -69341,3 +69368,155 @@ aliases = ["lash_core::TraceEvent::ToolCallCompleted::attempts"]
 area = "observation-admin"
 disposition = "unused-justify"
 reason = "Concrete host class: custom observability sink implementers consuming structured retry-attempt trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphFactObservation"
+kind = "struct"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance seam projects immutable graph facts for cross-definition validation."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphFactObservation::frame_node_id"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance observation exposes the persisted nearest-frame pointer."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphFactObservation::generation"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance observation exposes the persisted node generation."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphFactObservation::is_frame"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance observation identifies frame-opening payloads for pointer congruence."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphFactObservation::node_id"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance observation identifies the durable graph row."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphFactObservation::owning_session_id"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance observation exposes immutable node ownership for independent per-owner ceiling derivation."
+
+[[api]]
+symbol = "lash::testing::conformance::GraphFactObservation::parent_node_id"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance observation exposes edge authority for generation comparison."
+
+[[api]]
+symbol = "lash::testing::conformance::LineageConformanceHandles"
+kind = "struct"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance bundle supplies a session factory and raw lineage injector."
+
+[[api]]
+symbol = "lash::testing::conformance::LineageConformanceHandles::factory"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance bundle exposes the zero-copy fork implementation under test."
+
+[[api]]
+symbol = "lash::testing::conformance::LineageConformanceHandles::injector"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance bundle exposes raw fact, lineage, and tombstone test seams."
+
+[[api]]
+symbol = "lash::testing::conformance::LineageConformanceInjector"
+kind = "trait"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance seam lets all bundled stores expose raw edge facts and lets SQL stores inject invalid accelerator states."
+
+[[api]]
+symbol = "lash::testing::conformance::LineageConformanceInjector::all_graph_facts"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance hook exposes raw nodes so readability can be compared with edge reachability in both directions."
+
+[[api]]
+symbol = "lash::testing::conformance::LineageConformanceInjector::edge_path"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance hook reconstructs the head path from raw parent edges without trusting lineage rows."
+
+[[api]]
+symbol = "lash::testing::conformance::LineageConformanceInjector::force_lineage"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance hook proves a lineage accelerator row cannot grant authority."
+
+[[api]]
+symbol = "lash::testing::conformance::LineageConformanceInjector::lineage_ancestors"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance hook observes zero-node ancestor collapse."
+
+[[api]]
+symbol = "lash::testing::conformance::LineageConformanceInjector::tombstone_node"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance hook injects a mid-segment tombstone for corruption refusal."
+
+[[api]]
+symbol = "lash::testing::conformance::fork_lineage_conformance"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Shared in-memory, SQLite, and PostgreSQL suite proves lineage readability matches edge reachability."
+
+[[api]]
+symbol = "lash::testing::conformance::fork_lineage_no_carrier_law"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Shared backend law proves a pinned node remains forkable after its owner is deleted without a surviving lineage carrier."
+
+[[api]]
+symbol = "lash::testing::conformance::fork_plan_matches_edge_walk_law"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Shared backend law independently compares installed inherited ceilings with per-owner maxima from the raw edge walk."
