@@ -24,8 +24,8 @@ use futures_util::future::join_all;
 use http::{HeaderName, HeaderValue};
 use rmcp::ServiceError;
 use rmcp::model::{
-    CallToolRequestParams, ClientInfo, ClientRequest, Content, Implementation, PingRequest,
-    ProtocolVersion, RawContent, Request, ResourceContents, ServerResult,
+    CallToolRequestParams, ClientRequest, Content, PingRequest, ProtocolVersion, RawContent,
+    Request, ResourceContents, ServerResult,
 };
 use rmcp::service::{Peer, PeerRequestOptions, RoleClient, RunningService, ServiceExt};
 use rmcp::transport::child_process::TokioChildProcess;
@@ -46,12 +46,14 @@ use lash_tool_support::ToolDefinitionLashlangExt;
 use crate::config::McpCallPolicy;
 use crate::config::{McpServerConfig, TimeoutDisconnectPolicy};
 use crate::error::McpError;
+use crate::host::{LashMcpClientHandler, McpHostServices};
 use crate::naming;
 
 /// Shared, per-core connection pool. Wrapped in `Arc` and cloned into each
 /// session plugin instance.
 pub struct McpConnectionPool {
     entries: RwLock<BTreeMap<String, Arc<McpEntry>>>,
+    host_services: McpHostServices,
     shut_down: AtomicBool,
 }
 
@@ -69,9 +71,10 @@ pub struct McpServerStatus {
 struct McpEntry {
     server_name: String,
     config: McpServerConfig,
+    host_services: McpHostServices,
     /// `None` while disconnected. Once connected we keep the running service
     /// handle alive; the transport owns its own process internally.
-    service: tokio::sync::Mutex<Option<RunningService<RoleClient, ClientInfo>>>,
+    service: tokio::sync::Mutex<Option<RunningService<RoleClient, LashMcpClientHandler>>>,
     /// Cached, prefixed tool definitions for this server, refreshed on every
     /// successful (re)connect and kept across a disconnect so the tool
     /// surface stays stable. Keys are the prefixed names
@@ -110,8 +113,13 @@ struct ImportedTool {
 impl McpConnectionPool {
     /// Construct an empty pool.
     pub fn empty() -> Self {
+        Self::empty_with_host_services(McpHostServices::default())
+    }
+
+    pub(crate) fn empty_with_host_services(host_services: McpHostServices) -> Self {
         Self {
             entries: RwLock::new(BTreeMap::new()),
+            host_services,
             shut_down: AtomicBool::new(false),
         }
     }
@@ -124,10 +132,21 @@ impl McpConnectionPool {
     pub async fn connect(
         servers: BTreeMap<String, McpServerConfig>,
     ) -> Result<Arc<Self>, McpError> {
-        let pool = Arc::new(Self::empty());
+        Self::connect_with_host_services(servers, McpHostServices::default()).await
+    }
+
+    pub(crate) async fn connect_with_host_services(
+        servers: BTreeMap<String, McpServerConfig>,
+        host_services: McpHostServices,
+    ) -> Result<Arc<Self>, McpError> {
+        let pool = Arc::new(Self::empty_with_host_services(host_services));
         for (name, config) in servers {
             config.validate(&name)?;
-            let entry = Arc::new(McpEntry::new(name.clone(), config));
+            let entry = Arc::new(McpEntry::new(
+                name.clone(),
+                config,
+                pool.host_services.clone(),
+            ));
             if let Err(rejected) = pool.install(name.clone(), Arc::clone(&entry)) {
                 rejected.cancel();
                 rejected.shutdown().await;
@@ -163,7 +182,11 @@ impl McpConnectionPool {
             ));
         }
         config.validate(&server_name)?;
-        let entry = Arc::new(McpEntry::new(server_name.clone(), config));
+        let entry = Arc::new(McpEntry::new(
+            server_name.clone(),
+            config,
+            self.host_services.clone(),
+        ));
         entry.establish().await?;
         let _ = entry.spawn_keepalive_loop();
         if let Err(rejected) = self.install(server_name, entry) {
@@ -218,6 +241,52 @@ impl McpConnectionPool {
                 tool_count: entry.imported_tools.read_recover().len(),
             })
             .collect()
+    }
+
+    /// Notify every connected server that the host's roots may have changed.
+    ///
+    /// Disconnected servers are skipped: they receive the current list from
+    /// the same provider after reconnecting and issuing `roots/list`.
+    #[allow(
+        deprecated,
+        reason = "MCP 2025-11-25 still defines roots notifications"
+    )]
+    pub async fn notify_roots_changed(&self) -> Result<(), McpError> {
+        if !self.host_services.has_roots() {
+            return Err(McpError::Config(
+                "cannot notify MCP roots changes without a roots provider".to_string(),
+            ));
+        }
+        if self.shut_down.load(Ordering::SeqCst) {
+            return Err(McpError::Protocol(
+                "MCP connection pool has already shut down".to_string(),
+            ));
+        }
+
+        let entries: Vec<Arc<McpEntry>> = self
+            .entries
+            .read_recover()
+            .values()
+            .filter(|entry| entry.connected.load(Ordering::SeqCst))
+            .cloned()
+            .collect();
+        let mut peers = Vec::with_capacity(entries.len());
+        for entry in entries {
+            if let Some(service) = entry.service.lock().await.as_ref() {
+                peers.push((entry.server_name.clone(), service.peer().clone()));
+            }
+        }
+        let failures = collect_notification_failures(peers, |peer| async move {
+            peer.notify_roots_list_changed().await
+        })
+        .await;
+        if !failures.is_empty() {
+            return Err(McpError::Protocol(format!(
+                "failed to notify MCP servers that roots changed: {}",
+                failures.join("; ")
+            )));
+        }
+        Ok(())
     }
 
     /// All advertised tools across every server, with `mcp__<server>__<tool>`
@@ -440,6 +509,30 @@ impl McpConnectionPool {
     }
 }
 
+async fn collect_notification_failures<T, E, F, Fut>(
+    targets: Vec<(String, T)>,
+    notify: F,
+) -> Vec<String>
+where
+    E: std::fmt::Display,
+    F: Fn(T) -> Fut,
+    Fut: std::future::Future<Output = Result<(), E>>,
+{
+    join_all(targets.into_iter().map(|(server_name, target)| {
+        let notification = notify(target);
+        async move {
+            notification
+                .await
+                .err()
+                .map(|error| format!("`{server_name}`: {error}"))
+        }
+    }))
+    .await
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
 fn pool_shut_down_failure() -> ToolResult {
     ToolResult::failure(ToolFailure {
         class: ToolFailureClass::Unavailable,
@@ -462,10 +555,11 @@ fn is_connection_loss(err: &ServiceError) -> bool {
 }
 
 impl McpEntry {
-    fn new(server_name: String, config: McpServerConfig) -> Self {
+    fn new(server_name: String, config: McpServerConfig, host_services: McpHostServices) -> Self {
         Self {
             server_name,
             config,
+            host_services,
             service: tokio::sync::Mutex::new(None),
             imported_tools: RwLock::new(BTreeMap::new()),
             connected: AtomicBool::new(false),
@@ -508,7 +602,7 @@ impl McpEntry {
         }
         let service = timeout(
             self.config.startup_timeout(),
-            connect_service(&self.server_name, &self.config),
+            connect_service(&self.server_name, &self.config, self.host_services.clone()),
         )
         .await
         .map_err(|_| McpError::StartupTimeout {
@@ -517,7 +611,7 @@ impl McpEntry {
         })??;
 
         if self.cancelled.load(Ordering::SeqCst) {
-            let _ = service.cancel().await;
+            cancel_running_service(service).await;
             return Err(McpError::Protocol(format!(
                 "MCP connection for `{}` was cancelled during startup",
                 self.server_name
@@ -545,7 +639,7 @@ impl McpEntry {
             },
             () = self.cancelled_notify.notified() => {
                 if self.cancelled.load(Ordering::SeqCst) {
-                    let _ = service.cancel().await;
+                    cancel_running_service(service).await;
                     return Err(McpError::Protocol(format!(
                         "MCP connection for `{}` was cancelled during discovery",
                         self.server_name
@@ -558,14 +652,14 @@ impl McpEntry {
             Ok(tools) => tools,
             Err(error) => {
                 if self.cancelled.load(Ordering::SeqCst) {
-                    let _ = service.cancel().await;
+                    cancel_running_service(service).await;
                 }
                 return Err(error);
             }
         };
 
         if self.cancelled.load(Ordering::SeqCst) {
-            let _ = service.cancel().await;
+            cancel_running_service(service).await;
             return Err(McpError::Protocol(format!(
                 "MCP connection for `{}` was cancelled before installation",
                 self.server_name
@@ -654,7 +748,7 @@ impl McpEntry {
             guard.take()
         };
         if let Some(service) = service {
-            let _ = service.cancel().await;
+            cancel_running_service(service).await;
         }
         if !self.cancelled.load(Ordering::SeqCst) {
             self.spawn_reconnect_loop();
@@ -897,12 +991,18 @@ impl McpEntry {
     async fn cancel_service(&self) {
         let service = self.service.lock().await.take();
         if let Some(service) = service {
-            // `cancel` consumes the service and waits for rmcp's graceful
-            // cancellation plus transport-task drain. Errors only surface if
-            // the transport already shut down; ignore them.
-            let _ = service.cancel().await;
+            cancel_running_service(service).await;
         }
     }
+}
+
+async fn cancel_running_service(service: RunningService<RoleClient, LashMcpClientHandler>) {
+    let request_tasks = service.service().request_tasks();
+    request_tasks.shutdown().await;
+    // `cancel` consumes the service and waits for rmcp's graceful cancellation
+    // plus transport-task drain. Errors only surface if the transport already
+    // shut down; ignore them.
+    let _ = service.cancel().await;
 }
 
 fn full_jitter(max: Duration) -> Duration {
@@ -913,12 +1013,9 @@ fn full_jitter(max: Duration) -> Duration {
 async fn connect_service(
     server_name: &str,
     config: &McpServerConfig,
-) -> Result<RunningService<RoleClient, ClientInfo>, McpError> {
-    let mut implementation = Implementation::default();
-    implementation.name = "lash".to_string();
-    implementation.version = env!("CARGO_PKG_VERSION").to_string();
-    let mut client_info = ClientInfo::default();
-    client_info.client_info = implementation;
+    host_services: McpHostServices,
+) -> Result<RunningService<RoleClient, LashMcpClientHandler>, McpError> {
+    let client_handler = LashMcpClientHandler::new(server_name, host_services);
 
     match config {
         McpServerConfig::Stdio {
@@ -941,7 +1038,7 @@ async fn connect_service(
                     "failed to spawn `{command}` for `{server_name}`: {err}"
                 ))
             })?;
-            client_info.serve(transport).await.map_err(|err| {
+            client_handler.serve(transport).await.map_err(|err| {
                 McpError::Protocol(format!("MCP handshake with `{server_name}`: {err}"))
             })
         }
@@ -950,7 +1047,7 @@ async fn connect_service(
             let config = StreamableHttpClientTransportConfig::with_uri(url.as_str())
                 .custom_headers(custom_headers);
             let transport = StreamableHttpClientTransport::from_config(config);
-            client_info.serve(transport).await.map_err(|err| {
+            client_handler.serve(transport).await.map_err(|err| {
                 McpError::Protocol(format!("MCP handshake with `{server_name}`: {err}"))
             })
         }

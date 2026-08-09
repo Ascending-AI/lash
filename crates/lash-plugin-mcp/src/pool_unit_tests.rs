@@ -1,6 +1,29 @@
 use super::*;
 use lash_sansio::sync::RwLockExt;
 
+#[tokio::test]
+async fn roots_notification_failures_are_aggregated_after_every_attempt() {
+    let attempts = Arc::new(AtomicU64::new(0));
+    let failures = collect_notification_failures(
+        vec![
+            ("alpha".to_string(), Some("offline")),
+            ("bravo".to_string(), None),
+            ("charlie".to_string(), Some("closed")),
+        ],
+        |failure| {
+            let attempts = Arc::clone(&attempts);
+            async move {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                failure.map_or(Ok(()), Err)
+            }
+        },
+    )
+    .await;
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    assert_eq!(failures, ["`alpha`: offline", "`charlie`: closed"]);
+}
+
 /// Regression for the header-drop bug: custom/auth headers configured for
 /// an HTTP MCP server must be translated into the `http` header types the
 /// transport actually sends. Before the fix, `connect_service` called
@@ -238,6 +261,7 @@ async fn shutdown_all_wakes_sleeping_keepalive_loop() {
             },
             binary_content_attachments: false,
         },
+        McpHostServices::default(),
     ));
     assert!(
         pool.install("keepalive".to_string(), Arc::clone(&entry))
@@ -478,7 +502,7 @@ async fn discovery_hang_surfaces_startup_timeout() {
         binary_content_attachments: false,
     };
 
-    let entry = McpEntry::new("hangs".to_string(), config);
+    let entry = McpEntry::new("hangs".to_string(), config, McpHostServices::default());
     match entry.establish().await {
         Err(McpError::StartupTimeout { .. }) => {}
         Err(other) => panic!("expected StartupTimeout from a hung tools/list, got {other:?}"),

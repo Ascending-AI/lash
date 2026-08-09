@@ -14,12 +14,63 @@ use lash_core::{
 
 use crate::config::McpServerConfig;
 use crate::error::McpError;
+use crate::host::{
+    McpElicitationHandler, McpElicitationService, McpHostServices, McpRootsProvider,
+    McpSamplingHandler,
+};
 use crate::pool::McpConnectionPool;
 
 /// Plugin factory for MCP. Add once to `LashCoreBuilder` via
 /// `.plugin(Arc::new(factory))`.
 pub struct McpPluginFactory {
     pool: Arc<McpConnectionPool>,
+}
+
+/// Builder for an MCP plugin factory and its host-owned client handlers.
+pub struct McpPluginFactoryBuilder {
+    servers: BTreeMap<String, McpServerConfig>,
+    host_services: McpHostServices,
+    elicitation_handler: Option<Arc<dyn McpElicitationHandler>>,
+}
+
+impl McpPluginFactoryBuilder {
+    /// Route `sampling/createMessage` through the supplied host handler.
+    pub fn sampling_handler(mut self, handler: Arc<dyn McpSamplingHandler>) -> Self {
+        self.host_services.sampling = Some(handler);
+        self
+    }
+
+    /// Route `elicitation/create` through the supplied host handler.
+    pub fn elicitation_handler(mut self, handler: Arc<dyn McpElicitationHandler>) -> Self {
+        self.elicitation_handler = Some(handler);
+        self
+    }
+
+    /// Supply workspace roots and enable roots-change notifications.
+    pub fn roots_provider(mut self, provider: Arc<dyn McpRootsProvider>) -> Self {
+        self.host_services.roots = Some(provider);
+        self
+    }
+
+    /// Connect the configured servers and build the factory.
+    pub async fn build(mut self) -> Result<McpPluginFactory, McpError> {
+        if let Some(handler) = self.elicitation_handler {
+            let capability = handler.capability();
+            if capability.form.is_none() && capability.url.is_none() {
+                return Err(McpError::Config(
+                    "an MCP elicitation handler must advertise form, URL, or both modes"
+                        .to_string(),
+                ));
+            }
+            self.host_services.elicitation = Some(McpElicitationService {
+                handler,
+                capability,
+            });
+        }
+        let pool =
+            McpConnectionPool::connect_with_host_services(self.servers, self.host_services).await?;
+        Ok(McpPluginFactory { pool })
+    }
 }
 
 impl McpPluginFactory {
@@ -31,8 +82,17 @@ impl McpPluginFactory {
     /// cloning the factory and adding it to multiple `LashCore`s shares the
     /// same connections.
     pub async fn new(servers: BTreeMap<String, McpServerConfig>) -> Result<Self, McpError> {
-        let pool = McpConnectionPool::connect(servers).await?;
-        Ok(Self { pool })
+        Self::builder(servers).build().await
+    }
+
+    /// Configure servers together with optional host-owned sampling,
+    /// elicitation, and roots handlers.
+    pub fn builder(servers: BTreeMap<String, McpServerConfig>) -> McpPluginFactoryBuilder {
+        McpPluginFactoryBuilder {
+            servers,
+            host_services: McpHostServices::default(),
+            elicitation_handler: None,
+        }
     }
 
     /// Empty pool — useful when servers are added at runtime via
@@ -69,6 +129,11 @@ impl McpPluginFactory {
     /// connection error for servers currently reconnecting in the background.
     pub fn server_statuses(&self) -> Vec<crate::pool::McpServerStatus> {
         self.pool.server_statuses()
+    }
+
+    /// Notify connected servers that the host's current roots changed.
+    pub async fn notify_roots_changed(&self) -> Result<(), McpError> {
+        self.pool.notify_roots_changed().await
     }
 }
 

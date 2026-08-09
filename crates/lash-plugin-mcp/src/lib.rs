@@ -19,11 +19,28 @@
 
 pub mod config;
 pub mod error;
+pub mod host;
 pub mod naming;
 pub mod plugin;
 pub mod pool;
 
 pub use config::{McpCallPolicy, McpServerConfig, TimeoutDisconnectPolicy};
 pub use error::McpError;
-pub use plugin::{McpDeferredToolProvider, McpPluginFactory, McpToolProvider};
+pub use host::{
+    MCP_PROTOCOL_VERSION, McpElicitationHandler, McpElicitationRequest,
+    McpElicitationValidationError, McpNotificationContext, McpRequestContext, McpRootsProvider,
+    McpRootsRequest, McpSamplingHandler, McpSamplingRequest, McpUrlElicitationComplete,
+};
+pub use plugin::{
+    McpDeferredToolProvider, McpPluginFactory, McpPluginFactoryBuilder, McpToolProvider,
+};
 pub use pool::{McpConnectionPool, McpServerStatus};
+pub use rmcp::model::{
+    CreateElicitationRequestParams, CreateElicitationResult, CreateMessageRequestParams,
+    CreateMessageResult, ElicitationAction, ElicitationCapability, ErrorData as McpProtocolError,
+    FormElicitationCapability, Root, SamplingMessage, SamplingMessageContent,
+    UrlElicitationCapability,
+};
+
+#[cfg(test)]
+mod client_depth_tests;
