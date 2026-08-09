@@ -43,6 +43,8 @@ async fn run() -> Result<(), String> {
             let mut max_boundaries = None;
             let mut shard = None;
             let mut mode = lash_sim::runner::SimRunMode::Evidence;
+            let mut salt = None;
+            let mut corpus = None;
             while let Some(arg) = args.next() {
                 match arg.as_str() {
                     "--out" => out = args.next().map(PathBuf::from),
@@ -85,6 +87,18 @@ async fn run() -> Result<(), String> {
                         mode = lash_sim::runner::SimRunMode::parse(&raw)
                             .map_err(|err| format!("{err}\n\n{}", usage()))?;
                     }
+                    "--salt" => {
+                        salt = Some(
+                            args.next()
+                                .ok_or_else(|| format!("missing --salt value\n\n{}", usage()))?,
+                        );
+                    }
+                    "--corpus" => {
+                        corpus = Some(
+                            args.next()
+                                .ok_or_else(|| format!("missing --corpus value\n\n{}", usage()))?,
+                        );
+                    }
                     "-h" | "--help" => return Err(usage()),
                     other => return Err(format!("unknown argument `{other}`\n\n{}", usage())),
                 }
@@ -110,6 +124,18 @@ async fn run() -> Result<(), String> {
                     usage()
                 ));
             }
+            if salt.is_some() && corpus.is_some() {
+                return Err(format!(
+                    "--salt and --corpus are mutually exclusive\n\n{}",
+                    usage()
+                ));
+            }
+            if !explicit_seeds.is_empty() && (salt.is_some() || corpus.is_some()) {
+                return Err(format!(
+                    "--salt and --corpus apply to count-based --seeds runs only\n\n{}",
+                    usage()
+                ));
+            }
             let seeds = match seeds {
                 Some(seeds) => seeds,
                 None => lash_sim::generator::default_seed_count(&profile)
@@ -121,6 +147,10 @@ async fn run() -> Result<(), String> {
                     .map_err(|err| err.to_string())?,
             };
             let report = if explicit_seeds.is_empty() {
+                let seed_source = match corpus {
+                    Some(corpus) => lash_sim::runner::SimSeedSource::regression_corpus(&corpus)?,
+                    None => lash_sim::runner::SimSeedSource::exploration(salt),
+                };
                 lash_sim::run_generated_sim_profile(
                     out.as_path(),
                     &profile,
@@ -128,6 +158,7 @@ async fn run() -> Result<(), String> {
                     max_boundaries,
                     shard.unwrap_or(lash_sim::generator::SimShard::FULL),
                     mode,
+                    seed_source,
                 )
                 .await
                 .map_err(|err| err.to_string())?
@@ -437,7 +468,7 @@ fn parse_u64(name: &str, raw: &str) -> Result<u64, String> {
 fn usage() -> String {
     "Usage:
   lash-sim fixed-scripts --out <artifact-root>
-  lash-sim run --out <artifact-root> [--profile fast-random] [--seeds N | --seed U64 ...] [--max-boundaries N] [--shard I/N] [--mode evidence|search]
+  lash-sim run --out <artifact-root> [--profile fast-random] [--seeds N | --seed U64 ...] [--max-boundaries N] [--shard I/N] [--mode evidence|search] [--salt TEXT | --corpus weekly-fixed-v1]
   lash-sim run-postgres --out <artifact-root> [--profile fast-random] --seed U64 ... [--max-boundaries N]
   lash-sim replay <trace> [--out <artifact-root>]
   lash-sim replay-sqlite <trace> --out <artifact-root>

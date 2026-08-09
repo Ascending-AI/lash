@@ -218,7 +218,8 @@ pub use generated_driver::{
     run_generated_postgres_replay_for_seeds,
 };
 pub use generated_profiles::{
-    SimRunMode, SimRunModeError, run_generated_sim_profile, run_generated_sim_profile_for_seeds,
+    SimRunMode, SimRunModeError, SimSeedSource, WEEKLY_REGRESSION_CORPUS,
+    run_generated_sim_profile, run_generated_sim_profile_for_seeds,
 };
 
 use agent_contracts::*;

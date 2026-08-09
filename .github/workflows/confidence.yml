@@ -28,6 +28,9 @@ env:
   # worktree-qualified by default.
   LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence
   LASH_CI_FEATURES: ""
+  # External run entropy: recorded in each sim-search summary so every seed is
+  # reproducible without introducing entropy inside the deterministic world.
+  LASH_SIM_RUN_SALT: github-${{ github.run_id }}-attempt-${{ github.run_attempt }}
 
 jobs:
   confidence:

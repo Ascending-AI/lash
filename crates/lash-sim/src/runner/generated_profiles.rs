@@ -1,4 +1,5 @@
 use super::*;
+use crate::trace::value_digest;
 
 /// Anti-vacuity: across the whole generated seed set, the interleaving,
 /// suspend/resume, and transport-mutation boundary classes must EACH appear at
@@ -61,6 +62,69 @@ pub enum SimRunMode {
     Search,
 }
 
+pub const WEEKLY_REGRESSION_CORPUS: &str = "weekly-fixed-v1";
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SimSeedSource {
+    Exploration { salt: String },
+    RegressionCorpus,
+    Explicit,
+}
+
+impl SimSeedSource {
+    pub fn exploration(salt: Option<String>) -> Self {
+        Self::Exploration {
+            salt: salt.unwrap_or_else(random_run_salt),
+        }
+    }
+
+    pub fn regression_corpus(name: &str) -> Result<Self, String> {
+        if name == WEEKLY_REGRESSION_CORPUS {
+            Ok(Self::RegressionCorpus)
+        } else {
+            Err(format!(
+                "unknown simulation seed corpus `{name}`; expected `{WEEKLY_REGRESSION_CORPUS}`"
+            ))
+        }
+    }
+
+    fn seed(&self, profile: &str, seed_index: usize) -> u64 {
+        match self {
+            Self::Exploration { salt } => generated_seed(profile, salt, seed_index),
+            Self::RegressionCorpus => regression_corpus_seed(profile, seed_index),
+            Self::Explicit => unreachable!("explicit seeds bypass count-based derivation"),
+        }
+    }
+
+    fn source_name(&self) -> &'static str {
+        match self {
+            Self::Exploration { .. } => "salted_exploration",
+            Self::RegressionCorpus => "named_regression_corpus",
+            Self::Explicit => "explicit_seeds",
+        }
+    }
+
+    fn salt(&self) -> Option<&str> {
+        match self {
+            Self::Exploration { salt } => Some(salt),
+            Self::RegressionCorpus => None,
+            Self::Explicit => None,
+        }
+    }
+
+    fn corpus(&self) -> Option<&'static str> {
+        match self {
+            Self::Exploration { .. } => None,
+            Self::RegressionCorpus => Some(WEEKLY_REGRESSION_CORPUS),
+            Self::Explicit => None,
+        }
+    }
+}
+
+fn random_run_salt() -> String {
+    format!("{:016x}{:016x}", fastrand::u64(..), fastrand::u64(..))
+}
+
 #[derive(Clone, Debug)]
 pub struct SimRunModeError(String);
 
@@ -99,6 +163,7 @@ struct GeneratedRunLabels {
     shard: String,
     configured_seeds: usize,
     mode: SimRunMode,
+    seed_source: SimSeedSource,
 }
 
 pub async fn run_generated_sim_profile(
@@ -108,14 +173,15 @@ pub async fn run_generated_sim_profile(
     max_boundaries: usize,
     shard: SimShard,
     mode: SimRunMode,
+    seed_source: SimSeedSource,
 ) -> Result<GeneratedSimProfileReport, FixedScriptRunnerError> {
     lash_core::panic_containment::set_loud(true);
     let configured_seeds = seeds.max(1);
-    let seed_values = (0..configured_seeds)
+    let indexed_seeds = (0..configured_seeds)
         .filter(|seed_index| shard.selects(*seed_index))
-        .map(|seed_index| generated_seed(profile, seed_index))
+        .map(|seed_index| (seed_index, seed_source.seed(profile, seed_index)))
         .collect::<Vec<_>>();
-    if seed_values.is_empty() {
+    if indexed_seeds.is_empty() {
         return Err(FixedScriptRunnerError::Assertion(format!(
             "shard {} selects no seeds from a configured count of {configured_seeds}",
             shard.label()
@@ -125,13 +191,17 @@ pub async fn run_generated_sim_profile(
         shard: shard.label(),
         configured_seeds,
         mode,
+        seed_source,
     };
     match mode {
         SimRunMode::Evidence => {
             Box::pin(run_generated_evidence_profile(
                 artifact_root.as_ref(),
                 profile,
-                &seed_values,
+                &indexed_seeds
+                    .iter()
+                    .map(|(_, seed)| *seed)
+                    .collect::<Vec<_>>(),
                 max_boundaries,
                 labels,
             ))
@@ -141,7 +211,7 @@ pub async fn run_generated_sim_profile(
             Box::pin(run_generated_search_profile(
                 artifact_root.as_ref(),
                 profile,
-                &seed_values,
+                &indexed_seeds,
                 max_boundaries,
                 labels,
             ))
@@ -161,6 +231,7 @@ pub async fn run_generated_sim_profile_for_seeds(
         shard: SimShard::FULL.label(),
         configured_seeds: seed_values.len(),
         mode: SimRunMode::Evidence,
+        seed_source: SimSeedSource::Explicit,
     };
     Box::pin(run_generated_evidence_profile(
         artifact_root.as_ref(),
@@ -422,6 +493,15 @@ async fn run_generated_evidence_profile(
         shard: labels.shard,
         configured_seeds: labels.configured_seeds,
         mode: labels.mode.as_str(),
+        seed_source: labels.seed_source.source_name(),
+        seed_salt: labels.seed_source.salt().map(ToString::to_string),
+        seed_corpus: labels.seed_source.corpus(),
+        determinism_sample: GeneratedDeterminismSample {
+            policy: "not_applicable_to_evidence_mode",
+            selected_seed_indices: Vec::new(),
+            checked_seeds: 0,
+            reproduced_identically: 0,
+        },
         generator_version: GENERATOR_VERSION,
         script_bundle_hash: fixed_manifest.script_bundle_hash.clone(),
         provider_manifest_path: GENERATED_SIM_PROVIDER_MANIFEST,
@@ -482,7 +562,7 @@ async fn run_generated_evidence_profile(
 async fn run_generated_search_profile(
     artifact_root: &Path,
     profile: &str,
-    seed_values: &[u64],
+    indexed_seeds: &[(usize, u64)],
     max_boundaries: usize,
     labels: GeneratedRunLabels,
 ) -> Result<GeneratedSimProfileReport, FixedScriptRunnerError> {
@@ -538,7 +618,13 @@ async fn run_generated_search_profile(
     let mut interleaving_depth_max = 0usize;
     let mut interleaving_depth_min = usize::MAX;
 
-    for seed in seed_values.iter().copied() {
+    let selected_determinism_indices = indexed_seeds
+        .iter()
+        .filter_map(|(index, _)| (index % 20 == 0).then_some(*index))
+        .collect::<Vec<_>>();
+    let mut reproduced_identically = 0usize;
+
+    for (seed_index, seed) in indexed_seeds.iter().copied() {
         let workload = generate_workload(seed, profile, boundary_limit)?;
         let seed_dir = failures_dir.join(format!("seed-{seed:016x}"));
         let trace_path = seed_dir.join("trace.json");
@@ -591,7 +677,29 @@ async fn run_generated_search_profile(
             Ok(_) => oracle_passes += 1,
             Err(_) => oracle_failures += 1,
         }
-        if trace.oracle.is_passed() && replay_outcome.is_ok() {
+        let determinism_failure = if seed_index % 20 == 0 {
+            let rerun = run_generated_workload(
+                generate_workload(seed, profile, boundary_limit)?,
+                &fixed_manifest.script_bundle_hash,
+                &labels.shard,
+                &trace_path,
+            )
+            .await?;
+            match require_identical_simulation_rerun(seed_index, &trace, &rerun) {
+                Ok(()) => {
+                    reproduced_identically += 1;
+                    oracle_passes += 1;
+                    None
+                }
+                Err(err) => {
+                    oracle_failures += 1;
+                    Some(err.to_string())
+                }
+            }
+        } else {
+            None
+        };
+        if trace.oracle.is_passed() && replay_outcome.is_ok() && determinism_failure.is_none() {
             continue;
         }
 
@@ -623,6 +731,23 @@ async fn run_generated_search_profile(
                     serde_json::to_vec_pretty(&divergence)?,
                 )?;
             }
+        }
+        if let Some(error) = &determinism_failure {
+            let divergence = json!({
+                "schema": "lash.sim.search-determinism-divergence.v1",
+                "seed": seed,
+                "seed_index": seed_index,
+                "profile": profile,
+                "shard": labels.shard,
+                "seed_source": labels.seed_source.source_name(),
+                "seed_salt": labels.seed_source.salt(),
+                "seed_corpus": labels.seed_source.corpus(),
+                "error": error,
+            });
+            std::fs::write(
+                seed_dir.join("determinism-divergence.json"),
+                serde_json::to_vec_pretty(&divergence)?,
+            )?;
         }
         let failing_oracles = trace
             .oracles
@@ -661,7 +786,9 @@ async fn run_generated_search_profile(
                 Err(err) => json!({ "error": err.to_string() }),
             }
         };
-        let failure_reason = if trace.oracle.is_passed() {
+        let failure_reason = if let Some(error) = determinism_failure {
+            error
+        } else if trace.oracle.is_passed() {
             match &replay_outcome {
                 Err(err) => err.to_string(),
                 Ok(_) => unreachable!("failing search seed with passing oracle and passing replay"),
@@ -672,19 +799,45 @@ async fn run_generated_search_profile(
         let package = json!({
             "schema": "lash.sim.search-failure-package.v1",
             "seed": seed,
+            "seed_index": seed_index,
             "profile": profile,
             "shard": labels.shard,
             "mode": labels.mode.as_str(),
+            "seed_source": labels.seed_source.source_name(),
+            "seed_salt": labels.seed_source.salt(),
+            "seed_corpus": labels.seed_source.corpus(),
             "reason": failure_reason,
             "replay_command": trace.replay_command,
+            "regenerate_command": format!(
+                "cargo run -p lash-sim --locked -- run --out <artifact-root> --profile {profile} --seed {seed} --max-boundaries {boundary_limit}"
+            ),
             "minimize": minimize_summary,
         });
         std::fs::write(
             seed_dir.join("package.json"),
             serde_json::to_vec_pretty(&package)?,
         )?;
+        let failure_summary = json!({
+            "schema": "lash.sim.search-failure-summary.v1",
+            "status": "failed",
+            "profile": profile,
+            "shard": labels.shard,
+            "configured_seeds": labels.configured_seeds,
+            "mode": labels.mode.as_str(),
+            "seed_source": labels.seed_source.source_name(),
+            "seed_salt": labels.seed_source.salt(),
+            "seed_corpus": labels.seed_source.corpus(),
+            "failing_seed_index": seed_index,
+            "failing_seed": seed,
+            "reason": failure_reason,
+            "failure_package": relative_path(artifact_root, &seed_dir.join("package.json")),
+        });
+        std::fs::write(
+            artifact_root.join(GENERATED_SIM_SUMMARY),
+            serde_json::to_vec_pretty(&failure_summary)?,
+        )?;
         return Err(FixedScriptRunnerError::Assertion(format!(
-            "search seed seed-{seed:016x} ({profile}, shard {}) failed: {failure_reason}; \
+            "search seed index {seed_index}, seed-{seed:016x} ({profile}, shard {}) failed: {failure_reason}; \
              reproducibility package at {}; reproduce with: {}",
             labels.shard,
             seed_dir.display(),
@@ -701,6 +854,15 @@ async fn run_generated_search_profile(
         shard: labels.shard,
         configured_seeds: labels.configured_seeds,
         mode: labels.mode.as_str(),
+        seed_source: labels.seed_source.source_name(),
+        seed_salt: labels.seed_source.salt().map(ToString::to_string),
+        seed_corpus: labels.seed_source.corpus(),
+        determinism_sample: GeneratedDeterminismSample {
+            policy: "global_seed_index_mod_20_equals_zero",
+            selected_seed_indices: selected_determinism_indices,
+            checked_seeds: reproduced_identically,
+            reproduced_identically,
+        },
         generator_version: GENERATOR_VERSION,
         script_bundle_hash: fixed_manifest.script_bundle_hash.clone(),
         provider_manifest_path: GENERATED_SIM_PROVIDER_MANIFEST,
@@ -717,7 +879,7 @@ async fn run_generated_search_profile(
         model_only_boundary_reviews: model_only_boundary_reviews(),
         provider_transport_exclusions: fixed_manifest.provider_transport_exclusions.clone(),
         counts: GeneratedSimCounts {
-            generated_seeds: seed_values.len(),
+            generated_seeds: indexed_seeds.len(),
             boundary_events,
             scheduler_controlled_boundaries,
             runtime_completion_registrations: scheduler_owned_runtime_completions,
@@ -811,7 +973,20 @@ fn write_failure_artifact_shape(artifact_root: &Path) -> Result<(), FixedScriptR
     Ok(())
 }
 
-pub(super) fn generated_seed(profile: &str, seed_index: usize) -> u64 {
+pub(super) fn generated_seed(profile: &str, salt: &str, seed_index: usize) -> u64 {
+    let mut hasher = Sha256::new();
+    hasher.update((profile.len() as u64).to_le_bytes());
+    hasher.update(profile.as_bytes());
+    hasher.update((salt.len() as u64).to_le_bytes());
+    hasher.update(salt.as_bytes());
+    hasher.update(seed_index.to_le_bytes());
+    let digest = hasher.finalize();
+    let mut bytes = [0_u8; 8];
+    bytes.copy_from_slice(&digest[..8]);
+    u64::from_le_bytes(bytes)
+}
+
+pub(super) fn regression_corpus_seed(profile: &str, seed_index: usize) -> u64 {
     let mut hasher = Sha256::new();
     hasher.update(profile.as_bytes());
     hasher.update(seed_index.to_le_bytes());
@@ -819,6 +994,96 @@ pub(super) fn generated_seed(profile: &str, seed_index: usize) -> u64 {
     let mut bytes = [0_u8; 8];
     bytes.copy_from_slice(&digest[..8]);
     u64::from_le_bytes(bytes)
+}
+
+fn require_identical_simulation_rerun(
+    seed_index: usize,
+    first: &SimulationTrace,
+    second: &SimulationTrace,
+) -> Result<(), FixedScriptRunnerError> {
+    let first = determinism_projection(first)?;
+    let second = determinism_projection(second)?;
+    if first != second {
+        let difference = first_json_difference("$", &first, &second)
+            .unwrap_or_else(|| "unknown difference".to_string());
+        return Err(FixedScriptRunnerError::Assertion(format!(
+            "simulator nondeterminism: seed index {seed_index}, seed-{:016x} did not reproduce identically; {difference}; first={}; rerun={}",
+            first["seed"].as_u64().unwrap_or_default(),
+            value_digest(&first),
+            value_digest(&second)
+        )));
+    }
+    Ok(())
+}
+
+fn determinism_projection(trace: &SimulationTrace) -> Result<Value, serde_json::Error> {
+    let mut value = serde_json::to_value(trace)?;
+    if let Some(writes) = value
+        .get_mut("durable_writes")
+        .and_then(Value::as_array_mut)
+    {
+        for write in writes {
+            let attributed_session = write
+                .get("attributed_session_id")
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
+            if let Some(attributed_session) = attributed_session {
+                // Separately executed contract proofs allocate a fresh real
+                // runtime session id on every execution, then attribute the
+                // accepted write to a stable generated session. The raw UUID is
+                // entropy by contract; its stable attribution is the simulator
+                // identity checked here.
+                write["session_id"] = Value::String(attributed_session);
+            }
+        }
+    }
+    Ok(value)
+}
+
+fn first_json_difference(path: &str, first: &Value, second: &Value) -> Option<String> {
+    match (first, second) {
+        (Value::Object(first), Value::Object(second)) => {
+            let keys = first.keys().chain(second.keys()).collect::<BTreeSet<_>>();
+            for key in keys {
+                let child_path = format!("{path}.{key}");
+                match (first.get(key), second.get(key)) {
+                    (Some(first), Some(second)) => {
+                        if let Some(difference) = first_json_difference(&child_path, first, second)
+                        {
+                            return Some(difference);
+                        }
+                    }
+                    (first, second) => {
+                        return Some(format!(
+                            "first difference at {child_path}: first={first:?}; rerun={second:?}"
+                        ));
+                    }
+                }
+            }
+            None
+        }
+        (Value::Array(first), Value::Array(second)) => {
+            if first.len() != second.len() {
+                return Some(format!(
+                    "first difference at {path}.length: first={}; rerun={}",
+                    first.len(),
+                    second.len()
+                ));
+            }
+            for (index, (first, second)) in first.iter().zip(second).enumerate() {
+                if let Some(difference) =
+                    first_json_difference(&format!("{path}[{index}]"), first, second)
+                {
+                    return Some(difference);
+                }
+            }
+            None
+        }
+        _ if first != second => Some(format!(
+            "first difference at {path}: first={first}; rerun={second}"
+        )),
+        _ => None,
+    }
 }
 
 pub(super) fn provider_matrix(
@@ -951,4 +1216,57 @@ fn generated_runtime_provider_matrix(
     let mut by_provider: BTreeMap<String, GeneratedRuntimeProviderMatrixRow> = BTreeMap::new();
     observe_runtime_provider_matrix(&mut by_provider, event_lines.iter().map(|line| &line.event));
     finish_runtime_provider_matrix(by_provider)
+}
+
+#[cfg(test)]
+mod seed_tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+
+    #[test]
+    fn salted_seed_runs_explore_disjoint_seed_sets_and_reproduce_by_index() {
+        let first = (0..1_000)
+            .map(|index| generated_seed("full-random", "run-a", index))
+            .collect::<BTreeSet<_>>();
+        let second = (0..1_000)
+            .map(|index| generated_seed("full-random", "run-b", index))
+            .collect::<BTreeSet<_>>();
+
+        assert!(first.is_disjoint(&second));
+        assert_eq!(
+            generated_seed("full-random", "recorded-salt", 317),
+            generated_seed("full-random", "recorded-salt", 317)
+        );
+    }
+
+    #[test]
+    fn named_regression_corpus_retains_the_unsalted_seed_derivation() {
+        let corpus = SimSeedSource::regression_corpus(WEEKLY_REGRESSION_CORPUS)
+            .expect("named regression corpus");
+        assert_eq!(
+            corpus.seed("full-random", 12),
+            regression_corpus_seed("full-random", 12)
+        );
+        assert_eq!(corpus.corpus(), Some(WEEKLY_REGRESSION_CORPUS));
+    }
+
+    #[tokio::test]
+    async fn determinism_sample_rejects_an_injected_nondeterminism_source() {
+        let workload = generate_workload(5, "fast-random", 24).expect("workload");
+        let first = run_generated_workload_for_fixture(workload, "bundle")
+            .await
+            .expect("first run");
+        let mut injected = first.clone();
+        let event = injected
+            .events
+            .iter_mut()
+            .find(|event| event.kind == BoundaryKind::Provider)
+            .expect("provider event");
+        event.observed["injected_os_entropy"] = json!(fastrand::u64(..));
+
+        let error = require_identical_simulation_rerun(0, &first, &injected)
+            .expect_err("injected nondeterminism must fail loudly");
+        assert!(error.to_string().contains("simulator nondeterminism"));
+    }
 }

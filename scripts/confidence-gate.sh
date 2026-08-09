@@ -991,13 +991,19 @@ run_sim_search_lane() {
   local search_shard="${LASH_SIM_SHARD:-1/1}"
   step "Deterministic simulation search lane (${search_seeds} seeds @ ${search_max_boundaries} max boundaries, shard ${search_shard})"
   local search_dir="${out_dir}/sim-search"
+  local search_salt="${LASH_SIM_RUN_SALT:-}"
+  local salt_args=()
+  if [ -n "$search_salt" ]; then
+    salt_args+=(--salt "$search_salt")
+  fi
   cargo run -p lash-sim --locked -- run \
     --out "$search_dir" \
     --profile "$search_profile" \
     --seeds "$search_seeds" \
     --max-boundaries "$search_max_boundaries" \
     --shard "$search_shard" \
-    --mode search
+    --mode search \
+    "${salt_args[@]}"
   python3 - "${search_dir}/summary.json" "${out_dir}/sim/search.json" "$search_max_boundaries" "$SIM_SEARCH_MIN_SEEDS" "$SIM_SEARCH_MIN_MAX_BOUNDARIES" <<'PY'
 import json
 import sys
@@ -1059,6 +1065,17 @@ if errors:
         print(error, file=sys.stderr)
     sys.exit(1)
 PY
+
+  local corpus_dir="${out_dir}/sim-regression-${WEEKLY_SIM_CORPUS:-weekly-fixed-v1}"
+  step "Named simulation regression corpus (${WEEKLY_SIM_CORPUS:-weekly-fixed-v1}, ${search_seeds} seeds, shard ${search_shard})"
+  cargo run -p lash-sim --locked -- run \
+    --out "$corpus_dir" \
+    --profile "$search_profile" \
+    --seeds "$search_seeds" \
+    --max-boundaries "$search_max_boundaries" \
+    --shard "$search_shard" \
+    --mode search \
+    --corpus "${WEEKLY_SIM_CORPUS:-weekly-fixed-v1}"
 }
 
 run_focused_sqlite_seed_tail_repro() {
