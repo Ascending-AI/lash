@@ -29,3 +29,4 @@ mod rlm;
 mod streaming;
 mod tools;
 mod tracing;
+mod worker_capacity;

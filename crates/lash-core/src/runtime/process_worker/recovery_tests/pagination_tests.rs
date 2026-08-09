@@ -4,6 +4,89 @@ fn injected_worklist_error(label: &str) -> PluginError {
     PluginError::Session(format!("injected worklist failure: {label}"))
 }
 
+struct ReserveFutureDrop(Arc<AtomicBool>);
+
+impl Drop for ReserveFutureDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+struct BlockingSlotSupplier {
+    reserve_started: Arc<tokio::sync::Notify>,
+    reserve_dropped: Arc<AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl crate::WorkerSlotSupplier for BlockingSlotSupplier {
+    async fn reserve_slot(&self, _kind: crate::WorkerSlotKind) -> crate::WorkerSlotPermit {
+        let _drop = ReserveFutureDrop(Arc::clone(&self.reserve_dropped));
+        self.reserve_started.notify_one();
+        std::future::pending().await
+    }
+
+    fn try_reserve_slot(&self, _kind: crate::WorkerSlotKind) -> Option<crate::WorkerSlotPermit> {
+        None
+    }
+
+    fn available_slots(&self, _kind: crate::WorkerSlotKind) -> usize {
+        1
+    }
+}
+
+#[tokio::test]
+async fn process_slot_reservation_is_cancelled_when_the_dispatcher_shuts_down() {
+    let reserve_started = Arc::new(tokio::sync::Notify::new());
+    let reserve_dropped = Arc::new(AtomicBool::new(false));
+    let supplier = Arc::new(BlockingSlotSupplier {
+        reserve_started: Arc::clone(&reserve_started),
+        reserve_dropped: Arc::clone(&reserve_dropped),
+    });
+    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let (worker, registry, run_handle, env_ref, _) =
+        worker_with_engine_registry_timings_and_supplier(
+            1,
+            Arc::new(GatedSuccessEngine {
+                started: Arc::new(AtomicUsize::new(0)),
+                started_changed: Arc::new(tokio::sync::Notify::new()),
+                release: Arc::new(tokio::sync::Semaphore::new(1)),
+            }),
+            run_handle,
+            None,
+            Some(supplier),
+        )
+        .await;
+    registry
+        .register_process(engine_registration(
+            "cancel-blocked-process-slot",
+            "gated-success",
+            env_ref,
+            serde_json::Value::Null,
+        ))
+        .await
+        .expect("register blocked process-slot fixture");
+    run_handle
+        .enable_and_drive()
+        .await
+        .expect("start process dispatcher");
+    reserve_started.notified().await;
+
+    worker.execution_scheduler.shutdown.cancel();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while worker
+            .execution_scheduler
+            .state
+            .lock_recover()
+            .dispatcher_running
+            || !reserve_dropped.load(Ordering::SeqCst)
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("shutdown drops the supplier reservation and clears the latch");
+}
+
 #[tokio::test]
 async fn continuation_fetch_failure_is_typed_and_the_next_drive_resumes_the_sweep() {
     let started = Arc::new(AtomicUsize::new(0));
@@ -34,7 +117,7 @@ async fn continuation_fetch_failure_is_typed_and_the_next_drive_resumes_the_swee
     test_registry
         .set_worklist_page_errors_for_testing(
             1,
-            (0..worklist::FETCH_ATTEMPTS)
+            (0..WORKLIST_FETCH_ATTEMPTS)
                 .map(|_| injected_worklist_error("continuation"))
                 .collect(),
         )
@@ -46,7 +129,7 @@ async fn continuation_fetch_failure_is_typed_and_the_next_drive_resumes_the_swee
         .expect("initial worklist page succeeds");
     tokio::time::timeout(Duration::from_secs(2), async {
         while test_registry.worklist_page_reads_for_testing().await.len()
-            < 1 + worklist::FETCH_ATTEMPTS
+            < 1 + WORKLIST_FETCH_ATTEMPTS
         {
             tokio::task::yield_now().await;
         }

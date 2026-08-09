@@ -3,11 +3,16 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::PluginError;
+
+use super::worker_capacity::{
+    DefaultWorkerSlotSupplier, ObservedWorkerSlotSupplier, WorkerCapacityMetrics,
+    WorkerSlotSupplier as _,
+};
 
 const WAKE_RETRY_INITIAL: Duration = Duration::from_millis(25);
 const WAKE_RETRY_MAX: Duration = Duration::from_secs(1);
@@ -286,8 +291,9 @@ struct QueuedWorkExecutionSchedulerState {
 }
 
 struct QueuedWorkExecutionScheduler {
-    permits: Option<Arc<Semaphore>>,
+    slots: Option<Arc<dyn super::WorkerSlotSupplier>>,
     admission_limit: Option<usize>,
+    metrics: WorkerCapacityMetrics,
     state: Mutex<QueuedWorkExecutionSchedulerState>,
     changed: Arc<tokio::sync::Notify>,
 }
@@ -333,17 +339,38 @@ impl Drop for QueuedWorkExecutionDispatcherGuard {
 impl QueuedWorkExecutionScheduler {
     fn unbounded() -> Self {
         Self {
-            permits: None,
+            slots: None,
             admission_limit: None,
+            metrics: WorkerCapacityMetrics::default(),
             state: Mutex::new(QueuedWorkExecutionSchedulerState::default()),
             changed: Arc::new(tokio::sync::Notify::new()),
         }
     }
 
     fn inline(concurrency: QueuedWorkExecutionConcurrency) -> Self {
+        let supplier = Arc::new(DefaultWorkerSlotSupplier::new(
+            super::DEFAULT_PROCESS_EXECUTION_CONCURRENCY,
+            concurrency.get(),
+        ));
+        Self::with_supplier(supplier, Some(concurrency.get()))
+    }
+
+    fn with_supplier(
+        supplier: Arc<dyn super::WorkerSlotSupplier>,
+        admission_limit: Option<usize>,
+    ) -> Self {
+        let metrics = WorkerCapacityMetrics::default();
+        let slots = ObservedWorkerSlotSupplier::new(supplier, metrics.clone());
+        metrics.slots(
+            super::WorkerSlotKind::QueuedWork,
+            0,
+            slots.available_slots(super::WorkerSlotKind::QueuedWork),
+        );
+        metrics.intake_depth(super::WorkerSlotKind::QueuedWork, 0);
         Self {
-            permits: Some(Arc::new(Semaphore::new(concurrency.get()))),
-            admission_limit: Some(concurrency.get()),
+            slots: Some(slots),
+            admission_limit,
+            metrics,
             state: Mutex::new(QueuedWorkExecutionSchedulerState::default()),
             changed: Arc::new(tokio::sync::Notify::new()),
         }
@@ -354,9 +381,9 @@ impl QueuedWorkExecutionScheduler {
     }
 
     fn available_permits(&self) -> Option<usize> {
-        self.permits
+        self.slots
             .as_ref()
-            .map(|permits| permits.available_permits())
+            .map(|slots| slots.available_slots(super::WorkerSlotKind::QueuedWork))
     }
 }
 
@@ -393,6 +420,21 @@ impl QueuedWorkDriver {
         ))
     }
 
+    /// Construct an inline reference-substrate driver admitted by `supplier`.
+    #[doc(hidden)]
+    pub fn with_worker_slot_supplier(
+        run_handle: Arc<dyn QueuedWorkRunHandle>,
+        supplier: Arc<dyn super::WorkerSlotSupplier>,
+    ) -> Self {
+        Self::from_parts_with_supplier(
+            run_handle,
+            CancellationToken::new(),
+            None,
+            Some(supplier),
+            QUEUED_WORK_SLOW_WAKE_THRESHOLD,
+        )
+    }
+
     pub fn with_shutdown_token(
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         shutdown: CancellationToken,
@@ -406,6 +448,16 @@ impl QueuedWorkDriver {
         concurrency: Option<QueuedWorkExecutionConcurrency>,
         slow_wake_threshold: Duration,
     ) -> Self {
+        Self::from_parts_with_supplier(run_handle, shutdown, concurrency, None, slow_wake_threshold)
+    }
+
+    fn from_parts_with_supplier(
+        run_handle: Arc<dyn QueuedWorkRunHandle>,
+        shutdown: CancellationToken,
+        concurrency: Option<QueuedWorkExecutionConcurrency>,
+        supplier: Option<Arc<dyn super::WorkerSlotSupplier>>,
+        slow_wake_threshold: Duration,
+    ) -> Self {
         let shutdown = shutdown.child_token();
         let wake_tasks = TaskTracker::new();
         Self {
@@ -413,9 +465,12 @@ impl QueuedWorkDriver {
                 run_handle,
                 shutdown: shutdown.clone(),
                 wake_tasks: wake_tasks.clone(),
-                scheduler: Arc::new(match concurrency {
-                    Some(concurrency) => QueuedWorkExecutionScheduler::inline(concurrency),
-                    None => QueuedWorkExecutionScheduler::unbounded(),
+                scheduler: Arc::new(match (supplier, concurrency) {
+                    (Some(supplier), _) => {
+                        QueuedWorkExecutionScheduler::with_supplier(supplier, None)
+                    }
+                    (None, Some(concurrency)) => QueuedWorkExecutionScheduler::inline(concurrency),
+                    (None, None) => QueuedWorkExecutionScheduler::unbounded(),
                 }),
                 slow_wake_threshold,
             }),
@@ -472,6 +527,13 @@ impl QueuedWorkDriver {
                 true
             }
         };
+        {
+            let state = self.inner.scheduler.lock_state();
+            self.inner.scheduler.metrics.intake_depth(
+                super::WorkerSlotKind::QueuedWork,
+                state.pending.len() + state.rerun.len(),
+            );
+        }
         self.inner.scheduler.changed.notify_one();
         if should_start_dispatcher {
             let driver = QueuedWorkTaskDriver {
@@ -501,7 +563,7 @@ impl QueuedWorkTaskDriver {
             QueuedWorkExecutionDispatcherGuard::new(Arc::clone(&self.inner.scheduler));
         let (completed_tx, mut completed_rx) = tokio::sync::mpsc::unbounded_channel();
         loop {
-            while let Some((demand, permit)) = self.next_execution() {
+            while let Some((demand, permit)) = self.next_execution().await {
                 let driver = Self {
                     inner: Arc::clone(&self.inner),
                 };
@@ -512,10 +574,10 @@ impl QueuedWorkTaskDriver {
                 let scheduler = Arc::clone(&self.inner.scheduler);
                 self.inner.wake_tasks.spawn(async move {
                     let _completion = completion;
-                    match (permit, scheduler.permits.as_ref()) {
-                        (Some(permit), Some(permits)) => {
+                    match (permit, scheduler.slots.as_ref()) {
+                        (Some(permit), Some(slots)) => {
                             super::process_worker::scope_queued_work_execution_permit(
-                                Arc::clone(permits),
+                                Arc::clone(slots),
                                 permit,
                                 Arc::clone(&scheduler.changed),
                                 driver.run_demand(demand),
@@ -556,26 +618,49 @@ impl QueuedWorkTaskDriver {
                     } else {
                         state.scheduled.remove(&session_id);
                     }
+                    self.inner.scheduler.metrics.intake_depth(
+                        super::WorkerSlotKind::QueuedWork,
+                        state.pending.len() + state.rerun.len(),
+                    );
                 }
                 () = self.inner.scheduler.changed.notified() => {}
             }
         }
     }
 
-    fn next_execution(&self) -> Option<(QueuedWorkDemand, Option<OwnedSemaphorePermit>)> {
-        let mut state = self.inner.scheduler.lock_state();
-        if state.pending.is_empty() {
+    async fn next_execution(&self) -> Option<(QueuedWorkDemand, Option<super::WorkerSlotPermit>)> {
+        if self.inner.scheduler.lock_state().pending.is_empty() {
             return None;
         }
-        let permit = match self.inner.scheduler.permits.as_ref() {
-            Some(permits) => Some(Arc::clone(permits).try_acquire_owned().ok()?),
+        let permit = match self.inner.scheduler.slots.as_ref() {
+            Some(slots) => {
+                let reserve = slots.reserve_slot(super::WorkerSlotKind::QueuedWork);
+                tokio::pin!(reserve);
+                Some(tokio::select! {
+                    biased;
+                    () = self.inner.shutdown.cancelled() => return None,
+                    permit = &mut reserve => permit,
+                })
+            }
             None => None,
         };
-        let mut demand = state.pending.pop_front()?;
+        if self.inner.shutdown.is_cancelled() {
+            drop(permit);
+            return None;
+        }
+        let mut state = self.inner.scheduler.lock_state();
+        let Some(mut demand) = state.pending.pop_front() else {
+            drop(permit);
+            return None;
+        };
         if let Some(coalesced) = state.rerun.remove(&demand.session_id) {
             demand.merge(coalesced);
         }
         state.active += 1;
+        self.inner.scheduler.metrics.intake_depth(
+            super::WorkerSlotKind::QueuedWork,
+            state.pending.len() + state.rerun.len(),
+        );
         Some((demand, permit))
     }
 
@@ -947,7 +1032,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn admission_bound_limits_concurrent_executions_without_queued_tasks() {
+    async fn default_slot_supplier_releases_permits_and_preserves_admission_bound() {
         const SIGNALS: usize = 8;
         const CONCURRENCY: usize = 2;
         let handle = Arc::new(AdmissionRunHandle {

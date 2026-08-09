@@ -9,9 +9,9 @@ use lash_core::runtime::{
 use std::collections::HashSet;
 
 mod queued_work;
+mod worker_capacity;
 
 use queued_work::{InlineQueuedWorkRunConfig, InlineQueuedWorkRunHandle};
-
 #[derive(Clone)]
 pub struct LashCore {
     pub(crate) env: RuntimeEnvironment,
@@ -24,13 +24,12 @@ pub struct LashCore {
     pub(crate) live_replay_store: Arc<dyn LiveReplayStore>,
     /// Whether process lifecycle is available; threaded into rebuilt session plugin hosts.
     pub(crate) process_lifecycle_available: bool,
-    /// Per-worker bound used when this core constructs an inline process worker.
     pub(crate) process_execution_concurrency: usize,
-    /// Shared resolution of host-owned work drivers. Shared across `LashCore`
-    /// clones so inline process and queued drivers are constructed at most once.
+    /// Explicit host supplier; `None` preserves a fresh bound per process worker.
+    pub(crate) worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
+    /// Shared across core clones so inline drivers are constructed at most once.
     pub(crate) work_driver: Arc<InlineWorkDriverSlot>,
-    /// Store-less sessions have no durable tombstone authority, so one core
-    /// rejects reuse locally for its full process lifetime.
+    /// Store-less session ids rejected for reuse by this core.
     pub(crate) ephemeral_session_ids: Arc<std::sync::Mutex<HashSet<String>>>,
 }
 
@@ -118,6 +117,7 @@ pub(crate) enum QueuedWorkDriverSetup {
     None,
     LazyDefault {
         config: Arc<InlineQueuedWorkRunConfig>,
+        slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
         execution_concurrency: usize,
     },
     External {
@@ -182,14 +182,23 @@ impl InlineWorkDriverSlot {
                     QueuedWorkDriverSetup::External { driver } => Some(driver.clone()),
                     QueuedWorkDriverSetup::LazyDefault {
                         config,
+                        slot_supplier,
                         execution_concurrency,
-                    } => Some(
-                        QueuedWorkDriver::with_execution_concurrency(
-                            Arc::new(InlineQueuedWorkRunHandle::new(Arc::clone(config))),
-                            *execution_concurrency,
-                        )
-                        .expect("queued-work execution concurrency was validated at build"),
-                    ),
+                    } => {
+                        let run_handle =
+                            Arc::new(InlineQueuedWorkRunHandle::new(Arc::clone(config)));
+                        Some(match slot_supplier {
+                            Some(slot_supplier) => QueuedWorkDriver::with_worker_slot_supplier(
+                                run_handle,
+                                Arc::clone(slot_supplier),
+                            ),
+                            None => QueuedWorkDriver::with_execution_concurrency(
+                                run_handle,
+                                *execution_concurrency,
+                            )
+                            .expect("queued-work concurrency was validated at build"),
+                        })
+                    }
                 };
                 let (process, drive_process_on_open) = match &self.setup.process {
                     ProcessWorkDriverSetup::None => (None, false),
@@ -854,6 +863,9 @@ impl LashCore {
         )
         .with_session_policy(self.policy.clone())
         .with_process_execution_concurrency(self.process_execution_concurrency)?;
+        if let Some(worker_slot_supplier) = self.worker_slot_supplier.as_ref() {
+            config = config.with_worker_slot_supplier(Arc::clone(worker_slot_supplier));
+        }
         if let Some(trigger_store) = self.env.trigger_store.as_ref() {
             config = config.with_trigger_store(Arc::clone(trigger_store));
         }
@@ -906,6 +918,8 @@ pub struct LashCoreBuilder {
     process_execution_concurrency: Option<usize>,
     // Per-driver bound for the default inline queued-work executor.
     queued_work_execution_concurrency: Option<usize>,
+    // Optional host admission controller replacing both fixed worker lanes.
+    worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
     // Optional host-facing best-effort feed of appended process events,
     // installed on the inline process-registry decorator at build time.
     process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
@@ -941,6 +955,7 @@ impl LashCoreBuilder {
             process_work_source: ProcessWorkSource::default(),
             process_execution_concurrency: None,
             queued_work_execution_concurrency: None,
+            worker_slot_supplier: None,
             process_event_sink: None,
             wake_turn_policy: None,
             process_tool_visibility_filter: None,
@@ -1024,31 +1039,6 @@ impl LashCoreBuilder {
         process_env_store: Arc<dyn ProcessExecutionEnvStore>,
     ) -> Self {
         self.process_env_store = Some(process_env_store);
-        self
-    }
-
-    /// Set the number of processes each default inline worker may execute at
-    /// once. A running process releases its slot while parked on another
-    /// process or external completion and reacquires it before resuming.
-    ///
-    /// This is a per-worker bound: two workers sharing one process registry may
-    /// execute up to twice this number. The default is
-    /// [`DEFAULT_PROCESS_EXECUTION_CONCURRENCY`](facade_support::DEFAULT_PROCESS_EXECUTION_CONCURRENCY).
-    /// Invalid values are reported by [`build`](Self::build).
-    pub fn process_execution_concurrency(mut self, concurrency: usize) -> Self {
-        self.process_execution_concurrency = Some(concurrency);
-        self
-    }
-
-    /// Set the number of queued-work notifications the default inline driver
-    /// may execute at once. Additional per-session demand is retained and
-    /// coalesced without spawning a task per signal. A running queued-work
-    /// turn releases its slot while parked and reacquires it before resuming.
-    ///
-    /// The default is [`DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY`](facade_support::DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY).
-    /// Invalid values are reported by [`build`](Self::build).
-    pub fn queued_work_execution_concurrency(mut self, concurrency: usize) -> Self {
-        self.queued_work_execution_concurrency = Some(concurrency);
         self
     }
 
@@ -1235,6 +1225,7 @@ impl LashCoreBuilder {
         facade_support::QueuedWorkDriver::validate_execution_concurrency(
             queued_work_execution_concurrency,
         )?;
+        let worker_slot_supplier = self.worker_slot_supplier.clone();
         let protocol_factory = self.protocol_factory.clone();
         if protocol_factory.is_none() && self.plugin_host.is_none() {
             return Err(EmbedError::MissingProtocolPlugin);
@@ -1325,6 +1316,7 @@ impl LashCoreBuilder {
             &policy,
             self.trigger_store.as_ref(),
             process_execution_concurrency,
+            worker_slot_supplier.clone(),
         )?;
 
         let live_replay_clock = Arc::clone(&core.clock);
@@ -1362,6 +1354,7 @@ impl LashCoreBuilder {
                 .or(self.store_factory.as_ref()),
             Arc::clone(&live_replay_store),
             process_lifecycle_available,
+            worker_slot_supplier.clone(),
             queued_work_execution_concurrency,
         );
         let work_driver = InlineWorkDriverSetup {
@@ -1394,6 +1387,7 @@ impl LashCoreBuilder {
             protocol_factory,
             process_lifecycle_available,
             process_execution_concurrency,
+            worker_slot_supplier,
             work_driver: Arc::new(InlineWorkDriverSlot::new(work_driver)),
             ephemeral_session_ids: Arc::new(std::sync::Mutex::new(HashSet::new())),
         })
@@ -1419,6 +1413,7 @@ impl LashCoreBuilder {
         policy: &SessionPolicy,
         trigger_store: Option<&Arc<dyn lash_core::TriggerStore>>,
         process_execution_concurrency: usize,
+        worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
     ) -> Result<ProcessWorkDriverSetup> {
         let (process_registry, process_change_hub) = match process_work_source {
             ProcessWorkSource::None => return Ok(ProcessWorkDriverSetup::None),
@@ -1456,6 +1451,9 @@ impl LashCoreBuilder {
         }))
         .with_turn_phase_probe_slot(phase_probe_slot)
         .with_process_execution_concurrency(process_execution_concurrency)?;
+        if let Some(worker_slot_supplier) = worker_slot_supplier {
+            config = config.with_worker_slot_supplier(worker_slot_supplier);
+        }
         if let Some(hub) = process_change_hub {
             config = config.with_change_hub(hub);
         }
@@ -1473,6 +1471,7 @@ impl LashCoreBuilder {
         store_factory: Option<&Arc<dyn SessionStoreFactory>>,
         live_replay_store: Arc<dyn LiveReplayStore>,
         process_lifecycle_available: bool,
+        worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
         queued_work_execution_concurrency: usize,
     ) -> QueuedWorkDriverSetup {
         match queued_work_source {
@@ -1491,6 +1490,7 @@ impl LashCoreBuilder {
                         live_replay_store,
                         process_lifecycle_available,
                     )),
+                    slot_supplier: worker_slot_supplier,
                     execution_concurrency: queued_work_execution_concurrency,
                 },
                 None => QueuedWorkDriverSetup::None,

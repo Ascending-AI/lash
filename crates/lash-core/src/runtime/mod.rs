@@ -54,6 +54,7 @@ mod turn_loop;
 mod turn_queue;
 mod usage;
 mod wake_delivery_driver;
+mod worker_capacity;
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -317,6 +318,7 @@ pub use usage::{
 };
 use usage::{merge_ledger_entry_saturating, normalize_prompt_usage};
 pub use wake_delivery_driver::{WakeDeliveryDriveReport, WakeDeliveryDriver};
+pub use worker_capacity::{WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier};
 
 macro_rules! define_runtime_turn_phases {
     ($($phase:ident),+ $(,)?) => {

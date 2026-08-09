@@ -66,6 +66,8 @@ pub use lash_core::{
     facade_support::TurnCancellationEvidence, facade_support::TurnFinish,
     facade_support::TurnInputAcceptanceReceipt, facade_support::TurnOutcome,
     facade_support::TurnStop, facade_support::TurnTerminal, facade_support::TurnWorkDriver,
+    facade_support::WorkerSlotKind, facade_support::WorkerSlotPermit,
+    facade_support::WorkerSlotSupplier,
 };
 /// Cooperative cancellation handle accepted by
 /// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so

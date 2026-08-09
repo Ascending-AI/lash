@@ -1,5 +1,40 @@
 use super::*;
 
+struct SemaphoreSlotSupplier(Arc<Semaphore>);
+
+#[async_trait::async_trait]
+impl super::super::WorkerSlotSupplier for SemaphoreSlotSupplier {
+    async fn reserve_slot(
+        &self,
+        _kind: super::super::WorkerSlotKind,
+    ) -> super::super::WorkerSlotPermit {
+        super::super::WorkerSlotPermit::new(
+            Arc::clone(&self.0)
+                .acquire_owned()
+                .await
+                .expect("test worker slot semaphore remains open"),
+        )
+    }
+
+    fn try_reserve_slot(
+        &self,
+        _kind: super::super::WorkerSlotKind,
+    ) -> Option<super::super::WorkerSlotPermit> {
+        Arc::clone(&self.0)
+            .try_acquire_owned()
+            .ok()
+            .map(super::super::WorkerSlotPermit::new)
+    }
+
+    fn available_slots(&self, _kind: super::super::WorkerSlotKind) -> usize {
+        self.0.available_permits()
+    }
+}
+
+fn test_slot_supplier(semaphore: Arc<Semaphore>) -> Arc<dyn super::super::WorkerSlotSupplier> {
+    Arc::new(SemaphoreSlotSupplier(semaphore))
+}
+
 /// Dropping a future that parked the run's execution permit leaves the slot
 /// released: the reacquisition sits after the `release_while` await and a
 /// cancelled await never reaches it. Any resumption path that continues the
@@ -9,12 +44,12 @@ use super::*;
 #[tokio::test]
 async fn resuming_after_a_dropped_permit_release_reacquires_the_slot() {
     let semaphore = Arc::new(Semaphore::new(1));
-    let permit = Arc::clone(&semaphore)
-        .acquire_owned()
-        .await
-        .expect("initial process execution permit");
+    let supplier = test_slot_supplier(Arc::clone(&semaphore));
+    let permit = supplier
+        .reserve_slot(super::super::WorkerSlotKind::Process)
+        .await;
     let execution_permit = Arc::new(ProcessExecutionPermit::new(
-        Arc::clone(&semaphore),
+        supplier,
         permit,
         Arc::new(tokio::sync::Notify::new()),
     ));
@@ -101,12 +136,12 @@ async fn cancelled_tool_batch_reacquires_the_process_execution_permit() {
     }
 
     let semaphore = Arc::new(Semaphore::new(1));
-    let permit = Arc::clone(&semaphore)
-        .acquire_owned()
-        .await
-        .expect("initial process execution permit");
+    let supplier = test_slot_supplier(Arc::clone(&semaphore));
+    let permit = supplier
+        .reserve_slot(super::super::WorkerSlotKind::Process)
+        .await;
     let execution_permit = Arc::new(ProcessExecutionPermit::new(
-        Arc::clone(&semaphore),
+        supplier,
         permit,
         Arc::new(tokio::sync::Notify::new()),
     ));

@@ -13,6 +13,10 @@ use serde_json::Value;
 
 use crate::{TraceContext, TraceEvent, TraceRecord, TraceSink, TraceSinkError, TraceTokenUsage};
 
+mod metrics;
+#[doc(hidden)]
+pub use metrics::WorkerCapacityMetrics;
+
 const INSTRUMENTATION_NAME: &str = "lash-trace";
 
 /// Controls which structured Lash trace data is attached to OpenTelemetry

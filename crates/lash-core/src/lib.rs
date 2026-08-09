@@ -295,6 +295,7 @@ pub mod facade_support {
     pub use crate::runtime::validate_replayed_effect_envelope;
     pub use crate::runtime::watch_process_registry;
     pub use crate::runtime::watch_process_registry_with_sink;
+    pub use crate::runtime::{WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier};
     pub use crate::session::InjectedTurnInput;
     pub use crate::session::ToolInvocation;
     pub use crate::session::ToolInvocationReply;
@@ -823,7 +824,7 @@ pub use runtime::{
     TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,
     TurnInputCompletionData, TurnInputIngress, TurnInputState, WaitKind, WaitState, WakeDelivery,
     WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryReport,
-    WakeDeliveryState, WakeDiscardReason,
+    WakeDeliveryState, WakeDiscardReason, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{
