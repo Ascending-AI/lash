@@ -855,7 +855,7 @@ scheduler-owned-provider-completion-missing-evidence
 queued-input-operational-missing
 trigger-wakeup-operational-missing
 process-wake-operational-missing
-rlm-lashlang-cell-missing-exec-outcome
+rlm-lashlang-cell-missing-continuation
 agent-parallel-join-missing-wake-session
 standard-provider-error-missing-parser-matrix
 standard-max-turn-stop-missing
@@ -921,7 +921,7 @@ run_minimizer_fixture_suite() {
     "crates/lash-sim/failure-fixtures/queued-input-operational-missing.json",
     "crates/lash-sim/failure-fixtures/trigger-wakeup-operational-missing.json",
     "crates/lash-sim/failure-fixtures/process-wake-operational-missing.json",
-    "crates/lash-sim/failure-fixtures/rlm-lashlang-cell-missing-exec-outcome.json",
+    "crates/lash-sim/failure-fixtures/rlm-lashlang-cell-missing-continuation.json",
     "crates/lash-sim/failure-fixtures/agent-parallel-join-missing-wake-session.json",
     "crates/lash-sim/failure-fixtures/standard-provider-error-missing-parser-matrix.json",
     "crates/lash-sim/failure-fixtures/standard-max-turn-stop-missing.json",
@@ -942,7 +942,7 @@ run_minimizer_fixture_suite() {
     "queued_input_operational_missing": "failing-fixtures/queued-input-operational-missing/minimized-regression/package.json",
     "trigger_wakeup_operational_missing": "failing-fixtures/trigger-wakeup-operational-missing/minimized-regression/package.json",
     "process_wake_operational_missing": "failing-fixtures/process-wake-operational-missing/minimized-regression/package.json",
-    "rlm_lashlang_cell_missing_exec_outcome": "failing-fixtures/rlm-lashlang-cell-missing-exec-outcome/minimized-regression/package.json",
+    "rlm_lashlang_cell_missing_continuation": "failing-fixtures/rlm-lashlang-cell-missing-continuation/minimized-regression/package.json",
     "agent_parallel_join_missing_wake_session": "failing-fixtures/agent-parallel-join-missing-wake-session/minimized-regression/package.json",
     "standard_provider_error_missing_parser_matrix": "failing-fixtures/standard-provider-error-missing-parser-matrix/minimized-regression/package.json",
     "standard_max_turn_stop_missing": "failing-fixtures/standard-max-turn-stop-missing/minimized-regression/package.json",

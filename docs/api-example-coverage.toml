@@ -49216,6 +49216,54 @@ disposition = "unused-add"
 reason = "Add lash::testing::checkpoint_observer::CheckpointWriteCollector::with_ref_only_mutation to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::checkpoint_observer::CheckpointStateWrite"
+kind = "struct"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::testing::checkpoint_observer::CheckpointStateWrite to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::checkpoint_observer::CheckpointStateWrite::accepted_raw_rows"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::testing::checkpoint_observer::CheckpointStateWrite::accepted_raw_rows to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::checkpoint_observer::CheckpointStateWrite::accepted_read_model"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::testing::checkpoint_observer::CheckpointStateWrite::accepted_read_model to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::checkpoint_observer::CheckpointStateWrite::submitted_graph_append"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::testing::checkpoint_observer::CheckpointStateWrite::submitted_graph_append to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::checkpoint_observer::CheckpointStateWrite::submitted_turn_state"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::testing::checkpoint_observer::CheckpointStateWrite::submitted_turn_state to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::checkpoint_observer::CheckpointStateWrite::submitted_usage_rows"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::testing::checkpoint_observer::CheckpointStateWrite::submitted_usage_rows to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::testing::checkpoint_observer::CheckpointWriteEvent"
 kind = "struct"
 availability = "all-features"
@@ -49302,6 +49350,14 @@ availability = "all-features"
 area = "observation-admin"
 disposition = "unused-add"
 reason = "Add lash::testing::checkpoint_observer::CheckpointWriteEvent::session_id to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::checkpoint_observer::CheckpointWriteEvent::state"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::testing::checkpoint_observer::CheckpointWriteEvent::state to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::testing::checkpoint_observer::CheckpointWriteEvent::turn_index"

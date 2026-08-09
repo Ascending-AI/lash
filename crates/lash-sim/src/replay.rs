@@ -297,44 +297,28 @@ fn require_invariants_flag(
 fn normalize(value: &Value) -> Value {
     let mut value = value.clone();
     if let Some(object) = value.as_object_mut() {
-        object.remove("provider_parser_matrix");
-        object.remove("runtime_effect");
-        object.remove("runtime_effect_outcome");
-        object.remove("runtime_tool_record");
-        object.remove("runtime_queued_work");
-        object.remove("runtime_worker_store");
-        object.remove("runtime_process_lifecycle");
-        object.remove("runtime_active_lease");
-        object.remove("runtime_stale_completion");
-        object.remove("runtime_lease_probe");
-        object.remove("runtime_suspend");
-        object.remove("runtime_invariant_facts");
-        object.remove("runtime_final_value_facts");
+        // A completed provider future is harvested on the first host scheduler
+        // pass that observes its join handle as finished. Re-running an identical
+        // seed can therefore change only the virtual timestamp at which that
+        // harvest occurs; the scheduled provider releases and runtime state are
+        // compared separately below and by the independent state checker.
         object.remove("sim_clock");
-        // The cancel outcome (`cancelled`/`cancel_outcome`) depends on whether
-        // the real runtime had already consumed the targeted input by the time
-        // the cancellation arrived — a fact the abstract ModelStore cannot
-        // reconstruct from the boundary stream. Coverage is preserved because
-        // the cancellation oracle keys off `final_summary.cancellation_count`,
-        // which the model still tracks, not this per-boundary string.
-        object.remove("cancel_outcome");
-        object.remove("cancelled");
-        // Provider-event release evidence is liveness/timing dependent: a gate
-        // can be released while the turn is parked, or skipped as a no-op once
-        // the turn has already finished. The abstract model cannot reconstruct
-        // which, so these fields are excluded from cross-backend equality.
-        object.remove("scripted_transport_release");
-        object.remove("active_turn_pending_before_release");
-        object.remove("released_while_turn_pending");
-        object.remove("provider_event_release_noop_turn_finished");
-        if let Some(runtime_invariants) = object
-            .get_mut("runtime_invariants")
-            .and_then(Value::as_object_mut)
-        {
-            runtime_invariants.remove("graph_acyclic");
-            runtime_invariants.remove("single_active_agent_frame");
-            runtime_invariants.remove("usage_monotonic");
-        }
+        // The parser matrix is produced by executing four real provider stacks,
+        // including transport timeout/disconnect classifications whose outcome
+        // depends on host task wakeups outside the abstract boundary model. Its
+        // dedicated parser-matrix oracles compare the full result; boundary
+        // replay cannot predict it without reusing the implementation it checks.
+        object.remove("provider_parser_matrix");
+    }
+    if let Some(graph) = value
+        .pointer_mut("/runtime_invariant_facts/graph")
+        .and_then(Value::as_object_mut)
+    {
+        // History node ids are derived from the runtime's per-turn operation
+        // identity, which is allocated from entropy and is intentionally absent
+        // from the generated boundary stream. Graph shape, counts, edges, and all
+        // invariant outcomes remain compared.
+        graph.remove("leaf_node_id");
     }
     value
 }
@@ -399,6 +383,28 @@ mod tests {
         assert!(
             matches!(err, ReplayError::Divergence(message) if message.contains("graph")),
             "expected a graph invariant divergence"
+        );
+    }
+
+    #[tokio::test]
+    async fn seeded_replay_rejects_runtime_usage_the_old_mask_hid() {
+        let workload = generate_workload(5, "fast-random", 24).expect("workload");
+        let mut trace = run_generated_workload_for_fixture(workload, "bundle")
+            .await
+            .expect("trace");
+        let tampered = trace
+            .events
+            .iter_mut()
+            .find(|event| event.kind == BoundaryKind::Provider)
+            .expect("seed 5 includes a provider turn");
+        tampered.observed["runtime_invariant_facts"]["usage"]["total_usage"]["input_tokens"] =
+            serde_json::json!(999);
+
+        let err = replay_trace(Path::new("trace.json"), &trace)
+            .expect_err("the unmasked model diff must reject corrupted runtime usage");
+        assert!(
+            matches!(err, ReplayError::Divergence(message) if message.contains("observed payload changed") && message.contains("999")),
+            "expected the boundary model diff to expose the formerly hidden runtime field"
         );
     }
 

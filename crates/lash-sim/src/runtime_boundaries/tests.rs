@@ -316,6 +316,33 @@ async fn exec_boundary_uses_runtime_effect_controller_and_preserves_exit_data() 
 }
 
 #[tokio::test]
+async fn journaled_exec_boundary_matches_model_replay_projection() {
+    let boundary = event(
+        BoundaryKind::ExecCode,
+        "session-001:exec-code:001",
+        json!({
+            "output": "exec result 1 for session-001",
+            "exit_code": 0,
+        }),
+    );
+    let mut live_harness = harness();
+    let live = live_harness
+        .execute_code(&boundary)
+        .await
+        .expect("live journaled exec boundary");
+    let replay = crate::store::ModelStore::default().project_boundary_observation(&boundary);
+
+    assert_eq!(
+        live, replay,
+        "journaled exec-code runtime truth and model replay projection diverged"
+    );
+    assert!(
+        live.get("runtime_effect_outcome").is_some(),
+        "the exact boundary payload must retain the settled journaled outcome"
+    );
+}
+
+#[tokio::test]
 async fn worker_stale_completion_uses_runtime_session_lease_store() {
     let mut harness = harness();
     let observed = harness

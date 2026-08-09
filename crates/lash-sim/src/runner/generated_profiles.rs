@@ -1018,6 +1018,16 @@ fn require_identical_simulation_rerun(
 
 fn determinism_projection(trace: &SimulationTrace) -> Result<Value, serde_json::Error> {
     let mut value = serde_json::to_value(trace)?;
+    if let Some(events) = value.get_mut("events").and_then(Value::as_array_mut) {
+        for event in events {
+            // Provider futures are harvested on the first host scheduler pass
+            // that observes completion, so this diagnostic virtual timestamp is
+            // not part of the deterministic simulator decision stream.
+            if let Some(observed) = event.get_mut("observed").and_then(Value::as_object_mut) {
+                observed.remove("sim_clock");
+            }
+        }
+    }
     if let Some(writes) = value
         .get_mut("durable_writes")
         .and_then(Value::as_array_mut)
@@ -1034,6 +1044,14 @@ fn determinism_projection(trace: &SimulationTrace) -> Result<Value, serde_json::
                 // entropy by contract; its stable attribution is the simulator
                 // identity checked here.
                 write["session_id"] = Value::String(attributed_session);
+            }
+            if let Some(write) = write.as_object_mut() {
+                // Checker state contains raw persistence identities derived from
+                // host-time frame creation. Its internal graph/transcript/usage
+                // consistency is checked independently on each run; the unseed
+                // comparison retains the stable checkpoint seam and the full
+                // delivered boundary trace, matching the pre-v3 trace surface.
+                write.remove("state");
             }
         }
     }

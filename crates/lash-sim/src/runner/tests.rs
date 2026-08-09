@@ -1269,7 +1269,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         ("runtime", "queued-input-operational-missing"),
         ("runtime", "trigger-wakeup-operational-missing"),
         ("standard", "standard-provider-error-missing-parser-matrix"),
-        ("rlm", "rlm-lashlang-cell-missing-exec-outcome"),
+        ("rlm", "rlm-lashlang-cell-missing-continuation"),
         ("agent", "agent-parallel-join-missing-wake-session"),
     ] {
         assert!(

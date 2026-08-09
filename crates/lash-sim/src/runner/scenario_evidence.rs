@@ -718,7 +718,7 @@ fn scenario_negative_fixture_for_contract(
             return scenario_negative_fixture("rlm_empty_options_default_mode_broken");
         }
         "rlm.lashlang_cell_exec_continues" => {
-            return scenario_negative_fixture("rlm_lashlang_cell_missing_exec_outcome");
+            return scenario_negative_fixture("rlm_lashlang_cell_missing_continuation");
         }
         "agent.tuple_values_finish_as_json_arrays" => {
             return scenario_negative_fixture("agent_tuple_json_array_shape_broken");
@@ -763,7 +763,7 @@ fn scenario_negative_fixture_for_contract(
         return scenario_negative_fixture("process_wake_operational_missing");
     }
     if has("exec_code") || contract.suite == "rlm" {
-        return scenario_negative_fixture("rlm_lashlang_cell_missing_exec_outcome");
+        return scenario_negative_fixture("rlm_lashlang_cell_missing_continuation");
     }
     if contract.suite == "standard" {
         return scenario_negative_fixture("standard_provider_error_missing_parser_matrix");
@@ -812,9 +812,9 @@ fn scenario_negative_fixture(fixture_id: &str) -> ScenarioNegativeFixture {
             expected_oracle_id: "sim.oracle.scenario.standard-contract.v1:standard_protocol_scenario_max_turns_terminates_after_tool_result",
             expected_reason_contains: "fixed-source replay validation",
         },
-        "rlm_lashlang_cell_missing_exec_outcome" => ScenarioNegativeFixture {
-            fixture_id: "rlm-lashlang-cell-missing-exec-outcome",
-            fixture_path: "crates/lash-sim/failure-fixtures/rlm-lashlang-cell-missing-exec-outcome.json",
+        "rlm_lashlang_cell_missing_continuation" => ScenarioNegativeFixture {
+            fixture_id: "rlm-lashlang-cell-missing-continuation",
+            fixture_path: "crates/lash-sim/failure-fixtures/rlm-lashlang-cell-missing-continuation.json",
             expected_oracle_id: "sim.oracle.scenario-mini.rlm.lashlang-cell-exec-continues.v1",
             expected_reason_contains: "did not continue after exec",
         },

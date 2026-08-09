@@ -443,6 +443,7 @@ pub(super) async fn run_generated_workload(
         lease_time_monotonic(&events),
         generated_suspend_resume(&events),
         generated_final_value_semantic_channel(&events),
+        crate::state_checker::checkpoint_state_consistency(&events, &durable_writes),
     ];
     oracles.extend(scenario_contract_mini_oracles(&events, &final_summary));
     oracles.extend(scenario_contract_oracles(&events, &final_summary));

@@ -5,7 +5,7 @@
   "trace": "trace.json",
   "generator_version": "lash-sim.generated-workload.v9",
   "source": "generated full-random (seed 14123330213291275571, seed_index 0) DST trace refreshed with canonical occurrence identity and structural process/event wake identity against generator lash-sim.generated-workload.v9 on 2026-08-05; surfaced by the broad/full generated lane",
-  "source_trace_sha256": "bce3b01c53fcc755900ce069fdd8c23b0c30756e8e1bc2fd1eecd85fc1a6eee3",
+  "source_trace_sha256": "1ce1df831b193f071a6540595b1e5cc2a6e02a4c6793cf3790edb444e68f435d",
   "seed": 14123330213291275571,
   "profile": "full-random",
   "classification": "RESOLVED. This was NOT a product bug. The apparent cross-backend divergence was a replay-FIDELITY gap in the harness's own SQLite re-drive: the old `replay-sqlite` path re-drove a recorded trace in fixed order with provider exchanges GATED to the original in-memory run's recorded (exchange_index,event_index) counts, which deadlocked on the active-turn queued-input enqueue and could surface an extra exchange / empty output. Driven directly through one driver, the real in-memory store and the real lash-sqlite-store commit identical output.",

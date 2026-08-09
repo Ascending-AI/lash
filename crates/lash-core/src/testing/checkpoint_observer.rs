@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 /// The value keeps its historical `lash.sim.` prefix because generated
 /// simulation trace artifacts embed it; the observer itself is no longer
 /// simulator-specific.
-pub const CHECKPOINT_WRITE_EVENT_SCHEMA: &str = "lash.sim.checkpoint-write-event.v2";
+pub const CHECKPOINT_WRITE_EVENT_SCHEMA: &str = "lash.sim.checkpoint-write-event.v3";
 
 /// One checkpoint component observed at the successful store-commit seam.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -104,6 +104,22 @@ pub struct CheckpointWriteEvent {
     pub revision_after: u64,
     pub usage: CheckpointUsageWrite,
     pub components: Vec<CheckpointComponentWrite>,
+    /// Submitted rows plus the accepted raw/read projections observed after the
+    /// commit. Simulation checkers fold these values without calling store or
+    /// read-model implementation code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<CheckpointStateWrite>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CheckpointStateWrite {
+    pub submitted_graph_append: serde_json::Value,
+    pub submitted_turn_state: serde_json::Value,
+    pub submitted_usage_rows: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted_raw_rows: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted_read_model: Option<serde_json::Value>,
 }
 
 impl CheckpointWriteEvent {
@@ -386,8 +402,27 @@ impl SessionCommitStore for ObservedSessionStore {
         mut commit: RuntimeCommit,
     ) -> Result<RuntimeCommitResult, StoreError> {
         self.collector.apply_mutation(&mut commit);
-        let event = checkpoint_write_event(&commit);
+        let mut event = checkpoint_write_event(&commit);
         let result = self.inner.commit_runtime_state(commit).await?;
+        if let Some(state) = event.state.as_mut()
+            && let Some(accepted) = self.inner.load_session().await?
+        {
+            let read_model = accepted.current_frame_node_id.as_deref().map_or_else(
+                || accepted.graph.read_model(),
+                |frame_node_id| accepted.graph.read_model_for_frame(frame_node_id),
+            );
+            state.accepted_raw_rows = Some(serde_json::json!({
+                "graph_nodes": accepted.graph.nodes,
+                "graph_leaf_node_id": accepted.graph.leaf_node_id,
+                "turn_state": accepted.checkpoint.as_ref().map(|checkpoint| &checkpoint.turn_state),
+                "token_ledger": accepted.token_ledger,
+            }));
+            state.accepted_read_model = Some(serde_json::json!({
+                "graph_node_count": accepted.graph.nodes.len(),
+                "messages": read_model.messages.as_ref(),
+                "token_usage": accepted.checkpoint.as_ref().map(|checkpoint| &checkpoint.turn_state.token_usage),
+            }));
+        }
         self.collector.push(CheckpointWriteEvent {
             revision_after: result.head_revision,
             ..event
@@ -462,6 +497,22 @@ fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
         revision_after: 0,
         usage: checkpoint_usage_write(commit),
         components,
+        state: Some(CheckpointStateWrite {
+            submitted_graph_append: serde_json::to_value(&commit.graph)
+                .expect("runtime graph append is serializable"),
+            submitted_turn_state: serde_json::to_value(&checkpoint.turn_state)
+                .expect("runtime turn state is serializable"),
+            submitted_usage_rows: serde_json::to_value(
+                commit
+                    .usage_deltas
+                    .iter()
+                    .map(|delta| &delta.entry)
+                    .collect::<Vec<_>>(),
+            )
+            .expect("runtime usage rows are serializable"),
+            accepted_raw_rows: None,
+            accepted_read_model: None,
+        }),
     }
 }
 

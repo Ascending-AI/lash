@@ -324,6 +324,7 @@ fn test_write(session_id: &str, turn_index: usize) -> CheckpointWriteEvent {
         revision_after: turn_index as u64,
         usage: Default::default(),
         components: Vec::new(),
+        state: None,
     }
 }
 

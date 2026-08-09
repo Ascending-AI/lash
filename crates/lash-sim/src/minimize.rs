@@ -923,7 +923,7 @@ mod tests {
     #[tokio::test]
     async fn minimizer_preserves_rlm_mini_oracle_fixture_reason() {
         let fixture: FailingTraceFixture = serde_json::from_str(include_str!(
-            "../failure-fixtures/rlm-lashlang-cell-missing-exec-outcome.json"
+            "../failure-fixtures/rlm-lashlang-cell-missing-continuation.json"
         ))
         .expect("fixture");
         let workload = generate_workload(fixture.seed, &fixture.profile, fixture.max_boundaries)

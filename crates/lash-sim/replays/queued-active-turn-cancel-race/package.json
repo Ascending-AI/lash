@@ -5,7 +5,7 @@
   "trace": "trace.json",
   "generator_version": "lash-sim.generated-workload.v9",
   "source": "generated fast-random (seed 7313380382653661636, seed_index 0) DST trace, refreshed with canonical occurrence identity and structural process/event wake identity against generator lash-sim.generated-workload.v9 on 2026-08-05",
-  "source_trace_sha256": "f6cd6fb2943d4433d983d0d6acf8612c88ecba4823cb5280b6edfdf5bc6d17cf",
+  "source_trace_sha256": "191336ca2d8fea515a6e7440e80568b120554192e249dd86a72a34222369ce5e",
   "historical_production_regression": false,
   "regression_contract": "active-turn queued input stays hidden, then cancellation terminalizes the pending row before any later idle claim can surface it",
   "required_boundary_kinds": [
