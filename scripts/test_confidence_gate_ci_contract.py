@@ -17,6 +17,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 CONFIDENCE_WORKFLOW = ROOT / ".github" / "workflows" / "confidence.yml"
 PERF_WORKFLOW = ROOT / ".github" / "workflows" / "perf.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+DOCS_PAGES_WORKFLOW = ROOT / ".github" / "workflows" / "docs-pages.yml"
 RELEASE_NOTES = ROOT / "scripts" / "release_notes.py"
 GATE = ROOT / "scripts" / "confidence-gate.sh"
 PUSH_GATE = ROOT / "scripts" / "push-gate.sh"
@@ -421,7 +422,14 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
 
         self.assertIn("workflow-graph-roundtrip", functional)
         self.assertIn("recipe: workflow-graph-integration-verify", functional)
-        self.assertIn("uses: actions/setup-node@v6", functional)
+        self.assertIn("uses: actions/setup-node@", functional)
+        self.assertIn("node-version: 24", functional)
+        self.assertIn("cache: npm", functional)
+        self.assertIn(
+            "cache-dependency-path: "
+            "examples/workflow-graph-roundtrip/frontend/package-lock.json",
+            functional,
+        )
         self.assertIn("run: just ${{ matrix.recipe }}", functional)
         self.assertIn("workflow-graph-integration-verify:", justfile)
         self.assertIn(
@@ -575,7 +583,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn("workflow_dispatch:", perf)
         self.assertNotIn("schedule:", perf)
         self.assertIn("runs-on: blacksmith-16vcpu-ubuntu-2404", perf)
-        self.assertIn("useblacksmith/rust-cache@v3.0.1", release_cache)
+        self.assertIn("uses: useblacksmith/rust-cache@", release_cache)
         self.assertIn("cargo build --locked --release --workspace", release_cache)
         self.assertNotIn("--target x86_64-unknown-linux-gnu", release_cache)
         for command in (
@@ -587,16 +595,31 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             self.assertIn(command, perf)
             self.assertIn(command, release)
 
+        self.assertIn("image: postgres:16-alpine", perf)
+        self.assertRegex(
+            release,
+            r"image: postgres@sha256:[0-9a-f]{64} # postgres:16-alpine",
+        )
         for workflow_with_postgres in (perf, release):
-            # The image is either the tag itself or, in secret-bearing
-            # workflows, a digest pin that records the tag in a comment
-            # (FIG-1163). Both forms must resolve to postgres:16-alpine.
-            self.assertRegex(
-                workflow_with_postgres,
-                r"image: postgres(?::16-alpine"
-                r"|@sha256:[0-9a-f]{64} # postgres:16-alpine)",
-            )
             self.assertIn("LASH_POSTGRES_DATABASE_URL:", workflow_with_postgres)
+
+    def test_secret_bearing_workflows_pin_external_actions_by_sha(self) -> None:
+        for path in (RELEASE_WORKFLOW, DOCS_PAGES_WORKFLOW):
+            workflow = path.read_text(encoding="utf-8")
+            actions = re.findall(
+                r"^\s+uses: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([^\s#]+)"
+                r"(?:\s+#\s*(\S.*))?$",
+                workflow,
+                flags=re.MULTILINE,
+            )
+            self.assertGreater(len(actions), 0, path.name)
+            for action, ref, version_comment in actions:
+                with self.subTest(workflow=path.name, action=action):
+                    self.assertRegex(ref, r"^[0-9a-f]{40}$")
+                    self.assertRegex(
+                        version_comment or "",
+                        r"^(?:v[0-9]+(?:\.[0-9]+){0,2}|stable)$",
+                    )
 
     def test_all_confidence_fast_shards_use_blacksmith(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
