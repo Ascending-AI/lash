@@ -1,6 +1,8 @@
 //! Bot event-semantics tests: dedupe, ambient folding, session isolation, and
 //! the standard-mode tool loop.
 
+use std::sync::Arc;
+
 use crate::bot::channel::{Disposition, ReplySource};
 use crate::bot::ledger::Stage;
 use crate::bot::runtime::{session_id, thread_session_id};
@@ -379,6 +381,256 @@ async fn a_thread_forks_on_its_first_reply_and_inherits_uncommitted_root_context
         platform.bot_messages(&channel).await.is_empty(),
         "the bot reply is in the thread, not channel history"
     );
+}
+
+#[tokio::test]
+async fn a_thread_reply_waits_for_midflight_root_admission_and_forks_from_that_turn() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let script = Script::new([
+        Step::Gated("Root admission completed.".to_string()),
+        Step::Text("Thread answer from the root boundary.".to_string()),
+    ]);
+    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let channel = platform.channel("thread-root-admission-race").await;
+    let ada = platform.identify("ada").await;
+    let grace = platform.identify("grace").await;
+
+    let root = platform
+        .say(
+            &channel,
+            &ada,
+            &format!("{} establish the root", platform.mention()),
+        )
+        .await;
+    let root_mention = only_event(&platform.drain_envelopes().await, "app_mention");
+    let root_turn = tokio::spawn({
+        let bot = Arc::clone(&bot);
+        async move { bot.ingest(root_mention, None).await }
+    });
+    script.wait_gated().await;
+
+    platform
+        .say_thread(
+            &channel,
+            &grace,
+            root,
+            &format!("{} answer from this thread", platform.mention()),
+        )
+        .await;
+    let reply_mention = only_event(&platform.drain_envelopes().await, "app_mention");
+    let mut reply_turn = tokio::spawn({
+        let bot = Arc::clone(&bot);
+        async move { bot.ingest(reply_mention, None).await }
+    });
+
+    tokio::select! {
+        () = bot.wait_for_missing_thread_root() => {}
+        outcome = &mut reply_turn => {
+            panic!("thread turn completed before its root became durable: {outcome:?}");
+        }
+    }
+    let thread_id = thread_session_id(&channel, &root.to_string());
+    assert!(
+        !bot.core()
+            .session_exists(&thread_id)
+            .await
+            .expect("check child before root completion"),
+        "missing-root deferral must not fork from the channel's current leaf"
+    );
+
+    script.release_gate();
+    let root_disposition = root_turn
+        .await
+        .expect("join root turn")
+        .expect("complete root turn");
+    assert!(matches!(root_disposition, Disposition::Replied { .. }));
+    let reply_disposition = reply_turn
+        .await
+        .expect("join thread turn")
+        .expect("complete deferred thread turn");
+    assert!(matches!(reply_disposition, Disposition::Replied { .. }));
+
+    let requests = script.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests[1].contains("Root admission completed."),
+        "the child must share the completed root turn, not fork from the pre-root leaf: {}",
+        requests[1]
+    );
+}
+
+#[tokio::test]
+async fn a_permanently_missing_root_fails_loudly_then_root_arrival_and_retry_recover() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let script = Script::prose("Recovered from the authoritative root.");
+    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    bot.set_thread_root_wait_budget(std::time::Duration::ZERO);
+    let channel = platform.channel("thread-missing-root-recovery").await;
+    let ada = platform.identify("ada").await;
+    let grace = platform.identify("grace").await;
+
+    let root = platform
+        .say(&channel, &ada, "authoritative root fact")
+        .await;
+    let root_event = only_event(&platform.drain_envelopes().await, "message");
+    platform
+        .say_thread(
+            &channel,
+            &grace,
+            root,
+            &format!("{} use the root", platform.mention()),
+        )
+        .await;
+    let reply_mention = only_event(&platform.drain_envelopes().await, "app_mention");
+
+    let failure = bot
+        .ingest(reply_mention.clone(), None)
+        .await
+        .expect("exhaust bounded root wait");
+    assert!(matches!(
+        failure,
+        Disposition::RecoverableFailure {
+            notified: true,
+            reason: "thread_root_not_available",
+            ..
+        }
+    ));
+    assert_eq!(script.calls(), 0, "no turn can run without its root");
+    let failed_record = bot
+        .ledger()
+        .get(reply_mention.event_id.clone())
+        .await
+        .expect("read recoverable failure")
+        .expect("recoverable failure row");
+    assert_eq!(failed_record.stage, Stage::Accepted);
+    assert!(!failed_record.stage.is_terminal());
+    assert_eq!(
+        failed_record.detail.as_deref(),
+        Some("thread_root_not_available")
+    );
+    let replies = platform.thread_messages(&channel, root).await;
+    let error_reply = replies
+        .iter()
+        .find(|message| message.bot_id.is_some())
+        .expect("in-thread missing-root notification");
+    assert!(
+        error_reply
+            .text
+            .contains("can’t find the message this thread started from")
+    );
+    assert!(error_reply.text.contains("follow up here"));
+
+    let second_failure = bot
+        .ingest(reply_mention.clone(), Some(1))
+        .await
+        .expect("exhaust the still-missing root a second time");
+    assert!(matches!(
+        second_failure,
+        Disposition::RecoverableFailure {
+            notified: false,
+            reason: "thread_root_not_available",
+            ..
+        }
+    ));
+    assert_eq!(
+        platform
+            .thread_messages(&channel, root)
+            .await
+            .iter()
+            .filter(|message| message.bot_id.is_some())
+            .count(),
+        1,
+        "second exhaustion must find the first notification by metadata identity"
+    );
+
+    let folded = bot
+        .ingest(root_event, None)
+        .await
+        .expect("admit the late root");
+    assert!(matches!(folded, Disposition::Folded { .. }));
+    let recovered = bot
+        .ingest(reply_mention.clone(), Some(1))
+        .await
+        .expect("retry after root arrival");
+    assert!(matches!(
+        recovered,
+        Disposition::Replied {
+            source: ReplySource::Turn,
+            ..
+        }
+    ));
+    assert_eq!(script.calls(), 1);
+    assert!(script.saw("authoritative root fact"));
+    let recovered_record = bot
+        .ledger()
+        .get(reply_mention.event_id)
+        .await
+        .expect("read recovered row")
+        .expect("recovered row");
+    assert_eq!(recovered_record.stage, Stage::Replied);
+    assert_eq!(
+        platform
+            .thread_messages(&channel, root)
+            .await
+            .iter()
+            .filter(|message| message.bot_id.is_some())
+            .count(),
+        2,
+        "one loud failure and one recovered answer"
+    );
+}
+
+#[tokio::test]
+async fn a_terminal_unroutable_root_fails_fast_without_spending_the_wait_budget() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let script = Script::prose("must not run");
+    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    bot.set_thread_root_wait_budget(std::time::Duration::from_secs(60));
+    let channel = platform.channel("thread-terminal-root").await;
+    let ada = platform.identify("ada").await;
+
+    let root = platform.say(&channel, &ada, "authorless root").await;
+    let mut root_event = only_event(&platform.drain_envelopes().await, "message");
+    let crate::wire::events::Event::Message(message) = &mut root_event.event else {
+        unreachable!("say emits a message event")
+    };
+    message.user = None;
+    let ignored = bot
+        .ingest(root_event, None)
+        .await
+        .expect("record the permanently unroutable root");
+    assert!(matches!(
+        ignored,
+        Disposition::Ignored {
+            reason: "no_author",
+            ..
+        }
+    ));
+
+    platform
+        .say_thread(
+            &channel,
+            &ada,
+            root,
+            &format!("{} can this route?", platform.mention()),
+        )
+        .await;
+    let reply = only_event(&platform.drain_envelopes().await, "app_mention");
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(1), bot.ingest(reply, None))
+        .await
+        .expect("terminal root evidence must bypass the 60s wait")
+        .expect("handle unroutable-root reply");
+    assert!(matches!(
+        outcome,
+        Disposition::RecoverableFailure {
+            reason: "thread_root_not_available",
+            ..
+        }
+    ));
+    assert_eq!(script.calls(), 0);
 }
 
 #[tokio::test]

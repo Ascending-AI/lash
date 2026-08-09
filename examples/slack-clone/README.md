@@ -56,6 +56,7 @@ State lives under `.slack-clone/`. `cargo test -p slack-clone` needs no model ke
 | --- | --- |
 | Session per durable conversation | `bot/runtime.rs::session_id`, `bot/channel.rs` |
 | Thread as a forked child session | `bot/threads.rs`, `bot/runtime.rs::thread_session_id` |
+| Bounded thread-root admission deferral | `bot/threads.rs::open_thread_session` |
 | Ambient context as queued turn input, with no turn | `bot/channel.rs::ingest` |
 | Mention-triggered turn that drains the queue | `bot/channel.rs::run_mention_turn` |
 | Standard-mode native tool loop | `bot/tools.rs` |
@@ -63,7 +64,7 @@ State lives under `.slack-clone/`. `cargo test -p slack-clone` needs no model ke
 | Idempotent event consumption | `bot/ledger.rs` |
 | Restart recovery, stage by stage | `bot/channel.rs::recover` |
 | Telling "already committed" from "cannot reach it yet" | `bot/channel.rs::settle_empty_drain` |
-| Bounded retry of work fenced by a dead boot's lease | `bot/channel.rs::retry_deferred` |
+| Bounded retry of fenced work and delayed thread roots | `bot/channel.rs::retry_deferred` |
 | Reading a lost reply back out of the transcript | `bot/channel.rs::reply_from_transcript` |
 | Transactional outbox | `platform/state.rs::post_message` |
 | A liftable API client | `bot/slack_api.rs` |
@@ -214,27 +215,44 @@ drains them there. No thread event is ever admitted to `channel:<C…>`.
 
 ### Locating the fork boundary
 
-The ledger records the `input_id` returned by Lash for every Slack admission.
-After a channel turn commits, the bot reads `turn_input_applications`, finds the
-application for that `input_id`, groups every application with the same typed
-`turn_id`, pins the committed leaf, and records that boundary for those Slack
-messages. If a crash lands after the pin but before that ledger write, thread-open
-uses the durable application to re-derive and repair the missing boundary before
-it forks. Nothing parses an input, turn, message, or node id.
+The ledger records two different boundaries because they mean different things.
+A folded top-level message records and retains the exact channel graph boundary
+observed while its admission held the channel lock; the queued root is copied
+into a child forked there. After a channel turn commits, the bot instead reads
+`turn_input_applications`, finds the application for the root's `input_id`, groups
+every application with the same typed `turn_id`, pins the committed leaf, and
+records that later boundary. If a crash lands after the pin but before that
+ledger write, thread-open uses the durable application to re-derive and repair
+the missing boundary before it forks. Nothing parses an input, turn, message, or
+node id.
 
-A newly opened channel has a non-message baseline commit, so every honest
-fallback is forkable without spending a token. Thread-open chooses as follows:
+Thread-open chooses only from evidence durably tied to the root:
 
 | Durable root evidence | Fork boundary and context policy |
 | --- | --- |
 | Recorded `fork_node_id` | Fork at that retained turn boundary. |
 | `input_id` with a committed application, but no `fork_node_id` | Re-derive the applied turn boundary, repair the ledger row, then fork there. |
-| `input_id` with no application record | The root is still queued: fork at the current committed head and copy top-level admissions through the root that are not already in the child graph. |
-| No root admission (for example, the bot joined after the root was posted) | Fork at the current committed head and invent no older context. |
+| Folded root with a recorded admission boundary | Fork at that retained pre-root boundary and copy top-level admissions through the root that are not already in the child graph. |
+| Accepted root with `input_id` and an admission boundary | Treat the durable enqueue as valid immediately, even if the process died before advancing the ledger to Folded. |
+| Non-terminal root without an authoritative boundary yet | Poll from 250ms with exponential backoff capped at 8s, for at most 45s. |
+| Terminal ignored root with no admission evidence | Fail immediately; this ledger state proves the bot will never route it. |
+| No root row | Keep the bounded wait because delivery may be racing; record `thread_root_not_available` on exhaustion. |
 
-Copied admissions remain queued and are folded by the thread's first mention.
-The current-head fallback is deliberately limited to cases where the durable
-application needed to name an older committed boundary is absent.
+There is no current-head fallback: that leaf may already contain post-root
+channel turns. If the 45s budget expires, a mention gets an honest in-thread
+explanation that the bot has not caught up and will follow up. Its ledger row
+remains at the non-terminal FIG-1008 state. The bot continues under the remaining
+75s of one 120s in-process deadline, so a root that commits after the foreground
+wait can recover without a new mention or restart. The error notification has its
+own metadata identity, preventing it from being mistaken for the eventual answer
+or posted twice. Copied admissions remain queued and are folded by the thread's
+first mention.
+
+A no-row exhaustion is distinct from a known, still-processing root. Boot recovery
+handles `thread_root_not_available` with one zero-budget probe and does not enqueue
+another long poll, avoiding a repeated 45s serial stall on every boot. Top-level
+unfinished rows are recovered before thread rows, so a root that was accepted
+before a crash gets its admission boundary before its replies are re-driven.
 
 Fork isolation is directional in both cases and is asserted against the real
 store semantics:
@@ -396,20 +414,17 @@ host-supplied liveness assertion that would let a bot declare its own previous
 incarnation dead. So the wait is bounded by the session-execution lease TTL
 (`LeaseTimings`, **30s** by default, host-configurable) and nothing shorter will do.
 
-`ChannelBot::retry_deferred` therefore re-attempts on an interval with a finite
-deadline. Each attempt is a real, idempotent attempt whose *result* is the state
-test — it polls typed runtime state rather than sleeping for a duration and then
-assuming. Boot does not block on it: the immediate pass settles everything it can,
-registration proceeds, and deferred rows are retried on a background task, because
-an endpoint with live traffic should not wait out a lease TTL before serving. If
-the deadline is exhausted the row is *still* left resumable — a later boot picking
-it up beats a silently dropped mention. Be clear about what that means in
-practice, though: nothing in the *running* process re-attempts an exhausted row.
-Until the bot restarts (or the platform redelivers, which its bounded retries
-will not do this late), the mention stays unanswered. A transient failure inside
-an attempt — an unreachable platform, a network blip on the history scan — counts
-as a retryable iteration, not an abort: the ledger row is untouched by a failed
-attempt, so only the deadline ends the loop.
+`ChannelBot::retry_deferred` therefore re-attempts both lease-fenced admissions and
+recoverable thread-root races on an interval with a finite deadline. Each attempt
+is a real, idempotent state test. A foreground thread-open may spend 45s; its
+background continuation gets the remaining 75s, and every root wait inside that
+loop is capped by the remaining time rather than receiving a fresh budget. Boot
+does not block on root waits: the immediate pass gives thread routes one quick
+probe, registration proceeds, and roots known to be processing are retried on a
+background task. If the deadline is exhausted the row is *still* left resumable —
+a later boot picking it up beats a silently dropped mention. A transient failure
+inside an attempt counts as a retryable iteration, not an abort: the ledger row is
+untouched by a failed attempt, so only the deadline ends the loop.
 
 One caveat on the discriminator: a turn-input application record is written only
 for admissions with non-empty content, so "no record" means "not consumed" only

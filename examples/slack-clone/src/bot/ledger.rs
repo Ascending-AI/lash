@@ -56,6 +56,15 @@ CREATE TABLE IF NOT EXISTS event_routes (
 );
 CREATE INDEX IF NOT EXISTS idx_event_routes_thread ON event_routes(thread_ts);
 CREATE INDEX IF NOT EXISTS idx_event_routes_input ON event_routes(input_id);
+
+-- A folded top-level message has not committed into the channel graph yet, so
+-- its honest fork source is the graph boundary observed while that admission
+-- held the channel lock. Keep that evidence separate from `fork_node_id`, which
+-- continues to mean the later boundary produced by a committed turn.
+CREATE TABLE IF NOT EXISTS event_admission_boundaries (
+    event_id TEXT PRIMARY KEY REFERENCES handled_events(event_id) ON DELETE CASCADE,
+    node_id  TEXT NOT NULL
+);
 ";
 
 /// Columns every read projects, in the order [`read_row`] expects.
@@ -63,7 +72,9 @@ const BASE_COLUMNS: &str =
     "event_id, channel_id, message_ts, kind, stage, input_text, reply_ts, detail, deliveries";
 const COLUMNS: &str = "handled_events.event_id, channel_id, message_ts, kind, stage, input_text, \
      reply_ts, detail, deliveries, event_routes.thread_ts, event_routes.input_id, \
-     event_routes.fork_node_id";
+     event_routes.fork_node_id, event_admission_boundaries.node_id";
+const ROUTE_JOINS: &str = "LEFT JOIN event_routes USING(event_id) \
+     LEFT JOIN event_admission_boundaries USING(event_id)";
 
 /// Event kind for a message that mentions the bot.
 pub const KIND_APP_MENTION: &str = "app_mention";
@@ -138,6 +149,9 @@ pub struct EventRecord {
     pub input_id: Option<String>,
     /// Retained turn boundary that includes this input, when it has committed.
     pub fork_node_id: Option<String>,
+    /// Retained channel boundary captured while a folded top-level admission held
+    /// the channel lock. Used only while the root is still queued.
+    pub admission_node_id: Option<String>,
 }
 
 /// The outcome of claiming an event for handling.
@@ -256,6 +270,21 @@ impl EventLedger {
             .await
     }
 
+    /// Record the exact channel boundary preceding a folded top-level admission.
+    pub async fn record_admission_node(&self, event_id: String, node_id: String) -> Result<()> {
+        self.database
+            .call(move |connection| {
+                connection.execute(
+                    "INSERT INTO event_admission_boundaries (event_id, node_id)
+                     VALUES (?1, ?2)
+                     ON CONFLICT(event_id) DO NOTHING",
+                    params![event_id, node_id],
+                )?;
+                Ok(())
+            })
+            .await
+    }
+
     /// Associate every admission committed by a turn with its retained boundary.
     pub async fn record_fork_node_for_inputs(
         &self,
@@ -288,7 +317,7 @@ impl EventLedger {
             .call(move |connection| {
                 let mut statement = connection.prepare(&format!(
                     "SELECT {COLUMNS} FROM handled_events
-                     LEFT JOIN event_routes USING(event_id)
+                     {ROUTE_JOINS}
                      WHERE channel_id = ?1 AND message_ts <= ?2
                        AND event_routes.thread_ts IS NULL AND input_text IS NOT NULL
                      ORDER BY message_ts, first_seen_at"
@@ -312,10 +341,42 @@ impl EventLedger {
                     .query_row(
                         &format!(
                             "SELECT {COLUMNS} FROM handled_events
-                             LEFT JOIN event_routes USING(event_id)
+                             {ROUTE_JOINS}
                              WHERE channel_id = ?1 AND message_ts = ?2
                                AND event_routes.thread_ts IS NULL
                                AND input_text IS NOT NULL
+                             ORDER BY CASE kind WHEN 'app_mention' THEN 0 ELSE 1 END
+                             LIMIT 1"
+                        ),
+                        params![channel_id, message_ts],
+                        read_row,
+                    )
+                    .optional()?)
+            })
+            .await
+    }
+
+    /// Any top-level ledger row for a Slack message, including one the bot
+    /// deliberately ignored and therefore never admitted.
+    ///
+    /// Thread routing uses this only after [`Self::channel_message`] found no
+    /// admissible root. A terminal ignored row can then prove that waiting for
+    /// an admission is pointless, while no row at all may still mean delivery is
+    /// racing and remains worth a bounded wait.
+    pub async fn top_level_event(
+        &self,
+        channel_id: String,
+        message_ts: String,
+    ) -> Result<Option<EventRecord>> {
+        self.database
+            .call(move |connection| {
+                Ok(connection
+                    .query_row(
+                        &format!(
+                            "SELECT {COLUMNS} FROM handled_events
+                             {ROUTE_JOINS}
+                             WHERE channel_id = ?1 AND message_ts = ?2
+                               AND event_routes.thread_ts IS NULL
                              ORDER BY CASE kind WHEN 'app_mention' THEN 0 ELSE 1 END
                              LIMIT 1"
                         ),
@@ -380,9 +441,10 @@ impl EventLedger {
             .call(|connection| {
                 let mut statement = connection.prepare(&format!(
                     "SELECT {COLUMNS} FROM handled_events
-                     LEFT JOIN event_routes USING(event_id)
+                     {ROUTE_JOINS}
                      WHERE stage IN ('accepted', 'reply_pending')
-                     ORDER BY first_seen_at, message_ts"
+                     ORDER BY event_routes.thread_ts IS NOT NULL,
+                              first_seen_at, message_ts"
                 ))?;
                 let rows = statement
                     .query_map([], read_row)?
@@ -398,7 +460,7 @@ fn read(connection: &Connection, event_id: &str) -> Result<Option<EventRecord>> 
         .query_row(
             &format!(
                 "SELECT {COLUMNS} FROM handled_events
-                 LEFT JOIN event_routes USING(event_id)
+                 {ROUTE_JOINS}
                  WHERE handled_events.event_id = ?1"
             ),
             params![event_id],
@@ -421,6 +483,7 @@ fn read_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRecord> {
         thread_ts: row.get(9)?,
         input_id: row.get(10)?,
         fork_node_id: row.get(11)?,
+        admission_node_id: row.get(12)?,
     })
 }
 
@@ -438,6 +501,7 @@ fn read_base_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRecord> {
         thread_ts: None,
         input_id: None,
         fork_node_id: None,
+        admission_node_id: None,
     })
 }
 
