@@ -222,11 +222,15 @@ pub enum TraceEvent {
         provider_usage: Option<Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stream_summary: Option<Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attempts: Option<Vec<TraceRetryAttempt>>,
     },
     LlmCallFailed {
         error: TraceError,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stream_summary: Option<Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attempts: Option<Vec<TraceRetryAttempt>>,
     },
     ProviderRequest {
         event: TraceProviderRequestEvent,
@@ -251,6 +255,50 @@ pub enum TraceEvent {
         args: Value,
         output: TraceToolCallOutput,
         duration_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attempts: Option<Vec<TraceRetryAttempt>>,
+    },
+    /// A Restate `ctx.run` effect is about to cross its journal command boundary.
+    JournaledEffectStarted {
+        effect_name: String,
+        effect_kind: String,
+    },
+    /// A Restate `ctx.run` effect returned its recorded or newly executed outcome.
+    JournaledEffectSettled {
+        effect_name: String,
+        effect_kind: String,
+        status: String,
+    },
+    /// A Restate durable wait has issued its park command.
+    DurableWaitParked {
+        wait_kind: String,
+    },
+    /// A Restate durable wait resumed with a terminal resolution.
+    DurableWaitResolved {
+        wait_kind: String,
+        resolution: String,
+    },
+    /// A Restate durable timer has been issued.
+    DurableTimerStarted {
+        duration_ms: u64,
+    },
+    /// A Restate durable timer resumed or was cancelled.
+    DurableTimerResolved {
+        duration_ms: u64,
+        status: String,
+    },
+    /// The durable controller requested a quiescent handler-segment handover.
+    DurableSegmentBoundary {
+        reason: String,
+        effects_executed: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        journaled_bytes_estimate: Option<u64>,
+    },
+    /// The runtime received a typed, non-retryable store integrity failure.
+    StoreErrorObserved {
+        operation: String,
+        error_class: String,
+        message: String,
     },
     ProtocolStep {
         plugin_id: String,
@@ -274,6 +322,19 @@ pub enum TraceEvent {
         name: String,
         payload: Value,
     },
+}
+
+/// One provider or tool retry attempt projected from the retry owner's sealed
+/// record. The trace does not own retry bookkeeping; it only renders it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceRetryAttempt {
+    pub ordinal: u32,
+    pub outcome: String,
+    pub duration_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delay_ms: Option<u64>,
 }
 
 impl TraceEvent {
@@ -302,6 +363,14 @@ impl TraceEvent {
             Self::RuntimeStreamEvent { .. } => "runtime_stream_event",
             Self::ToolCallStarted { .. } => "tool_call_started",
             Self::ToolCallCompleted { .. } => "tool_call_completed",
+            Self::JournaledEffectStarted { .. } => "journaled_effect_started",
+            Self::JournaledEffectSettled { .. } => "journaled_effect_settled",
+            Self::DurableWaitParked { .. } => "durable_wait_parked",
+            Self::DurableWaitResolved { .. } => "durable_wait_resolved",
+            Self::DurableTimerStarted { .. } => "durable_timer_started",
+            Self::DurableTimerResolved { .. } => "durable_timer_resolved",
+            Self::DurableSegmentBoundary { .. } => "durable_segment_boundary",
+            Self::StoreErrorObserved { .. } => "store_error_observed",
             Self::ProtocolStep { .. } => "protocol_step",
             Self::TokenUsage { .. } => "token_usage",
             Self::LashlangExecution { .. } => "lashlang_execution",
@@ -1031,6 +1100,7 @@ mod tests {
                     control: None,
                 },
                 duration_ms: 3,
+                attempts: None,
             },
         );
 

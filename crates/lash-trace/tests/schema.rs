@@ -120,6 +120,7 @@ fn event_samples() -> Vec<TraceEvent> {
             usage: Some(token_usage_sample()),
             provider_usage: None,
             stream_summary: None,
+            attempts: None,
         },
         TraceEvent::LlmCallFailed {
             error: TraceError {
@@ -130,6 +131,7 @@ fn event_samples() -> Vec<TraceEvent> {
                 raw: None,
             },
             stream_summary: None,
+            attempts: None,
         },
         TraceEvent::ProviderRequest {
             event: TraceProviderRequestEvent {
@@ -201,6 +203,7 @@ fn event_samples() -> Vec<TraceEvent> {
                 control: None,
             },
             duration_ms: 3,
+            attempts: None,
         },
         TraceEvent::ProtocolStep {
             plugin_id: "custom".to_string(),
@@ -365,6 +368,7 @@ fn tool_call_completed_pins_outcome_vocabulary() {
                 control: None,
             },
             duration_ms: 3,
+            attempts: None,
         };
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["type"], "tool_call_completed");
@@ -390,6 +394,7 @@ fn llm_call_completed_full_shape() {
         usage: Some(token_usage_sample()),
         provider_usage: None,
         stream_summary: None,
+        attempts: None,
     };
     assert_eq!(
         serde_json::to_value(&event).unwrap(),
@@ -409,6 +414,45 @@ fn llm_call_completed_full_shape() {
             },
         })
     );
+}
+
+#[test]
+fn retry_attempts_are_optional_additive_event_fields() {
+    let attempts = Some(vec![
+        lash_trace::TraceRetryAttempt {
+            ordinal: 1,
+            outcome: "failed".to_string(),
+            duration_ms: 10,
+            reason: Some("http_429".to_string()),
+            delay_ms: Some(250),
+        },
+        lash_trace::TraceRetryAttempt {
+            ordinal: 2,
+            outcome: "completed".to_string(),
+            duration_ms: 20,
+            reason: None,
+            delay_ms: None,
+        },
+    ]);
+    let event = TraceEvent::ToolCallCompleted {
+        call_id: Some("call-1".to_string()),
+        name: "retry_probe".to_string(),
+        args: json!({}),
+        output: TraceToolCallOutput {
+            outcome: TraceToolCallOutcome::Success(json!("ok")),
+            control: None,
+        },
+        duration_ms: 280,
+        attempts,
+    };
+    let json = serde_json::to_value(event).expect("serialize retry ladder");
+    assert_eq!(json["type"], "tool_call_completed");
+    assert_eq!(json["attempts"].as_array().map(Vec::len), Some(2));
+    assert_eq!(json["attempts"][0]["reason"], "http_429");
+    assert_eq!(json["attempts"][0]["delay_ms"], 250);
+    assert!(json["attempts"][1].get("reason").is_none());
+    assert!(json["attempts"][1].get("delay_ms").is_none());
+    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 3);
 }
 
 #[test]
@@ -570,4 +614,52 @@ fn jsonl_round_trip_preserves_records() {
     assert_eq!(tool_call["name"], "read_file");
     assert_eq!(tool_call["duration_ms"], 5);
     assert_eq!(tool_call["status"], "success");
+}
+
+#[test]
+fn durable_step_events_are_additive_at_schema_version_three() {
+    let events = vec![
+        TraceEvent::JournaledEffectStarted {
+            effect_name: "lash:turn:llm:1".to_string(),
+            effect_kind: "llm_call".to_string(),
+        },
+        TraceEvent::JournaledEffectSettled {
+            effect_name: "lash:turn:llm:1".to_string(),
+            effect_kind: "llm_call".to_string(),
+            status: "completed".to_string(),
+        },
+        TraceEvent::DurableWaitParked {
+            wait_kind: "await_event".to_string(),
+        },
+        TraceEvent::DurableWaitResolved {
+            wait_kind: "await_event".to_string(),
+            resolution: "ok".to_string(),
+        },
+        TraceEvent::DurableTimerStarted { duration_ms: 250 },
+        TraceEvent::DurableTimerResolved {
+            duration_ms: 250,
+            status: "resolved".to_string(),
+        },
+        TraceEvent::DurableSegmentBoundary {
+            reason: "journal_budget".to_string(),
+            effects_executed: 10_000,
+            journaled_bytes_estimate: None,
+        },
+        TraceEvent::StoreErrorObserved {
+            operation: "session_restore".to_string(),
+            error_class: "StoredDataCorrupt".to_string(),
+            message: "stored SessionHeadMeta data is corrupt".to_string(),
+        },
+    ];
+
+    for event in events {
+        let expected_kind = event.kind();
+        let record = TraceRecord::new(TraceContext::default().for_session("s1"), event);
+        let json = serde_json::to_value(&record).expect("serialize durable trace event");
+        assert_eq!(json["schema_version"], lash_trace::TRACE_SCHEMA_VERSION);
+        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 3);
+        assert_eq!(json["type"], expected_kind);
+        let decoded: TraceRecord = serde_json::from_value(json).expect("round trip event");
+        assert_eq!(decoded.event.kind(), expected_kind);
+    }
 }

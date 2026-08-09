@@ -1177,6 +1177,22 @@ mod tests {
                 usage: Some(usage()),
                 provider_usage: None,
                 stream_summary: None,
+                attempts: Some(vec![
+                    lash_trace::TraceRetryAttempt {
+                        ordinal: 1,
+                        outcome: "failed".to_string(),
+                        duration_ms: 12,
+                        reason: Some("http_429".to_string()),
+                        delay_ms: Some(250),
+                    },
+                    lash_trace::TraceRetryAttempt {
+                        ordinal: 2,
+                        outcome: "completed".to_string(),
+                        duration_ms: 8,
+                        reason: None,
+                        delay_ms: None,
+                    },
+                ]),
             },
             TraceEvent::LlmCallFailed {
                 error: TraceError {
@@ -1187,6 +1203,7 @@ mod tests {
                     raw: None,
                 },
                 stream_summary: None,
+                attempts: None,
             },
             TraceEvent::ProviderRequest {
                 event: TraceProviderRequestEvent {
@@ -1242,6 +1259,53 @@ mod tests {
                     control: None,
                 },
                 duration_ms: 4,
+                attempts: Some(vec![
+                    lash_trace::TraceRetryAttempt {
+                        ordinal: 1,
+                        outcome: "failed".to_string(),
+                        duration_ms: 1,
+                        reason: Some("busy".to_string()),
+                        delay_ms: Some(10),
+                    },
+                    lash_trace::TraceRetryAttempt {
+                        ordinal: 2,
+                        outcome: "completed".to_string(),
+                        duration_ms: 3,
+                        reason: None,
+                        delay_ms: None,
+                    },
+                ]),
+            },
+            TraceEvent::JournaledEffectStarted {
+                effect_name: "lash:turn:llm:1".to_string(),
+                effect_kind: "llm_call".to_string(),
+            },
+            TraceEvent::JournaledEffectSettled {
+                effect_name: "lash:turn:llm:1".to_string(),
+                effect_kind: "llm_call".to_string(),
+                status: "completed".to_string(),
+            },
+            TraceEvent::DurableWaitParked {
+                wait_kind: "await_event".to_string(),
+            },
+            TraceEvent::DurableWaitResolved {
+                wait_kind: "await_event".to_string(),
+                resolution: "ok".to_string(),
+            },
+            TraceEvent::DurableTimerStarted { duration_ms: 250 },
+            TraceEvent::DurableTimerResolved {
+                duration_ms: 250,
+                status: "resolved".to_string(),
+            },
+            TraceEvent::DurableSegmentBoundary {
+                reason: "journal_budget".to_string(),
+                effects_executed: 10_000,
+                journaled_bytes_estimate: None,
+            },
+            TraceEvent::StoreErrorObserved {
+                operation: "session_restore".to_string(),
+                error_class: "StoredDataCorrupt".to_string(),
+                message: "bad session head".to_string(),
             },
             TraceEvent::ProtocolStep {
                 plugin_id: "rlm".to_string(),
@@ -1297,6 +1361,62 @@ mod tests {
     }
 
     #[test]
+    fn restate_hosted_turn_keeps_session_turn_and_durable_step_parity() {
+        let context = TraceContext::default()
+            .for_session("restate-session")
+            .for_turn("restate-turn");
+        let trace = loaded_trace(vec![
+            TraceRecord::new(
+                context.clone(),
+                TraceEvent::TurnStarted {
+                    metadata: Default::default(),
+                },
+            ),
+            TraceRecord::new(
+                context.clone(),
+                TraceEvent::JournaledEffectStarted {
+                    effect_name: "lash:llm:1".to_string(),
+                    effect_kind: "llm_call".to_string(),
+                },
+            ),
+            TraceRecord::new(
+                context,
+                TraceEvent::JournaledEffectSettled {
+                    effect_name: "lash:llm:1".to_string(),
+                    effect_kind: "llm_call".to_string(),
+                    status: "completed".to_string(),
+                },
+            ),
+        ]);
+        let model = build_model(&trace);
+
+        assert_eq!(
+            model
+                .events
+                .iter()
+                .map(|event| event.kind.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "turn_started",
+                "journaled_effect_started",
+                "journaled_effect_settled"
+            ]
+        );
+        assert!(model.events.iter().all(|event| {
+            event
+                .pills
+                .iter()
+                .any(|pill| pill == "session restate-session")
+        }));
+        assert!(
+            model
+                .events
+                .iter()
+                .all(|event| event.pills.iter().any(|pill| pill == "turn restate-turn"))
+        );
+    }
+
+    #[test]
     fn render_escapes_script_breakout_sequences() {
         let trace = loaded_trace(vec![TraceRecord::new(
             TraceContext::default(),
@@ -1344,10 +1464,34 @@ mod tests {
         ));
         let model = build_model(&trace);
         assert_eq!(model.stats.llm_calls, 1);
-        // llm_call_failed contributes one failure; every other sample is ok.
-        assert_eq!(model.stats.failures, 1);
+        // The failed LLM call and typed store-integrity evidence are failures.
+        assert_eq!(model.stats.failures, 2);
         // LlmCallCompleted usage (18) + TokenUsage usage (18); reasoning excluded.
         assert_eq!(model.stats.total_tokens, 36);
+    }
+
+    #[test]
+    fn llm_and_tool_retry_ladders_render_attempt_count_reason_and_delay() {
+        let trace = loaded_trace(
+            every_variant()
+                .into_iter()
+                .filter(|event| {
+                    matches!(
+                        event,
+                        TraceEvent::LlmCallCompleted { .. } | TraceEvent::ToolCallCompleted { .. }
+                    )
+                })
+                .map(|event| TraceRecord::new(TraceContext::default(), event))
+                .collect(),
+        );
+        let model = build_model(&trace);
+        assert_eq!(model.events.len(), 2);
+        for event in model.events {
+            assert!(event.summary.contains("attempts: 2"));
+            assert!(event.summary.contains("#1 failed"));
+            assert!(event.summary.contains("retry after"));
+            assert!(event.summary.contains("#2 completed"));
+        }
     }
 
     #[test]
@@ -1363,6 +1507,7 @@ mod tests {
                     control: None,
                 },
                 duration_ms: 2,
+                attempts: None,
             },
         );
         let entry = TraceEntry {

@@ -120,6 +120,8 @@ impl<'run> ToolDispatchContext<'run> {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ToolDispatchOutcome {
     pub record: ToolCallRecord,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attempts: Vec<lash_trace::TraceRetryAttempt>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -129,13 +131,15 @@ pub(crate) struct PendingToolDispatchOutcome {
     pub key: crate::AwaitEventKey,
     pub pending: crate::PendingCompletion,
     pub duration_ms: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attempts: Vec<lash_trace::TraceRetryAttempt>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub(crate) enum ToolCallLaunch {
-    Done(ToolDispatchOutcome),
-    Pending(PendingToolDispatchOutcome),
+    Done(Box<ToolDispatchOutcome>),
+    Pending(Box<PendingToolDispatchOutcome>),
 }
 
 pub(crate) enum ToolPreparationOutcome {
@@ -165,11 +169,14 @@ pub(super) fn outcome(
         }),
         duration_ms,
     };
-    ToolDispatchOutcome { record }
+    ToolDispatchOutcome {
+        record,
+        attempts: Vec::new(),
+    }
 }
 
 pub(super) fn launch_done(outcome: ToolDispatchOutcome) -> ToolCallLaunch {
-    ToolCallLaunch::Done(outcome)
+    ToolCallLaunch::Done(Box::new(outcome))
 }
 
 pub(super) fn runtime_failure(

@@ -568,6 +568,7 @@ impl RuntimeTurnDriver<'_> {
                         response,
                         debug.elapsed_ms(self.host.core.clock.as_ref()),
                         Some(stream_summary.clone()),
+                        call_record.as_ref(),
                         self.host.core.clock.as_ref(),
                     );
                 }
@@ -579,6 +580,7 @@ impl RuntimeTurnDriver<'_> {
                             .for_llm_call(llm_call_id),
                         crate::runtime::effect::LlmTraceFailure::from(error),
                         Some(stream_summary.clone()),
+                        call_record.as_ref(),
                         self.host.core.clock.as_ref(),
                     );
                 }
@@ -649,6 +651,7 @@ impl RuntimeTurnDriver<'_> {
                         usage: Some(crate::trace::trace_usage_from_session(&usage)),
                         provider_usage,
                         stream_summary: stream_summary.map(|summary| summary.to_json()),
+                        attempts: None,
                     },
                     self.host.core.clock.as_ref(),
                 );
@@ -682,6 +685,7 @@ impl RuntimeTurnDriver<'_> {
                             raw,
                         },
                         stream_summary: stream_summary.map(|summary| summary.to_json()),
+                        attempts: None,
                     },
                     self.host.core.clock.as_ref(),
                 );

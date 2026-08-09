@@ -1049,6 +1049,16 @@ impl LashRuntime {
         {
             Ok(committed) => committed,
             Err(err) => {
+                crate::trace::emit_store_error(
+                    &self.host.core.tracing.trace_sink,
+                    &self.host.core.tracing.trace_context,
+                    lash_trace::TraceContext::default()
+                        .for_session(self.state.session_id.clone())
+                        .for_turn(trace_turn_id.clone()),
+                    "turn_commit",
+                    &err,
+                    self.host.core.clock.as_ref(),
+                );
                 // Reported here, not inside the commit: the guard reference and the
                 // claimant are already live in this future, so naming the writer
                 // costs nothing, while carrying evidence through the commit await

@@ -115,6 +115,7 @@ impl RuntimeTurnDriver<'_> {
                                 prepared.args.clone(),
                                 resolution,
                                 duration_ms,
+                                Vec::new(),
                             )
                             .await;
                         let completed = prepare_context

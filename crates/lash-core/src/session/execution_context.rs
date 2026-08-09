@@ -108,6 +108,25 @@ impl RuntimeExecutionTracing {
             clock,
         );
     }
+
+    pub(crate) fn emit_tool_call_completed(
+        &self,
+        record: &crate::ToolCallRecord,
+        attempts: &[lash_trace::TraceRetryAttempt],
+        clock: &dyn crate::Clock,
+    ) {
+        self.emit(
+            lash_trace::TraceEvent::ToolCallCompleted {
+                call_id: record.call_id.clone(),
+                name: record.tool.clone(),
+                args: record.args.clone(),
+                output: crate::trace::trace_tool_call_output(&record.output),
+                duration_ms: record.duration_ms,
+                attempts: (!attempts.is_empty()).then(|| attempts.to_vec()),
+            },
+            clock,
+        );
+    }
 }
 
 impl<'run> RuntimeExecutionContext<'run> {
@@ -322,18 +341,13 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     /// Emit a `ToolCallCompleted` trace event for a tool run from this context.
     /// No-op when the host installed no trace sink.
-    pub(super) fn emit_tool_call_completed_trace(&self, record: &crate::ToolCallRecord) {
+    pub(super) fn emit_tool_call_completed_trace(
+        &self,
+        record: &crate::ToolCallRecord,
+        attempts: &[lash_trace::TraceRetryAttempt],
+    ) {
         if let Some(tracing) = self.tracing.as_ref() {
-            tracing.emit(
-                lash_trace::TraceEvent::ToolCallCompleted {
-                    call_id: record.call_id.clone(),
-                    name: record.tool.clone(),
-                    args: record.args.clone(),
-                    output: crate::trace::trace_tool_call_output(&record.output),
-                    duration_ms: record.duration_ms,
-                },
-                self.dispatch.clock.as_ref(),
-            );
+            tracing.emit_tool_call_completed(record, attempts, self.dispatch.clock.as_ref());
         }
     }
 

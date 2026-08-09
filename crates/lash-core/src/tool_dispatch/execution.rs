@@ -121,13 +121,14 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
                     ));
                 }
             };
-            return ToolCallLaunch::Pending(PendingToolDispatchOutcome {
+            return ToolCallLaunch::Pending(Box::new(PendingToolDispatchOutcome {
                 tool_name,
                 args,
                 key,
                 pending,
                 duration_ms,
-            });
+                attempts: Vec::new(),
+            }));
         }
     };
 
@@ -202,13 +203,14 @@ pub(super) async fn dispatch_granted_prepared_tool_attempt_launch_with_execution
                     ));
                 }
             };
-            return ToolCallLaunch::Pending(PendingToolDispatchOutcome {
+            return ToolCallLaunch::Pending(Box::new(PendingToolDispatchOutcome {
                 tool_name,
                 args,
                 key,
                 pending,
                 duration_ms,
-            });
+                attempts: Vec::new(),
+            }));
         }
     };
 
@@ -313,7 +315,7 @@ trait ToolCallLaunchExt {
 impl ToolCallLaunchExt for ToolCallLaunch {
     fn into_done_or_runtime_failure(self) -> ToolDispatchOutcome {
         match self {
-            ToolCallLaunch::Done(outcome) => outcome,
+            ToolCallLaunch::Done(outcome) => *outcome,
             ToolCallLaunch::Pending(pending) => outcome(
                 pending.tool_name,
                 pending.args,

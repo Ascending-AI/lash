@@ -40,6 +40,10 @@ pub(crate) fn emit_llm_trace_started(
     );
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "trace completion carries the explicit sink, scope, outcome, attempt record, and clock"
+)]
 pub(crate) fn emit_llm_trace_completed(
     trace_sink: &Option<Arc<dyn lash_trace::TraceSink>>,
     base_context: &lash_trace::TraceContext,
@@ -47,6 +51,7 @@ pub(crate) fn emit_llm_trace_completed(
     response: &LlmResponse,
     duration_ms: u64,
     stream_summary: Option<serde_json::Value>,
+    call_record: Option<&crate::LlmCallRecord>,
     clock: &dyn crate::Clock,
 ) {
     crate::trace::emit_trace(
@@ -64,6 +69,7 @@ pub(crate) fn emit_llm_trace_completed(
             usage: Some(crate::trace::trace_usage_from_llm(&response.usage)),
             provider_usage: response.provider_usage.clone(),
             stream_summary,
+            attempts: crate::trace::trace_llm_attempts(call_record),
         },
         clock,
     );
@@ -107,6 +113,7 @@ pub(crate) fn emit_llm_trace_failed(
     context: lash_trace::TraceContext,
     failure: LlmTraceFailure,
     stream_summary: Option<serde_json::Value>,
+    call_record: Option<&crate::LlmCallRecord>,
     clock: &dyn crate::Clock,
 ) {
     crate::trace::emit_trace(
@@ -122,6 +129,7 @@ pub(crate) fn emit_llm_trace_failed(
                 raw: failure.raw,
             },
             stream_summary,
+            attempts: crate::trace::trace_llm_attempts(call_record),
         },
         clock,
     );
@@ -168,6 +176,7 @@ pub(crate) async fn apply_direct_outcome(
         &request.model.clone(),
         caused_by,
         result,
+        call_record.as_ref(),
     )
     .await?;
     let call_record = call_record.ok_or_else(|| {
@@ -178,6 +187,10 @@ pub(crate) async fn apply_direct_outcome(
     Ok((response, usage, call_record))
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "direct effect application keeps usage, causal, outcome, and attempt capabilities explicit"
+)]
 async fn apply_direct_llm_result(
     current: &CurrentSessionCapability,
     usage_capability: &UsageCapability,
@@ -186,11 +199,18 @@ async fn apply_direct_llm_result(
     usage_model: &str,
     caused_by: Option<&CausalRef>,
     result: Result<LlmResponse, LlmCallError>,
+    call_record: Option<&crate::LlmCallRecord>,
 ) -> Result<(LlmResponse, TokenUsage), PluginError> {
     let llm_call_id = emit_direct_llm_trace_started(current, request, caused_by);
     match result {
         Ok(response) => {
-            emit_direct_llm_trace_completed(current, llm_call_id.as_deref(), caused_by, &response);
+            emit_direct_llm_trace_completed(
+                current,
+                llm_call_id.as_deref(),
+                caused_by,
+                &response,
+                call_record,
+            );
             let usage = token_usage_from_llm(&response.usage);
             // Record into the shared token ledger only. The ledger is the same
             // `Arc` the turn loop drains at turn-commit time (`turn_loop.rs`).
@@ -207,7 +227,13 @@ async fn apply_direct_llm_result(
             Ok((response, usage))
         }
         Err(err) => {
-            emit_direct_llm_trace_failed(current, llm_call_id.as_deref(), caused_by, &err);
+            emit_direct_llm_trace_failed(
+                current,
+                llm_call_id.as_deref(),
+                caused_by,
+                &err,
+                call_record,
+            );
             Err(PluginError::Session(err.message))
         }
     }
@@ -235,6 +261,7 @@ fn emit_direct_llm_trace_completed(
     llm_call_id: Option<&str>,
     caused_by: Option<&CausalRef>,
     response: &LlmResponse,
+    call_record: Option<&crate::LlmCallRecord>,
 ) {
     let Some(llm_call_id) = llm_call_id else {
         return;
@@ -246,6 +273,7 @@ fn emit_direct_llm_trace_completed(
         response,
         0,
         None,
+        call_record,
         current.host.core.clock.as_ref(),
     );
 }
@@ -255,6 +283,7 @@ fn emit_direct_llm_trace_failed(
     llm_call_id: Option<&str>,
     caused_by: Option<&CausalRef>,
     err: &LlmCallError,
+    call_record: Option<&crate::LlmCallRecord>,
 ) {
     let Some(llm_call_id) = llm_call_id else {
         return;
@@ -265,6 +294,7 @@ fn emit_direct_llm_trace_failed(
         direct_trace_context(&current.session_id, Some(llm_call_id), caused_by),
         LlmTraceFailure::from(err),
         None,
+        call_record,
         current.host.core.clock.as_ref(),
     );
 }

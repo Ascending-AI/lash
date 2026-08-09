@@ -266,6 +266,30 @@ where
                     self.emit_instant(record, "lash.tool", Some(*duration_ms));
                 }
             }
+            TraceEvent::JournaledEffectStarted { .. } => {
+                self.emit_instant(record, "lash.durable.journaled_effect.started", None)
+            }
+            TraceEvent::JournaledEffectSettled { .. } => {
+                self.emit_instant(record, "lash.durable.journaled_effect.settled", None)
+            }
+            TraceEvent::DurableWaitParked { .. } => {
+                self.emit_instant(record, "lash.durable.wait.parked", None)
+            }
+            TraceEvent::DurableWaitResolved { .. } => {
+                self.emit_instant(record, "lash.durable.wait.resolved", None)
+            }
+            TraceEvent::DurableTimerStarted { .. } => {
+                self.emit_instant(record, "lash.durable.timer.started", None)
+            }
+            TraceEvent::DurableTimerResolved { duration_ms, .. } => {
+                self.emit_instant(record, "lash.durable.timer.resolved", Some(*duration_ms))
+            }
+            TraceEvent::DurableSegmentBoundary { .. } => {
+                self.emit_instant(record, "lash.durable.segment_boundary", None)
+            }
+            TraceEvent::StoreErrorObserved { .. } => {
+                self.emit_instant(record, "lash.store.error", None)
+            }
             TraceEvent::SessionStarted { .. } => self.emit_instant(record, "lash.session", None),
             TraceEvent::PromptBuilt { .. } => self.emit_instant(record, "lash.prompt", None),
             TraceEvent::RollingHistoryCompactionNeeded { .. } => {
@@ -498,6 +522,7 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             usage,
             provider_usage,
             stream_summary,
+            attempts,
         } => {
             attrs.push(KeyValue::new(
                 "lash.llm.duration_ms",
@@ -523,10 +548,12 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 stream_summary,
             );
             push_payload_json(&mut attrs, options, "lash.llm.response_json", response);
+            push_payload_json(&mut attrs, options, "lash.retry.attempts_json", attempts);
         }
         TraceEvent::LlmCallFailed {
             error,
             stream_summary,
+            attempts,
         } => {
             attrs.push(KeyValue::new(
                 "error.type",
@@ -541,6 +568,7 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 stream_summary,
             );
             push_payload_json(&mut attrs, options, "lash.error.raw", &error.raw);
+            push_payload_json(&mut attrs, options, "lash.retry.attempts_json", attempts);
         }
         TraceEvent::ProviderRequest { event } => {
             attrs.push(KeyValue::new("lash.provider.name", event.provider.clone()));
@@ -665,6 +693,7 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             args,
             output,
             duration_ms,
+            attempts,
         } => {
             push_opt(&mut attrs, "lash.tool.call_id", call_id);
             attrs.push(KeyValue::new("lash.tool.name", name.clone()));
@@ -681,6 +710,77 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 "lash.tool.result_json",
                 &output.value_for_projection(),
             );
+            push_payload_json(&mut attrs, options, "lash.retry.attempts_json", attempts);
+        }
+        TraceEvent::JournaledEffectStarted {
+            effect_name,
+            effect_kind,
+        }
+        | TraceEvent::JournaledEffectSettled {
+            effect_name,
+            effect_kind,
+            ..
+        } => {
+            attrs.push(KeyValue::new(
+                "lash.durable.effect_name",
+                effect_name.clone(),
+            ));
+            attrs.push(KeyValue::new(
+                "lash.durable.effect_kind",
+                effect_kind.clone(),
+            ));
+            if let TraceEvent::JournaledEffectSettled { status, .. } = &record.event {
+                attrs.push(KeyValue::new("lash.durable.status", status.clone()));
+            }
+        }
+        TraceEvent::DurableWaitParked { wait_kind } => {
+            attrs.push(KeyValue::new("lash.durable.wait_kind", wait_kind.clone()));
+        }
+        TraceEvent::DurableWaitResolved {
+            wait_kind,
+            resolution,
+        } => {
+            attrs.push(KeyValue::new("lash.durable.wait_kind", wait_kind.clone()));
+            attrs.push(KeyValue::new("lash.durable.resolution", resolution.clone()));
+        }
+        TraceEvent::DurableTimerStarted { duration_ms }
+        | TraceEvent::DurableTimerResolved { duration_ms, .. } => {
+            attrs.push(KeyValue::new(
+                "lash.durable.timer.duration_ms",
+                *duration_ms as i64,
+            ));
+            if let TraceEvent::DurableTimerResolved { status, .. } = &record.event {
+                attrs.push(KeyValue::new("lash.durable.status", status.clone()));
+            }
+        }
+        TraceEvent::DurableSegmentBoundary {
+            reason,
+            effects_executed,
+            journaled_bytes_estimate,
+        } => {
+            attrs.push(KeyValue::new(
+                "lash.durable.boundary_reason",
+                reason.clone(),
+            ));
+            attrs.push(KeyValue::new(
+                "lash.durable.effects_executed",
+                *effects_executed as i64,
+            ));
+            if let Some(bytes) = journaled_bytes_estimate {
+                attrs.push(KeyValue::new(
+                    "lash.durable.journaled_bytes_estimate",
+                    *bytes as i64,
+                ));
+            }
+        }
+        TraceEvent::StoreErrorObserved {
+            operation,
+            error_class,
+            message,
+        } => {
+            attrs.push(KeyValue::new("lash.store.operation", operation.clone()));
+            attrs.push(KeyValue::new("error.type", error_class.clone()));
+            attrs.push(KeyValue::new("error.message", message.clone()));
         }
         TraceEvent::ProtocolStep { plugin_id, payload } => {
             attrs.push(KeyValue::new("lash.protocol.plugin_id", plugin_id.clone()));
@@ -1098,36 +1198,17 @@ fn record_time(record: &TraceRecord) -> SystemTime {
 }
 
 fn event_type(event: &TraceEvent) -> &'static str {
-    match event {
-        TraceEvent::SessionStarted { .. } => "session_started",
-        TraceEvent::TurnStarted { .. } => "turn_started",
-        TraceEvent::PromptBuilt { .. } => "prompt_built",
-        TraceEvent::RollingHistoryCompactionNeeded { .. } => "rolling_history_compaction_needed",
-        TraceEvent::RollingHistoryPromptPruned { .. } => "rolling_history_prompt_pruned",
-        TraceEvent::RollingHistoryCompactionStarted { .. } => "rolling_history_compaction_started",
-        TraceEvent::RollingHistoryCompactionCompleted { .. } => {
-            "rolling_history_compaction_completed"
-        }
-        TraceEvent::LlmCallStarted { .. } => "llm_call_started",
-        TraceEvent::LlmCallCompleted { .. } => "llm_call_completed",
-        TraceEvent::LlmCallFailed { .. } => "llm_call_failed",
-        TraceEvent::ProviderRequest { .. } => "provider_request",
-        TraceEvent::EffectEnvelopeDiff { .. } => "effect_envelope_diff",
-        TraceEvent::ProviderStreamEvent { .. } => "provider_stream_event",
-        TraceEvent::RuntimeStreamEvent { .. } => "runtime_stream_event",
-        TraceEvent::LashlangExecution { .. } => "lashlang_execution",
-        TraceEvent::ToolCallStarted { .. } => "tool_call_started",
-        TraceEvent::ToolCallCompleted { .. } => "tool_call_completed",
-        TraceEvent::ProtocolStep { .. } => "protocol_step",
-        TraceEvent::TokenUsage { .. } => "token_usage",
-        TraceEvent::TurnCompleted { .. } => "turn_completed",
-        TraceEvent::Custom { .. } => "custom",
-    }
+    event.kind()
 }
 
 fn is_error_event(event: &TraceEvent) -> bool {
     match event {
-        TraceEvent::LlmCallFailed { .. } | TraceEvent::EffectEnvelopeDiff { .. } => true,
+        TraceEvent::LlmCallFailed { .. }
+        | TraceEvent::EffectEnvelopeDiff { .. }
+        | TraceEvent::StoreErrorObserved { .. } => true,
+        TraceEvent::JournaledEffectSettled { status, .. }
+        | TraceEvent::DurableTimerResolved { status, .. } => status == "failed",
+        TraceEvent::DurableWaitResolved { resolution, .. } => resolution == "failed",
         TraceEvent::ToolCallStarted { .. } => false,
         TraceEvent::ToolCallCompleted { output, .. } => !output.is_success(),
         TraceEvent::TurnCompleted { status, .. } => status == "failed",
@@ -1146,6 +1227,14 @@ fn error_status(record: &TraceRecord) -> Status {
             "effect envelope hash mismatch at {} paths",
             event.divergent_paths.len()
         )),
+        TraceEvent::JournaledEffectSettled { effect_name, .. } => {
+            Status::error(format!("journaled effect failed: {effect_name}"))
+        }
+        TraceEvent::DurableWaitResolved { wait_kind, .. } => {
+            Status::error(format!("durable wait failed: {wait_kind}"))
+        }
+        TraceEvent::DurableTimerResolved { .. } => Status::error("durable timer failed"),
+        TraceEvent::StoreErrorObserved { message, .. } => Status::error(message.clone()),
         _ => Status::error("lash trace event failed"),
     }
 }
@@ -1232,6 +1321,7 @@ mod tests {
                     raw: None,
                 },
                 stream_summary: None,
+                attempts: None,
             },
         ))
         .unwrap();
