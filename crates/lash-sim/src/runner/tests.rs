@@ -250,7 +250,7 @@ async fn absolute_fence_drift_seed_cross_backend_semantics_agree() {
 
 #[test]
 fn full_random_seed_12_keeps_modeled_provider_exchange_slots_owned_by_scheduler() {
-    let seed = generated_seed("full-random", 12);
+    let seed = regression_corpus_seed("full-random", 12);
     assert_eq!(seed, 8_740_143_186_674_533_974);
     let workload = generate_workload(seed, "full-random", 384).expect("workload");
     let provider_turn = workload
@@ -307,7 +307,7 @@ fn full_random_seed_12_keeps_modeled_provider_exchange_slots_owned_by_scheduler(
 
 #[tokio::test]
 async fn runtime_completion_serialization_mutation_guard() {
-    let seed = generated_seed("full-random", 12);
+    let seed = regression_corpus_seed("full-random", 12);
     let workload = generate_workload(seed, "full-random", 384).expect("workload");
     let clock = SimClock::new();
     let mut world = GeneratedRuntimeWorld::with_backend(
@@ -1039,6 +1039,7 @@ fn generated_sim_search_mode_keeps_summary_lean_and_labels_shards() {
                 24,
                 SimShard::new(1, 2).expect("shard"),
                 SimRunMode::Search,
+                SimSeedSource::exploration(Some("search-test-salt".to_string())),
             ))
         },
     )
@@ -1047,6 +1048,8 @@ fn generated_sim_search_mode_keeps_summary_lean_and_labels_shards() {
     assert_eq!(report.mode, "search");
     assert_eq!(report.shard, "1/2");
     assert_eq!(report.configured_seeds, 4);
+    assert_eq!(report.seed_salt.as_deref(), Some("search-test-salt"));
+    assert_eq!(report.seed_source, "salted_exploration");
     // Shard 1/2 of 4 configured seeds owns seed indices 0 and 2.
     assert_eq!(report.counts.generated_seeds, 2);
     assert_eq!(report.events_path, None);
@@ -1101,6 +1104,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
                 24,
                 SimShard::FULL,
                 SimRunMode::Evidence,
+                SimSeedSource::exploration(Some("evidence-test-salt".to_string())),
             ))
         },
     )
@@ -1265,7 +1269,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         ("runtime", "queued-input-operational-missing"),
         ("runtime", "trigger-wakeup-operational-missing"),
         ("standard", "standard-provider-error-missing-parser-matrix"),
-        ("rlm", "rlm-lashlang-cell-missing-exec-outcome"),
+        ("rlm", "rlm-lashlang-cell-missing-continuation"),
         ("agent", "agent-parallel-join-missing-wake-session"),
     ] {
         assert!(

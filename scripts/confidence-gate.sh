@@ -855,7 +855,7 @@ scheduler-owned-provider-completion-missing-evidence
 queued-input-operational-missing
 trigger-wakeup-operational-missing
 process-wake-operational-missing
-rlm-lashlang-cell-missing-exec-outcome
+rlm-lashlang-cell-missing-continuation
 agent-parallel-join-missing-wake-session
 standard-provider-error-missing-parser-matrix
 standard-max-turn-stop-missing
@@ -921,7 +921,7 @@ run_minimizer_fixture_suite() {
     "crates/lash-sim/failure-fixtures/queued-input-operational-missing.json",
     "crates/lash-sim/failure-fixtures/trigger-wakeup-operational-missing.json",
     "crates/lash-sim/failure-fixtures/process-wake-operational-missing.json",
-    "crates/lash-sim/failure-fixtures/rlm-lashlang-cell-missing-exec-outcome.json",
+    "crates/lash-sim/failure-fixtures/rlm-lashlang-cell-missing-continuation.json",
     "crates/lash-sim/failure-fixtures/agent-parallel-join-missing-wake-session.json",
     "crates/lash-sim/failure-fixtures/standard-provider-error-missing-parser-matrix.json",
     "crates/lash-sim/failure-fixtures/standard-max-turn-stop-missing.json",
@@ -942,7 +942,7 @@ run_minimizer_fixture_suite() {
     "queued_input_operational_missing": "failing-fixtures/queued-input-operational-missing/minimized-regression/package.json",
     "trigger_wakeup_operational_missing": "failing-fixtures/trigger-wakeup-operational-missing/minimized-regression/package.json",
     "process_wake_operational_missing": "failing-fixtures/process-wake-operational-missing/minimized-regression/package.json",
-    "rlm_lashlang_cell_missing_exec_outcome": "failing-fixtures/rlm-lashlang-cell-missing-exec-outcome/minimized-regression/package.json",
+    "rlm_lashlang_cell_missing_continuation": "failing-fixtures/rlm-lashlang-cell-missing-continuation/minimized-regression/package.json",
     "agent_parallel_join_missing_wake_session": "failing-fixtures/agent-parallel-join-missing-wake-session/minimized-regression/package.json",
     "standard_provider_error_missing_parser_matrix": "failing-fixtures/standard-provider-error-missing-parser-matrix/minimized-regression/package.json",
     "standard_max_turn_stop_missing": "failing-fixtures/standard-max-turn-stop-missing/minimized-regression/package.json",
@@ -991,13 +991,19 @@ run_sim_search_lane() {
   local search_shard="${LASH_SIM_SHARD:-1/1}"
   step "Deterministic simulation search lane (${search_seeds} seeds @ ${search_max_boundaries} max boundaries, shard ${search_shard})"
   local search_dir="${out_dir}/sim-search"
+  local search_salt="${LASH_SIM_RUN_SALT:-}"
+  local salt_args=()
+  if [ -n "$search_salt" ]; then
+    salt_args+=(--salt "$search_salt")
+  fi
   cargo run -p lash-sim --locked -- run \
     --out "$search_dir" \
     --profile "$search_profile" \
     --seeds "$search_seeds" \
     --max-boundaries "$search_max_boundaries" \
     --shard "$search_shard" \
-    --mode search
+    --mode search \
+    "${salt_args[@]}"
   python3 - "${search_dir}/summary.json" "${out_dir}/sim/search.json" "$search_max_boundaries" "$SIM_SEARCH_MIN_SEEDS" "$SIM_SEARCH_MIN_MAX_BOUNDARIES" <<'PY'
 import json
 import sys
@@ -1059,6 +1065,17 @@ if errors:
         print(error, file=sys.stderr)
     sys.exit(1)
 PY
+
+  local corpus_dir="${out_dir}/sim-regression-${WEEKLY_SIM_CORPUS:-weekly-fixed-v1}"
+  step "Named simulation regression corpus (${WEEKLY_SIM_CORPUS:-weekly-fixed-v1}, ${search_seeds} seeds, shard ${search_shard})"
+  cargo run -p lash-sim --locked -- run \
+    --out "$corpus_dir" \
+    --profile "$search_profile" \
+    --seeds "$search_seeds" \
+    --max-boundaries "$search_max_boundaries" \
+    --shard "$search_shard" \
+    --mode search \
+    --corpus "${WEEKLY_SIM_CORPUS:-weekly-fixed-v1}"
 }
 
 run_focused_sqlite_seed_tail_repro() {

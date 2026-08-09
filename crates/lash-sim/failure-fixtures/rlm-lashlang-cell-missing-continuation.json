@@ -1,14 +1,11 @@
 {
   "schema": "lash.sim.failing-trace-fixture.v1",
-  "fixture_id": "rlm-lashlang-cell-missing-exec-outcome",
+  "fixture_id": "rlm-lashlang-cell-missing-continuation",
   "seed": 29,
   "profile": "fast-random",
   "max_boundaries": 32,
   "mutation": {
-    "remove_observed_field_for_kind": {
-      "kind": "exec_code",
-      "field": "runtime_effect_outcome"
-    }
+    "remove_kind": "provider"
   },
   "expected_oracle_id": "sim.oracle.scenario-mini.rlm.lashlang-cell-exec-continues.v1",
   "expected_reason_contains": "did not continue after exec"

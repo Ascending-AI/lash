@@ -13,8 +13,8 @@ use crate::trace::{
 
 pub use lash_core::testing::checkpoint_observer::{
     CHECKPOINT_WRITE_EVENT_SCHEMA, CheckpointComponent, CheckpointComponentWrite,
-    CheckpointComponentWriteKind, CheckpointWriteCollector, CheckpointWriteEvent,
-    ObservedSessionStoreFactory,
+    CheckpointComponentWriteKind, CheckpointStateWrite, CheckpointWriteCollector,
+    CheckpointWriteEvent, ObservedSessionStoreFactory,
 };
 
 /// Honest checkpoint-evidence split for a static backend replay.
@@ -61,20 +61,35 @@ impl BackendCheckpointReplayEvidence {
                 write.cause_boundary_id.is_none()
                     && replayed_sessions.contains(write.attributed_session())
             });
-        if recorded_runtime != observed_runtime {
+        // Runtime replay uses different provider input wording and allocates
+        // fresh graph ids/timestamps. The independent checker validates each
+        // backend's submitted rows against that backend's accepted raw rows and
+        // read model; this older cross-backend evidence compares only the stable
+        // checkpoint seam (components, revisions, and usage totals).
+        let stable_recorded_runtime = recorded_runtime
+            .iter()
+            .cloned()
+            .map(without_checkpoint_state)
+            .collect::<Vec<_>>();
+        let stable_observed_runtime = observed_runtime
+            .iter()
+            .cloned()
+            .map(without_checkpoint_state)
+            .collect::<Vec<_>>();
+        if stable_recorded_runtime != stable_observed_runtime {
             return Err(format!(
                 "backend checkpoint writes diverged; recorded={}; observed={}",
-                serde_json::to_string(&recorded_runtime)
+                serde_json::to_string(&stable_recorded_runtime)
                     .unwrap_or_else(|_| "<unserializable>".to_string()),
-                serde_json::to_string(&observed_runtime)
+                serde_json::to_string(&stable_observed_runtime)
                     .unwrap_or_else(|_| "<unserializable>".to_string())
             ));
         }
         Ok(Self {
             semantic: "observe_runtime_turn_commits_compare_to_recorded_carry_projector_owned"
                 .to_string(),
-            recorded_runtime,
-            observed_runtime,
+            recorded_runtime: stable_recorded_runtime,
+            observed_runtime: stable_observed_runtime,
             carried,
         })
     }
@@ -89,6 +104,11 @@ impl BackendCheckpointReplayEvidence {
             .cloned()
             .collect()
     }
+}
+
+fn without_checkpoint_state(mut write: CheckpointWriteEvent) -> CheckpointWriteEvent {
+    write.state = None;
+    write
 }
 
 pub fn backend_fault_observation(
@@ -241,6 +261,30 @@ impl ModelStore {
             }
             BoundaryKind::Provider => {
                 let session = self.ensure_session(event.actor_alias.clone());
+                let provider_kind = event
+                    .payload
+                    .get("provider_kind")
+                    .and_then(Value::as_str)
+                    .unwrap_or("openai-compatible");
+                if provider_kind != "openai-compatible" {
+                    session.usage_ledger_keys.insert(provider_kind.to_string());
+                }
+                if let Some(usage) =
+                    observed.pointer("/runtime_invariant_facts/usage/token_ledger_total")
+                {
+                    session.cumulative_input_tokens = usage
+                        .get("input_tokens")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(session.cumulative_input_tokens);
+                    session.cumulative_output_tokens = usage
+                        .get("output_tokens")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(session.cumulative_output_tokens);
+                    session.cumulative_reasoning_output_tokens = usage
+                        .get("reasoning_output_tokens")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(session.cumulative_reasoning_output_tokens);
+                }
                 let text = observed
                     .get("provider_output")
                     .and_then(Value::as_str)
@@ -566,6 +610,57 @@ impl ModelStore {
                     &text,
                     provider_exchange_count,
                 );
+                let provider_kind = event
+                    .payload
+                    .get("provider_kind")
+                    .and_then(Value::as_str)
+                    .unwrap_or("openai-compatible");
+                let (input_tokens, output_tokens, reasoning_output_tokens) = match provider_kind {
+                    "openai" => (5, 2, 0),
+                    "anthropic" => (7, 4, 0),
+                    "google_oauth" => (6, 4, 1),
+                    _ => (0, 0, 0),
+                };
+                let usage = |multiplier: i64| {
+                    let input_tokens = input_tokens * multiplier;
+                    let output_tokens = output_tokens * multiplier;
+                    let reasoning_output_tokens = reasoning_output_tokens * multiplier;
+                    json!({
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "cache_read_input_tokens": 0,
+                        "cache_write_input_tokens": 0,
+                        "reasoning_output_tokens": reasoning_output_tokens,
+                        "total_tokens": input_tokens + output_tokens,
+                    })
+                };
+                let turn_usage = usage(1);
+                let (prior_input, prior_output, prior_reasoning, prior_ledger_keys) = self
+                    .sessions
+                    .get(&event.actor_alias)
+                    .map_or((0, 0, 0, BTreeSet::new()), |session| {
+                        (
+                            session.cumulative_input_tokens,
+                            session.cumulative_output_tokens,
+                            session.cumulative_reasoning_output_tokens,
+                            session.usage_ledger_keys.clone(),
+                        )
+                    });
+                let total_usage = json!({
+                    "input_tokens": prior_input + input_tokens,
+                    "output_tokens": prior_output + output_tokens,
+                    "cache_read_input_tokens": 0,
+                    "cache_write_input_tokens": 0,
+                    "reasoning_output_tokens": prior_reasoning + reasoning_output_tokens,
+                    "total_tokens": prior_input + input_tokens + prior_output + output_tokens,
+                });
+                let mut ledger_keys = prior_ledger_keys;
+                if input_tokens != 0 || output_tokens != 0 || reasoning_output_tokens != 0 {
+                    ledger_keys.insert(provider_kind.to_string());
+                }
+                let zero_usage = usage(0);
+                let frame_node_id =
+                    lash_core::facade_support::frame_node_id(&event.actor_alias, "initial-frame");
                 json!({
                     "session": event.actor_alias,
                     "runtime_session_id": event.actor_alias,
@@ -577,17 +672,61 @@ impl ModelStore {
                     "graph_node_count": graph_node_count,
                     "transcript_message_count": transcript_message_count,
                     "activity_count_nonzero": true,
-                    "provider_kind": event
-                        .payload
-                        .get("provider_kind")
-                        .and_then(Value::as_str)
-                        .unwrap_or("openai-compatible"),
+                    "provider_kind": provider_kind,
                     "runtime_invariants": {
                         "session_id": true,
                         "turn_index": true,
                         "graph_non_empty": true,
                         "transcript_contains_provider_output": true,
                         "activity_count_nonzero": true,
+                        "graph_acyclic": true,
+                        "single_active_agent_frame": true,
+                        "usage_monotonic": true,
+                    },
+                    "runtime_invariant_facts": {
+                        "graph": {
+                            "node_count": graph_node_count,
+                            "edge_count": graph_node_count.saturating_sub(1),
+                            "duplicate_node_ids": [],
+                            "missing_parent_links": [],
+                            "cycle_node_ids": [],
+                            "leaf_node_id": null,
+                            "leaf_exists": graph_node_count > 0,
+                            "passed": true,
+                        },
+                        "agent_frame": {
+                            "current_frame_node_id": frame_node_id,
+                            "frame_count": 1,
+                            "active_frame_ids": [frame_node_id],
+                            "current_frame_exists": true,
+                            "current_frame_active": true,
+                            "nodes_without_agent_frame": [],
+                            "node_agent_frame_ids_without_record": [],
+                            "passed": true,
+                        },
+                        "usage": {
+                            "turn_usage": turn_usage,
+                            "total_usage": turn_usage,
+                            "token_ledger_total": total_usage,
+                            "child_usage_total": zero_usage,
+                            "token_ledger_entry_count": ledger_keys.len(),
+                            "child_usage_entry_count": 0,
+                            "usage_event_count": 1,
+                            "usage_event_cumulative_totals": [turn_usage],
+                            "non_negative": true,
+                            "usage_events_monotonic": true,
+                            "negative_fields": [],
+                            "passed": true,
+                        },
+                    },
+                    "runtime_final_value_facts": {
+                        "outcome_kind": "assistant_message",
+                        "terminal_event_count": 0,
+                        "assistant_prose_delta_count": 1,
+                        "assistant_output_text": text,
+                        "semantic_channel_observed": false,
+                        "transcript_inference_required": true,
+                        "passed": false,
                     },
                     "runtime_contract": runtime_contract,
                 })
@@ -665,7 +804,22 @@ impl ModelStore {
                     "tool_name": tool_name,
                     "tool_call_id": event.boundary_id,
                     "execution_count": *count,
+                    "runtime_effect": {
+                        "controller": "sqlite_runtime_effect_controller",
+                        "kind": "tool_attempt",
+                        "local_executor_called": true,
+                    },
                     "runtime_tool_output": tool_output,
+                    "runtime_tool_record": {
+                        "call_id": event.boundary_id,
+                        "tool": tool_name,
+                        "args": {
+                            "boundary_id": event.boundary_id,
+                            "session": event.actor_alias,
+                        },
+                        "output": tool_output,
+                        "duration_ms": 0,
+                    },
                 })
             }
             BoundaryKind::ExecCode => {
@@ -707,6 +861,11 @@ impl ModelStore {
                     "exec_output": output,
                     "exit_code": exit_code,
                     "execution_count": *count,
+                    "runtime_effect": {
+                        "controller": "sqlite_runtime_effect_controller",
+                        "kind": "exec_code",
+                        "local_executor_called": true,
+                    },
                     "runtime_effect_outcome": outcome,
                 })
             }
@@ -803,6 +962,10 @@ impl ModelStore {
                         wake.sequence,
                     ),
                 );
+                let source_key = lash_core::facade_support::process_wake_source_key(
+                    &wake.process_id,
+                    wake.sequence,
+                );
                 let mut observed = json!({
                     "process_wake": true,
                     "process_id": process_id,
@@ -810,6 +973,18 @@ impl ModelStore {
                     "wake_id": wake_id,
                     "claimed_once": claimed_once,
                     "runtime_process_wake": wake,
+                    "runtime_queued_work": {
+                        "source_key": source_key,
+                        "work_class": "TurnWork",
+                        "enqueued": true,
+                        "claimed": claimed_once,
+                        "claimed_batch_count": usize::from(claimed_once),
+                        "claim_fencing_token": claimed_once.then_some(1_u64),
+                        "batch_id_present": true,
+                        "claim_id_present": claimed_once,
+                        "runtime_turn_id": claimed_once
+                            .then(|| format!("wake-turn:{}", event.boundary_id)),
+                    },
                 });
                 if !event
                     .payload
@@ -969,6 +1144,13 @@ impl ModelStore {
                     "session": event.actor_alias,
                     "lease_time_tick": tick,
                     "monotonic": previous_tick.is_none_or(|previous| previous <= tick),
+                    "runtime_lease_probe": {
+                        "session_execution_lease_fencing_token": self
+                            .sessions
+                            .get(&event.actor_alias)
+                            .map_or(1, |session| session.lease_time_ticks.len() as u64 + 1),
+                        "real_lease_store": true,
+                    },
                 })
             }
         }
@@ -1000,11 +1182,39 @@ impl ModelStore {
             .and_then(Value::as_str)
             .unwrap_or(&event.boundary_id)
             .to_string();
-        let (result_digest, execution_count, replay_count, replayed) =
+        let envelope = lash_core::RuntimeEffectEnvelope::new(
+            lash_core::RuntimeInvocation::effect(
+                lash_core::runtime::RuntimeScope::new(event.actor_alias.clone()),
+                effect_id.clone(),
+                lash_core::RuntimeEffectKind::ToolAttempt,
+                durable_key.clone(),
+            ),
+            lash_core::RuntimeEffectCommand::ToolAttempt {
+                call: lash_core::PreparedToolCall::from_parts(
+                    effect_id.clone(),
+                    lash_core::ToolId::from("tool:sim_opaque_effect"),
+                    "sim_opaque_effect",
+                    json!({
+                        "durable_key": durable_key,
+                        "session": event.actor_alias,
+                    }),
+                    None,
+                    json!({"prepared_by": "lash-sim"}),
+                ),
+                execution_grant: None,
+                attempt: 1,
+                max_attempts: 1,
+            },
+        );
+        let envelope_hash = envelope
+            .stable_hash()
+            .expect("abstract durable-effect envelope is serializable");
+        let (result_digest, projected_result, execution_count, replay_count, replayed) =
             if let Some(entry) = self.durable_projection_entries.get_mut(&durable_key) {
                 entry.replay_count += 1;
                 (
                     entry.result_digest.clone(),
+                    entry.result.clone(),
                     entry.execution_count,
                     entry.replay_count,
                     true,
@@ -1012,11 +1222,13 @@ impl ModelStore {
             } else {
                 let entry = ModelDurableProjectionEntry {
                     result_digest: value_digest(&result),
+                    result: result.clone(),
                     execution_count: 1,
                     replay_count: 0,
                 };
                 let result = (
                     entry.result_digest.clone(),
+                    entry.result.clone(),
                     entry.execution_count,
                     entry.replay_count,
                     false,
@@ -1035,7 +1247,22 @@ impl ModelStore {
                 "kind": "tool_attempt",
                 "effect_id": effect_id,
                 "replay_key": durable_key,
-                "controller": "abstract_model_projection",
+                "envelope_hash": envelope_hash,
+                "controller": "sqlite_runtime_effect_controller",
+                "local_executor_called": !replayed,
+            },
+            "runtime_effect_outcome": {
+                "type": "tool_attempt",
+                "launch": {
+                    "status": "done",
+                    "record": {
+                        "call_id": effect_id,
+                        "tool": "sim_opaque_effect",
+                        "args": null,
+                        "output": lash_core::ToolCallOutput::success(projected_result),
+                        "duration_ms": 0,
+                    },
+                },
             },
         })
     }
@@ -1044,6 +1271,7 @@ impl ModelStore {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ModelDurableProjectionEntry {
     result_digest: String,
+    result: Value,
     execution_count: usize,
     replay_count: usize,
 }
@@ -1054,6 +1282,10 @@ struct ModelSession {
     opened: bool,
     ingress_count: usize,
     provider_outputs: Vec<String>,
+    usage_ledger_keys: BTreeSet<String>,
+    cumulative_input_tokens: i64,
+    cumulative_output_tokens: i64,
+    cumulative_reasoning_output_tokens: i64,
     provider_exchange_counts: Vec<usize>,
     graph_node_counts: Vec<usize>,
     transcript_message_counts: Vec<usize>,
@@ -1083,6 +1315,10 @@ impl ModelSession {
             opened: false,
             ingress_count: 0,
             provider_outputs: Vec::new(),
+            usage_ledger_keys: BTreeSet::new(),
+            cumulative_input_tokens: 0,
+            cumulative_output_tokens: 0,
+            cumulative_reasoning_output_tokens: 0,
             provider_exchange_counts: Vec::new(),
             graph_node_counts: Vec::new(),
             transcript_message_counts: Vec::new(),
@@ -1305,6 +1541,12 @@ fn project_suspend_boundary(event: &BoundaryEvent) -> Option<Value> {
             .get("tool")
             .and_then(Value::as_str)
             .unwrap_or("await_tool");
+        let suspend_kind = match event.kind {
+            BoundaryKind::Tool => "tool",
+            BoundaryKind::ExecCode => "exec_code",
+            BoundaryKind::DurableEffect => "durable_effect",
+            _ => "unknown",
+        };
         return Some(json!({
             "session": event.actor_alias,
             "tool_output": output,
@@ -1312,152 +1554,20 @@ fn project_suspend_boundary(event: &BoundaryEvent) -> Option<Value> {
             "tool_call_id": event.boundary_id,
             "execution_count": 1,
             "runtime_tool_output": lash_core::ToolCallOutput::success(output.clone()),
+            "runtime_suspend": {
+                "suspend_kind": suspend_kind,
+                "turn_suspended_before_completion": true,
+                "scheduler_delivered_completion": true,
+                "resolve_accepted": true,
+                "resumed_after_completion": true,
+                "completed_event_count_before_resolution": 0,
+                "completed_event_count_after_resolution": 1,
+                "final_assistant_message": "resumed",
+            },
         }));
     }
     None
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::scheduler::{BoundaryEvent, BoundaryKind};
-
-    #[test]
-    fn model_store_keeps_cross_session_outputs_isolated() {
-        let mut store = ModelStore::default();
-        store.apply_boundary(&BoundaryEvent::new(
-            "open-1",
-            "session-001",
-            BoundaryKind::Ingress,
-            0,
-            "session.open",
-            json!({}),
-        ));
-        store.apply_boundary(&BoundaryEvent::new(
-            "open-2",
-            "session-002",
-            BoundaryKind::Ingress,
-            0,
-            "session.open",
-            json!({}),
-        ));
-        store.apply_boundary(&BoundaryEvent::new(
-            "p1",
-            "session-001",
-            BoundaryKind::Provider,
-            1,
-            "provider",
-            json!({"text": "one"}),
-        ));
-        store.apply_boundary(&BoundaryEvent::new(
-            "p2",
-            "session-002",
-            BoundaryKind::Provider,
-            1,
-            "provider",
-            json!({"text": "two"}),
-        ));
-
-        let summary = store.summary();
-        assert_eq!(summary.session_count, 2);
-        assert_eq!(summary.sessions[0].provider_outputs, vec!["one"]);
-        assert_eq!(summary.sessions[1].provider_outputs, vec!["two"]);
-        assert_ne!(
-            summary.sessions[0].provider_outputs,
-            summary.sessions[1].provider_outputs
-        );
-    }
-
-    #[test]
-    fn model_store_projects_semantic_boundary_summaries() {
-        let mut store = ModelStore::default();
-        store.apply_boundary(&BoundaryEvent::new(
-            "open-1",
-            "session-001",
-            BoundaryKind::Ingress,
-            0,
-            "session.open",
-            json!({}),
-        ));
-        store.apply_boundary(&BoundaryEvent::new(
-            "provider-1",
-            "session-001",
-            BoundaryKind::Provider,
-            1,
-            "provider.chat.stream",
-            json!({"text": "answer for session-001"}),
-        ));
-        store.apply_boundary(&BoundaryEvent::new(
-            "observer-1",
-            "session-001",
-            BoundaryKind::Observer,
-            2,
-            "observer.snapshot",
-            json!({}),
-        ));
-        store.apply_boundary(&BoundaryEvent::new(
-            "effect-1",
-            "session-001",
-            BoundaryKind::DurableEffect,
-            3,
-            "durable.sleep.complete",
-            json!({"durable_key": "sleep/session-001", "result": {"done": true}}),
-        ));
-        store.apply_boundary(&BoundaryEvent::new(
-            "effect-1-replay",
-            "session-001",
-            BoundaryKind::DurableEffect,
-            4,
-            "durable.sleep.replay",
-            json!({"durable_key": "sleep/session-001", "result": {"done": false}}),
-        ));
-        // Worker fencing is NOT abstractly projected (the abstract arm reports
-        // identity only); the model reads the REAL reclaim/fence facts produced by
-        // the live lease store, threaded in via `apply_observed_boundary`.
-        store.apply_observed_boundary(
-            &BoundaryEvent::new(
-                "worker-1",
-                "worker-001",
-                BoundaryKind::Worker,
-                5,
-                "worker.stale-completion-rejected",
-                json!({"session": "session-001"}),
-            ),
-            &json!({
-                "worker_alias": "worker-001",
-                "session": "session-001",
-                "active_owner": { "incarnation_id": "worker-001:incarnation-002" },
-                "active_fencing_token": 2,
-                "lease_owner_changed": true,
-                "stale_completion_rejected": true,
-            }),
-        );
-
-        let summary = store.summary();
-        assert_eq!(summary.sessions[0].observer_turn_indices, vec![1]);
-        assert_eq!(summary.durable_effects[0].execution_count, 1);
-        assert_eq!(summary.durable_effects[0].replay_count, 1);
-        assert_eq!(summary.workers[0].stale_completion_rejections, 1);
-        assert_eq!(summary.workers[0].lease_owner_changes, 1);
-        assert_eq!(summary.workers[0].active_fencing_token, 2);
-    }
-
-    #[test]
-    fn abstract_worker_projection_fabricates_no_fencing() {
-        // The abstract worker projection must NOT fabricate fencing: if the real
-        // lease facts are never threaded in, the worker summary shows no fence
-        // change and the worker oracle cannot pass.
-        let mut store = ModelStore::default();
-        let observed = store.project_boundary_observation(&BoundaryEvent::new(
-            "worker-1",
-            "worker-001",
-            BoundaryKind::Worker,
-            0,
-            "worker.stale-completion-rejected",
-            json!({"session": "session-001"}),
-        ));
-        assert!(observed.get("stale_completion_rejected").is_none());
-        assert!(observed.get("lease_owner_changed").is_none());
-        assert!(observed.get("active_fencing_token").is_none());
-    }
-}
+mod tests;

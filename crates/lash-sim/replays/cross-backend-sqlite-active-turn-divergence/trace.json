@@ -1197,6 +1197,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
+              "executed_calls": [],
               "images": [],
               "observation_truncation": [],
               "observations": [
@@ -7035,6 +7036,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
+              "executed_calls": [],
               "images": [],
               "observation_truncation": [],
               "observations": [
@@ -9396,6 +9398,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": "exit code 1",
+              "executed_calls": [],
               "images": [],
               "observation_truncation": [],
               "observations": [
@@ -11872,6 +11875,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
+              "executed_calls": [],
               "images": [],
               "observation_truncation": [],
               "observations": [
@@ -13159,6 +13163,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": "exit code 1",
+              "executed_calls": [],
               "images": [],
               "observation_truncation": [],
               "observations": [
@@ -14099,6 +14104,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
+              "executed_calls": [],
               "images": [],
               "observation_truncation": [],
               "observations": [
@@ -17321,6 +17327,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
+              "executed_calls": [],
               "images": [],
               "observation_truncation": [],
               "observations": [
@@ -18252,6 +18259,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
+              "executed_calls": [],
               "images": [],
               "observation_truncation": [],
               "observations": [
@@ -18643,6 +18651,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
+              "executed_calls": [],
               "images": [],
               "observation_truncation": [],
               "observations": [
@@ -20211,6 +20220,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
+              "executed_calls": [],
               "images": [],
               "observation_truncation": [],
               "observations": [
@@ -20283,6 +20293,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": "exit code 1",
+              "executed_calls": [],
               "images": [],
               "observation_truncation": [],
               "observations": [
@@ -20892,6 +20903,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
+              "executed_calls": [],
               "images": [],
               "observation_truncation": [],
               "observations": [
@@ -22045,6 +22057,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
+              "executed_calls": [],
               "images": [],
               "observation_truncation": [],
               "observations": [
@@ -22260,6 +22273,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
+              "executed_calls": [],
               "images": [],
               "observation_truncation": [],
               "observations": [
@@ -23051,6 +23065,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
+              "executed_calls": [],
               "images": [],
               "observation_truncation": [],
               "observations": [
@@ -24286,6 +24301,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": "exit code 1",
+              "executed_calls": [],
               "images": [],
               "observation_truncation": [],
               "observations": [
@@ -26609,6 +26625,7 @@
             "Ok": {
               "duration_ms": 0,
               "error": null,
+              "executed_calls": [],
               "images": [],
               "observation_truncation": [],
               "observations": [

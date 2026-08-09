@@ -20,6 +20,7 @@ lash-sansio = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
+fastrand = { workspace = true }
 lash = { workspace = true, features = ["rlm"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-llm-transport = { workspace = true }

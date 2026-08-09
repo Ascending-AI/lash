@@ -2427,6 +2427,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
+ "fastrand",
  "insta",
  "lash-core",
  "lash-lashlang-runtime",

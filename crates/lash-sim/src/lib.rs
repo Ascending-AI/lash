@@ -26,6 +26,7 @@ pub mod scheduler;
 pub mod sqlite_faults;
 pub mod sqlite_replay;
 pub mod stack_policy;
+pub mod state_checker;
 pub mod store;
 pub mod trace;
 mod transcript;

@@ -297,6 +297,7 @@ mod tests {
                     logical_bytes: Some(64),
                 },
             }],
+            state: None,
         }
     }
 
