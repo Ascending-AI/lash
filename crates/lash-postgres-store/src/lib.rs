@@ -154,7 +154,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Version 39 adds the required per-turn budget to every durable session policy
 // carrier. Older stores are rejected and recreated without a compatibility
 // read path.
-const SCHEMA_VERSION: i32 = 39;
+// Version 40 adds immutable graph generations and frame pointers plus
+// zero-copy fork-lineage accelerators. Older stores are rejected and recreated;
+// there is no backfill or compatibility read path.
+const SCHEMA_VERSION: i32 = 40;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -845,6 +848,135 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_first_commits_return_one_typed_head_revision_conflict() {
+        let Some(database_url) = postgres_test_support::database_url() else {
+            eprintln!("skipping concurrent first-commit proof: database URL is not set");
+            return;
+        };
+        let _database_lock =
+            postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+        let storage = PostgresStorage::connect(&database_url)
+            .await
+            .expect("connect concurrent first-commit storage");
+        let factory = storage.session_store_factory();
+        let session_id = format!("postgres-first-commit-race:{}", uuid::Uuid::new_v4());
+        let request = SessionStoreCreateRequest {
+            session_id: session_id.clone(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        };
+        let first_store = factory
+            .create_store(&request)
+            .await
+            .expect("create first racing handle");
+        let second_store = factory
+            .create_store(&request)
+            .await
+            .expect("create second racing handle");
+        let mut first_state = lash_core::RuntimeSessionState {
+            session_id: session_id.clone(),
+            ..lash_core::RuntimeSessionState::new(request.policy.clone())
+        };
+        first_state.ensure_agent_frame_initialized();
+        let second_state = first_state.clone();
+        let (first_commit, _) =
+            lash_core::RuntimeCommit::persisted_state_for_test(&first_state, &[])
+                .with_operation(lash_core::OperationId::turn(
+                    &session_id,
+                    "first-racer",
+                    "final",
+                ))
+                .expect("build first racing commit");
+        let (second_commit, _) =
+            lash_core::RuntimeCommit::persisted_state_for_test(&second_state, &[])
+                .with_operation(lash_core::OperationId::turn(
+                    &session_id,
+                    "second-racer",
+                    "final",
+                ))
+                .expect("build second racing commit");
+        let start = Arc::new(tokio::sync::Barrier::new(2));
+        let first_start = Arc::clone(&start);
+        let second_start = Arc::clone(&start);
+        let (first, second) = tokio::join!(
+            async move {
+                first_start.wait().await;
+                first_store.commit_runtime_state(first_commit).await
+            },
+            async move {
+                second_start.wait().await;
+                second_store.commit_runtime_state(second_commit).await
+            }
+        );
+        let results = [first, second];
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(
+                    result,
+                    Err(StoreError::HeadRevisionConflict {
+                        expected: 0,
+                        actual: 1
+                    })
+                ))
+                .count(),
+            1,
+            "the losing first commit must fail with the typed CAS conflict: {results:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn postgres_graph_generation_uniqueness_is_typed() {
+        let Some(database_url) = postgres_test_support::database_url() else {
+            eprintln!("skipping graph-generation error proof: database URL is not set");
+            return;
+        };
+        let _database_lock =
+            postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+        let storage = PostgresStorage::connect(&database_url)
+            .await
+            .expect("connect graph-generation error storage");
+        let nonce = uuid::Uuid::new_v4().simple().to_string();
+        let session_id = format!("postgres-generation-collision:{nonce}");
+        let first_node = format!("generation-node-a:{nonce}");
+        let second_node = format!("generation-node-b:{nonce}");
+        sqlx::query(
+            "INSERT INTO lash_graph_nodes
+             (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
+             VALUES ($1, $2, NULL, 3, $2, '{}')",
+        )
+        .bind(&session_id)
+        .bind(&first_node)
+        .execute(storage.pool())
+        .await
+        .expect("seed graph-generation uniqueness fixture");
+        let raw = sqlx::query(
+            "INSERT INTO lash_graph_nodes
+             (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
+             VALUES ($1, $2, NULL, 3, $2, '{}')",
+        )
+        .bind(&session_id)
+        .bind(&second_node)
+        .execute(storage.pool())
+        .await
+        .expect_err("duplicate generation must violate Postgres uniqueness");
+        let error = graph_node_insert_error(raw, &session_id, 3, &second_node);
+        assert!(matches!(
+            error,
+            StoreError::GraphGenerationCollision {
+                session_id: ref actual_session_id,
+                generation: 3
+            } if actual_session_id == &session_id
+        ));
+        sqlx::query("DELETE FROM lash_graph_nodes WHERE session_id = $1")
+            .bind(&session_id)
+            .execute(storage.pool())
+            .await
+            .expect("clean graph-generation uniqueness fixture");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -11,6 +11,7 @@ use lash_postgres_store::PostgresStorage;
 use lash_sqlite_store::SqliteSessionStoreFactory;
 
 const DEEP_CHAIN_DEPTH: usize = 256;
+const DEEP_FORK_CHAIN_DEPTH: usize = 64;
 const SAMPLES: usize = 7;
 const WIDE_SIBLING_COUNT: usize = 64;
 
@@ -125,6 +126,32 @@ async fn create_chain(
     commit_state(&store, &state, "seed-chain").await
 }
 
+async fn create_fork_chain(
+    factory: &Arc<dyn SessionStoreFactory>,
+    prefix: &str,
+) -> (String, String, Arc<dyn RuntimePersistence>) {
+    let source_id = format!("{prefix}-fork-chain-source");
+    let (source, mut state) = create_state(factory, &source_id).await;
+    state.ensure_agent_frame_initialized();
+    let (root_node_id, mut leaf_node_id) = commit_state(&source, &state, "seed-fork-chain").await;
+    let mut terminal = source;
+    for depth in 0..DEEP_FORK_CHAIN_DEPTH {
+        let session_id = format!("{prefix}-fork-chain-{depth}");
+        terminal = fork_store(factory, &leaf_node_id, &session_id).await;
+        append_child(&terminal, &format!("fork-chain-{depth}")).await;
+        leaf_node_id = terminal
+            .load_session()
+            .await
+            .expect("load fork-chain session")
+            .expect("fork-chain session exists")
+            .graph
+            .leaf_node_id
+            .clone()
+            .expect("fork-chain leaf");
+    }
+    (root_node_id, leaf_node_id, terminal)
+}
+
 fn percentile(samples: &mut [Duration], percentile: f64) -> Duration {
     samples.sort_unstable();
     let index = ((samples.len() - 1) as f64 * percentile).round() as usize;
@@ -163,6 +190,8 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn SessionStoreFactory>,
 
     let deep_source_id = format!("{prefix}-deep-source");
     let (_, deep_leaf) = create_chain(&factory, &deep_source_id, DEEP_CHAIN_DEPTH).await;
+    let (fork_chain_root, fork_chain_leaf, fork_chain_terminal) =
+        create_fork_chain(&factory, &prefix).await;
 
     let mut wide_fork = Vec::with_capacity(SAMPLES);
     let mut wide_head_move = Vec::with_capacity(SAMPLES);
@@ -170,6 +199,9 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn SessionStoreFactory>,
     let mut deep_fork = Vec::with_capacity(SAMPLES);
     let mut deep_head_move = Vec::with_capacity(SAMPLES);
     let mut deep_delete = Vec::with_capacity(SAMPLES);
+    let mut fork_chain_load_node = Vec::with_capacity(SAMPLES);
+    let mut fork_chain_load_session = Vec::with_capacity(SAMPLES);
+    let mut fork_chain_fork = Vec::with_capacity(SAMPLES);
 
     for sample in 0..SAMPLES {
         let fork_id = format!("{prefix}-wide-fork-{sample}");
@@ -240,6 +272,29 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn SessionStoreFactory>,
             .await
             .expect("delete deep victim");
         deep_delete.push(started.elapsed());
+
+        let started = Instant::now();
+        assert!(
+            fork_chain_terminal
+                .load_node(&fork_chain_root)
+                .await
+                .expect("load fork-chain root")
+                .is_some()
+        );
+        fork_chain_load_node.push(started.elapsed());
+
+        let started = Instant::now();
+        fork_chain_terminal
+            .load_session()
+            .await
+            .expect("load terminal fork-chain session")
+            .expect("terminal fork-chain session exists");
+        fork_chain_load_session.push(started.elapsed());
+
+        let fork_id = format!("{prefix}-fork-chain-probe-{sample}");
+        let started = Instant::now();
+        fork_store(&factory, &fork_chain_leaf, &fork_id).await;
+        fork_chain_fork.push(started.elapsed());
     }
 
     print_samples(backend, "wide", "fork", WIDE_SIBLING_COUNT, &mut wide_fork);
@@ -272,10 +327,31 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn SessionStoreFactory>,
         DEEP_CHAIN_DEPTH,
         &mut deep_delete,
     );
+    print_samples(
+        backend,
+        "fork_chain",
+        "load_root_node",
+        DEEP_FORK_CHAIN_DEPTH,
+        &mut fork_chain_load_node,
+    );
+    print_samples(
+        backend,
+        "fork_chain",
+        "load_session",
+        DEEP_FORK_CHAIN_DEPTH,
+        &mut fork_chain_load_session,
+    );
+    print_samples(
+        backend,
+        "fork_chain",
+        "fork",
+        DEEP_FORK_CHAIN_DEPTH,
+        &mut fork_chain_fork,
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "measurement benchmark; requires LASH_POSTGRES_DATABASE_URL"]
+#[ignore = "noisy measurement benchmark; repeat runs (fork-chain medians can swing by 10x); requires LASH_POSTGRES_DATABASE_URL"]
 async fn measured_refcount_replacement_operations() {
     let database_url = std::env::var("LASH_POSTGRES_DATABASE_URL")
         .expect("set LASH_POSTGRES_DATABASE_URL to run the benchmark");

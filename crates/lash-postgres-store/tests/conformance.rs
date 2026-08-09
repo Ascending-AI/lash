@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use lash_core::testing::conformance::{
     FenceIntegrityHandles, FenceIntegrityInjector, FenceIntegrityObservation, FenceIntegrityTarget,
+    GraphFactObservation, LineageConformanceHandles, LineageConformanceInjector,
     ReopenableProcessRegistry, ReopenableRuntimePersistence, ReopenableTriggerStore,
 };
 use lash_core::{
@@ -21,6 +22,142 @@ mod support;
 mod cold_process_turn_parent;
 
 use support::{SharedDatabaseLock, database_url};
+
+struct PostgresLineageConformanceInjector {
+    storage: Arc<PostgresStorage>,
+}
+
+#[async_trait::async_trait]
+impl LineageConformanceInjector for PostgresLineageConformanceInjector {
+    async fn force_lineage(&self, session_id: &str, ancestor_node_id: &str) {
+        sqlx::query(
+            "INSERT INTO lash_fork_lineage
+             (session_id, ancestor_session_id, fork_node_id, fork_generation)
+             SELECT $1, session_id, node_id, generation
+             FROM lash_graph_nodes WHERE node_id = $2
+             ON CONFLICT (session_id, ancestor_session_id) DO UPDATE SET
+                 fork_node_id = EXCLUDED.fork_node_id,
+                 fork_generation = EXCLUDED.fork_generation",
+        )
+        .bind(session_id)
+        .bind(ancestor_node_id)
+        .execute(self.storage.pool())
+        .await
+        .expect("inject false Postgres lineage");
+    }
+
+    async fn tombstone_node(&self, node_id: &str) {
+        let result =
+            sqlx::query("UPDATE lash_graph_nodes SET tombstoned = TRUE WHERE node_id = $1")
+                .bind(node_id)
+                .execute(self.storage.pool())
+                .await
+                .expect("tombstone intermediate Postgres node");
+        assert_eq!(result.rows_affected(), 1);
+    }
+
+    async fn lineage_ancestors(
+        &self,
+        session_id: &str,
+    ) -> Vec<lash_core::store::ForkLineageAncestor> {
+        sqlx::query_as::<_, (String, String, i64)>(
+            "SELECT ancestor_session_id, fork_node_id, fork_generation
+             FROM lash_fork_lineage
+             WHERE session_id = $1 ORDER BY ancestor_session_id",
+        )
+        .bind(session_id)
+        .fetch_all(self.storage.pool())
+        .await
+        .expect("observe Postgres lineage")
+        .into_iter()
+        .map(|(ancestor_session_id, fork_node_id, fork_generation)| {
+            lash_core::store::ForkLineageAncestor {
+                ancestor_session_id,
+                fork_node_id,
+                fork_generation: u64::try_from(fork_generation)
+                    .expect("non-negative fork generation"),
+            }
+        })
+        .collect()
+    }
+
+    async fn edge_path(&self, session_id: &str) -> Vec<GraphFactObservation> {
+        let mut facts = self.all_graph_facts().await;
+        let mut current = sqlx::query_scalar::<_, String>(
+            "SELECT leaf_node_id FROM lash_sessions
+             WHERE session_id = $1 AND leaf_node_id IS NOT NULL",
+        )
+        .bind(session_id)
+        .fetch_optional(self.storage.pool())
+        .await
+        .expect("read Postgres lineage head");
+        let mut path = Vec::new();
+        while let Some(node_id) = current {
+            let index = facts
+                .iter()
+                .position(|fact| fact.node_id == node_id)
+                .expect("edge-path node exists in raw Postgres facts");
+            let fact = facts.swap_remove(index);
+            current = fact.parent_node_id.clone();
+            path.push(fact);
+        }
+        path.reverse();
+        path
+    }
+
+    async fn all_graph_facts(&self) -> Vec<GraphFactObservation> {
+        use sqlx::Row;
+        sqlx::query(
+            "SELECT node.node_id, node.parent_node_id, node.session_id,
+                    node.generation, node.frame_node_id,
+                    node.node_json::jsonb ->> 'kind' = 'frame_open' AS is_frame
+             FROM lash_graph_nodes AS node
+             ORDER BY node.generation, node.node_id",
+        )
+        .fetch_all(self.storage.pool())
+        .await
+        .expect("observe Postgres graph facts")
+        .into_iter()
+        .map(|row| GraphFactObservation {
+            node_id: row.get(0),
+            parent_node_id: row.get(1),
+            owning_session_id: row.get(2),
+            generation: u64::try_from(row.get::<i64, _>(3)).expect("non-negative generation"),
+            frame_node_id: row.get(4),
+            is_frame: row.get(5),
+        })
+        .collect()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_fork_lineage_conformance_when_configured() {
+    let Some((_database_lock, handles)) = postgres_lineage_handles().await else {
+        eprintln!(
+            "skipping Postgres fork-lineage conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    lash_core::testing::conformance::fork_lineage_conformance(handles).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_fork_lineage_no_carrier_law_when_configured() {
+    let Some((_database_lock, handles)) = postgres_lineage_handles().await else {
+        eprintln!("skipping Postgres no-carrier law: database URL is not set");
+        return;
+    };
+    lash_core::testing::conformance::fork_lineage_no_carrier_law(handles).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_fork_plan_matches_edge_walk_law_when_configured() {
+    let Some((_database_lock, handles)) = postgres_lineage_handles().await else {
+        eprintln!("skipping Postgres ForkPlan ground-truth law: database URL is not set");
+        return;
+    };
+    lash_core::testing::conformance::fork_plan_matches_edge_walk_law(handles).await;
+}
 
 fn sync_await<T: Send + 'static>(
     future: impl std::future::Future<Output = T> + Send + 'static,
@@ -41,6 +178,19 @@ async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage)> {
         .await
         .expect("connect postgres");
     Some((database_lock, storage))
+}
+
+async fn postgres_lineage_handles() -> Option<(SharedDatabaseLock, LineageConformanceHandles)> {
+    let (database_lock, storage) = storage().await?;
+    reset(&storage).await;
+    let storage = Arc::new(storage);
+    let handles = LineageConformanceHandles {
+        factory: Arc::new(storage.session_store_factory()),
+        injector: Arc::new(PostgresLineageConformanceInjector {
+            storage: Arc::clone(&storage),
+        }),
+    };
+    Some((database_lock, handles))
 }
 
 async fn reset(storage: &PostgresStorage) {
@@ -1349,7 +1499,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 39, "Postgres component schema pin");
+    assert_eq!(current_version, 40, "Postgres component schema pin");
     let payload_hash_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
          WHERE table_schema = 'public'

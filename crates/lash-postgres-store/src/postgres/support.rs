@@ -34,6 +34,33 @@ pub(crate) fn store_sqlx_error(err: sqlx::Error) -> StoreError {
     }
 }
 
+pub(crate) fn graph_node_insert_error(
+    err: sqlx::Error,
+    session_id: &str,
+    generation: u64,
+    node_id: &str,
+) -> StoreError {
+    if let sqlx::Error::Database(database) = &err
+        && database.code().as_deref() == Some("23505")
+    {
+        match database.constraint() {
+            Some("lash_graph_nodes_session_id_generation_key") => {
+                return StoreError::GraphGenerationCollision {
+                    session_id: session_id.to_string(),
+                    generation,
+                };
+            }
+            Some("lash_graph_nodes_pkey") => {
+                return StoreError::NodeIdCollision {
+                    node_id: node_id.to_string(),
+                };
+            }
+            _ => {}
+        }
+    }
+    store_sqlx_error(err)
+}
+
 pub(crate) fn u64_from_sql(
     record_kind: &'static str,
     field: &'static str,
@@ -377,83 +404,114 @@ pub(crate) async fn load_graph_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
     leaf_node_id: Option<String>,
-    active_path: bool,
 ) -> Result<lash_core::SessionGraph, StoreError> {
-    let rows = if active_path {
-        let Some(leaf_node_id) = leaf_node_id.as_deref() else {
-            return Ok(lash_core::SessionGraph::default());
-        };
-        sqlx::query(
-            "WITH RECURSIVE bound_path(node_id, parent_node_id) AS (
-                SELECT node_id, parent_node_id
-                FROM lash_graph_nodes
-                WHERE node_id = (
-                    SELECT leaf_node_id FROM lash_sessions WHERE session_id = $2
-                ) AND tombstoned = FALSE
-              UNION
-                SELECT parent.node_id, parent.parent_node_id
-                FROM lash_graph_nodes parent
-                JOIN bound_path ON parent.node_id = bound_path.parent_node_id
-                WHERE parent.tombstoned = FALSE
-            ),
-            active(seq, node_id, parent_node_id, node_json) AS (
-                SELECT seq, node_id, parent_node_id, node_json
-                FROM lash_graph_nodes
-                WHERE node_id = $1
-                  AND tombstoned = FALSE
-                  AND (
-                      session_id = $2
-                      OR node_id IN (SELECT node_id FROM bound_path)
-                  )
-              UNION
-                SELECT parent.seq, parent.node_id, parent.parent_node_id, parent.node_json
-                FROM lash_graph_nodes AS parent
-                JOIN active ON parent.node_id = active.parent_node_id
-                WHERE parent.tombstoned = FALSE
-            )
-            SELECT node_id, parent_node_id, node_json
-            FROM active ORDER BY seq ASC",
-        )
-        .bind(leaf_node_id)
-        .bind(session_id)
-        .fetch_all(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?
-    } else {
-        sqlx::query(
-            "WITH RECURSIVE ancestry(node_id, parent_node_id) AS (
-                 SELECT node_id, parent_node_id FROM lash_graph_nodes
-                 WHERE node_id = $2 AND tombstoned = FALSE
-                 UNION
-                 SELECT parent.node_id, parent.parent_node_id
-                 FROM lash_graph_nodes parent
-                 JOIN ancestry ON parent.node_id = ancestry.parent_node_id
-                 WHERE parent.tombstoned = FALSE
-             )
-             SELECT node_id, parent_node_id, node_json FROM lash_graph_nodes
-             WHERE tombstoned = FALSE
-               AND (session_id = $1 OR node_id IN (SELECT node_id FROM ancestry))
-             ORDER BY seq ASC",
-        )
-        .bind(session_id)
-        .bind(leaf_node_id.as_deref())
-        .fetch_all(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?
+    let Some(leaf_node_id) = leaf_node_id else {
+        return Ok(lash_core::SessionGraph::default());
     };
+    let leaf_generation = sqlx::query_scalar::<_, i64>(
+        "SELECT generation FROM lash_graph_nodes
+         WHERE node_id = $1 AND tombstoned = FALSE",
+    )
+    .bind(&leaf_node_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?
+    .ok_or_else(|| StoreError::StoredDataCorrupt {
+        record_kind: "SessionGraph",
+        message: format!("leaf `{leaf_node_id}` is missing or tombstoned"),
+    })?;
+    load_readable_graph_tx(tx, session_id, Some(leaf_generation), Some(leaf_node_id)).await
+}
+
+#[cfg(test)]
+pub(crate) async fn load_whole_graph_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &str,
+    leaf_node_id: Option<String>,
+) -> Result<lash_core::SessionGraph, StoreError> {
+    load_readable_graph_tx(tx, session_id, None, leaf_node_id).await
+}
+
+async fn load_readable_graph_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &str,
+    generation_ceiling: Option<i64>,
+    leaf_node_id: Option<String>,
+) -> Result<lash_core::SessionGraph, StoreError> {
+    let rows = sqlx::query(
+        "SELECT node.node_id, node.parent_node_id, node.node_json,
+                node.generation, node.frame_node_id
+         FROM lash_graph_nodes AS node
+         WHERE node.tombstoned = FALSE
+           AND ($2::BIGINT IS NULL OR node.generation <= $2)
+           AND (
+               node.session_id = $1
+               OR EXISTS (
+                   SELECT 1 FROM lash_fork_lineage AS lineage
+                   WHERE lineage.session_id = $1
+                     AND lineage.ancestor_session_id = node.session_id
+                     AND node.generation <= lineage.fork_generation
+               )
+           )
+         ORDER BY node.generation ASC",
+    )
+    .bind(session_id)
+    .bind(generation_ceiling)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
     let mut nodes = Vec::<SessionNodeRecord>::new();
+    let mut prior_node_id: Option<String> = None;
+    let mut expected_generation = 0_i64;
+    let mut expected_frame_node_id: Option<String> = None;
     for row in rows {
         let node_id: String = row.get(0);
         let parent_node_id: Option<String> = row.get(1);
         let json: String = row.get(2);
-        nodes.push(
-            SessionNodeRecord::decode_storage_body(node_id, parent_node_id, &json).map_err(
-                |error| StoreError::StoredDataCorrupt {
-                    record_kind: "SessionGraph node",
-                    message: error.to_string(),
-                },
-            )?,
-        );
+        let generation: i64 = row.get(3);
+        let frame_node_id: String = row.get(4);
+        if generation != expected_generation || parent_node_id != prior_node_id {
+            return Err(StoreError::StoredDataCorrupt {
+                record_kind: "SessionGraph",
+                message: format!(
+                    "generation/parent gap at `{node_id}`: generation {generation}, expected {expected_generation}"
+                ),
+            });
+        }
+        let node = SessionNodeRecord::decode_storage_body(node_id.clone(), parent_node_id, &json)
+            .map_err(|error| StoreError::StoredDataCorrupt {
+            record_kind: "SessionGraph node",
+            message: error.to_string(),
+        })?;
+        if matches!(
+            node.payload,
+            lash_core::SessionNodePayload::FrameOpen { .. }
+        ) {
+            expected_frame_node_id = Some(node_id.clone());
+        }
+        if expected_frame_node_id.as_deref() != Some(frame_node_id.as_str()) {
+            return Err(StoreError::StoredDataCorrupt {
+                record_kind: "SessionGraph",
+                message: format!("frame pointer mismatch at `{node_id}`"),
+            });
+        }
+        prior_node_id = Some(node_id);
+        expected_generation =
+            expected_generation
+                .checked_add(1)
+                .ok_or_else(|| StoreError::StoredDataCorrupt {
+                    record_kind: "SessionGraph",
+                    message: "generation overflow".to_string(),
+                })?;
+        nodes.push(node);
+    }
+    if let Some(leaf_node_id) = leaf_node_id.as_deref()
+        && prior_node_id.as_deref() != Some(leaf_node_id)
+    {
+        return Err(StoreError::StoredDataCorrupt {
+            record_kind: "SessionGraph",
+            message: format!("readable path does not end at leaf `{leaf_node_id}`"),
+        });
     }
     lash_core::SessionGraph::from_nodes(nodes, leaf_node_id).map_err(|error| {
         StoreError::StoredDataCorrupt {

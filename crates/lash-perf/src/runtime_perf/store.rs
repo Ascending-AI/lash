@@ -626,15 +626,30 @@ impl SessionCommitStore for RuntimePerfStore {
         let old_leaf_is_live = old_leaf_node_id
             .as_deref()
             .is_none_or(|leaf| graph_snapshot.find_node(leaf).is_some());
-        let mut proposed_graph = graph_snapshot;
-        proposed_graph.extend_node_records(commit.graph.nodes.iter().cloned());
-        proposed_graph.set_leaf_node_id(commit.graph.leaf_node_id.clone());
-        let derived_frame_node_id = match commit.graph.leaf_node_id.as_deref() {
-            Some(leaf_node_id) => proposed_graph
-                .nearest_frame_node_id(Some(leaf_node_id))
-                .map(str::to_string),
-            None => None,
-        };
+        let parent_node_facts = old_leaf_node_id
+            .as_deref()
+            .map(|leaf_node_id| {
+                let generation = graph_snapshot
+                    .active_path_nodes()
+                    .len()
+                    .checked_sub(1)
+                    .ok_or_else(|| StoreError::StoredDataCorrupt {
+                        record_kind: "SessionGraph",
+                        message: "published leaf has an empty active path".to_string(),
+                    })? as u64;
+                let frame_node_id = graph_snapshot
+                    .nearest_frame_node_id(Some(leaf_node_id))
+                    .map(str::to_string)
+                    .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
+                        leaf_node_id: leaf_node_id.to_string(),
+                    })?;
+                Ok(store::ParentNodeFacts {
+                    node_id: leaf_node_id.to_string(),
+                    generation,
+                    frame_node_id,
+                })
+            })
+            .transpose()?;
         let plan = planner.plan(store::FreshRuntimeCommitFacts {
             actual_head_revision: actual,
             old_leaf_node_id,
@@ -643,7 +658,7 @@ impl SessionCommitStore for RuntimePerfStore {
             selected_leaf_is_live,
             has_live_nodes,
             old_leaf_is_live,
-            derived_frame_node_id,
+            parent_node_facts,
         })?;
         {
             let pending = self.pending_turn_inputs.lock_recover();

@@ -2106,6 +2106,7 @@ fn normalized_store_error(backend: &str, error: &StoreError) -> String {
         StoreError::ProcessWakeSequenceRewound { .. } => "ProcessWakeSequenceRewound".to_string(),
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch".to_string(),
         StoreError::NodeIdCollision { .. } => "NodeIdCollision".to_string(),
+        StoreError::GraphGenerationCollision { .. } => "GraphGenerationCollision".to_string(),
         StoreError::InvalidGraphLeaf { .. } => "InvalidGraphLeaf".to_string(),
         StoreError::ForkPointNotRetained { .. } => "ForkPointNotRetained".to_string(),
         StoreError::ForkSessionAlreadyExists { .. } => "ForkSessionAlreadyExists".to_string(),

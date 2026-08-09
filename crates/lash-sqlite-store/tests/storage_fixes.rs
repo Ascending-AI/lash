@@ -479,8 +479,8 @@ async fn unsupported_schema_error_reports_real_versions() {
         "error must report the found version 99: {message}"
     );
     assert!(
-        message.contains("schema version 27"),
-        "error must report the real expected version 27: {message}"
+        message.contains("schema version 28"),
+        "error must report the real expected version 28: {message}"
     );
     assert!(
         !message.contains("version 1 only"),
@@ -516,7 +516,7 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
     let user_version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
-    assert_eq!(user_version, 27);
+    assert_eq!(user_version, 28);
     let payload_hash_not_null: i32 = conn
         .query_row(
             "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')

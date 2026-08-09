@@ -340,6 +340,10 @@ async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
     let old_leaf = state.session_graph.leaf_node_id.clone().expect("seed leaf");
 
     let same_leaf_commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let seed_frame_node_id = same_leaf_commit
+        .current_frame_node_id
+        .clone()
+        .expect("seed frame");
     let same_leaf_planner = crate::store::RuntimeCommitPlanner::prepare(same_leaf_commit.clone())
         .expect("prepare same-leaf commit");
     let same_leaf_plan = same_leaf_planner
@@ -351,7 +355,11 @@ async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
             selected_leaf_is_live: true,
             has_live_nodes: true,
             old_leaf_is_live: true,
-            derived_frame_node_id: same_leaf_commit.current_frame_node_id.clone(),
+            parent_node_facts: Some(crate::store::ParentNodeFacts {
+                node_id: old_leaf.clone(),
+                generation: state.session_graph.active_path_nodes().len() as u64 - 1,
+                frame_node_id: seed_frame_node_id.clone(),
+            }),
         })
         .expect("plan same-leaf commit");
     assert!(
@@ -389,7 +397,11 @@ async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
             selected_leaf_is_live: false,
             has_live_nodes: true,
             old_leaf_is_live: true,
-            derived_frame_node_id: changed_commit.current_frame_node_id.clone(),
+            parent_node_facts: Some(crate::store::ParentNodeFacts {
+                node_id: old_leaf.clone(),
+                generation: state.session_graph.active_path_nodes().len() as u64 - 1,
+                frame_node_id: seed_frame_node_id,
+            }),
         })
         .expect("plan leaf-changing commit");
     assert!(

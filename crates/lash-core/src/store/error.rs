@@ -164,6 +164,8 @@ pub enum StoreError {
     },
     #[error("runtime commit node id `{node_id}` already exists in durable session history")]
     NodeIdCollision { node_id: String },
+    #[error("runtime commit generation {generation} already exists for session `{session_id}`")]
+    GraphGenerationCollision { session_id: String, generation: u64 },
     #[error("runtime commit leaf {leaf_node_id:?} does not resolve to a live graph node")]
     InvalidGraphLeaf { leaf_node_id: Option<String> },
     #[error("node `{node_id}` has no retained continuation anchor")]
@@ -385,6 +387,7 @@ impl StoreError {
             Self::AppendAncestorNotActive { .. } => "AppendAncestorNotActive",
             Self::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch",
             Self::NodeIdCollision { .. } => "NodeIdCollision",
+            Self::GraphGenerationCollision { .. } => "GraphGenerationCollision",
             Self::InvalidGraphLeaf { .. } => "InvalidGraphLeaf",
             Self::ForkPointNotRetained { .. } => "ForkPointNotRetained",
             Self::ForkSessionAlreadyExists { .. } => "ForkSessionAlreadyExists",

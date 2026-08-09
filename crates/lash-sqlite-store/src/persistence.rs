@@ -145,20 +145,8 @@ pub(crate) fn nearest_frame_node_id_conn(
     leaf_node_id: &str,
 ) -> Result<Option<String>, StoreError> {
     conn.query_row(
-        "WITH RECURSIVE ancestry(node_id, parent_node_id, node_json, depth) AS (
-            SELECT node_id, parent_node_id, node_json, 0
-            FROM graph_nodes
-            WHERE node_id = ?1 AND tombstoned = 0
-          UNION ALL
-            SELECT parent.node_id, parent.parent_node_id, parent.node_json, ancestry.depth + 1
-            FROM graph_nodes AS parent
-            JOIN ancestry ON parent.node_id = ancestry.parent_node_id
-            WHERE parent.tombstoned = 0
-        )
-        SELECT node_id FROM ancestry
-        WHERE json_extract(node_json, '$.kind') = 'frame_open'
-        ORDER BY depth ASC
-        LIMIT 1",
+        "SELECT frame_node_id FROM graph_nodes
+         WHERE node_id = ?1 AND tombstoned = 0",
         params![leaf_node_id],
         |row| row.get(0),
     )
@@ -229,30 +217,152 @@ impl SessionCommitStore for Store {
         let row: Option<(String, Option<String>, String)> = self
             .conn
             .call(move |conn| {
-                conn.query_row(
-                    "WITH RECURSIVE ancestry(node_id, parent_node_id) AS (
-                         SELECT node.node_id, node.parent_node_id
-                         FROM graph_nodes node
-                         JOIN session_head head ON head.leaf_node_id = node.node_id
-                         WHERE head.session_id = ?2 AND node.tombstoned = 0
-                         UNION ALL
-                         SELECT parent.node_id, parent.parent_node_id
-                         FROM graph_nodes parent
-                         JOIN ancestry child ON parent.node_id = child.parent_node_id
-                         WHERE parent.tombstoned = 0
-                     )
-                     SELECT node_id, parent_node_id, node_json FROM graph_nodes
-                     WHERE node_id = ?1 AND tombstoned = 0
-                       AND (
-                           session_id = ?2
-                           OR EXISTS (
-                               SELECT 1 FROM ancestry WHERE ancestry.node_id = graph_nodes.node_id
-                           )
-                       )",
-                    params![node_id, session_id],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                )
-                .optional()
+                let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
+                let outcome = (|| {
+                    let candidate = tx
+                        .query_row(
+                            "SELECT node.node_id, node.parent_node_id, node.node_json,
+                                node.session_id, node.generation
+                         FROM graph_nodes AS node
+                         WHERE node.node_id = ?1 AND node.tombstoned = 0
+                           AND (
+                               node.session_id = ?2
+                               OR EXISTS (
+                                   SELECT 1 FROM fork_lineage AS lineage
+                                   WHERE lineage.session_id = ?2
+                                     AND lineage.ancestor_session_id = node.session_id
+                                     AND node.generation <= lineage.fork_generation
+                               )
+                           )",
+                            params![node_id, session_id],
+                            |row| {
+                                Ok((
+                                    row.get::<_, String>(0)?,
+                                    row.get::<_, Option<String>>(1)?,
+                                    row.get::<_, String>(2)?,
+                                    row.get::<_, String>(3)?,
+                                    row.get::<_, i64>(4)?,
+                                ))
+                            },
+                        )
+                        .optional()?;
+                    let Some((
+                        candidate_id,
+                        parent_node_id,
+                        node_json,
+                        owner,
+                        candidate_generation,
+                    )) = candidate
+                    else {
+                        return Ok(None);
+                    };
+                    if owner != session_id {
+                        let mut stmt = tx.prepare(
+                            "WITH readable_sessions(session_id, generation_ceiling) AS (
+                                 SELECT ?1, NULL
+                                 UNION ALL
+                                 SELECT lineage.ancestor_session_id, lineage.fork_generation
+                                 FROM fork_lineage AS lineage
+                                 WHERE lineage.session_id = ?1
+                             )
+                             SELECT head.leaf_node_id, head_node.generation, head_node.tombstoned,
+                                    node.node_id, node.parent_node_id,
+                                    node.generation, node.tombstoned
+                             FROM session_head AS head
+                             LEFT JOIN graph_nodes AS head_node
+                               ON head_node.node_id = head.leaf_node_id
+                             LEFT JOIN readable_sessions AS readable ON TRUE
+                             LEFT JOIN graph_nodes AS node
+                               ON node.session_id = readable.session_id
+                              AND node.generation BETWEEN ?2 AND head_node.generation
+                              AND (
+                                  readable.generation_ceiling IS NULL
+                                  OR node.generation <= readable.generation_ceiling
+                              )
+                             WHERE head.session_id = ?1",
+                        )?;
+                        let rows = stmt
+                            .query_map(params![session_id, candidate_generation], |row| {
+                                Ok((
+                                    row.get::<_, Option<String>>(0)?,
+                                    row.get::<_, Option<i64>>(1)?,
+                                    row.get::<_, Option<i64>>(2)?,
+                                    row.get::<_, Option<String>>(3)?,
+                                    row.get::<_, Option<String>>(4)?,
+                                    row.get::<_, Option<i64>>(5)?,
+                                    row.get::<_, Option<i64>>(6)?,
+                                ))
+                            })?
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let Some(first) = rows.first() else {
+                            return Ok(None);
+                        };
+                        let Some(head_id) = first.0.clone() else {
+                            return Ok(None);
+                        };
+                        let (Some(head_generation), Some(head_tombstoned)) = (first.1, first.2)
+                        else {
+                            return Err(sqlite_conversion_error(stored_data_corrupt(
+                                "SessionGraph",
+                                "head leaf is missing",
+                            )));
+                        };
+                        if head_tombstoned != 0 {
+                            return Err(sqlite_conversion_error(stored_data_corrupt(
+                                "SessionGraph",
+                                "head leaf is tombstoned",
+                            )));
+                        }
+                        if candidate_generation < 0 || candidate_generation > head_generation {
+                            return Ok(None);
+                        }
+                        let mut range = std::collections::HashMap::new();
+                        for row in rows {
+                            if let (
+                                Some(node_id),
+                                parent_node_id,
+                                Some(generation),
+                                Some(tombstoned),
+                            ) = (row.3, row.4, row.5, row.6)
+                            {
+                                range.insert(node_id, (parent_node_id, generation, tombstoned));
+                            }
+                        }
+                        let mut current_id = head_id;
+                        let mut current_generation = head_generation;
+                        loop {
+                            let Some((parent_id, generation, tombstoned)) = range.get(&current_id)
+                            else {
+                                return Err(sqlite_conversion_error(stored_data_corrupt(
+                                    "SessionGraph",
+                                    "readable generation range omits an edge-path node",
+                                )));
+                            };
+                            if *tombstoned != 0 || *generation != current_generation {
+                                return Err(sqlite_conversion_error(stored_data_corrupt(
+                                    "SessionGraph",
+                                    "parent edge crosses a tombstone or generation gap",
+                                )));
+                            }
+                            if current_generation == candidate_generation {
+                                if current_id != candidate_id {
+                                    return Ok(None);
+                                }
+                                break;
+                            }
+                            current_id = parent_id.clone().ok_or_else(|| {
+                                sqlite_conversion_error(stored_data_corrupt(
+                                    "SessionGraph",
+                                    "parent edge ended before the candidate generation",
+                                ))
+                            })?;
+                            current_generation -= 1;
+                        }
+                    }
+                    Ok(Some((candidate_id, parent_node_id, node_json)))
+                })()?;
+                tx.commit()?;
+                Ok(outcome)
             })
             .await
             .map_err(sqlite_error)?;
@@ -377,25 +487,62 @@ impl SessionCommitStore for Store {
                     let old_leaf_node_id = existing
                         .as_ref()
                         .and_then(|head| head.leaf_node_id.clone());
-                    let active_graph = commit
-                        .turn_commit
-                        .requested_ancestor_node_id
-                        .as_ref()
-                        .map(|_| {
-                            Self::load_active_path_session_graph_from_conn(
-                                tx,
-                                &commit.session_id,
-                                old_leaf_node_id.clone(),
+                    let parent_node_facts = old_leaf_node_id
+                        .as_deref()
+                        .map(|leaf_node_id| {
+                            tx.query_row(
+                                "SELECT generation, frame_node_id FROM graph_nodes
+                                 WHERE node_id = ?1 AND tombstoned = 0",
+                                params![leaf_node_id],
+                                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
                             )
+                            .optional()
+                            .map_err(sqlite_error)?
+                            .map(|(generation, frame_node_id)| {
+                                Ok(lash_core::store::ParentNodeFacts {
+                                    node_id: leaf_node_id.to_string(),
+                                    generation: u64::try_from(generation).map_err(|_| {
+                                        stored_data_corrupt(
+                                            "SessionGraph node",
+                                            format!("negative generation {generation}"),
+                                        )
+                                    })?,
+                                    frame_node_id,
+                                })
+                            })
+                            .transpose()
                         })
-                        .transpose()?;
+                        .transpose()?
+                        .flatten();
                     let requested_ancestor_is_active = match (
                         commit.turn_commit.requested_ancestor_node_id.as_deref(),
-                        active_graph.as_ref(),
+                        parent_node_facts.as_ref(),
                     ) {
-                        (Some(required), Some(graph)) => graph.active_path_contains(required),
-                        (None, None) => true,
-                        _ => unreachable!("active graph is loaded exactly for ancestor-fenced appends"),
+                        (None, _) => true,
+                        (Some(_), None) => false,
+                        (Some(required), Some(parent)) => tx
+                            .query_row(
+                                "SELECT 1 FROM graph_nodes AS node
+                                 WHERE node.node_id = ?1
+                                   AND node.tombstoned = 0
+                                   AND node.generation <= ?3
+                                   AND (
+                                       node.session_id = ?2
+                                       OR EXISTS (
+                                           SELECT 1 FROM fork_lineage AS lineage
+                                           WHERE lineage.session_id = ?2
+                                             AND lineage.ancestor_session_id = node.session_id
+                                             AND node.generation <= lineage.fork_generation
+                                       )
+                                   )",
+                                params![required, commit.session_id, i64::try_from(parent.generation).map_err(|_| {
+                                    StoreError::Backend("parent generation does not fit SQLite INTEGER".to_string())
+                                })?],
+                                |_| Ok(()),
+                            )
+                            .optional()
+                            .map_err(sqlite_error)?
+                            .is_some(),
                     };
                     let mut occupied_node_ids = std::collections::HashSet::new();
                     for node in &commit.graph.nodes {
@@ -437,35 +584,7 @@ impl SessionCommitStore for Store {
                         .optional()
                         .map_err(sqlite_error)?
                         .is_some();
-                    let old_leaf_is_live = match (old_leaf_node_id.as_deref(), active_graph.as_ref()) {
-                        (None, _) => true,
-                        (Some(_), Some(graph)) => !graph.nodes.is_empty(),
-                        (Some(old_leaf_node_id), None) => tx
-                            .query_row(
-                                "SELECT 1 FROM graph_nodes
-                                 WHERE node_id = ?1 AND tombstoned = 0
-                                 LIMIT 1",
-                                params![old_leaf_node_id],
-                                |_| Ok(()),
-                            )
-                            .optional()
-                            .map_err(sqlite_error)?
-                            .is_some(),
-                    };
-                    let derived_frame_node_id = match commit
-                        .graph
-                        .nodes
-                        .iter()
-                        .rev()
-                        .find(|node| matches!(node.payload, lash_core::SessionNodePayload::FrameOpen { .. }))
-                    {
-                        Some(frame) => Some(frame.node_id.clone()),
-                        None => old_leaf_node_id
-                            .as_deref()
-                            .map(|leaf| nearest_frame_node_id_conn(tx, leaf))
-                            .transpose()?
-                            .flatten(),
-                    };
+                    let old_leaf_is_live = old_leaf_node_id.is_none() || parent_node_facts.is_some();
                     let plan = planner.plan(lash_core::store::FreshRuntimeCommitFacts {
                         actual_head_revision: actual_revision,
                         old_leaf_node_id,
@@ -474,7 +593,7 @@ impl SessionCommitStore for Store {
                         selected_leaf_is_live,
                         has_live_nodes,
                         old_leaf_is_live,
-                        derived_frame_node_id,
+                        parent_node_facts,
                     })?;
                     let sql_head_revision = sql_monotonic_counter_value(
                         "session_head_revision",
@@ -585,7 +704,12 @@ impl SessionCommitStore for Store {
                         }
                     }
 
-                    for node in &commit.graph.nodes {
+                    for (node, facts) in commit
+                        .graph
+                        .nodes
+                        .iter()
+                        .zip(plan.planned_node_facts())
+                    {
                         let node_json = node.encode_storage_body().map_err(|err| {
                             StoreError::Backend(format!(
                                 "failed to encode graph node body: {err}"
@@ -593,16 +717,27 @@ impl SessionCommitStore for Store {
                         })?;
                         tx.execute(
                             "INSERT INTO graph_nodes
-                             (session_id, node_id, parent_node_id, node_json)
-                             VALUES (?1, ?2, ?3, ?4)",
+                             (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                             params![
                                 commit.session_id,
                                 node.node_id,
                                 node.parent_node_id,
+                                i64::try_from(facts.generation).map_err(|_| StoreError::Backend(
+                                    "node generation does not fit SQLite INTEGER".to_string()
+                                ))?,
+                                facts.frame_node_id,
                                 node_json
                             ],
                         )
-                        .map_err(sqlite_error)?;
+                        .map_err(|error| {
+                            sqlite_graph_node_insert_error(
+                                error,
+                                &commit.session_id,
+                                facts.generation,
+                                &node.node_id,
+                            )
+                        })?;
                     }
                     let meta = plan.head_meta(stored_checkpoint.checkpoint_ref.clone());
                     tx.execute(

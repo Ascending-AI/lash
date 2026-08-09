@@ -287,27 +287,95 @@ pub(super) async fn fork_at_in_catalog(
             // The relation records which session the host branched from, while
             // the retained point records which session originally wrote the
             // node. Those identities legitimately differ after a rewind.
-            let current_frame_node_id =
-                persistence::nearest_frame_node_id_conn(tx, &request.node_id)?.ok_or_else(
-                    || lash_core::StoreError::MissingFrameOpenAncestor {
-                        leaf_node_id: request.node_id.clone(),
-                    },
-                )?;
-            let live = tx
+            let node_facts = tx
                 .query_row(
-                    "SELECT 1 FROM graph_nodes
+                    "SELECT session_id, generation, frame_node_id FROM graph_nodes
                      WHERE node_id = ?1 AND tombstoned = 0",
                     params![request.node_id],
-                    |_| Ok(()),
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
                 )
                 .optional()
-                .map_err(sqlite_error)?
-                .is_some();
-            if !live {
-                return Err(lash_core::StoreError::ForkPointNotRetained {
+                .map_err(sqlite_error)?;
+            let (_owning_session_id, fork_generation, current_frame_node_id) = node_facts
+                .ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
                     node_id: request.node_id.clone(),
+                })?;
+            let fork_generation = u64::try_from(fork_generation).map_err(|_| {
+                stored_data_corrupt(
+                    "SessionGraph node",
+                    format!("negative generation {fork_generation}"),
+                )
+            })?;
+            let mut edge_path = Vec::new();
+            let mut current_node_id = request.node_id.clone();
+            let mut expected_generation = fork_generation;
+            loop {
+                let facts = tx
+                    .query_row(
+                        "SELECT node_id, parent_node_id, session_id, generation
+                         FROM graph_nodes
+                         WHERE node_id = ?1 AND tombstoned = 0",
+                        params![current_node_id],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, Option<String>>(1)?,
+                                row.get::<_, String>(2)?,
+                                row.get::<_, i64>(3)?,
+                            ))
+                        },
+                    )
+                    .optional()
+                    .map_err(sqlite_error)?
+                    .ok_or_else(|| {
+                        stored_data_corrupt(
+                            "SessionGraph",
+                            format!(
+                                "retained fork path is missing or tombstoned at `{current_node_id}`"
+                            ),
+                        )
+                    })?;
+                let generation = u64::try_from(facts.3).map_err(|_| {
+                    stored_data_corrupt(
+                        "SessionGraph node",
+                        format!("negative generation {}", facts.3),
+                    )
+                })?;
+                if generation != expected_generation {
+                    return Err(stored_data_corrupt(
+                        "SessionGraph",
+                        format!(
+                            "parent generation {generation} does not match expected {expected_generation}"
+                        ),
+                    ));
+                }
+                let parent_node_id = facts.1.clone();
+                edge_path.push(lash_core::store::ForkNodeFacts {
+                    node_id: facts.0,
+                    parent_node_id: facts.1,
+                    owning_session_id: facts.2,
+                    generation,
                 });
+                if expected_generation == 0 {
+                    break;
+                }
+                current_node_id = parent_node_id.ok_or_else(|| {
+                    stored_data_corrupt(
+                        "SessionGraph",
+                        "retained fork path ended before generation zero",
+                    )
+                })?;
+                expected_generation -= 1;
             }
+            edge_path.reverse();
+            let fork_plan =
+                lash_core::store::ForkPlan::derive(&request.session_id, edge_path)?;
             let config = lash_core::PersistedSessionConfig {
                 provider_id: request.policy.recorded_provider_id().to_string(),
                 model: request.policy.model.clone(),
@@ -336,6 +404,28 @@ pub(super) async fn fork_at_in_catalog(
                 ],
             )
             .map_err(sqlite_error)?;
+            {
+                let mut stmt = tx
+                    .prepare(
+                        "INSERT INTO fork_lineage
+                         (session_id, ancestor_session_id, fork_node_id, fork_generation)
+                         VALUES (?1, ?2, ?3, ?4)",
+                    )
+                    .map_err(sqlite_error)?;
+                for ancestor in fork_plan.ancestors() {
+                    stmt.execute(params![
+                        fork_plan.session_id(),
+                        ancestor.ancestor_session_id,
+                        ancestor.fork_node_id,
+                        i64::try_from(ancestor.fork_generation).map_err(|_| {
+                            lash_core::StoreError::Backend(
+                                "fork generation does not fit SQLite INTEGER".to_string(),
+                            )
+                        })?,
+                    ])
+                    .map_err(sqlite_error)?;
+                }
+            }
             let session_meta = lash_core::SessionMeta {
                 session_id: request.session_id.clone(),
                 session_name: request.session_id.clone(),

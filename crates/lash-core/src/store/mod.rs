@@ -5,6 +5,7 @@ mod claim_settlement;
 mod commit_budget;
 mod commit_identity;
 mod error;
+mod fork_plan;
 mod graph_commit;
 mod lease_timings;
 mod load;
@@ -28,6 +29,8 @@ pub use commit_identity::{
     derive_history_node_id,
 };
 pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
+#[doc(hidden)]
+pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use load::{load_persisted_session_state, refresh_persisted_session_state};
 pub use queued_work::QueuedWorkClass;
@@ -38,8 +41,9 @@ pub use runtime_commit::{
 };
 #[doc(hidden)]
 pub use runtime_commit_plan::{
-    FreshRuntimeCommitFacts, RuntimeCommitPlan, RuntimeCommitPlanner, RuntimeCommitReceiptRecord,
-    RuntimeCommitReceiptWrite, RuntimeCommitReplay,
+    FreshRuntimeCommitFacts, ParentNodeFacts, PlannedNodeFacts, RuntimeCommitPlan,
+    RuntimeCommitPlanner, RuntimeCommitReceiptRecord, RuntimeCommitReceiptWrite,
+    RuntimeCommitReplay,
 };
 pub use session_execution_lease::{
     LeaseClaimNonce, LeaseOwnerIdentity, SessionExecutionLease, SessionExecutionLeaseAcquisition,
