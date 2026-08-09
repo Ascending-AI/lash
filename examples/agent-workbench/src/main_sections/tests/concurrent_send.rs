@@ -2,10 +2,17 @@
 /// here so a test-driven turn contends for the session exactly as the workflow
 /// does.
 fn test_turn_execution_owner(turn_id: &str) -> lash::persistence::LeaseOwnerIdentity {
+    test_turn_execution_owner_for_incarnation(turn_id, "test-incarnation")
+}
+
+fn test_turn_execution_owner_for_incarnation(
+    turn_id: &str,
+    incarnation_id: &str,
+) -> lash::persistence::LeaseOwnerIdentity {
     let owner_id = format!("WorkbenchTurnWorkflow/{turn_id}/run");
     lash::persistence::LeaseOwnerIdentity::opaque(
         owner_id.clone(),
-        format!("{owner_id}/test-incarnation"),
+        format!("{owner_id}/{incarnation_id}"),
     )
 }
 
@@ -118,6 +125,177 @@ fn state_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
             TranscriptRow::Reasoning { .. } | TranscriptRow::CodeBlock { .. } => None,
         })
         .collect()
+}
+
+/// FIG-1129: a replacement Restate worker keeps the logical workflow owner id
+/// but starts with a new process incarnation. The dead process's advisory lane
+/// can therefore still be live when redrive finishes the runtime turn. Both the
+/// turn commit and the workbench-owned assistant projection must proceed under
+/// the head CAS; an unrelated live owner must still retain the hard busy result.
+#[tokio::test]
+async fn successor_persistence_tolerates_the_dead_incarnations_live_lease_window() {
+    let data_dir = tempfile::tempdir().expect("successor persistence tempdir");
+    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+        data_dir.path().join("lash-sessions"),
+    ));
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-successor-persistence")
+        .complete(|_| async {
+            Ok(text_response(
+                "<lashlang>\nfinish \"replacement completed\"\n</lashlang>",
+            ))
+        })
+        .build()
+        .into_handle();
+    let state = recoverable_chat_test_state_with_dependencies(
+        data_dir.path(),
+        64,
+        provider,
+        in_memory_trigger_store(),
+        store_factory.clone(),
+        Some(inert_queued_work_driver()),
+    )
+    .await;
+    let session_id = state.current_session_id();
+    let turn_id = "fig1129-successor-turn";
+    let dead_incarnation =
+        test_turn_execution_owner_for_incarnation(turn_id, "dead-incarnation-a");
+    let successor_incarnation =
+        test_turn_execution_owner_for_incarnation(turn_id, "successor-incarnation-b");
+
+    // Materialize and park the durable session before incarnation A claims the
+    // workflow lane. Dropping the acquisition value simulates process loss: it
+    // performs no owner-side release, so the durable lease remains live.
+    let parked = state
+        .core
+        .session(session_id.clone())
+        .session_execution_owner(dead_incarnation.clone())
+        .open()
+        .await
+        .expect("open the first incarnation")
+        .park()
+        .await
+        .expect("park the materialized session");
+    assert_eq!(parked.session_id(), session_id);
+    drop(parked);
+    let store = lash_sqlite_store::Store::open(&store_factory.catalog_path())
+        .await
+        .expect("open the durable session catalog");
+    let dead_lease = lash::persistence::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+        &store,
+        &session_id,
+        &dead_incarnation,
+        60_000,
+    )
+    .await
+    .expect("incarnation A claims the session lane")
+    .acquired()
+    .expect("the parked session lane is free for incarnation A");
+
+    let successor = state
+        .core
+        .session(session_id.clone())
+        .session_execution_owner(successor_incarnation)
+        .open()
+        .await
+        .expect("open the replacement incarnation");
+    let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
+    let ui_events = ChannelTurnEvents {
+        turn_state: Arc::clone(&turn_state),
+    };
+    let output = successor
+        .turn(lash::TurnInput::text("complete after process loss"))
+        .turn_id(turn_id)
+        .require_finish()
+        .expect("require finish")
+        .stream_to(&ui_events)
+        .await
+        .expect("the replacement runtime completes under commit-CAS authority");
+    crate::restate::record_turn_output(
+        &state,
+        &successor,
+        turn_id,
+        output,
+        turn_state,
+        "test.fig1129.successor.completed",
+    )
+    .await
+    .expect("the replacement persists the workbench-owned assistant projection");
+
+    let committed = successor
+        .read_view()
+        .messages()
+        .iter()
+        .map(lash::message_text)
+        .collect::<Vec<_>>();
+    assert!(
+        committed.iter().any(|text| text == "complete after process loss"),
+        "the successor's user turn must be durable: {committed:?}"
+    );
+    assert!(
+        committed.iter().any(|text| text == "replacement completed"),
+        "the successor's final workbench projection must be durable: {committed:?}"
+    );
+    let Json(projected) = app_state(State(state.clone()), Query(SessionQuery::default()))
+        .await
+        .expect("project the completed successor turn");
+    assert!(
+        state_rows(&projected)
+            .iter()
+            .any(|(role, text)| role == "assistant" && text == "replacement completed"),
+        "the user-facing projection must show the completed turn: {:?}",
+        state_rows(&projected)
+    );
+
+    // The tolerance is not general lease bypass. Relative to this claimant the
+    // same still-live row belongs to a different logical owner, so the existing
+    // busy error must remain visible and no extra message may commit.
+    let contender = state
+        .core
+        .session(session_id.clone())
+        .session_execution_owner(lash::persistence::LeaseOwnerIdentity::opaque(
+            "genuinely-live-contender",
+            "genuinely-live-contender/incarnation",
+        ))
+        .open()
+        .await
+        .expect("open a genuinely contending runtime");
+    let contention_error = contender
+        .admin()
+        .state()
+        .append_messages(vec![lash::plugins::PluginMessage::text(
+            lash::messages::MessageRole::Assistant,
+            "must not commit under a different owner's live lease",
+        )])
+        .await
+        .expect_err("a different live owner must retain the hard busy refusal");
+    assert!(
+        contention_error.to_string().contains("is busy"),
+        "live contention must surface the existing busy error: {contention_error}"
+    );
+    assert!(
+        contender
+            .read_view()
+            .messages()
+            .iter()
+            .all(|message| !lash::message_text(message).contains("must not commit")),
+        "the refused live contender must not mutate resident projection"
+    );
+    let durable_after_refusal = lash::persistence::load_persisted_session_state(&store)
+        .await
+        .expect("re-read durable session after different-owner refusal")
+        .expect("the durable session remains present");
+    assert!(
+        durable_after_refusal
+            .read_view()
+            .messages()
+            .iter()
+            .all(|message| !lash::message_text(message).contains("must not commit")),
+        "the refused live contender must not mutate durable projection"
+    );
+
+    // Keep the exact pre-TTL evidence live through both assertions.
+    assert_eq!(dead_lease.owner, dead_incarnation);
 }
 
 /// A provider whose first call parks until released, so a turn can be held

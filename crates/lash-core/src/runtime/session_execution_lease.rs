@@ -4,9 +4,8 @@
 //! The lease is advisory: it serializes the common case so two runners do not
 //! duplicate work, but the commit's head compare-and-set is the only authority
 //! on who publishes (ADR 0029). That makes a handful of transitions decisive when
-//! a turn looks stuck, and each emits a structured event carrying the session id,
-//! the lease `fencing_token` (ADR 0029 calls it the generation), and the holder
-//! identity:
+//! a turn looks stuck; each structured event carries the decision-specific lane,
+//! identity, and session facts shown below:
 //!
 //! | event | level | emitted by | meaning |
 //! |---|---|---|---|
@@ -17,6 +16,9 @@
 //! | `session_execution_lease.renewal_install_refused` | WARN | the runner | a backend returned a renewal that did not preserve the presented lease |
 //! | `session_execution_lease.release_refused` | WARN | the store | durable owner/token decision evidence for a refused release |
 //! | `session_execution_lease.renewal_failed` | WARN | the holder | renewal stopped on a transient error; the lease is still ours to release |
+//! | `session_execution_lease.busy` | DEBUG | the claimant | the claim observed a named live holder and did not acquire the lane |
+//! | `session_execution_lease.busy_advisory` | DEBUG | the turn claimant | a turn proceeds lane-lessly because the head CAS is the authority |
+//! | `session_execution_lease.successor_busy_advisory` | INFO | the persistence claimant | a different incarnation of the same logical owner commits lane-lessly under the head CAS |
 //! | `session_execution_lease.commit_cas_rejected` | WARN | the losing writer | the commit's head CAS lost to a concurrent writer |
 //!
 //! **`taken_over` is the winner's event, emitted atomically with the claim that
@@ -32,8 +34,7 @@
 //! The loser's `lost` remains a purely local observation: *this* runner no longer
 //! holds the lane. It deliberately does not name a successor.
 //!
-//! They are trace events, not durable session events, on purpose: lease churn is
-//! per-attempt telemetry about which runner tried what, not session history. A
+//! These are trace events, not durable session history: lease churn is per-attempt telemetry. A
 //! lost lease is not a turn failure: the turn may still commit, and the
 //! `commit_cas_rejected` event is what proves it did not.
 //! Same-incarnation overlap is benign by design: rotating the lock-lifecycle
@@ -56,6 +57,8 @@ use crate::store::{
     RuntimeCommit, RuntimeCommitResult, RuntimePersistence, SessionExecutionLease,
     SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome, StoreError,
 };
+
+mod observability;
 
 static NEXT_LEASE_GUARD_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -128,6 +131,11 @@ pub(super) struct SessionExecutionLeaseGuard {
     renew_task: tokio::task::JoinHandle<()>,
 }
 
+enum SessionExecutionLeaseGuardAcquisition {
+    Acquired(SessionExecutionLeaseGuard),
+    Busy(SessionExecutionLease),
+}
+
 /// A non-owning view of a turn driver's execution lane.
 ///
 /// It shares only the live fence and loss evidence needed by nested commits.
@@ -162,6 +170,19 @@ impl SessionExecutionLeaseGuard {
         timings: LeaseTimings,
         clock: Arc<dyn Clock>,
     ) -> Result<Option<Self>, StoreError> {
+        match Self::try_acquire_with_busy_holder(store, session_id, owner, timings, clock).await? {
+            SessionExecutionLeaseGuardAcquisition::Acquired(guard) => Ok(Some(guard)),
+            SessionExecutionLeaseGuardAcquisition::Busy(_) => Ok(None),
+        }
+    }
+
+    async fn try_acquire_with_busy_holder(
+        store: Arc<dyn RuntimePersistence>,
+        session_id: &str,
+        owner: &crate::LeaseOwnerIdentity,
+        timings: LeaseTimings,
+        clock: Arc<dyn Clock>,
+    ) -> Result<SessionExecutionLeaseGuardAcquisition, StoreError> {
         let claim_nonce = crate::LeaseClaimNonce::new();
         let acquisition = match store
             .try_claim_session_execution_lease_with_token(
@@ -175,15 +196,12 @@ impl SessionExecutionLeaseGuard {
             SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => acquisition,
             SessionExecutionLeaseClaimOutcome::Busy { holder } => {
                 trace_busy(session_id, owner, &holder);
-                return Ok(None);
+                return Ok(SessionExecutionLeaseGuardAcquisition::Busy(holder));
             }
         };
-        Ok(Some(Self::from_acquisition(
-            store,
-            acquisition,
-            timings,
-            clock,
-        )))
+        Ok(SessionExecutionLeaseGuardAcquisition::Acquired(
+            Self::from_acquisition(store, acquisition, timings, clock),
+        ))
     }
 
     /// Report the claim, then start renewing it.
@@ -369,6 +387,9 @@ impl SessionExecutionLeaseGuard {
     }
 }
 
+/// Three outcomes: an acquired lane commits and releases; a same-owner successor commits lane-lessly;
+/// any other busy holder is refused. The successor neither displaces nor releases the predecessor,
+/// whose lane TTLs out untouched; head CAS is sole authority. The name is historical for that arm.
 pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
     store: Arc<dyn RuntimePersistence>,
     commit: RuntimeCommit,
@@ -377,18 +398,35 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
     clock: Arc<dyn Clock>,
 ) -> Result<RuntimeCommitResult, StoreError> {
     let session_id = commit.session_id.clone();
-    let Some(lease) = SessionExecutionLeaseGuard::try_acquire(
+    let acquisition = SessionExecutionLeaseGuard::try_acquire_with_busy_holder(
         Arc::clone(&store),
         &session_id,
         owner,
         timings,
         clock,
     )
-    .await?
-    else {
-        return Err(StoreError::Backend(format!(
-            "session execution lease for session `{session_id}` is busy"
-        )));
+    .await?;
+    let lease = match acquisition {
+        SessionExecutionLeaseGuardAcquisition::Acquired(lease) => lease,
+        SessionExecutionLeaseGuardAcquisition::Busy(holder)
+            if holder.owner.same_owner_other_incarnation(owner) =>
+        {
+            // Same-incarnation claims rotate upstream; this clause guards nonconformant backends.
+            observability::trace_successor_busy_advisory(&session_id, &holder);
+            return match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await {
+                Ok(result) => Ok(result),
+                Err(error) => {
+                    trace_commit_cas_rejected(&session_id, None, owner, &error);
+                    Err(error)
+                }
+            };
+        }
+        SessionExecutionLeaseGuardAcquisition::Busy(_) => {
+            // Multi-tab runbook Phase 6 gates here; widening requires the FIG-1133 owner ruling.
+            return Err(StoreError::Backend(format!(
+                "session execution lease for session `{session_id}` is busy"
+            )));
+        }
     };
     let evidence = lease.commit_evidence();
     let commit = commit.releasing_session_execution_lease(lease.completion());

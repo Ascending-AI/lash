@@ -262,6 +262,11 @@ impl LeaseOwnerIdentity {
     pub fn same_incarnation(&self, other: &LeaseOwnerIdentity) -> bool {
         self.owner_id == other.owner_id && self.incarnation_id == other.incarnation_id
     }
+
+    /// Reports whether two identities name the same logical owner through different incarnations.
+    pub(crate) fn same_owner_other_incarnation(&self, other: &LeaseOwnerIdentity) -> bool {
+        self.owner_id == other.owner_id && self.incarnation_id != other.incarnation_id
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
