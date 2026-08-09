@@ -29,7 +29,7 @@ jobs:
 
     steps:
       - name: Check out main with release history
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
@@ -112,7 +112,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777 # postgres:16-alpine
         env:
           POSTGRES_USER: lash
           POSTGRES_PASSWORD: lash
@@ -130,7 +130,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare-release.outputs.release_sha }}
 
@@ -138,10 +138,10 @@ jobs:
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
 
       - name: Restore cargo cache
-        uses: useblacksmith/rust-cache@v3.0.1
+        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
           # Restore-only against the release cache ci.yml warms on main.
@@ -149,7 +149,7 @@ jobs:
           save-if: false
 
       - name: Install protoc
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
         with:
           tool: protoc
 
@@ -168,7 +168,7 @@ jobs:
 
       - name: Upload performance guard artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-perf-guard-${{ needs.prepare-release.outputs.release_tag }}-attempt-${{ github.run_attempt }}
           path: .benchmarks/perf-guard/*
@@ -186,7 +186,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare-release.outputs.release_sha }}
 
@@ -210,13 +210,13 @@ jobs:
           fi
 
       - name: Check out release tooling
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare-release.outputs.release_sha }}
           path: .release-tools
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
 
       # Publishes every publishable workspace member in topological dependency
       # layers (crates within a layer publish concurrently under a conservative
@@ -264,7 +264,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare-release.outputs.release_sha }}
           # Full history + tags: release_notes.py walks previous-tag..tag to
@@ -305,7 +305,7 @@ jobs:
           git push origin "refs/tags/${RELEASE_TAG}"
 
       - name: Publish release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           body_path: ${{ runner.temp }}/RELEASE_NOTES.md

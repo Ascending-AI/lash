@@ -153,21 +153,79 @@ data_root="$state_root/$state_key"
 
 # ------------------------------------------------------------- process glue ---
 
+process_start_time() {
+  local pid="${1:-}"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  [[ -r "/proc/$pid/stat" ]] || return 1
+  local start_time
+  start_time="$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null || true)"
+  [[ "$start_time" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$start_time"
+}
+
+read_pid_file() {
+  local file="$1"
+  [[ -f "$file" ]] || return 1
+  local pid start_time extra
+  read -r pid start_time extra < "$file" || return 1
+  [[ "$pid" =~ ^[0-9]+$ && "$start_time" =~ ^[0-9]+$ && -z "$extra" ]] || return 1
+  printf '%s %s\n' "$pid" "$start_time"
+}
+
+pid_identity_matches() {
+  local pid="$1" expected_start_time="$2" current_start_time
+  current_start_time="$(process_start_time "$pid" 2>/dev/null || true)"
+  [[ -n "$current_start_time" && "$current_start_time" = "$expected_start_time" ]]
+}
+
+pid_file_identity() {
+  local file="$1" record pid start_time
+  record="$(read_pid_file "$file" 2>/dev/null || true)"
+  [[ -n "$record" ]] || return 1
+  read -r pid start_time <<<"$record"
+  pid_identity_matches "$pid" "$start_time" || return 1
+  printf '%s\n' "$record"
+}
+
+write_pid_file() {
+  local file="$1" pid="$2" start_time
+  start_time="$(process_start_time "$pid")" || return 1
+  printf '%s %s\n' "$pid" "$start_time" > "$file"
+}
+
+remove_stale_pid_file() {
+  local label="$1" file="$2"
+  if [[ -e "$file" ]]; then
+    log "removing stale or mismatched $label PID file $file"
+  fi
+  rm -f "$file"
+}
+
 pid_alive() {
-  local pid_file="$1"
-  [[ -f "$pid_file" ]] || return 1
-  local pid
-  pid="$(cat "$pid_file" 2>/dev/null || true)"
-  [[ -n "$pid" ]] || return 1
-  kill -0 "$pid" 2>/dev/null
+  local label="$1" file="$2"
+  [[ -e "$file" ]] || return 1
+  if pid_file_identity "$file" >/dev/null; then
+    return 0
+  fi
+  remove_stale_pid_file "$label" "$file"
+  return 1
+}
+
+signal_verified_process() {
+  local signal="$1" pid="$2" start_time="$3"
+  pid_identity_matches "$pid" "$start_time" || return 1
+  if kill "-$signal" "-$pid" >/dev/null 2>&1; then
+    return 0
+  fi
+  pid_identity_matches "$pid" "$start_time" || return 1
+  kill "-$signal" "$pid" >/dev/null 2>&1
 }
 
 require_alive() {
   local label="$1" pid_file="$2" log_file="$3"
-  if ! pid_alive "$pid_file"; then
+  if ! pid_alive "$label" "$pid_file"; then
     log "$label exited; last log lines:"
     tail -n 40 "$log_file" >&2 || true
-    rm -f "$pid_file"
     die "$label is not running"
   fi
 }
@@ -188,7 +246,7 @@ start_detached() {
     nohup env "$@" >> "$log_file" 2>&1 < /dev/null &
   fi
   local pid="$!"
-  printf '%s\n' "$pid" > "$pid_file"
+  write_pid_file "$pid_file" "$pid" || die "could not record $label process identity for $pid"
   log "started $label as process $pid; log: $log_file"
 }
 
@@ -230,19 +288,26 @@ build_binaries() {
 
 stop_one() {
   local label="$1" pid_file="$2"
-  if ! pid_alive "$pid_file"; then
-    rm -f "$pid_file"
+  [[ -e "$pid_file" ]] || return 0
+  local record="" pid="" start_time=""
+  record="$(pid_file_identity "$pid_file" 2>/dev/null || true)"
+  if [[ -z "$record" ]]; then
+    remove_stale_pid_file "$label" "$pid_file"
     return 0
   fi
-  local pid
-  pid="$(cat "$pid_file")"
+  read -r pid start_time <<<"$record"
   log "stopping $label (process $pid)"
-  kill "$pid" 2>/dev/null || true
+  if ! signal_verified_process TERM "$pid" "$start_time"; then
+    remove_stale_pid_file "$label" "$pid_file"
+    return 0
+  fi
   local deadline=$((SECONDS + 15))
-  while kill -0 "$pid" 2>/dev/null; do
+  while pid_identity_matches "$pid" "$start_time"; do
     if (( SECONDS >= deadline )); then
       log "$label did not exit; sending SIGKILL"
-      kill -9 "$pid" 2>/dev/null || true
+      if ! signal_verified_process KILL "$pid" "$start_time"; then
+        log "$label identity changed before SIGKILL; refusing to signal PID $pid"
+      fi
       break
     fi
     sleep 0.5
@@ -254,7 +319,7 @@ stop_one() {
 
 run_up() {
   build_binaries
-  if pid_alive "$platform_pid_file"; then
+  if pid_alive platform "$platform_pid_file"; then
     log "platform already running on $platform_addr"
   else
     mapfile -t env_pairs < <(platform_env)
@@ -272,7 +337,7 @@ run_up() {
     log "the bot will exit on boot. The platform alone is still usable at $platform_url."
   fi
 
-  if pid_alive "$bot_pid_file"; then
+  if pid_alive bot "$bot_pid_file"; then
     log "bot already running on $bot_addr"
   else
     mapfile -t env_pairs < <(bot_env)
@@ -290,8 +355,17 @@ run_up() {
 
 run_status() {
   local platform_state="stopped" bot_state="stopped"
-  pid_alive "$platform_pid_file" && platform_state="running ($(cat "$platform_pid_file"))"
-  pid_alive "$bot_pid_file" && bot_state="running ($(cat "$bot_pid_file"))"
+  local record="" pid=""
+  if pid_alive platform "$platform_pid_file"; then
+    record="$(read_pid_file "$platform_pid_file")"
+    read -r pid _ <<<"$record"
+    platform_state="running ($pid)"
+  fi
+  if pid_alive bot "$bot_pid_file"; then
+    record="$(read_pid_file "$bot_pid_file")"
+    read -r pid _ <<<"$record"
+    bot_state="running ($pid)"
+  fi
   printf 'platform  %-24s %s\n' "$platform_addr" "$platform_state"
   printf 'bot       %-24s %s\n' "$bot_addr" "$bot_state"
   if health="$(curl -fsS "$platform_url/healthz" 2>/dev/null)"; then
