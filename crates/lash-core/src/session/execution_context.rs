@@ -79,7 +79,6 @@ pub(super) struct RuntimeExecutionProcessEventContext {
 #[derive(Clone)]
 pub(crate) struct RuntimeExecutionTracing {
     sink: Arc<dyn lash_trace::TraceSink>,
-    level: lash_trace::TraceLevel,
     base_context: lash_trace::TraceContext,
     scope_context: lash_trace::TraceContext,
 }
@@ -87,13 +86,11 @@ pub(crate) struct RuntimeExecutionTracing {
 impl RuntimeExecutionTracing {
     pub(crate) fn new(
         sink: Arc<dyn lash_trace::TraceSink>,
-        level: lash_trace::TraceLevel,
         base_context: lash_trace::TraceContext,
         scope_context: lash_trace::TraceContext,
     ) -> Self {
         Self {
             sink,
-            level,
             base_context,
             scope_context,
         }
@@ -288,8 +285,7 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub(crate) fn replay_validation_trace(&self) -> Option<crate::RuntimeEffectReplayTrace> {
         let tracing = self.tracing.as_ref()?;
-        crate::RuntimeEffectReplayTrace::gated(
-            tracing.level,
+        crate::RuntimeEffectReplayTrace::for_divergence(
             Some(&tracing.sink),
             tracing.base_context.clone(),
             tracing.scope_context.clone(),

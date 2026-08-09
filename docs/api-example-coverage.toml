@@ -46086,8 +46086,9 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeError::code"]
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeError::code. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:127#err.code.is_replay_mismatch()"
+assertion = "examples/docs-snippets/src/persistence.rs:140#assert!(requires_replay_mismatch_drain(&error));"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::deleted_session_id"
@@ -46125,6 +46126,16 @@ aliases = ["lash_core::RuntimeError::message"]
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeError::message. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+
+[[api]]
+symbol = "lash::runtime::RuntimeError::summary"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeError::summary"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:136#error.summary = Some(lash::runtime::RuntimeEffectReplayMismatchSummary {"
+assertion = "examples/docs-snippets/src/persistence.rs:142#assert_eq!(summary.divergent_path_count, 1);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::missing_process_execution_id"
@@ -46192,7 +46203,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/persistence.rs:136#if err.code == RuntimeErrorCode::SessionExecutionBusy =>"
+usage = "examples/docs-snippets/src/persistence.rs:158#if err.code == RuntimeErrorCode::SessionExecutionBusy =>"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::AwaitEventCancelUnsupported"
@@ -46754,7 +46765,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::SessionExecutionBusy"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/persistence.rs:136#if err.code == RuntimeErrorCode::SessionExecutionBusy =>"
+usage = "examples/docs-snippets/src/persistence.rs:158#if err.code == RuntimeErrorCode::SessionExecutionBusy =>"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::SessionExecutionLeaseLost"
@@ -46763,7 +46774,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::SessionExecutionLeaseLost"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/persistence.rs:141#if err.code == RuntimeErrorCode::SessionExecutionLeaseLost =>"
+usage = "examples/docs-snippets/src/persistence.rs:163#if err.code == RuntimeErrorCode::SessionExecutionLeaseLost =>"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::SessionHeadRefresh"
@@ -46853,7 +46864,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::StoreCommitContended"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/persistence.rs:148#if err.code == RuntimeErrorCode::StoreCommitContended =>"
+usage = "examples/docs-snippets/src/persistence.rs:170#if err.code == RuntimeErrorCode::StoreCommitContended =>"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::StoreCommitFailed"
@@ -46862,7 +46873,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::StoreCommitFailed"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/persistence.rs:153#Err(lash::EmbedError::Runtime(err)) if err.code == RuntimeErrorCode::StoreCommitFailed => {"
+usage = "examples/docs-snippets/src/persistence.rs:175#Err(lash::EmbedError::Runtime(err)) if err.code == RuntimeErrorCode::StoreCommitFailed => {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::StoreCommitNodeBudgetExceeded"
@@ -47062,6 +47073,16 @@ aliases = ["lash_core::RuntimeErrorCode::is_retryable"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: runtime hosts derive retry policy from the typed diagnostic instead of duplicating error-code classification."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::is_replay_mismatch"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::is_replay_mismatch"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:127#err.code.is_replay_mismatch()"
+assertion = "examples/docs-snippets/src/persistence.rs:140#assert!(requires_replay_mismatch_drain(&error));"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::is_terminal"
@@ -64998,28 +65019,34 @@ disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::RetryDecision::scheduled. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
-symbol = "lash_core::RuntimeEffectReplayMismatchSummary"
+symbol = "lash::runtime::RuntimeEffectReplayMismatchSummary"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectReplayMismatchSummary"]
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectReplayMismatchSummary. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:136#error.summary = Some(lash::runtime::RuntimeEffectReplayMismatchSummary {"
+assertion = "examples/docs-snippets/src/persistence.rs:142#assert_eq!(summary.divergent_path_count, 1);"
 
 [[api]]
-symbol = "lash_core::RuntimeEffectReplayMismatchSummary::divergent_path_count"
+symbol = "lash::runtime::RuntimeEffectReplayMismatchSummary::divergent_path_count"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectReplayMismatchSummary::divergent_path_count"]
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectReplayMismatchSummary::divergent_path_count. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:137#divergent_path_count: 1,"
+assertion = "examples/docs-snippets/src/persistence.rs:142#assert_eq!(summary.divergent_path_count, 1);"
 
 [[api]]
-symbol = "lash_core::RuntimeEffectReplayMismatchSummary::first_divergent_paths"
+symbol = "lash::runtime::RuntimeEffectReplayMismatchSummary::first_divergent_paths"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectReplayMismatchSummary::first_divergent_paths"]
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeEffectReplayMismatchSummary::first_divergent_paths. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:138#first_divergent_paths: vec![\"command.duration_ms\".to_string()],"
+assertion = "examples/docs-snippets/src/persistence.rs:143#assert_eq!(summary.first_divergent_paths, [\"command.duration_ms\"]);"
 
 [[api]]
 symbol = "lash_core::RuntimeExecutionContext"

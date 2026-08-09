@@ -359,8 +359,7 @@ impl DirectCompletionCapability {
             usage_source,
         } = plan;
         let tracing = &current.host.core.tracing;
-        let replay_trace = crate::RuntimeEffectReplayTrace::gated(
-            tracing.trace_level,
+        let replay_trace = crate::RuntimeEffectReplayTrace::for_divergence(
             tracing.trace_sink.as_ref(),
             tracing.trace_context.clone(),
             crate::trace::trace_context_from_invocation(&envelope.invocation),

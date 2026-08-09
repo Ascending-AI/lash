@@ -1380,7 +1380,6 @@ async fn safe_retry_policy_retries_safe_failure_and_stops_on_success() {
     let sink: Arc<dyn lash_trace::TraceSink> = Arc::new(lash_trace::JsonlTraceSink::new(&path));
     let tracing = crate::RuntimeExecutionTracing::new(
         sink,
-        lash_trace::TraceLevel::Standard,
         lash_trace::TraceContext::default(),
         lash_trace::TraceContext::default().for_session("tool-retry-session"),
     );

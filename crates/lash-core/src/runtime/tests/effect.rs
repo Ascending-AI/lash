@@ -82,7 +82,7 @@ impl RecordingEffectController {
     }
 }
 
-fn runtime_host_config_with_inline_controller(
+pub(super) fn runtime_host_config_with_inline_controller(
     controller: Arc<dyn RuntimeEffectController>,
 ) -> RuntimeHostConfig {
     let mut config = RuntimeHostConfig::in_memory();
@@ -505,12 +505,33 @@ impl RuntimeEffectController for SerialOnlyEffectController {
 }
 
 #[derive(Default)]
-struct RejectingEffectController {
+pub(super) struct RejectingEffectController {
     inline: InlineRuntimeEffectController,
+    controller_owned_replay: bool,
+    mismatch_summary: Option<RuntimeEffectReplayMismatchSummary>,
+}
+
+impl RejectingEffectController {
+    pub(super) fn with_replay_mismatch(mut self) -> Self {
+        self.controller_owned_replay = true;
+        self.mismatch_summary = Some(RuntimeEffectReplayMismatchSummary {
+            divergent_path_count: 1,
+            first_divergent_paths: vec!["command.request.model".to_string()],
+        });
+        self
+    }
 }
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for RejectingEffectController {
+    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
+        if self.controller_owned_replay {
+            crate::EffectReplayOwnership::Controller
+        } else {
+            crate::EffectReplayOwnership::Runtime
+        }
+    }
+
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,
@@ -568,6 +589,13 @@ impl RuntimeEffectController for RejectingEffectController {
             RuntimeEffectCommand::PeekAwaitEvent { .. }
         ) {
             return Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution: None });
+        }
+        if let Some(summary) = self.mismatch_summary.clone() {
+            return Err(RuntimeEffectControllerError::new(
+                "sqlite_effect_replay_hash_conflict",
+                "recorded runtime effect diverged at command.request.model",
+            )
+            .with_summary(summary));
         }
         Err(RuntimeEffectControllerError::new(
             "test_controller_rejected",

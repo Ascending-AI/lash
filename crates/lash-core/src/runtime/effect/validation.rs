@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use lash_trace::{
     TraceContext, TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent,
-    TraceEffectEnvelopeDiffValue, TraceEvent, TraceLevel, TraceSink,
+    TraceEffectEnvelopeDiffValue, TraceEvent, TraceSink,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -72,10 +72,11 @@ pub struct RuntimeEffectReplayMismatchSummary {
     pub first_divergent_paths: Vec<String>,
 }
 
-/// Extended-trace capability for replay-validation diagnostics.
+/// Trace capability dedicated to replay-divergence diagnostics.
 ///
-/// Construction returns `None` unless both sides of the FIG-523 gate are
-/// present: extended trace level and a configured sink.
+/// Construction returns `None` only when no sink is configured. A divergence
+/// is rare and always actionable, so its evidence reaches a configured sink at
+/// the default standard trace level without enabling other extended events.
 #[derive(Clone)]
 pub struct RuntimeEffectReplayTrace {
     sink: Arc<dyn TraceSink>,
@@ -85,16 +86,14 @@ pub struct RuntimeEffectReplayTrace {
 }
 
 impl RuntimeEffectReplayTrace {
-    pub(crate) fn gated(
-        level: TraceLevel,
+    pub(crate) fn for_divergence(
         sink: Option<&Arc<dyn TraceSink>>,
         base_context: TraceContext,
         context: TraceContext,
         clock: Arc<dyn crate::Clock>,
     ) -> Option<Self> {
-        if !level.is_extended() {
-            return None;
-        }
+        // Deliberately bypass the ordinary extended-level gate for this one
+        // rare diagnostic; the sink remains the emission boundary.
         Some(Self {
             sink: Arc::clone(sink?),
             base_context,
@@ -118,14 +117,18 @@ impl RuntimeEffectReplayTrace {
 /// canonical envelope.
 ///
 /// This is the shared replay-validation seam. Substrates supply only their
-/// public mismatch code; canonical comparison, summary construction, and gated
-/// diagnostics remain identical for every consumer.
+/// public mismatch code; canonical comparison, summary construction, and
+/// divergence diagnostics remain identical for every consumer.
 pub fn validate_replayed_effect_envelope(
     recorded: &CanonicalRuntimeEffectEnvelope,
     reconstructed: &CanonicalRuntimeEffectEnvelope,
     mismatch_code: &str,
     trace: Option<&RuntimeEffectReplayTrace>,
 ) -> Result<(), RuntimeEffectControllerError> {
+    debug_assert!(
+        crate::RuntimeErrorCode::from_wire_code(mismatch_code).is_replay_mismatch(),
+        "replay-validation seam requires a classified replay-mismatch code: {mismatch_code}"
+    );
     recorded.verify("recorded")?;
     reconstructed.verify("reconstructed")?;
 
@@ -193,10 +196,19 @@ pub fn validate_replayed_effect_envelope(
             recorded.hash,
             reconstructed.hash,
             summary.divergent_path_count,
-            summary.first_divergent_paths.join(", ")
+            render_divergent_paths(&summary)
         ),
     )
     .with_summary(summary))
+}
+
+fn render_divergent_paths(summary: &RuntimeEffectReplayMismatchSummary) -> String {
+    let mut paths = summary.first_divergent_paths.clone();
+    let elided = summary.divergent_path_count.saturating_sub(paths.len());
+    if elided > 0 {
+        paths.push(format!("<{elided} more paths elided>"));
+    }
+    paths.join(", ")
 }
 
 fn collect_differences(
@@ -378,8 +390,8 @@ mod tests {
         )
         .expect_err("mismatch");
         assert_eq!(
-            error.summary.expect("summary"),
-            RuntimeEffectReplayMismatchSummary {
+            error.summary.as_ref(),
+            Some(&RuntimeEffectReplayMismatchSummary {
                 divergent_path_count: 10,
                 first_divergent_paths: vec![
                     "command.call.args.f0".to_string(),
@@ -391,7 +403,14 @@ mod tests {
                     "command.call.args.f6".to_string(),
                     "command.call.args.f7".to_string(),
                 ],
-            }
+            })
+        );
+        assert!(
+            error
+                .message
+                .ends_with("command.call.args.f6, command.call.args.f7, <2 more paths elided>]"),
+            "bounded rendered summary must say how many paths were elided: {}",
+            error.message
         );
     }
 
@@ -399,14 +418,13 @@ mod tests {
     fn large_divergent_value_is_whole_value_elided() {
         let sink = Arc::new(RecordingSink::default());
         let sink_dyn: Arc<dyn TraceSink> = sink.clone();
-        let trace = RuntimeEffectReplayTrace::gated(
-            TraceLevel::Extended,
+        let trace = RuntimeEffectReplayTrace::for_divergence(
             Some(&sink_dyn),
             TraceContext::default(),
             TraceContext::default(),
             Arc::new(crate::SystemClock),
         )
-        .expect("extended trace");
+        .expect("configured divergence trace");
         let error = validate_replayed_effect_envelope(
             &canonical(json!({"tool_results": [{"value": "a".repeat(3_000)}]})),
             &canonical(json!({"tool_results": [{"value": "b".repeat(3_000)}]})),
@@ -457,35 +475,37 @@ mod tests {
     }
 
     #[test]
-    fn diff_trace_requires_extended_level_and_sink_but_summary_does_not() {
+    fn diff_trace_uses_default_wiring_when_a_sink_is_configured() {
         let sink = Arc::new(RecordingSink::default());
         let sink_dyn: Arc<dyn TraceSink> = sink.clone();
-        for trace in [
-            RuntimeEffectReplayTrace::gated(
-                TraceLevel::Standard,
-                Some(&sink_dyn),
-                TraceContext::default(),
-                TraceContext::default(),
-                Arc::new(crate::SystemClock),
-            ),
-            RuntimeEffectReplayTrace::gated(
-                TraceLevel::Extended,
+        let trace = RuntimeEffectReplayTrace::for_divergence(
+            Some(&sink_dyn),
+            TraceContext::default(),
+            TraceContext::default(),
+            Arc::new(crate::SystemClock),
+        )
+        .expect("a configured sink is sufficient under default wiring");
+        let error = validate_replayed_effect_envelope(
+            &canonical(json!({"value": 1})),
+            &canonical(json!({"value": 2})),
+            "restate_effect_hash_mismatch",
+            Some(&trace),
+        )
+        .expect_err("mismatch");
+        assert_eq!(error.summary.expect("summary").divergent_path_count, 1);
+        assert!(matches!(
+            sink.records.lock_recover()[0].event,
+            TraceEvent::EffectEnvelopeDiff { .. }
+        ));
+
+        assert!(
+            RuntimeEffectReplayTrace::for_divergence(
                 None,
                 TraceContext::default(),
                 TraceContext::default(),
                 Arc::new(crate::SystemClock),
-            ),
-        ] {
-            assert!(trace.is_none());
-            let error = validate_replayed_effect_envelope(
-                &canonical(json!({"value": 1})),
-                &canonical(json!({"value": 2})),
-                "restate_effect_hash_mismatch",
-                trace.as_ref(),
             )
-            .expect_err("mismatch");
-            assert_eq!(error.summary.expect("summary").divergent_path_count, 1);
-        }
-        assert!(sink.records.lock_recover().is_empty());
+            .is_none()
+        );
     }
 }

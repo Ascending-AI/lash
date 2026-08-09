@@ -678,6 +678,52 @@ struct Fig1126PendingToolRedriveImpl {
     terminal_resumes: Arc<AtomicUsize>,
 }
 
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+struct Fig1142ReplayDivergenceInput;
+
+#[restate_sdk::workflow]
+trait Fig1142ReplayDivergence {
+    async fn run(input: Json<Fig1142ReplayDivergenceInput>) -> HandlerResult<Json<bool>>;
+}
+
+struct Fig1142ReplayDivergenceImpl {
+    model_version: Arc<AtomicUsize>,
+}
+
+fn fig1142_llm_envelope(model_version: usize) -> RuntimeEffectEnvelope {
+    let mut request = llm_spec();
+    request.model = format!("model-v{model_version}");
+    RuntimeEffectEnvelope::new(
+        RuntimeInvocation::effect(
+            RuntimeScope::for_turn("fig1142-session", "fig1142-turn", 0, 0),
+            "fig1142-replay-divergence",
+            RuntimeEffectKind::LlmCall,
+            "fig1142-replay-divergence",
+        ),
+        RuntimeEffectCommand::LlmCall {
+            request: Box::new(request),
+        },
+    )
+}
+
+impl Fig1142ReplayDivergence for Fig1142ReplayDivergenceImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(_input): Json<Fig1142ReplayDivergenceInput>,
+    ) -> HandlerResult<Json<bool>> {
+        let model_version = self.model_version.load(Ordering::SeqCst);
+        RestateRuntimeEffectController::new(ctx)
+            .execute_effect(
+                fig1142_llm_envelope(model_version),
+                RuntimeEffectLocalExecutor::testing(|_| async { Ok(fig793_llm_outcome()) }),
+            )
+            .await
+            .map_err(TerminalError::from_error)?;
+        Ok(Json(true))
+    }
+}
+
 impl Fig1126PendingToolRedrive for Fig1126PendingToolRedriveImpl {
     async fn run(
         &self,
@@ -894,6 +940,70 @@ async fn fig1126_revoked_await_refuses_before_command_on_first_execution_and_red
         restate_output_failure_message(&redriven)
             .is_some_and(|failure| failure.contains("await_event_unknown_or_revoked")),
         "redrive must preserve the typed revoked-session refusal"
+    );
+}
+
+/// Runbook-level replay proof: splice the captured first-incarnation run into
+/// a handler whose reconstructed envelope has changed, then inspect the error
+/// exactly as the Restate host renders it.
+#[tokio::test]
+async fn fig1142_replay_divergence_runbook_renders_path_summary() {
+    let model_version = Arc::new(AtomicUsize::new(1));
+    let endpoint = Endpoint::builder()
+        .bind(
+            Fig1142ReplayDivergenceImpl {
+                model_version: Arc::clone(&model_version),
+            }
+            .serve(),
+        )
+        .build();
+    let workflow_key = "fig1142-rendered-divergence";
+    let input = Fig1142ReplayDivergenceInput;
+    let suspended = invoke_endpoint(
+        &endpoint,
+        "Fig1142ReplayDivergence",
+        "run",
+        workflow_key,
+        &input,
+    )
+    .await
+    .expect("capture the first-incarnation runtime-effect run");
+    assert!(
+        restate_message_types(&suspended)
+            .expect("decode first-incarnation frames")
+            .contains(&RESTATE_SUSPENSION_MESSAGE_TYPE),
+        "the fixture must suspend with its runtime-effect run unresolved"
+    );
+
+    let recorded = RecordedRuntimeEffect {
+        envelope: Arc::new(
+            fig1142_llm_envelope(1)
+                .canonical_form()
+                .expect("canonical first-incarnation envelope"),
+        ),
+        outcome: Ok(fig793_llm_outcome()),
+    };
+    let replay = encode_run_replay(
+        workflow_key,
+        &input,
+        &suspended,
+        serde_json::to_value(recorded).expect("serialize first-incarnation effect"),
+    )
+    .expect("splice the first-incarnation runtime-effect run");
+
+    model_version.store(2, Ordering::SeqCst);
+    let redriven = invoke_endpoint_body(&endpoint, "Fig1142ReplayDivergence", "run", replay)
+        .await
+        .expect("the divergent redrive must render a terminal output failure");
+    let rendered = restate_output_failure_message(&redriven)
+        .expect("the Restate host must render the replay-divergence failure");
+    assert!(
+        rendered.contains("restate_effect_hash_mismatch"),
+        "rendered failure omitted the typed mismatch code: {rendered}"
+    );
+    assert!(
+        rendered.contains("divergent_paths=[command.request.model]"),
+        "rendered failure omitted the per-path divergence summary: {rendered}"
     );
 }
 
@@ -3355,6 +3465,10 @@ fn recorded_runtime_effect_hash_mismatch_fails_explicitly() {
         .expect_err("hash mismatch");
 
     assert_eq!(err.code, "restate_effect_hash_mismatch");
+    assert!(
+        lash_core::RuntimeErrorCode::from_wire_code(&err.code).is_replay_mismatch(),
+        "Restate replay divergence must retain the shared typed classification"
+    );
     assert_eq!(
         err.summary.expect("mismatch summary"),
         lash_core::RuntimeEffectReplayMismatchSummary {

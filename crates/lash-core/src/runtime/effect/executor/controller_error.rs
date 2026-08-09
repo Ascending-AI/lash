@@ -58,8 +58,15 @@ impl RuntimeEffectControllerError {
     }
 
     pub(crate) fn into_runtime_error(self) -> RuntimeError {
-        let runtime = RuntimeError::new(RuntimeErrorCode::from_wire_code(&self.code), self.message);
-        match self.cause {
+        let Self {
+            code,
+            message,
+            summary,
+            cause,
+        } = self;
+        let mut runtime = RuntimeError::new(RuntimeErrorCode::from_wire_code(&code), message);
+        runtime.summary = summary;
+        match cause {
             Some(cause) => runtime.with_cause(cause),
             None => runtime,
         }
@@ -137,5 +144,26 @@ mod tests {
             assert!(!runtime_error.is_retryable());
             assert!(runtime_error.is_terminal());
         }
+    }
+
+    #[test]
+    fn replay_mismatch_summary_survives_runtime_error_conversion() {
+        let summary = crate::RuntimeEffectReplayMismatchSummary {
+            divergent_path_count: 2,
+            first_divergent_paths: vec![
+                "command.duration_ms".to_string(),
+                "invocation.replay_key".to_string(),
+            ],
+        };
+        let runtime_error = RuntimeEffectControllerError::new(
+            "sqlite_effect_replay_hash_conflict",
+            "recorded runtime effect diverged at command.duration_ms",
+        )
+        .with_summary(summary.clone())
+        .into_runtime_error();
+
+        assert!(runtime_error.code.is_replay_mismatch());
+        assert_eq!(runtime_error.summary, Some(summary));
+        assert!(runtime_error.to_string().contains("command.duration_ms"));
     }
 }
