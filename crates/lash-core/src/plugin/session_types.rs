@@ -371,7 +371,15 @@ pub enum SessionRelation {
         caused_by: Option<crate::CausalRef>,
     },
     Fork {
+        /// Host-declared lineage: the session this fork branched from as the
+        /// host understands it. Stores persist it as picker/display metadata
+        /// and never validate it against the fork point's anchor provenance —
+        /// repeated rewinds legitimately name superseded intermediate
+        /// sessions, while [`crate::ForkSessionResult::source_session_id`]
+        /// always reports the original writer.
         source_session_id: String,
+        /// Host-declared source node, persisted alongside
+        /// [`Self::Fork::source_session_id`] and equally unvalidated.
         source_node_id: String,
         #[serde(default)]
         observer_inheritance: crate::ObserverInheritance,

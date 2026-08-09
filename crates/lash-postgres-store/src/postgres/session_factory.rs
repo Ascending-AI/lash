@@ -376,16 +376,9 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             retained.ok_or_else(|| StoreError::ForkPointNotRetained {
                 node_id: request.node_id.clone(),
             })?;
-        if let lash_core::SessionRelation::Fork {
-            source_session_id: expected,
-            ..
-        } = &request.relation
-            && expected != &source_session_id
-        {
-            return Err(StoreError::ForkPointNotRetained {
-                node_id: request.node_id.clone(),
-            });
-        }
+        // The relation records which session the host branched from, while the
+        // retained point records which session originally wrote the node. Those
+        // identities legitimately differ after a rewind.
         let current_frame_node_id =
             crate::runtime_persistence::nearest_frame_node_id_tx(&mut tx, &request.node_id)
                 .await?

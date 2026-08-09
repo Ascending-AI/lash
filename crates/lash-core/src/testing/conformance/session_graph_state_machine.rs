@@ -946,6 +946,14 @@ impl SessionGraphScenario {
         {
             self.append(slot, 1, 0).await?;
         }
+        if self
+            .model
+            .sessions
+            .get(&slot)
+            .is_some_and(|session| session.head_revision == 0)
+        {
+            self.checkpoint_commit(slot).await?;
+        }
         let before = self.session_snapshot(slot).await?;
         let operation_key = self.next_operation_id("stale-cas");
         let live = self.live.get(&slot).expect("stale-CAS live session");
@@ -1544,6 +1552,29 @@ where
             SessionGraphContractOp::ReachabilitySweep,
         ];
         replay_case(seed.wrapping_add(1), factory, &operations)
+            .await
+            .map(|_| ())
+    })
+    .await?;
+    // FIG-1174: a retained leaf remains rewindable after the first rewind
+    // replaces and deletes the session that pinned it.
+    assert_on_fresh_factory(make, seed.wrapping_add(2), |factory| async move {
+        let operations = vec![
+            SessionGraphContractOp::Append {
+                session: 0,
+                node_count: 1,
+                requirement: 0,
+            },
+            SessionGraphContractOp::TruncateRewind {
+                session: 0,
+                node: 0,
+            },
+            SessionGraphContractOp::TruncateRewind {
+                session: 0,
+                node: 0,
+            },
+        ];
+        replay_case(seed.wrapping_add(2), factory, &operations)
             .await
             .map(|_| ())
     })
