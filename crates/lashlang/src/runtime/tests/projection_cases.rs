@@ -64,7 +64,7 @@ impl SearchProjectedText {
     }
 
     fn slices(&self) -> Vec<(Option<isize>, Option<isize>)> {
-        self.slices.lock().expect("slices lock").clone()
+        self.slices.lock_recover().clone()
     }
 }
 
@@ -107,7 +107,7 @@ impl ProjectedHostDescriptor for SearchProjectedText {
                 ProjectedReadRequest::Len => ProjectedReadResponse::Len(self.text.chars().count()),
                 ProjectedReadRequest::Slice { start, end } => {
                     self.slice_count.fetch_add(1, Ordering::SeqCst);
-                    self.slices.lock().expect("slices lock").push((start, end));
+                    self.slices.lock_recover().push((start, end));
                     ProjectedReadResponse::Value(Value::String(
                         slice_string(&self.text, start, end).into(),
                     ))
@@ -735,11 +735,11 @@ impl OverrideProjectedValue {
     }
 
     fn push_call(&self, name: &'static str) {
-        self.calls.lock().expect("calls lock").push(name);
+        self.calls.lock_recover().push(name);
     }
 
     fn calls(&self) -> Vec<&'static str> {
-        self.calls.lock().expect("calls lock").clone()
+        self.calls.lock_recover().clone()
     }
 }
 

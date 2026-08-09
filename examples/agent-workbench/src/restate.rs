@@ -1,3 +1,4 @@
+use lash::sync::MutexExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::panic::AssertUnwindSafe;
@@ -686,10 +687,7 @@ pub(crate) async fn cancel_cron_jobs_for_session(
         .collect();
     session.close().await.map_err(AppError::session_open)?;
     job_keys.extend({
-        let mut guard = state
-            .restate_cron_job_keys
-            .lock()
-            .expect("restate cron job key lock");
+        let mut guard = state.restate_cron_job_keys.lock_recover();
         guard.remove(session_id).unwrap_or_default()
     });
     for job_key in job_keys {
@@ -1175,7 +1173,7 @@ pub(crate) async fn record_turn_output(
     trace_name: &str,
 ) -> Result<(), AppError> {
     let streamed_prose = {
-        let mut turn_state = turn_state.lock().expect("turn state lock");
+        let mut turn_state = turn_state.lock_recover();
         let streamed_prose = turn_state.assistant_prose();
         turn_state.settle_terminal();
         streamed_prose

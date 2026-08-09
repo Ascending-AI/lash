@@ -6,22 +6,22 @@
 //! path changes.
 
 use super::InMemorySessionStore;
+use lash_sansio::sync::MutexExt;
 
 impl InMemorySessionStore {
     pub(super) fn commit_attachment_refs_in_memory(
         &self,
         session_id: &str,
         attachment_ids: &[crate::AttachmentId],
+        committed_at_epoch_ms: u64,
     ) {
-        let now = self.clock.timestamp_ms();
-        let mut manifest = self
-            .attachment_manifest
-            .lock()
-            .expect("lock attachment manifest");
+        let mut manifest = self.attachment_manifest.lock_recover();
         for attachment_id in attachment_ids {
             if let Some(entry) = manifest.get_mut(&(session_id.to_string(), attachment_id.clone()))
             {
-                entry.committed_at_epoch_ms.get_or_insert(now);
+                entry
+                    .committed_at_epoch_ms
+                    .get_or_insert(committed_at_epoch_ms);
             }
         }
     }
@@ -30,21 +30,16 @@ impl InMemorySessionStore {
         &self,
         session_id: &str,
         completed: &crate::store::RuntimeTurnCommitStamp,
+        committed_at_epoch_ms: u64,
     ) {
-        let now = self.clock.timestamp_ms();
-        for entry in self
-            .attachment_manifest
-            .lock()
-            .expect("lock attachment manifest")
-            .values_mut()
-        {
+        for entry in self.attachment_manifest.lock_recover().values_mut() {
             let turn_id = completed.operation.turn_id();
             if entry.session_id == session_id
                 && entry.owner_kind == Some(crate::AttachmentOwnerKind::Turn)
                 && entry.owner_id.as_deref() == turn_id
                 && entry.committed_at_epoch_ms.is_none()
             {
-                entry.committed_at_epoch_ms = Some(now);
+                entry.committed_at_epoch_ms = Some(committed_at_epoch_ms);
             }
         }
     }
@@ -52,8 +47,7 @@ impl InMemorySessionStore {
     #[cfg(test)]
     pub(crate) fn attachment_manifest_entries(&self) -> Vec<crate::AttachmentManifestEntry> {
         self.attachment_manifest
-            .lock()
-            .expect("lock attachment manifest")
+            .lock_recover()
             .values()
             .cloned()
             .collect()
@@ -65,16 +59,10 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         &self,
         intent: crate::AttachmentIntent,
     ) -> Result<(), crate::store::StoreError> {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
+        let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(&intent.session_id)?;
         let key = (intent.session_id.clone(), intent.attachment_id.clone());
-        let mut manifest = self
-            .attachment_manifest
-            .lock()
-            .expect("lock attachment manifest");
+        let mut manifest = self.attachment_manifest.lock_recover();
         match manifest.get_mut(&key) {
             Some(existing) => {
                 // Re-recording refreshes the timestamp and durable owner as one
@@ -107,12 +95,10 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         session_id: &str,
         attachment_ids: &[crate::AttachmentId],
     ) -> Result<(), crate::store::StoreError> {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
+        let committed_at_epoch_ms = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(session_id)?;
-        self.commit_attachment_refs_in_memory(session_id, attachment_ids);
+        self.commit_attachment_refs_in_memory(session_id, attachment_ids, committed_at_epoch_ms);
         Ok(())
     }
 
@@ -122,8 +108,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
     ) -> Result<Vec<crate::AttachmentManifestEntry>, crate::store::StoreError> {
         let mut entries = self
             .attachment_manifest
-            .lock()
-            .expect("lock attachment manifest")
+            .lock_recover()
             .values()
             .filter(|entry| {
                 entry.committed_at_epoch_ms.is_none()
@@ -144,14 +129,10 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         &self,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<(), crate::store::StoreError> {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
+        let _transaction = self.write_transaction.lock_recover();
         let committed_turns = self
             .runtime_turn_commits
-            .lock()
-            .expect("lock runtime turn commits")
+            .lock_recover()
             .iter()
             .map(|((session_id, turn_id), record)| {
                 (session_id.clone(), turn_id.clone(), record.committed_at_ms)
@@ -160,26 +141,23 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         // Age, owner death, and removal happen under the same transaction/lock
         // boundary. Process owners are conservatively live in the inline store;
         // durable factories evaluate process-row existence in their database.
-        self.attachment_manifest
-            .lock()
-            .expect("lock attachment manifest")
-            .retain(|_, entry| {
-                let owner_is_dead = match (entry.owner_kind, entry.owner_id.as_deref()) {
-                    (None, None) => true,
-                    (Some(crate::AttachmentOwnerKind::Turn), Some(owner_id)) => committed_turns
-                        .iter()
-                        .any(|(session_id, turn_id, committed_at_ms)| {
-                            session_id == &entry.session_id
-                                && turn_id != owner_id
-                                && *committed_at_ms > entry.intent_at_epoch_ms
-                        }),
-                    (Some(crate::AttachmentOwnerKind::Process), Some(_)) => false,
-                    _ => false,
-                };
-                !(entry.committed_at_epoch_ms.is_none()
-                    && entry.intent_at_epoch_ms <= intent_grace_cutoff_epoch_ms
-                    && owner_is_dead)
-            });
+        self.attachment_manifest.lock_recover().retain(|_, entry| {
+            let owner_is_dead = match (entry.owner_kind, entry.owner_id.as_deref()) {
+                (None, None) => true,
+                (Some(crate::AttachmentOwnerKind::Turn), Some(owner_id)) => committed_turns
+                    .iter()
+                    .any(|(session_id, turn_id, committed_at_ms)| {
+                        session_id == &entry.session_id
+                            && turn_id != owner_id
+                            && *committed_at_ms > entry.intent_at_epoch_ms
+                    }),
+                (Some(crate::AttachmentOwnerKind::Process), Some(_)) => false,
+                _ => false,
+            };
+            !(entry.committed_at_epoch_ms.is_none()
+                && entry.intent_at_epoch_ms <= intent_grace_cutoff_epoch_ms
+                && owner_is_dead)
+        });
         Ok(())
     }
 
@@ -189,8 +167,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         attachment_id: &crate::AttachmentId,
     ) -> Result<(), crate::store::StoreError> {
         self.attachment_manifest
-            .lock()
-            .expect("lock attachment manifest")
+            .lock_recover()
             .remove(&(session_id.to_string(), attachment_id.clone()));
         Ok(())
     }
@@ -202,8 +179,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
     ) -> Result<bool, crate::store::StoreError> {
         Ok(self
             .attachment_manifest
-            .lock()
-            .expect("lock attachment manifest")
+            .lock_recover()
             .contains_key(&(session_id.to_string(), attachment_id.clone())))
     }
 
@@ -214,8 +190,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
     ) -> Result<bool, crate::store::StoreError> {
         let committed_turns = self
             .runtime_turn_commits
-            .lock()
-            .expect("lock runtime turn commits")
+            .lock_recover()
             .iter()
             .map(|((session_id, turn_id), record)| {
                 (session_id.clone(), turn_id.clone(), record.committed_at_ms)
@@ -223,8 +198,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
             .collect::<Vec<_>>();
         Ok(self
             .attachment_manifest
-            .lock()
-            .expect("lock attachment manifest")
+            .lock_recover()
             .values()
             .filter(|entry| &entry.attachment_id == attachment_id)
             .any(|entry| {
@@ -254,8 +228,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
     fn list_all_refs(&self) -> Result<Vec<crate::AttachmentId>, crate::store::StoreError> {
         let mut refs = self
             .attachment_manifest
-            .lock()
-            .expect("lock attachment manifest")
+            .lock_recover()
             .keys()
             .map(|(_, attachment_id)| attachment_id.clone())
             .collect::<Vec<_>>();

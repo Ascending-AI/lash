@@ -13,6 +13,7 @@
 //! (reads) or `conn.write` (read-then-write); only the wrapper call is awaited.
 
 use super::*;
+use lash_sansio::sync::MutexExt;
 
 /// Logical keyspaces multiplexed onto the `artifact_refs` pointer table. Each
 /// namespace owns its own half of the `(namespace, artifact_ref)` composite
@@ -113,10 +114,7 @@ impl lashlang::LashlangArtifactStore for Store {
         .await
         .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))?;
         self.artifact_cache
-            .lock()
-            .map_err(|_| {
-                lashlang::ArtifactStoreError::Backend("artifact cache lock poisoned".to_string())
-            })?
+            .lock_recover()
             .insert(artifact.module_ref.clone(), Arc::new(artifact.clone()));
         Ok(())
     }
@@ -125,15 +123,7 @@ impl lashlang::LashlangArtifactStore for Store {
         &self,
         module_ref: &lashlang::ModuleRef,
     ) -> Result<Option<Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError> {
-        if let Some(artifact) = self
-            .artifact_cache
-            .lock()
-            .map_err(|_| {
-                lashlang::ArtifactStoreError::Backend("artifact cache lock poisoned".to_string())
-            })?
-            .get(module_ref)
-            .cloned()
-        {
+        if let Some(artifact) = self.artifact_cache.lock_recover().get(module_ref).cloned() {
             return Ok(Some(artifact));
         }
 
@@ -154,10 +144,7 @@ impl lashlang::LashlangArtifactStore for Store {
                 .map_err(lashlang::ArtifactStoreError::from)?,
         );
         self.artifact_cache
-            .lock()
-            .map_err(|_| {
-                lashlang::ArtifactStoreError::Backend("artifact cache lock poisoned".to_string())
-            })?
+            .lock_recover()
             .insert(module_ref.clone(), artifact.clone());
         Ok(Some(artifact))
     }

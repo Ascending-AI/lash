@@ -18,6 +18,7 @@
 //! a durable tool-catalog refresh so the next opened turn sees the updated
 //! `inbox.<slug>` authority set.
 
+use lash::sync::{MutexExt, RwLockExt};
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex, RwLock},
@@ -125,7 +126,7 @@ impl MailWorld {
         }
         let slug = slugify(&display_name)
             .ok_or_else(|| "account name must contain a letter or digit".to_string())?;
-        let mut accounts = self.inner.write().expect("mail world lock");
+        let mut accounts = self.inner.write_recover();
         if accounts.iter().any(|account| account.slug == slug) {
             return Err(format!("account `{slug}` already exists"));
         }
@@ -142,8 +143,7 @@ impl MailWorld {
 
     pub(crate) fn account_summaries(&self) -> Vec<AccountSummary> {
         self.inner
-            .read()
-            .expect("mail world lock")
+            .read_recover()
             .iter()
             .map(Account::summary)
             .collect()
@@ -153,15 +153,12 @@ impl MailWorld {
     /// Drop every account and inbox: the workbench reset wipes the mail
     /// world along with the chat session.
     pub(crate) fn clear(&self) {
-        self.inner.write().expect("mail world lock").clear();
-        self.sent_by_replay_key
-            .lock()
-            .expect("sent replay key lock")
-            .clear();
+        self.inner.write_recover().clear();
+        self.sent_by_replay_key.lock_recover().clear();
     }
 
     pub(crate) fn remove_account(&self, slug: &str) -> Result<(), String> {
-        let mut accounts = self.inner.write().expect("mail world lock");
+        let mut accounts = self.inner.write_recover();
         let before = accounts.len();
         accounts.retain(|account| account.slug != slug);
         if accounts.len() == before {
@@ -178,7 +175,7 @@ impl MailWorld {
         title: &str,
         text: &str,
     ) -> Result<DeliveredMail, String> {
-        let mut accounts = self.inner.write().expect("mail world lock");
+        let mut accounts = self.inner.write_recover();
         let account = find_mut(&mut accounts, slug)?;
         let message = account.append(title, text);
         Ok(DeliveredMail {
@@ -193,7 +190,7 @@ impl MailWorld {
 
     /// Messages for an account, newest first (for the UI).
     pub(crate) fn inbox(&self, slug: &str) -> Result<Vec<MailMessage>, String> {
-        let accounts = self.inner.read().expect("mail world lock");
+        let accounts = self.inner.read_recover();
         let account = find(&accounts, slug)?;
         let mut messages = account.messages.clone();
         messages.reverse();
@@ -202,7 +199,7 @@ impl MailWorld {
 
     /// Remove a single message by id.
     pub(crate) fn remove_message(&self, slug: &str, id: &str) -> Result<(), String> {
-        let mut accounts = self.inner.write().expect("mail world lock");
+        let mut accounts = self.inner.write_recover();
         let account = find_mut(&mut accounts, slug)?;
         let before = account.messages.len();
         account.messages.retain(|message| message.id != id);
@@ -235,10 +232,7 @@ impl MailWorld {
         slug: &str,
         args: &Value,
     ) -> Result<DeliveredMail, String> {
-        let mut sent = self
-            .sent_by_replay_key
-            .lock()
-            .expect("sent replay key lock");
+        let mut sent = self.sent_by_replay_key.lock_recover();
         if let Some(delivered) = sent.get(replay_key) {
             return Ok(delivered.clone());
         }
@@ -248,7 +242,7 @@ impl MailWorld {
     }
 
     fn op_list(&self, slug: &str, _args: &Value) -> Result<Value, String> {
-        let accounts = self.inner.read().expect("mail world lock");
+        let accounts = self.inner.read_recover();
         let account = find(&accounts, slug)?;
         let mut messages: Vec<&MailMessage> = account.messages.iter().collect();
         messages.reverse();

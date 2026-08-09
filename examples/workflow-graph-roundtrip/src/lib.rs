@@ -1,5 +1,6 @@
 //! HTTP backend for the workflow-graph round-trip example.
 
+use lash::sync::MutexExt;
 mod catalog;
 mod contract;
 mod display;
@@ -108,8 +109,7 @@ impl AppState {
 
     fn current(&self) -> SavedWorkflow {
         self.store
-            .lock()
-            .expect("workflow store lock")
+            .lock_recover()
             .versions
             .last()
             .expect("workflow store always has a version")
@@ -117,7 +117,7 @@ impl AppState {
     }
 
     fn save(&self, source: String, graph: WorkflowGraph) -> SavedWorkflow {
-        let mut store = self.store.lock().expect("workflow store lock");
+        let mut store = self.store.lock_recover();
         let version = store.versions.last().map_or(1, |saved| saved.version + 1);
         let saved = SavedWorkflow {
             version,

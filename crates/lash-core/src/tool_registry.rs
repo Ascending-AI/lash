@@ -1,3 +1,4 @@
+use lash_sansio::sync::RwLockExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
 
@@ -42,10 +43,7 @@ pub(crate) mod facade_ops {
             provider: Arc<dyn ToolProvider>,
         ) -> Result<ToolSourceHandle, ReconfigureError> {
             let source_id = {
-                let mut state = self
-                    .state
-                    .write()
-                    .expect("tool registry state lock poisoned");
+                let mut state = self.state.write_recover();
                 state.next_live_source_id += 1;
                 format!("live:{}", state.next_live_source_id)
             };

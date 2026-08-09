@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, Record,
     RuntimeError, State, TypeExpr, Value, parse,
@@ -50,10 +51,7 @@ impl ExecutionHost for TestHost {
                 .map(AbilityResult::Value),
             AbilityOp::Await(handle) => Ok(AbilityResult::Value(handle)),
             AbilityOp::Print(value) => {
-                self.observations
-                    .lock()
-                    .expect("observation mutex")
-                    .push(value);
+                self.observations.lock_recover().push(value);
                 Ok(AbilityResult::Unit)
             }
             AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
@@ -532,7 +530,7 @@ async fn tuple_comma_expressions_are_first_class_sequence_values() {
     assert_eq!(record["tuple_not_list"], Value::Bool(false));
     assert_eq!(record["text"], Value::String(r#"(1, "x")"#.into()));
 
-    let observations = host.observations.lock().expect("observations");
+    let observations = host.observations.lock_recover();
     assert!(matches!(&observations[0], Value::Tuple(items) if items.len() == 2));
 }
 
@@ -1751,7 +1749,7 @@ async fn observe_captures_intermediate_values_without_ending_execution() {
     );
 
     assert_eq!(value, Value::String("final".to_string().into()));
-    let observed = host.observations.lock().expect("observation mutex");
+    let observed = host.observations.lock_recover();
     assert_eq!(observed.len(), 2);
     assert_eq!(
         observed[0],
@@ -1783,7 +1781,7 @@ async fn execution_can_continue_without_finish() {
 
     assert_eq!(outcome, ExecutionOutcome::Continued);
     assert_eq!(state.globals()["counter"], Value::Number(1.0));
-    let observed = host.observations.lock().expect("observation mutex");
+    let observed = host.observations.lock_recover();
     assert_eq!(observed.as_slice(), &[Value::Number(1.0)]);
 }
 

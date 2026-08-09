@@ -3,8 +3,7 @@ impl ToolRegistry {
         let manifest = self.resolve_manifest(name)?;
         let is_member = self
             .state
-            .read()
-            .expect("tool registry state lock poisoned")
+            .read_recover()
             .tools
             .get(&manifest.id)
             .is_some_and(ToolRegistryEntry::is_member);
@@ -20,8 +19,7 @@ impl ToolRegistry {
     fn try_rebind_orphan(&self, tool_id: &ToolId) -> Option<ToolManifest> {
         self.refresh_sources().ok()?;
         self.state
-            .read()
-            .expect("tool registry state lock poisoned")
+            .read_recover()
             .tools
             .get(tool_id)
             .filter(|entry| !entry.is_orphaned())
@@ -42,8 +40,7 @@ impl ToolRegistry {
         let is_member = {
             let state = self
                 .state
-                .read()
-                .expect("tool registry state lock poisoned");
+                .read_recover();
             state
                 .tools
                 .get(tool_id)
@@ -58,8 +55,7 @@ impl ToolRegistry {
         let binding = {
             let state = self
                 .state
-                .read()
-                .expect("tool registry state lock poisoned");
+                .read_recover();
             state.tools.get(tool_id).map(|entry| entry.binding.clone())
         };
         let source_id = match binding {
@@ -74,8 +70,7 @@ impl ToolRegistry {
         };
         let source = {
             self.sources
-                .read()
-                .expect("tool source lock poisoned")
+                .read_recover()
                 .get(&source_id)
                 .cloned()
         };
@@ -98,8 +93,7 @@ impl ToolRegistry {
         };
         let source = self
             .sources
-            .read()
-            .expect("tool source lock poisoned")
+            .read_recover()
             .get(source_id)
             .cloned();
         let Some(source) = source else {
@@ -121,8 +115,7 @@ impl ToolProvider for ToolRegistry {
     fn tool_manifests(&self) -> Vec<ToolManifest> {
         let state = self
             .state
-            .read()
-            .expect("tool registry state lock poisoned");
+            .read_recover();
         state
             .tools
             .values()
@@ -135,8 +128,7 @@ impl ToolProvider for ToolRegistry {
         let known = {
             let state = self
                 .state
-                .read()
-                .expect("tool registry state lock poisoned");
+                .read_recover();
             state
                 .tools
                 .iter()
@@ -153,8 +145,7 @@ impl ToolProvider for ToolRegistry {
 
         let sources = self
             .sources
-            .read()
-            .expect("tool source lock poisoned")
+            .read_recover()
             .iter()
             .map(|(source_id, source)| (source_id.clone(), Arc::clone(source)))
             .collect::<Vec<_>>();
@@ -165,8 +156,7 @@ impl ToolProvider for ToolRegistry {
             let manifest = manifest_with_compact_contract(source.as_ref(), manifest);
             let mut state = self
                 .state
-                .write()
-                .expect("tool registry state lock poisoned");
+                .write_recover();
             if let Some(existing) = state.tools.get(&manifest.id) {
                 return (existing.binding.source_id() == Some(source_id.as_str()))
                     .then(|| existing.view_manifest());
@@ -193,8 +183,7 @@ impl ToolProvider for ToolRegistry {
         let known = {
             let state = self
                 .state
-                .read()
-                .expect("tool registry state lock poisoned");
+                .read_recover();
             state
                 .tools
                 .get(id)
@@ -210,8 +199,7 @@ impl ToolProvider for ToolRegistry {
 
         let sources = self
             .sources
-            .read()
-            .expect("tool source lock poisoned")
+            .read_recover()
             .iter()
             .map(|(source_id, source)| (source_id.clone(), Arc::clone(source)))
             .collect::<Vec<_>>();
@@ -222,8 +210,7 @@ impl ToolProvider for ToolRegistry {
             manifest = manifest_with_compact_contract(source.as_ref(), manifest);
             let mut state = self
                 .state
-                .write()
-                .expect("tool registry state lock poisoned");
+                .write_recover();
             if let Some((_, existing)) = state
                 .tools
                 .iter()
@@ -252,16 +239,14 @@ impl ToolProvider for ToolRegistry {
         let source_id = {
             let state = self
                 .state
-                .read()
-                .expect("tool registry state lock poisoned");
+                .read_recover();
             state
                 .tools
                 .get(id)
                 .and_then(|entry| entry.binding.source_id().map(str::to_string))
         }?;
         self.sources
-            .read()
-            .expect("tool source lock poisoned")
+            .read_recover()
             .get(&source_id)?
             .resolve_contract_by_id(&manifest.id)
     }

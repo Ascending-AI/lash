@@ -20,6 +20,10 @@ pub mod recoverable_chat;
 #[cfg(feature = "rlm")]
 pub mod rlm;
 pub mod scenario_contracts;
+/// Standard-lock poison recovery traits for application code.
+pub mod sync {
+    pub use lash_core::sync::*;
+}
 mod session;
 mod session_lease;
 mod support;

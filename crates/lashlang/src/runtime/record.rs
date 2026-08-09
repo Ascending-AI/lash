@@ -1,4 +1,5 @@
 use super::Value;
+use lash_sansio::sync::RwLockExt;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
@@ -23,12 +24,7 @@ fn symbol_table() -> &'static RwLock<SymbolTable> {
 }
 
 pub(crate) fn lookup_symbol(name: &str) -> Option<Symbol> {
-    symbol_table()
-        .read()
-        .expect("symbol table read lock poisoned")
-        .lookup
-        .get(name)
-        .copied()
+    symbol_table().read_recover().lookup.get(name).copied()
 }
 
 pub(crate) fn intern_symbol(name: &str) -> Symbol {
@@ -37,17 +33,13 @@ pub(crate) fn intern_symbol(name: &str) -> Symbol {
 
 pub(crate) fn intern_symbol_with_name(name: &str) -> (Symbol, Arc<str>) {
     {
-        let table = symbol_table()
-            .read()
-            .expect("symbol table read lock poisoned");
+        let table = symbol_table().read_recover();
         if let Some(symbol) = table.lookup.get(name) {
             return (*symbol, table.names[symbol.0 as usize].clone());
         }
     }
 
-    let mut table = symbol_table()
-        .write()
-        .expect("symbol table write lock poisoned");
+    let mut table = symbol_table().write_recover();
     if let Some(symbol) = table.lookup.get(name) {
         return (*symbol, table.names[symbol.0 as usize].clone());
     }
@@ -60,11 +52,7 @@ pub(crate) fn intern_symbol_with_name(name: &str) -> (Symbol, Arc<str>) {
 }
 
 pub(crate) fn symbol_name(symbol: Symbol) -> Arc<str> {
-    symbol_table()
-        .read()
-        .expect("symbol table read lock poisoned")
-        .names[symbol.0 as usize]
-        .clone()
+    symbol_table().read_recover().names[symbol.0 as usize].clone()
 }
 
 #[derive(Clone, Debug, PartialEq)]

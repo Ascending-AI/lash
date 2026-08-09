@@ -1,5 +1,6 @@
 use super::*;
 use ::tracing::Instrument;
+use lash_sansio::sync::MutexExt;
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, Registry};
@@ -17,7 +18,7 @@ struct CapturedSpan {
 
 impl SpanCapture {
     fn snapshot(&self) -> Vec<CapturedSpan> {
-        self.spans.lock().expect("lock captured spans").clone()
+        self.spans.lock_recover().clone()
     }
 }
 
@@ -38,10 +39,7 @@ where
                 .parent()
                 .map(|parent| parent.metadata().name().to_string()),
         };
-        self.spans
-            .lock()
-            .expect("lock captured spans")
-            .push(captured);
+        self.spans.lock_recover().push(captured);
     }
 }
 

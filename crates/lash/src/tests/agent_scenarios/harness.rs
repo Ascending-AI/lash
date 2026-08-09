@@ -7,6 +7,7 @@ use super::contracts::{
     assert_successful_agent_scenario,
 };
 use lash_core::llm::types::LlmUsage;
+use lash_sansio::sync::MutexExt;
 use std::collections::VecDeque;
 
 #[derive(Default)]
@@ -258,10 +259,7 @@ struct AgentScenarioRuntime {
 
 impl AgentScenarioRuntime {
     fn prompt_captures_snapshot(&self) -> Vec<LlmRequest> {
-        self.prompt_captures
-            .lock()
-            .expect("prompt captures")
-            .clone()
+        self.prompt_captures.lock_recover().clone()
     }
 
     async fn final_process_list(&self) -> Result<Vec<lash_core::ProcessHandleSummary>> {
@@ -920,10 +918,7 @@ fn scripted_provider(
             let usage = usage.clone();
             let prompt_captures = Arc::clone(&prompt_captures);
             async move {
-                prompt_captures
-                    .lock()
-                    .expect("prompt captures")
-                    .push(request.clone());
+                prompt_captures.lock_recover().push(request.clone());
                 let Some(text) = responses.lock().await.pop_front() else {
                     return Err(lash_core::llm::transport::LlmTransportError::new(
                         "scripted agent scenario provider exhausted its expected responses",

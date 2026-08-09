@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
+use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -140,8 +141,7 @@ impl TraceLashlangGraphStore {
     /// Returns a snapshot for one observed Lashlang graph key.
     pub fn graph(&self, graph_key: &str) -> Option<TraceLashlangGraph> {
         self.inner
-            .lock()
-            .ok()?
+            .lock_recover()
             .graphs
             .get(graph_key)
             .map(TraceLashlangGraphAccumulator::to_graph)
@@ -150,22 +150,16 @@ impl TraceLashlangGraphStore {
     /// Returns snapshots for all observed executions in stable graph-key order.
     pub fn graphs(&self) -> Vec<TraceLashlangGraph> {
         self.inner
-            .lock()
-            .map(|state| {
-                state
-                    .graphs
-                    .values()
-                    .map(TraceLashlangGraphAccumulator::to_graph)
-                    .collect()
-            })
-            .unwrap_or_default()
+            .lock_recover()
+            .graphs
+            .values()
+            .map(TraceLashlangGraphAccumulator::to_graph)
+            .collect()
     }
 
     /// Clears all reduced graph projections and replay de-duplication keys.
     pub fn clear(&self) {
-        if let Ok(mut state) = self.inner.lock() {
-            *state = TraceLashlangGraphState::default();
-        }
+        *self.inner.lock_recover() = TraceLashlangGraphState::default();
     }
 }
 
@@ -175,10 +169,7 @@ impl TraceSink for TraceLashlangGraphStore {
             return Ok(());
         };
         let event_key = lashlang_execution_event_key(event);
-        let mut state = self
-            .inner
-            .lock()
-            .map_err(|_| TraceSinkError::LockPoisoned)?;
+        let mut state = self.inner.lock_recover();
         if !state.seen_event_keys.insert(event_key.to_string()) {
             return Ok(());
         }

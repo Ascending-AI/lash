@@ -3,6 +3,11 @@ use crate::LlmTerminalReason;
 
 /// A configured LLM backend: its identity, host-config serialization, its
 /// generation options, and the request transport.
+///
+/// Lash contains a panic from [`Provider::complete`] as a typed call failure,
+/// but `complete` receives `&mut self`: after an unwind, the provider object's
+/// own internal state is undefined from the host's perspective. The host owns
+/// replacement, reset, or any other recovery needed before reusing it.
 #[async_trait]
 pub trait Provider: Send + Sync + std::fmt::Debug {
     fn kind(&self) -> &'static str;

@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::facade_support::ScopedEffectControllerFacadeOps;
+use lash_sansio::sync::MutexExt;
 
 /// One scope selected by an [`EffectHost`] and one effect envelope executed
 /// through the scoped controller.
@@ -31,21 +32,18 @@ impl RuntimeEffectController for RecordingEffectHostController {
         _local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let envelope_hash = envelope.stable_hash()?;
-        self.records
-            .lock()
-            .expect("effect host records")
-            .push(RecordingEffectHostRecord {
-                runtime_scope: envelope.invocation.scope.clone(),
-                execution_scope: self.execution_scope.clone(),
-                effect_id: envelope
-                    .invocation
-                    .effect_id()
-                    .expect("effect invocation")
-                    .to_string(),
-                effect_kind: envelope.command.kind(),
-                replay_key: envelope.invocation.replay_key().map(ToOwned::to_owned),
-                envelope_hash,
-            });
+        self.records.lock_recover().push(RecordingEffectHostRecord {
+            runtime_scope: envelope.invocation.scope.clone(),
+            execution_scope: self.execution_scope.clone(),
+            effect_id: envelope
+                .invocation
+                .effect_id()
+                .expect("effect invocation")
+                .to_string(),
+            effect_kind: envelope.command.kind(),
+            replay_key: envelope.invocation.replay_key().map(ToOwned::to_owned),
+            envelope_hash,
+        });
         match envelope.command {
             RuntimeEffectCommand::Sleep { .. } => Ok(RuntimeEffectOutcome::Sleep),
             command => Err(RuntimeEffectControllerError::new(
@@ -70,31 +68,22 @@ pub struct RecordingEffectHost {
 
 impl RecordingEffectHost {
     pub fn selected_scopes(&self) -> Vec<ExecutionScope> {
-        self.selected_scopes
-            .lock()
-            .expect("selected execution scopes")
-            .clone()
+        self.selected_scopes.lock_recover().clone()
     }
 
     pub fn records(&self) -> Vec<RecordingEffectHostRecord> {
-        self.records.lock().expect("effect host records").clone()
+        self.records.lock_recover().clone()
     }
 
     pub fn retirements(&self) -> Vec<crate::EffectJournalRetirement> {
-        self.retirements
-            .lock()
-            .expect("effect host retirements")
-            .clone()
+        self.retirements.lock_recover().clone()
     }
 
     fn scoped_for<'run>(
         &self,
         scope: ExecutionScope,
     ) -> Result<ScopedEffectController<'run>, crate::RuntimeError> {
-        self.selected_scopes
-            .lock()
-            .expect("selected execution scopes")
-            .push(scope.clone());
+        self.selected_scopes.lock_recover().push(scope.clone());
         ScopedEffectController::shared(
             Arc::new(RecordingEffectHostController {
                 execution_scope: scope.clone(),
@@ -142,10 +131,7 @@ impl EffectHost for RecordingEffectHost {
         &self,
         retirement: crate::EffectJournalRetirement,
     ) -> Result<usize, crate::RuntimeError> {
-        self.retirements
-            .lock()
-            .expect("effect host retirements")
-            .push(retirement);
+        self.retirements.lock_recover().push(retirement);
         Ok(0)
     }
 }
@@ -539,7 +525,7 @@ pub async fn effect_controller_journaled_effect_replay(
         );
     }
     assert!(
-        local_calls.lock().expect("local calls").is_empty(),
+        local_calls.lock_recover().is_empty(),
         "journaled-effect replay must not invoke local closures"
     );
 }
@@ -1008,10 +994,7 @@ pub async fn effect_controller_concurrent_replay_deterministic(
     assert_replay_conformance_tool_attempt_marker(fast_replay, "call-fast", "fast_tool");
     assert_replay_conformance_tool_attempt_marker(slow_replay, "call-slow", "slow_tool");
     assert!(
-        replay_local_calls
-            .lock()
-            .expect("replay local calls")
-            .is_empty(),
+        replay_local_calls.lock_recover().is_empty(),
         "replay must return recorded outcomes without invoking local executors"
     );
 }
@@ -1115,10 +1098,7 @@ pub async fn effect_controller_tool_attempt_fanout_replay_deterministic(
     assert_replay_conformance_tool_attempt_marker(fast_replay, "call-fast", "fast_tool");
     assert_replay_conformance_tool_attempt_marker(slow_replay, "call-slow", "slow_tool");
     assert!(
-        replay_local_calls
-            .lock()
-            .expect("tool-attempt replay local calls")
-            .is_empty(),
+        replay_local_calls.lock_recover().is_empty(),
         "tool-attempt replay must return recorded outcomes without invoking local executors"
     );
 }
@@ -1577,10 +1557,7 @@ async fn replay_conformance_concurrent_first_pass(
             "concurrent first-pass effects must enter both local executors and record fast first",
         );
     assert_eq!(
-        completion_order
-            .lock()
-            .expect("completion order")
-            .as_slice(),
+        completion_order.lock_recover().as_slice(),
         &[fast.effect_id.to_string(), slow.effect_id.to_string()],
         "first pass must prove local completion order can differ from effect request order"
     );
@@ -1602,8 +1579,7 @@ fn replay_conformance_tool_attempt_recording_executor(
             probe.release.notified().await;
             probe
                 .completion_order
-                .lock()
-                .expect("tool-attempt completion order")
+                .lock_recover()
                 .push(attempt.effect_id.to_string());
         }
         Ok(replay_conformance_tool_attempt_outcome(
@@ -1619,8 +1595,7 @@ fn replay_conformance_failing_executor(
 ) -> RuntimeEffectLocalExecutor<'static> {
     RuntimeEffectLocalExecutor::testing(move |envelope| async move {
         replay_local_calls
-            .lock()
-            .expect("replay local calls")
+            .lock_recover()
             .push(envelope.invocation.effect_id().unwrap_or("").to_string());
         Err(RuntimeEffectControllerError::new(
             "conformance_replay_local_executor_called",

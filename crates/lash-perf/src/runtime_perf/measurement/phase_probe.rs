@@ -1,4 +1,5 @@
 
+use lash_sansio::sync::MutexExt;
 #[derive(Clone, Copy)]
 struct PhaseStart {
     started_at: Instant,
@@ -36,14 +37,14 @@ impl lash::runtime::RuntimeEffectController for ScopedPerfEffectController {
 
 impl RuntimePerfPhaseProbe {
     fn take_completed(&self) -> BTreeMap<String, RuntimePerfPhaseRunResult> {
-        let mut state = self.state.lock().expect("phase probe lock");
+        let mut state = self.state.lock_recover();
         std::mem::take(&mut state.completed)
     }
 }
 
 impl RuntimeTurnPhaseProbe for RuntimePerfPhaseProbe {
     fn begin(&self, phase: RuntimeTurnPhase) {
-        let mut state = self.state.lock().expect("phase probe lock");
+        let mut state = self.state.lock_recover();
         state.started.insert(
             phase,
             PhaseStart {
@@ -55,7 +56,7 @@ impl RuntimeTurnPhaseProbe for RuntimePerfPhaseProbe {
     }
 
     fn end(&self, phase: RuntimeTurnPhase) {
-        let mut state = self.state.lock().expect("phase probe lock");
+        let mut state = self.state.lock_recover();
         let Some(start) = state.started.remove(&phase) else {
             return;
         };
@@ -63,7 +64,7 @@ impl RuntimeTurnPhaseProbe for RuntimePerfPhaseProbe {
     }
 
     fn begin_named(&self, phase: &str) {
-        let mut state = self.state.lock().expect("phase probe lock");
+        let mut state = self.state.lock_recover();
         state
             .named_started
             .entry(phase.to_string())
@@ -76,7 +77,7 @@ impl RuntimeTurnPhaseProbe for RuntimePerfPhaseProbe {
     }
 
     fn end_named(&self, phase: &str) {
-        let mut state = self.state.lock().expect("phase probe lock");
+        let mut state = self.state.lock_recover();
         let Some(starts) = state.named_started.get_mut(phase) else {
             return;
         };

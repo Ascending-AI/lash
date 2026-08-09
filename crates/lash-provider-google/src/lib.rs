@@ -15,6 +15,8 @@ pub use lash_core::llm::transport::{GOOGLE_FILE_MIMES, GOOGLE_IMAGE_MIMES, GOOGL
 
 #[cfg(test)]
 mod tests {
+    use lash_sansio::sync::MutexExt;
+
     use std::num::NonZeroUsize;
     use std::sync::Arc;
 
@@ -174,7 +176,7 @@ mod tests {
                 "access",
                 wire_request,
                 Some(LlmEventSender::new(move |event| {
-                    event_sink.lock().expect("event lock").push(event);
+                    event_sink.lock_recover().push(event);
                 })),
                 None,
                 StreamTermination::RequireTerminalEvidence,
@@ -198,14 +200,10 @@ mod tests {
                 .any(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
         );
         assert!(
-            events
-                .lock()
-                .expect("event lock")
-                .iter()
-                .all(|event| !matches!(
-                    event,
-                    LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })
-                ))
+            events.lock_recover().iter().all(|event| !matches!(
+                event,
+                LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })
+            ))
         );
     }
 
@@ -393,7 +391,7 @@ mod tests {
                 "access",
                 json!({ "model": "gemini-test" }),
                 Some(LlmEventSender::new(move |event| {
-                    event_sink.lock().expect("event lock").push(event);
+                    event_sink.lock_recover().push(event);
                 })),
                 None,
                 StreamTermination::RequireTerminalEvidence,
@@ -401,7 +399,7 @@ mod tests {
             )
             .await
             .expect("streaming reasoning response");
-        let events = events.lock().expect("event lock").clone();
+        let events = events.lock_recover().clone();
         (response, events)
     }
 

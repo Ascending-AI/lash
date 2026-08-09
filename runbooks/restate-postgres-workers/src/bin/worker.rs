@@ -909,6 +909,7 @@ impl E2eTurnWorkflow for E2eTurnWorkflowImpl {
 }
 
 fn main() -> Result<()> {
+    lash_core::panic_containment::set_loud(true);
     let stack_bytes = e2e_tokio_thread_stack_bytes()?;
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()

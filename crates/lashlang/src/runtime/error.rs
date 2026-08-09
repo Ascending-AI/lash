@@ -352,9 +352,6 @@ pub enum RuntimeError {
     /// Loop bytecode executed without its required loop state.
     #[error("missing loop state")]
     MissingLoopState,
-    /// The compiled-process cache could not be accessed after lock poisoning.
-    #[error("lashlang compiled process cache lock poisoned")]
-    CompiledProcessCacheUnavailable,
 }
 
 impl RuntimeError {
@@ -593,7 +590,6 @@ mod tests {
             RuntimeError::InvalidAggregateAwaitRecordShape,
             RuntimeError::VmStackUnderflow,
             RuntimeError::MissingLoopState,
-            RuntimeError::CompiledProcessCacheUnavailable,
         ];
 
         for error in errors {
@@ -811,9 +807,6 @@ mod tests {
                 }
                 RuntimeError::VmStackUnderflow => "vm stack underflow",
                 RuntimeError::MissingLoopState => "missing loop state",
-                RuntimeError::CompiledProcessCacheUnavailable => {
-                    "lashlang compiled process cache lock poisoned"
-                }
             };
 
             assert_eq!(error.to_string(), expected);

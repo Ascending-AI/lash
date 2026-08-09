@@ -1,3 +1,4 @@
+use lash::sync::MutexExt;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -179,7 +180,7 @@ impl RunHost {
 
     fn emit(&self, node_id: String, status: RunStatus, delta: DisplayDelta, error: Option<String>) {
         let sequence = self.sequence.fetch_add(1, Ordering::Relaxed) + 1;
-        let display = self.display.lock().expect("display lock").clone();
+        let display = self.display.lock_recover().clone();
         let _ = self.sender.try_send(RunEvent {
             run_id: self.run_id.clone(),
             workflow_version: self.workflow_version,
@@ -193,15 +194,14 @@ impl RunHost {
     }
 
     fn emit_waiting(&self) {
-        if let Some(node_id) = self.current_node.lock().expect("current node lock").clone() {
+        if let Some(node_id) = self.current_node.lock_recover().clone() {
             self.emit(node_id, RunStatus::Waiting, DisplayDelta::default(), None);
         }
     }
 
     fn emit_current_failure(&self, error: String) {
-        if let Some(node_id) = self.current_node.lock().expect("current node lock").clone() {
-            let delta =
-                std::mem::take(&mut *self.pending_delta.lock().expect("pending delta lock"));
+        if let Some(node_id) = self.current_node.lock_recover().clone() {
+            let delta = std::mem::take(&mut *self.pending_delta.lock_recover());
             self.emit(node_id, RunStatus::Failed, delta, Some(error));
         }
     }
@@ -214,13 +214,10 @@ impl RunHost {
                 &operation.args,
             );
         }
-        let mut display = self.display.lock().expect("display lock");
+        let mut display = self.display.lock_recover();
         let (value, delta) =
             crate::display::apply_tool(&mut display, &operation.operation, &operation.args)?;
-        self.pending_delta
-            .lock()
-            .expect("pending delta lock")
-            .merge(delta);
+        self.pending_delta.lock_recover().merge(delta);
         Ok(value)
     }
 
@@ -270,17 +267,15 @@ impl ExecutionHost for RunHost {
         match observation {
             LashlangExecutionObservation::NodeStarted { site, .. } => {
                 if let Some(node_id) = self.correlated_node(&site) {
-                    *self.current_node.lock().expect("current node lock") = Some(node_id.clone());
+                    *self.current_node.lock_recover() = Some(node_id.clone());
                     self.emit(node_id, RunStatus::Started, DisplayDelta::default(), None);
                 }
             }
             LashlangExecutionObservation::NodeCompleted { site, .. } => {
                 if let Some(node_id) = self.correlated_node(&site) {
-                    let delta = std::mem::take(
-                        &mut *self.pending_delta.lock().expect("pending delta lock"),
-                    );
+                    let delta = std::mem::take(&mut *self.pending_delta.lock_recover());
                     self.emit(node_id.clone(), RunStatus::Succeeded, delta, None);
-                    let mut current = self.current_node.lock().expect("current node lock");
+                    let mut current = self.current_node.lock_recover();
                     if current.as_deref() == Some(node_id.as_str()) {
                         *current = None;
                     }
@@ -288,9 +283,7 @@ impl ExecutionHost for RunHost {
             }
             LashlangExecutionObservation::NodeFailed { site, error, .. } => {
                 if let Some(node_id) = self.correlated_node(&site) {
-                    let delta = std::mem::take(
-                        &mut *self.pending_delta.lock().expect("pending delta lock"),
-                    );
+                    let delta = std::mem::take(&mut *self.pending_delta.lock_recover());
                     self.emit(node_id, RunStatus::Failed, delta, Some(error));
                 }
             }

@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::TestProcessRegistryWriteExt;
+use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -1035,7 +1036,7 @@ struct CollectingProcessEventSink {
 
 impl CollectingProcessEventSink {
     fn collected(&self) -> Vec<(String, u64)> {
-        self.events.lock().expect("sink lock").clone()
+        self.events.lock_recover().clone()
     }
 }
 
@@ -1043,8 +1044,7 @@ impl CollectingProcessEventSink {
 impl lash_core::facade_support::ProcessEventSink for CollectingProcessEventSink {
     async fn emit(&self, event: &lash_core::ProcessEvent) {
         self.events
-            .lock()
-            .expect("sink lock")
+            .lock_recover()
             .push((event.event_type.clone(), event.sequence));
     }
 }

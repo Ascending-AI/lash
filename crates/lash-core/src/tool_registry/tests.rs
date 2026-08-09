@@ -31,6 +31,7 @@ where
 mod tests {
     use super::*;
     use crate::ToolDefinition;
+    use lash_sansio::sync::MutexExt;
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -308,8 +309,7 @@ mod tests {
             self.executions.fetch_add(1, Ordering::SeqCst);
             if let Some(bindings) = &self.observed_execution_bindings {
                 bindings
-                    .lock()
-                    .expect("execution bindings")
+                    .lock_recover()
                     .push(context.tool_execution_binding().clone());
             }
             ToolResult::ok(json!(tool))
@@ -364,8 +364,7 @@ mod tests {
     impl ToolProvider for DynamicToolProvider {
         fn tool_manifests(&self) -> Vec<ToolManifest> {
             self.names
-                .lock()
-                .expect("dynamic tool names lock")
+                .lock_recover()
                 .iter()
                 .map(|name| dynamic_definition(name).manifest())
                 .collect()
@@ -373,8 +372,7 @@ mod tests {
 
         fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
             self.names
-                .lock()
-                .expect("dynamic tool names lock")
+                .lock_recover()
                 .iter()
                 .any(|tool_name| tool_name == name)
                 .then(|| Arc::new(dynamic_definition(name).contract()))
@@ -519,8 +517,7 @@ mod tests {
         impl ToolProvider for DriftingProvider {
             fn tool_manifests(&self) -> Vec<ToolManifest> {
                 self.definitions
-                    .lock()
-                    .expect("drifting definitions lock")
+                    .lock_recover()
                     .iter()
                     .map(ToolDefinition::manifest)
                     .collect()
@@ -528,8 +525,7 @@ mod tests {
 
             fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
                 self.definitions
-                    .lock()
-                    .expect("drifting definitions lock")
+                    .lock_recover()
                     .iter()
                     .find(|definition| definition.name() == name)
                     .map(|definition| Arc::new(definition.contract()))
@@ -566,7 +562,7 @@ mod tests {
             json!({ "type": "object", "properties": { "query": { "type": "boolean" } } }),
             json!({ "type": "boolean" }),
         );
-        *definitions.lock().expect("drifting definitions lock") =
+        *definitions.lock_recover() =
             vec![reassigned_id.clone(), reused_name.clone()];
 
         let actual = registry
@@ -808,8 +804,7 @@ mod tests {
         assert!(!tool_names().contains("dynamic_two"));
 
         names
-            .lock()
-            .expect("dynamic tool names lock")
+            .lock_recover()
             .push("dynamic_two".to_string());
         registry.refresh_sources().expect("refresh sources");
         let refreshed = tool_names();
@@ -817,8 +812,7 @@ mod tests {
         assert!(refreshed.contains("dynamic_two"));
 
         names
-            .lock()
-            .expect("dynamic tool names lock")
+            .lock_recover()
             .retain(|name| name != "dynamic_one");
         registry.refresh_sources().expect("refresh sources");
         let refreshed = tool_names();
@@ -837,8 +831,7 @@ mod tests {
         let snapshot = source.export_state();
 
         names
-            .lock()
-            .expect("dynamic tool names lock")
+            .lock_recover()
             .push("dynamic_two".to_string());
         let resumed =
             ToolRegistry::from_tool_providers(vec![provider]).expect("cold resume registry");
@@ -872,8 +865,7 @@ mod tests {
         let registry = ToolRegistry::from_tool_providers(vec![provider]).expect("registry");
         let snapshot = registry.export_state();
         names
-            .lock()
-            .expect("dynamic tool names lock")
+            .lock_recover()
             .push("dynamic_two".to_string());
 
         let fork = registry.fork_with_state(snapshot).expect("live fork");
@@ -900,8 +892,7 @@ mod tests {
         });
         let registry = ToolRegistry::from_tool_providers(vec![provider]).expect("registry");
         names
-            .lock()
-            .expect("dynamic tool names lock")
+            .lock_recover()
             .push("dynamic_two".to_string());
 
         let composed = registry
@@ -1040,8 +1031,7 @@ mod tests {
         assert_eq!(executions.load(Ordering::SeqCst), 1);
         assert_eq!(
             *observed_execution_bindings
-                .lock()
-                .expect("execution bindings"),
+                .lock_recover(),
             vec![json!({ "kind": "test", "route": "grant" })]
         );
     }

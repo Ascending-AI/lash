@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, OnceLock};
 
 use crate::PluginMessage;
@@ -208,10 +209,7 @@ impl Session {
         self.context_tools = tool_providers;
         self.tool_registry = registry;
         self.context_prompt_contributions = prompt_contributions;
-        self.tool_catalog_cache
-            .lock()
-            .expect("tool catalog cache lock")
-            .clear();
+        self.tool_catalog_cache.lock_recover().clear();
         Ok(())
     }
 
@@ -275,10 +273,7 @@ impl Session {
         session_id: &str,
     ) -> Result<ToolCatalogHandle, crate::PluginError> {
         let key = self.tool_catalog_cache_key();
-        let mut cache = self
-            .tool_catalog_cache
-            .lock()
-            .expect("tool catalog cache lock");
+        let mut cache = self.tool_catalog_cache.lock_recover();
         if let Some((_, entry)) = cache.iter().find(|(entry_key, _)| *entry_key == key) {
             return Ok(entry.clone());
         }
@@ -374,10 +369,7 @@ impl Session {
     }
 
     pub fn invalidate_runtime_caches(&self) {
-        self.tool_catalog_cache
-            .lock()
-            .expect("tool catalog cache lock")
-            .clear();
+        self.tool_catalog_cache.lock_recover().clear();
         self.prompt_cache.clear();
     }
 
@@ -389,10 +381,7 @@ impl Session {
             .compose_session_catalog(self.include_base_tools, self.context_tools.clone())
             .map(Arc::new)
             .map_err(|err| SessionError::Protocol(format!("tool reconfigure failed: {err}")))?;
-        self.tool_catalog_cache
-            .lock()
-            .expect("tool catalog cache lock")
-            .clear();
+        self.tool_catalog_cache.lock_recover().clear();
         Ok(())
     }
 }

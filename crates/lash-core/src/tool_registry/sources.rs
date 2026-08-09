@@ -15,7 +15,7 @@ impl ToolProviderSource {
 
     fn read_advertised_tools(&self) -> Vec<ToolManifest> {
         let manifests = self.provider.tool_manifests();
-        *self.tools.write().expect("tool provider lock poisoned") = manifests
+        *self.tools.write_recover() = manifests
             .iter()
             .cloned()
             .map(|manifest| (manifest.id.clone(), manifest))
@@ -26,16 +26,14 @@ impl ToolProviderSource {
     fn indexed_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
         if let Some(manifest) = self
             .tools
-            .read()
-            .expect("tool provider lock poisoned")
+            .read_recover()
             .get(id)
         {
             return Some(manifest.clone());
         }
         let manifest = self.provider.resolve_manifest_by_id(id)?;
         self.tools
-            .write()
-            .expect("tool provider lock poisoned")
+            .write_recover()
             .insert(id.clone(), manifest.clone());
         Some(manifest)
     }
@@ -92,16 +90,14 @@ impl ToolProviderGroupSource {
             .collect::<Vec<_>>();
         *self
             .tools
-            .write()
-            .expect("tool provider group lock poisoned") = tools;
+            .write_recover() = tools;
         manifests
     }
 
     fn provider_index_for(&self, name: &str) -> Option<usize> {
         self.resolve_manifest(name).and_then(|_| {
             self.tools
-                .read()
-                .expect("tool provider group lock poisoned")
+                .read_recover()
                 .values()
                 .find(|(manifest, _)| manifest.name == name)
                 .map(|(_, provider_idx)| *provider_idx)
@@ -119,8 +115,7 @@ impl ToolProviderGroupSource {
     ) -> Option<(ToolManifest, usize)> {
         if let Some((manifest, provider_idx)) = self
             .tools
-            .read()
-            .expect("tool provider group lock poisoned")
+            .read_recover()
             .get(id)
         {
             return Some((manifest.clone(), *provider_idx));
@@ -128,8 +123,7 @@ impl ToolProviderGroupSource {
         for (provider_idx, provider) in self.providers.iter().enumerate() {
             if let Some(manifest) = provider.resolve_manifest_by_id(id) {
                 self.tools
-                    .write()
-                    .expect("tool provider group lock poisoned")
+                    .write_recover()
                     .insert(id.clone(), (manifest.clone(), provider_idx));
                 return Some((manifest, provider_idx));
             }
@@ -151,8 +145,7 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
     fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
         if let Some((manifest, _)) = self
             .tools
-            .read()
-            .expect("tool provider group lock poisoned")
+            .read_recover()
             .values()
             .find(|(manifest, _)| manifest.name == name)
         {
@@ -161,8 +154,7 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
         for (provider_idx, provider) in self.providers.iter().enumerate() {
             if let Some(manifest) = provider.resolve_manifest(name) {
                 self.tools
-                    .write()
-                    .expect("tool provider group lock poisoned")
+                    .write_recover()
                     .insert(manifest.id.clone(), (manifest.clone(), provider_idx));
                 return Some(manifest);
             }
@@ -246,8 +238,7 @@ impl ToolSourceExecutor for ToolProviderSource {
     fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
         if let Some(manifest) = self
             .tools
-            .read()
-            .expect("tool provider lock poisoned")
+            .read_recover()
             .values()
             .find(|manifest| manifest.name == name)
         {
@@ -255,8 +246,7 @@ impl ToolSourceExecutor for ToolProviderSource {
         }
         let manifest = self.provider.resolve_manifest(name)?;
         self.tools
-            .write()
-            .expect("tool provider lock poisoned")
+            .write_recover()
             .insert(manifest.id.clone(), manifest.clone());
         Some(manifest)
     }

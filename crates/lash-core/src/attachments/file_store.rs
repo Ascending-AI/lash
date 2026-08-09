@@ -321,6 +321,7 @@ fn delete_at_path(path: PathBuf) -> Result<(), AttachmentStoreError> {
 mod tests {
     use super::*;
     use crate::{AttachmentTypeMetadata, MediaType};
+    use lash_sansio::sync::MutexExt;
     use std::collections::BTreeSet;
     use std::sync::{Arc, Mutex};
 
@@ -530,7 +531,7 @@ mod tests {
                     Arc::new(FileAttachmentStore::new(dir.path())) as Arc<dyn AttachmentStore>;
                 let reopen =
                     Arc::new(FileAttachmentStore::new(dir.path())) as Arc<dyn AttachmentStore>;
-                dirs.lock().expect("dirs lock").push(dir);
+                dirs.lock_recover().push(dir);
                 ReopenableAttachmentStore { open, reopen }
             },
             AttachmentStorePersistence::Durable,

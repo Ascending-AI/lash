@@ -6,6 +6,7 @@
 //! per-attempt telemetry, not session history), so the oracle here is a capture
 //! layer over the `tracing` dispatcher rather than an event sink.
 
+use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -113,7 +114,7 @@ async fn a_dead_holder_is_still_reported_as_taken_over_by_the_winner() {
     assert!(
         capture.named("session_execution_lease.lost").is_empty(),
         "a dead holder runs no renewal, so it reports nothing: {:?}",
-        capture.events.lock().expect("lock captured events")
+        capture.events.lock_recover()
     );
     let taken_over = capture.exactly_one("session_execution_lease.taken_over");
     assert_eq!(taken_over.level, "INFO");
@@ -188,7 +189,7 @@ async fn claiming_a_released_lane_reports_no_takeover() {
             .named("session_execution_lease.taken_over")
             .is_empty(),
         "a cleanly released lane is handed over, not taken over: {:?}",
-        capture.events.lock().expect("lock captured events")
+        capture.events.lock_recover()
     );
 }
 
@@ -279,7 +280,7 @@ async fn a_live_holder_that_is_swept_reports_only_its_own_renewal_failure() {
             .named("session_execution_lease.taken_over")
             .is_empty(),
         "the successor claimed a released row, so it displaced nobody: {:?}",
-        capture.events.lock().expect("lock captured events")
+        capture.events.lock_recover()
     );
 }
 
@@ -333,14 +334,14 @@ async fn a_transient_renewal_error_neither_loses_the_lane_nor_reports_a_takeover
     assert!(
         capture.named("session_execution_lease.lost").is_empty(),
         "a transient error is not a lease loss: {:?}",
-        capture.events.lock().expect("lock captured events")
+        capture.events.lock_recover()
     );
     assert!(
         capture
             .named("session_execution_lease.taken_over")
             .is_empty(),
         "a transient renewal error is not a handoff, and no claim happened: {:?}",
-        capture.events.lock().expect("lock captured events")
+        capture.events.lock_recover()
     );
 }
 

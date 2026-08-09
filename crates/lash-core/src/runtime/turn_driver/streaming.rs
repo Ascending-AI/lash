@@ -402,6 +402,50 @@ impl RuntimeTurnDriver<'_> {
                             llm_task_abort.disarm();
                             v
                         }
+                        Err(e) if e.is_panic() => {
+                            let payload = e.into_panic();
+                            let message = crate::panic_containment::payload_message(payload.as_ref());
+                            call_record = Some(crate::LlmCallRecord {
+                                call_id: crate::LlmCallId(uuid::Uuid::new_v4().to_string()),
+                                label: None,
+                                attempts: vec![crate::AttemptRecord {
+                                    ordinal: 1,
+                                    started_at: self.host.core.clock.timestamp_ms(),
+                                    duration: std::time::Duration::ZERO,
+                                    outcome: crate::AttemptOutcome::Failed,
+                                    protocol_position: crate::ProtocolPosition::NoResponse,
+                                    retry_budget_consumed: true,
+                                    retry_decision: Some(crate::RetryDecision {
+                                        scheduled: false,
+                                        delay: None,
+                                        reason: Some("not_retryable".to_string()),
+                                    }),
+                                    error: Some(crate::NormalizedError {
+                                        class: crate::ProviderFailureKind::Unknown.code().to_string(),
+                                        provider_code: Some("provider_panicked".to_string()),
+                                        http_status: None,
+                                        provider_request_id: None,
+                                        retry_after: None,
+                                        diagnostic: Some(message.clone()),
+                                    }),
+                                    evidence: None,
+                                    generation_disposition: None,
+                                    usage: None,
+                                }],
+                            });
+                            let failure = LlmCallError {
+                                message,
+                                retryable: false,
+                                kind: crate::ProviderFailureKind::Unknown,
+                                raw: None,
+                                code: Some("provider_panicked".to_string()),
+                                terminal_reason: crate::LlmTerminalReason::ProviderError,
+                                request_body: None,
+                                partial_response: None,
+                            };
+                            drop(payload);
+                            break Err(failure);
+                        }
                         Err(e) => break Err(LlmCallError {
                             message: format!("internal task failed: {e}"),
                             retryable: false,

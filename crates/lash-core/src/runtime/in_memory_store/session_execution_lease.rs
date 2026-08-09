@@ -4,6 +4,7 @@
 //! the semantics live with the trait contract in `crate::store`.
 
 use super::InMemorySessionStore;
+use lash_sansio::sync::MutexExt;
 
 #[async_trait::async_trait]
 impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
@@ -15,16 +16,10 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
         lease_ttl_ms: u64,
     ) -> Result<crate::SessionExecutionLeaseClaimOutcome, crate::store::StoreError> {
         let lease_token = claim_nonce.as_str();
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
-        self.ensure_session_not_deleted(session_id)?;
         let now = self.clock.timestamp_ms();
-        let mut leases = self
-            .session_execution_leases
-            .lock()
-            .expect("lock session execution leases");
+        let _transaction = self.write_transaction.lock_recover();
+        self.ensure_session_not_deleted(session_id)?;
+        let mut leases = self.session_execution_leases.lock_recover();
         let current = leases.entry(session_id.to_string()).or_default();
         if current.is_live(now) {
             if current
@@ -89,22 +84,15 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let injected = self
                 .fail_next_session_execution_lease_renewal
-                .lock()
-                .expect("lock injected renewal failure")
+                .lock_recover()
                 .take();
             if let Some(error) = injected {
                 return Err(error);
             }
         }
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory write transaction");
         let now = self.clock.timestamp_ms();
-        let mut leases = self
-            .session_execution_leases
-            .lock()
-            .expect("lock session execution leases");
+        let _transaction = self.write_transaction.lock_recover();
+        let mut leases = self.session_execution_leases.lock_recover();
         let Some(current) = leases.get_mut(&fence.session_id) else {
             return Err(crate::store::StoreError::SessionExecutionLeaseExpired {
                 session_id: fence.session_id.clone(),
@@ -149,8 +137,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
         #[cfg(test)]
         if let Some(injected) = self
             .next_session_execution_lease_renewal_response
-            .lock()
-            .expect("lock injected renewal response")
+            .lock_recover()
             .take()
         {
             return Ok(injected);
@@ -166,18 +153,14 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
         {
             let gate = self
                 .session_execution_lease_release_gate
-                .lock()
-                .expect("lock lease release gate")
+                .lock_recover()
                 .clone();
             if let Some(gate) = gate {
                 gate.enter().await;
             }
         }
         {
-            let _transaction = self
-                .write_transaction
-                .lock()
-                .expect("lock in-memory write transaction");
+            let _transaction = self.write_transaction.lock_recover();
             #[cfg(test)]
             self.session_execution_lease_release_attempt_count
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -198,10 +181,7 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
     ) -> Result<Option<crate::SessionExecutionLease>, crate::store::StoreError> {
         #[cfg(test)]
         self.refuse_injected_counter_defect("session_lease_fencing_token")?;
-        let leases = self
-            .session_execution_leases
-            .lock()
-            .expect("lock session execution leases");
+        let leases = self.session_execution_leases.lock_recover();
         Ok(leases.get(session_id).and_then(|current| {
             // An unleased or released row keeps its generation but drops owner
             // and token; only a held row is reported. Expiry is not filtered:

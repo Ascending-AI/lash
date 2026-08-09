@@ -1,6 +1,7 @@
 use super::*;
 use lash_llm_transport::{LlmHttpRequest, LlmHttpResponse};
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat};
+use lash_sansio::sync::MutexExt;
 
 #[derive(Debug)]
 struct CapturingLlmHttpTransport {
@@ -15,10 +16,7 @@ impl LlmHttpTransport for CapturingLlmHttpTransport {
         request: LlmHttpRequest,
         timeout: Option<std::time::Duration>,
     ) -> Result<LlmHttpResponse, LlmTransportError> {
-        self.bodies
-            .lock()
-            .expect("capture lock")
-            .push(request.body.to_vec());
+        self.bodies.lock_recover().push(request.body.to_vec());
         self.inner.send(request, timeout).await
     }
 }
@@ -136,7 +134,7 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
             "RLM turn failed for {model}: {output:?}"
         );
 
-        let bodies = capture.bodies.lock().expect("capture lock");
+        let bodies = capture.bodies.lock_recover();
         assert_eq!(bodies.len(), 2, "expected two RLM iterations for {model}");
         let previous_body: Value = serde_json::from_slice(&bodies[0]).expect("first request JSON");
         let next_body: Value = serde_json::from_slice(&bodies[1]).expect("second request JSON");

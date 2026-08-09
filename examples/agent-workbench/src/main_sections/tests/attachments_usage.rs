@@ -130,8 +130,7 @@ async fn run_attachment_usage_gate(
             let provider_requests = Arc::clone(&provider_requests_for_call);
             async move {
                 provider_requests
-                    .lock()
-                    .expect("provider request lock")
+                    .lock_recover()
                     .push(request);
                 Ok(usage_gate_response())
             }
@@ -254,7 +253,7 @@ async fn run_attachment_usage_gate(
     session.close().await.expect("close gate session");
 
     {
-        let requests = provider_requests.lock().expect("provider request lock");
+        let requests = provider_requests.lock_recover();
         assert_eq!(requests.len(), 1, "gate must make exactly one LLM call");
         assert_eq!(requests[0].attachments.len(), 1);
         let source = &requests[0].attachments[0];

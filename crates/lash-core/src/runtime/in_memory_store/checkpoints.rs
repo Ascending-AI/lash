@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -24,14 +25,11 @@ where
     let Some(blob_ref) = existing_ref else {
         return Ok((None, None));
     };
-    let body = blobs
-        .lock()
-        .expect("lock in-memory checkpoint components")
-        .get(blob_ref)
-        .cloned()
-        .ok_or_else(|| crate::store::StoreError::CheckpointComponentMissing {
+    let body = blobs.lock_recover().get(blob_ref).cloned().ok_or_else(|| {
+        crate::store::StoreError::CheckpointComponentMissing {
             component,
             blob_ref: blob_ref.clone(),
-        })?;
+        }
+    })?;
     Ok((Some(blob_ref.clone()), Some(body)))
 }

@@ -283,8 +283,7 @@
                     let requests = Arc::clone(&requests_for_provider);
                     async move {
                         requests
-                            .lock()
-                            .expect("context transform request lock")
+                            .lock_recover()
                             .push(request);
                         Ok(text_response(
                             "<lashlang>\nfinish \"context shaped\"\n</lashlang>",
@@ -345,7 +344,7 @@
             // And its contribution is in the prompt the provider was handed —
             // the transform's output is not merely recorded, it is rendered.
             let rendered = {
-                let captured = requests.lock().expect("context transform request lock");
+                let captured = requests.lock_recover();
                 assert_eq!(captured.len(), 1, "one turn must make one provider call");
                 serde_json::to_string(&*captured)
                     .expect("serialize the provider request the runtime issued")

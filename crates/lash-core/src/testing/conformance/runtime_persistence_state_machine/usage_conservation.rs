@@ -7,6 +7,7 @@
 //! which returned identities may disappear, then checks the production retain.
 
 use super::*;
+use lash_sansio::sync::MutexExt;
 use std::collections::HashSet;
 
 use crate::RuntimeUsageDelta;
@@ -242,11 +243,7 @@ fn usage_entry(slot: u8, value: u8) -> crate::TokenLedgerEntry {
 }
 
 fn pending_usage_snapshot(model: &ReferenceModel) -> Vec<crate::runtime::PendingTokenLedgerEntry> {
-    model
-        .pending_usage
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .clone()
+    model.pending_usage.lock_recover().clone()
 }
 
 pub(super) fn register_committed_usage(

@@ -274,6 +274,7 @@ mod error_detail_tests {
 
     use super::*;
     use lash_llm_transport::{LlmHttpBody, LlmHttpResponse};
+    use lash_sansio::sync::MutexExt;
 
     #[derive(Debug)]
     struct ResponseQueue(Mutex<VecDeque<LlmHttpResponse>>);
@@ -287,8 +288,7 @@ mod error_detail_tests {
         ) -> Result<LlmHttpResponse, LlmTransportError> {
             Ok(self
                 .0
-                .lock()
-                .expect("response queue")
+                .lock_recover()
                 .pop_front()
                 .expect("scripted response"))
         }

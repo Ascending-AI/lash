@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::future::Future;
 use std::sync::Arc;
@@ -232,7 +233,7 @@ struct ProcessExecutionSchedulerState {
 
 struct ProcessExecutionScheduler {
     permits: Arc<Semaphore>,
-    state: tokio::sync::Mutex<ProcessExecutionSchedulerState>,
+    state: std::sync::Mutex<ProcessExecutionSchedulerState>,
     changed: Arc<tokio::sync::Notify>,
 }
 
@@ -240,7 +241,7 @@ impl ProcessExecutionScheduler {
     fn new(concurrency: ProcessExecutionConcurrency) -> Self {
         Self {
             permits: Arc::new(Semaphore::new(concurrency.get())),
-            state: tokio::sync::Mutex::new(ProcessExecutionSchedulerState::default()),
+            state: std::sync::Mutex::new(ProcessExecutionSchedulerState::default()),
             changed: Arc::new(tokio::sync::Notify::new()),
         }
     }
@@ -272,14 +273,14 @@ impl Drop for ProcessExecutionDispatcherGuard {
         if !self.armed {
             return;
         }
-        if let Ok(mut state) = self.scheduler.state.try_lock() {
+        if let Some(mut state) = self.scheduler.state.try_lock_recover() {
             state.dispatcher_running = false;
             self.scheduler.changed.notify_one();
             return;
         }
         let scheduler = Arc::clone(&self.scheduler);
         crate::task::spawn(async move {
-            scheduler.state.lock().await.dispatcher_running = false;
+            scheduler.state.lock_recover().dispatcher_running = false;
             scheduler.changed.notify_one();
         });
     }
@@ -359,12 +360,7 @@ impl ProcessExecutionPermit {
     }
 
     async fn ensure_acquired(&self) {
-        if self
-            .held
-            .lock()
-            .expect("process execution permit lock")
-            .is_some()
-        {
+        if self.held.lock_recover().is_some() {
             tracing::debug!(
                 consulted = "held_permit",
                 gate = "fast_path",
@@ -375,12 +371,7 @@ impl ProcessExecutionPermit {
             return;
         }
         let _reacquire = self.reacquire.lock().await;
-        if self
-            .held
-            .lock()
-            .expect("process execution permit lock")
-            .is_some()
-        {
+        if self.held.lock_recover().is_some() {
             tracing::debug!(
                 consulted = "held_permit",
                 gate = "reacquire_serialization",
@@ -419,7 +410,7 @@ impl ProcessExecutionPermit {
                     .expect("process execution semaphore remains open")
             }
         };
-        *self.held.lock().expect("process execution permit lock") = Some(permit);
+        *self.held.lock_recover() = Some(permit);
         tracing::debug!(
             consulted = self.telemetry.semaphore,
             outcome = "held",
@@ -429,11 +420,7 @@ impl ProcessExecutionPermit {
     }
 
     async fn release_while<F: Future>(&self, future: F) -> F::Output {
-        let released = self
-            .held
-            .lock()
-            .expect("process execution permit lock")
-            .take();
+        let released = self.held.lock_recover().take();
         let Some(released) = released else {
             return future.await;
         };
@@ -719,7 +706,7 @@ impl DurableProcessWorker {
         self.reconcile_trigger_deliveries().await?;
         let records = self.config.process_registry.list_non_terminal().await?;
         let should_start_dispatcher = {
-            let mut state = self.execution_scheduler.state.lock().await;
+            let mut state = self.execution_scheduler.state.lock_recover();
             for record in records {
                 if state.scheduled.insert(record.id.clone()) {
                     state.pending.push_back(record);
@@ -772,7 +759,7 @@ impl DurableProcessWorker {
             }
 
             {
-                let mut state = self.execution_scheduler.state.lock().await;
+                let mut state = self.execution_scheduler.state.lock_recover();
                 if state.pending.is_empty() && state.active == 0 {
                     state.dispatcher_running = false;
                     dispatcher_guard.disarm();
@@ -782,7 +769,7 @@ impl DurableProcessWorker {
 
             tokio::select! {
                 Some(process_id) = completed_rx.recv() => {
-                    let mut state = self.execution_scheduler.state.lock().await;
+                    let mut state = self.execution_scheduler.state.lock_recover();
                     state.active = state
                         .active
                         .checked_sub(1)
@@ -799,7 +786,7 @@ impl DurableProcessWorker {
     }
 
     async fn next_process_execution(&self) -> Option<(ProcessRecord, OwnedSemaphorePermit)> {
-        let mut state = self.execution_scheduler.state.lock().await;
+        let mut state = self.execution_scheduler.state.lock_recover();
         let permit = Arc::clone(&self.execution_scheduler.permits)
             .try_acquire_owned()
             .ok()?;

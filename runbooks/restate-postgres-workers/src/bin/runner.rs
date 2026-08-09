@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use lash::sync::MutexExt;
 use lash::triggers::{TriggerOccurrenceRequest, empty_trigger_source_key};
 use lash_core::AwaitEventResolver as _;
 use lash_core::{
@@ -52,7 +53,7 @@ fn runner_progress() -> &'static Mutex<RunnerProgress> {
 fn report_workflow_progress(workflow_id: &str, phase: &str) {
     let description = format!("workflow={workflow_id} phase={phase}");
     {
-        let mut progress = runner_progress().lock().expect("runner progress lock");
+        let mut progress = runner_progress().lock_recover();
         progress.last_update = Instant::now();
         progress.description.clone_from(&description);
     }
@@ -74,6 +75,7 @@ fn runner_stall_timeout() -> Result<Duration> {
 }
 
 fn main() -> Result<()> {
+    lash_core::panic_containment::set_loud(true);
     let stack_bytes = e2e_tokio_thread_stack_bytes()?;
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -532,7 +534,7 @@ async fn runner_stall_watchdog(pool: sqlx::PgPool, admin_url: String, timeout: D
     loop {
         tokio::time::sleep(Duration::from_secs(5)).await;
         let stalled = {
-            let progress = runner_progress().lock().expect("runner progress lock");
+            let progress = runner_progress().lock_recover();
             (progress.last_update.elapsed() >= timeout)
                 .then(|| (progress.last_update.elapsed(), progress.description.clone()))
         };

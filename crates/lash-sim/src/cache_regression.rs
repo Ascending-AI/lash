@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 
 use lash::rlm::RlmTurnBuilderExt;
@@ -123,7 +124,7 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
                 let captures = Arc::clone(&captures);
                 let responses = Arc::clone(&responses);
                 async move {
-                    captures.lock().expect("RLM capture lock").push(request);
+                    captures.lock_recover().push(request);
                     let text = responses
                         .lock()
                         .await
@@ -185,7 +186,7 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
         .await
         .expect("RLM cache regression turn");
 
-    captures.lock().expect("RLM capture lock").clone()
+    captures.lock_recover().clone()
 }
 
 fn prefix_for_openai_chat(body: Value, stable_messages: usize) -> SerializedPromptRequest {

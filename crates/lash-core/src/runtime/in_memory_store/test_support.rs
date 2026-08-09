@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 
 use super::InMemorySessionStore;
@@ -45,13 +46,7 @@ impl InMemorySessionStore {
         &self,
         field: &'static str,
     ) -> Result<(), crate::StoreError> {
-        if let Some(value) = self
-            .raw_counter_defects
-            .lock()
-            .expect("lock raw counter defects")
-            .get(field)
-            .copied()
-        {
+        if let Some(value) = self.raw_counter_defects.lock_recover().get(field).copied() {
             let (record_kind, stored_field) = match field {
                 "queued_work_claim_fencing_token" => ("QueuedWorkBatch", "claim_fencing_token"),
                 "session_head_revision" => ("SessionHeadMeta", "head_revision"),
@@ -74,15 +69,14 @@ impl InMemorySessionStore {
     ) {
         if value < 0 {
             self.raw_counter_defects
-                .lock()
-                .expect("lock raw counter defects")
+                .lock_recover()
                 .insert(field.to_string(), value);
             return;
         }
         let value = value as u64;
         match field {
             "queued_work_claim_fencing_token" => {
-                let mut queued = self.queued_work.lock().expect("lock queued work");
+                let mut queued = self.queued_work.lock_recover();
                 let row = queued
                     .iter_mut()
                     .find(|row| row.batch.batch_id == record_id)
@@ -91,16 +85,14 @@ impl InMemorySessionStore {
             }
             "session_head_revision" => {
                 self.session_head_meta
-                    .lock()
-                    .expect("lock session head")
+                    .lock_recover()
                     .as_mut()
                     .expect("session-head counter injection row")
                     .head_revision = value;
             }
             "session_lease_fencing_token" => {
                 self.session_execution_leases
-                    .lock()
-                    .expect("lock session leases")
+                    .lock_recover()
                     .get_mut(record_id)
                     .expect("session-lease counter injection row")
                     .fencing_token = value;
@@ -114,17 +106,12 @@ impl InMemorySessionStore {
         field: &'static str,
         record_id: &str,
     ) -> String {
-        if let Some(value) = self
-            .raw_counter_defects
-            .lock()
-            .expect("lock raw counter defects")
-            .get(field)
-        {
+        if let Some(value) = self.raw_counter_defects.lock_recover().get(field) {
             return format!("defect:{field}:{value}");
         }
         match field {
             "queued_work_claim_fencing_token" => {
-                let queued = self.queued_work.lock().expect("lock queued work");
+                let queued = self.queued_work.lock_recover();
                 let row = queued
                     .iter()
                     .find(|row| row.batch.batch_id == record_id)
@@ -138,7 +125,7 @@ impl InMemorySessionStore {
                 )
             }
             "session_head_revision" => {
-                let head = self.session_head_meta.lock().expect("lock session head");
+                let head = self.session_head_meta.lock_recover();
                 let row = head.as_ref().expect("session-head counter snapshot row");
                 format!(
                     "{}:{:?}:{:?}",
@@ -146,10 +133,7 @@ impl InMemorySessionStore {
                 )
             }
             "session_lease_fencing_token" => {
-                let leases = self
-                    .session_execution_leases
-                    .lock()
-                    .expect("lock session leases");
+                let leases = self.session_execution_leases.lock_recover();
                 let row = leases
                     .get(record_id)
                     .expect("session-lease counter snapshot row");
@@ -166,21 +150,14 @@ impl InMemorySessionStore {
         }
     }
     pub(super) fn run_claim_after_lease_validation_hook(&self) {
-        let hook = self
-            .claim_after_lease_validation_hook
-            .lock()
-            .expect("lock claim validation hook")
-            .take();
+        let hook = self.claim_after_lease_validation_hook.lock_recover().take();
         if let Some(hook) = hook {
             hook();
         }
     }
 
     pub(crate) fn set_claim_after_lease_validation_hook(&self, hook: Arc<dyn Fn() + Send + Sync>) {
-        *self
-            .claim_after_lease_validation_hook
-            .lock()
-            .expect("lock claim validation hook") = Some(hook);
+        *self.claim_after_lease_validation_hook.lock_recover() = Some(hook);
     }
 
     pub(crate) fn fail_next_exact_queue_claim(&self) {
@@ -199,17 +176,13 @@ impl InMemorySessionStore {
     }
 
     pub(crate) fn fail_next_runtime_commit(&self, error: crate::StoreError) {
-        *self
-            .fail_next_runtime_commit
-            .lock()
-            .expect("lock next runtime commit failure") = Some(error);
+        *self.fail_next_runtime_commit.lock_recover() = Some(error);
     }
 
     pub(crate) fn fail_next_runtime_commit_after_first_mutation(&self, error: crate::StoreError) {
         *self
             .fail_next_runtime_commit_after_first_mutation
-            .lock()
-            .expect("lock post-mutation runtime commit failure") = Some(error);
+            .lock_recover() = Some(error);
     }
 
     pub(super) fn fail_after_first_runtime_commit_mutation_if_requested(
@@ -218,18 +191,17 @@ impl InMemorySessionStore {
     ) -> Result<(), crate::StoreError> {
         if let Some(error) = self
             .fail_next_runtime_commit_after_first_mutation
-            .lock()
-            .expect("lock post-mutation runtime commit failure")
+            .lock_recover()
             .take()
         {
-            *self.session_meta.lock().expect("lock session meta") = session_meta_before_commit;
+            *self.session_meta.lock_recover() = session_meta_before_commit;
             return Err(error);
         }
         Ok(())
     }
 
     pub(crate) async fn save_session_head_meta(&self, meta: crate::SessionHeadMeta) {
-        *self.session_head_meta.lock().expect("lock store") = Some(meta);
+        *self.session_head_meta.lock_recover() = Some(meta);
     }
 
     pub(crate) fn load_session_count(&self) -> usize {
@@ -238,10 +210,7 @@ impl InMemorySessionStore {
     }
 
     pub(crate) fn fail_load_session_on_call(&self, call: usize) {
-        *self
-            .fail_load_session_on_call
-            .lock()
-            .expect("lock load-session failure injection") = Some(call);
+        *self.fail_load_session_on_call.lock_recover() = Some(call);
     }
 
     pub(crate) fn checkpoint_claim_counts(&self) -> (usize, usize) {
@@ -265,8 +234,7 @@ impl InMemorySessionStore {
     pub(crate) fn fail_next_session_execution_lease_renewal_with(&self, error: crate::StoreError) {
         *self
             .fail_next_session_execution_lease_renewal
-            .lock()
-            .expect("lock injected renewal failure") = Some(error);
+            .lock_recover() = Some(error);
     }
 
     /// Replace the next successful backend renewal response without changing
@@ -277,8 +245,7 @@ impl InMemorySessionStore {
     ) {
         *self
             .next_session_execution_lease_renewal_response
-            .lock()
-            .expect("lock injected renewal response") = Some(response);
+            .lock_recover() = Some(response);
     }
 
     /// Suspend every subsequent `release_session_execution_lease` at its
@@ -287,10 +254,7 @@ impl InMemorySessionStore {
         &self,
     ) -> Arc<SessionExecutionLeaseReleaseGate> {
         let gate = Arc::new(SessionExecutionLeaseReleaseGate::default());
-        *self
-            .session_execution_lease_release_gate
-            .lock()
-            .expect("lock lease release gate") = Some(Arc::clone(&gate));
+        *self.session_execution_lease_release_gate.lock_recover() = Some(Arc::clone(&gate));
         gate
     }
 
@@ -319,34 +283,26 @@ impl InMemorySessionStore {
     }
 
     pub(crate) fn force_active_leaf_for_testing(&self, leaf_node_id: String) {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory test branch switch");
-        let mut meta = self.session_head_meta.lock().expect("lock session head");
+        let _transaction = self.write_transaction.lock_recover();
+        let mut meta = self.session_head_meta.lock_recover();
         let meta = meta.as_mut().expect("branch switch requires session head");
         meta.head_revision += 1;
         meta.leaf_node_id = Some(leaf_node_id.clone());
         self.session_graph
-            .lock()
-            .expect("lock resident graph")
+            .lock_recover()
             .set_leaf_node_id(Some(leaf_node_id));
     }
 
     pub(crate) fn tombstone_node_for_testing(&self, node_id: String) {
-        let _transaction = self
-            .write_transaction
-            .lock()
-            .expect("lock in-memory test tombstone");
-        self.tombstoned_node_ids
-            .lock()
-            .expect("lock tombstoned nodes")
-            .insert(node_id);
+        let _transaction = self.write_transaction.lock_recover();
+        self.tombstoned_node_ids.lock_recover().insert(node_id);
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use lash_sansio::sync::MutexExt;
+
     use std::sync::Arc;
 
     use crate::store::{GraphAppend, SessionCommitStore};
@@ -374,8 +330,7 @@ mod tests {
             .expect("second store");
         let second_concrete = factory
             .stores
-            .lock()
-            .expect("lock stores")
+            .lock_recover()
             .get("second")
             .cloned()
             .expect("second concrete store");
@@ -402,8 +357,7 @@ mod tests {
             .clone();
         factory
             .global_node_owners
-            .lock()
-            .expect("lock global node owners")
+            .lock_recover()
             .insert(occupied_node_id.clone(), "first".to_string());
 
         let error = second
@@ -416,11 +370,7 @@ mod tests {
             StoreError::NodeIdCollision { node_id } if node_id == occupied_node_id
         ));
         assert_eq!(
-            second_concrete
-                .usage_deltas
-                .lock()
-                .expect("lock usage")
-                .len(),
+            second_concrete.usage_deltas.lock_recover().len(),
             0,
             "a rejected ownership collision must not leak usage deltas"
         );
@@ -471,8 +421,10 @@ mod tests {
     #[test]
     fn queued_work_claim_refuses_exhausted_in_memory_fence() {
         let store = super::super::InMemorySessionStore::new();
-        store.queued_work.lock().expect("lock queued work").push(
-            super::super::InMemoryQueuedBatch {
+        store
+            .queued_work
+            .lock_recover()
+            .push(super::super::InMemoryQueuedBatch {
                 batch: QueuedWorkBatch {
                     batch_id: "exhausted-batch".to_string(),
                     session_id: "session".to_string(),
@@ -495,8 +447,7 @@ mod tests {
                 claim_owner: None,
                 claim_fencing_token: i64::MAX as u64,
                 claim_session_lease_generation: 0,
-            },
-        );
+            });
         let owner = crate::LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
         let authority = crate::SessionExecutionLeaseAuthority {
             session_id: "session".to_string(),
@@ -514,6 +465,7 @@ mod tests {
                     boundary: crate::QueuedWorkClaimBoundary::Idle,
                     max_batches: 1,
                 },
+                store.clock.timestamp_ms(),
             )
             .expect_err("exhausted in-memory fence must refuse");
         assert!(matches!(
@@ -528,8 +480,10 @@ mod tests {
     #[tokio::test]
     async fn stale_claim_validation_cannot_partially_mutate_a_commit() {
         let store = super::InMemorySessionStore::new();
-        store.queued_work.lock().expect("lock queued work").push(
-            super::super::InMemoryQueuedBatch {
+        store
+            .queued_work
+            .lock_recover()
+            .push(super::super::InMemoryQueuedBatch {
                 batch: QueuedWorkBatch {
                     batch_id: "batch".to_string(),
                     session_id: "session".to_string(),
@@ -547,8 +501,7 @@ mod tests {
                 claim_owner: None,
                 claim_fencing_token: 1,
                 claim_session_lease_generation: 1,
-            },
-        );
+            });
         let state = RuntimeSessionState {
             session_id: "session".to_string(),
             ..Default::default()
@@ -586,7 +539,7 @@ mod tests {
 
         assert!(matches!(error, StoreError::TurnInputClaimSuperseded { .. }));
         assert_eq!(
-            store.queued_work.lock().expect("lock queued work").len(),
+            store.queued_work.lock_recover().len(),
             1,
             "a later validation failure must not consume an earlier queue claim"
         );
@@ -603,8 +556,7 @@ mod tests {
         let process_id = "rewound-commit-process";
         store
             .wake_redelivery_fences
-            .lock()
-            .expect("lock receiver floors")
+            .lock_recover()
             .insert((session_id.to_string(), process_id.to_string()), 7);
         let wake = crate::ProcessWakeDelivery {
             wake_id: "rewound-commit-wake".to_string(),
@@ -651,19 +603,12 @@ mod tests {
             "a rejected rewound outbox must not publish a session head"
         );
         assert_eq!(
-            *store
-                .runtime_commit_count
-                .lock()
-                .expect("lock runtime commit count"),
+            *store.runtime_commit_count.lock_recover(),
             0,
             "a rejected rewound outbox must not increment the commit counter"
         );
         assert!(
-            store
-                .runtime_turn_commits
-                .lock()
-                .expect("lock runtime turn commits")
-                .is_empty(),
+            store.runtime_turn_commits.lock_recover().is_empty(),
             "a rejected rewound outbox must not publish a turn receipt"
         );
     }

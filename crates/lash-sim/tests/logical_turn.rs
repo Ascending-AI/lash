@@ -1,3 +1,4 @@
+use lash_sansio::sync::{LockResultExt, MutexExt};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -24,16 +25,13 @@ struct RecordingTraceSink {
 
 impl RecordingTraceSink {
     fn snapshot(&self) -> Vec<TraceRecord> {
-        self.records.lock().expect("trace records").clone()
+        self.records.lock_recover().clone()
     }
 }
 
 impl TraceSink for RecordingTraceSink {
     fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
-        self.records
-            .lock()
-            .expect("trace records")
-            .push(record.clone());
+        self.records.lock_recover().push(record.clone());
         Ok(())
     }
 }
@@ -56,7 +54,7 @@ impl PauseAfterFirstCommittedTurn {
     }
 
     fn resume(&self) {
-        *self.released.lock().expect("commit pause") = true;
+        *self.released.lock_recover() = true;
         self.release.notify_all();
     }
 }
@@ -68,12 +66,12 @@ impl RuntimeTurnPhaseProbe for PauseAfterFirstCommittedTurn {
         if phase != RuntimeTurnPhase::CommittedTurn || self.used.swap(true, Ordering::SeqCst) {
             return;
         }
-        if let Some(reached) = self.reached.lock().expect("commit signal").take() {
+        if let Some(reached) = self.reached.lock_recover().take() {
             reached.send(()).expect("commit observer remains live");
         }
-        let mut released = self.released.lock().expect("commit pause");
+        let mut released = self.released.lock_recover();
         while !*released {
-            released = self.release.wait(released).expect("commit pause wait");
+            released = self.release.wait(released).recover();
         }
     }
 }
@@ -258,11 +256,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
                 async move {
                     Ok(match provider_call.fetch_add(1, Ordering::SeqCst) {
                         0 => {
-                            if let Some(started) = first_provider_started_tx
-                                .lock()
-                                .expect("first provider signal")
-                                .take()
-                            {
+                            if let Some(started) = first_provider_started_tx.lock_recover().take() {
                                 let _ = started.send(());
                             }
                             if let Some(release) = release_first_provider_rx.lock().await.take() {
@@ -271,17 +265,11 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
                             tool_call_response()
                         }
                         1 => {
-                            completions
-                                .lock()
-                                .expect("completion order")
-                                .push("follow-on".to_string());
+                            completions.lock_recover().push("follow-on".to_string());
                             text_response("seeded follow-on complete")
                         }
                         2 => {
-                            completions
-                                .lock()
-                                .expect("completion order")
-                                .push("pending-next".to_string());
+                            completions.lock_recover().push("pending-next".to_string());
                             text_response("pending next complete")
                         }
                         index => panic!("unexpected provider call {index}"),
@@ -424,7 +412,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
     );
     assert!(
         frame_switch_follow_on_precedes_pending(
-            &completions.lock().expect("completion order"),
+            &completions.lock_recover(),
             "follow-on",
             &["pending-next".to_string()],
         )
@@ -545,11 +533,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
             move |_| {
                 let provider_started_tx = Arc::clone(&provider_started_tx);
                 async move {
-                    if let Some(started) = provider_started_tx
-                        .lock()
-                        .expect("cancel provider signal")
-                        .take()
-                    {
+                    if let Some(started) = provider_started_tx.lock_recover().take() {
                         let _ = started.send(());
                     }
                     std::future::pending().await

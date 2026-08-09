@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::sync::MutexExt;
 use std::sync::atomic::Ordering;
 
 #[derive(Clone, Debug)]
@@ -62,11 +63,11 @@ impl ChildUsageEventRelay {
     }
 
     pub(in crate::runtime) fn clear(&self) {
-        self.tx.lock().expect("child usage relay lock").take();
+        self.tx.lock_recover().take();
     }
 
     async fn emit(&self, event: SessionStreamEvent) {
-        let tx = self.tx.lock().expect("child usage relay lock").clone();
+        let tx = self.tx.lock_recover().clone();
         let Some(tx) = tx else { return };
         if tx.is_closed() {
             return;
@@ -216,10 +217,7 @@ impl StagedTokenLedger {
             .iter()
             .cloned()
             .collect::<std::collections::HashSet<_>>();
-        let mut ledger = self
-            .ledger
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let mut ledger = self.ledger.lock_recover();
         let staged = ledger
             .iter()
             .filter_map(|pending| pending.identity.clone())
@@ -265,9 +263,7 @@ pub(crate) fn stage_token_ledger_shared(
     operation: &crate::OperationId,
 ) -> Result<StagedTokenLedger, crate::StoreError> {
     let operation_storage_key = operation.storage_key()?;
-    let mut ledger = token_ledger
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let mut ledger = token_ledger.lock_recover();
     let mut next_ordinal = ledger
         .iter()
         .filter_map(|pending| pending.identity.as_ref())
@@ -326,9 +322,7 @@ pub(crate) fn record_token_usage_shared(
     if usage.is_zero() {
         return;
     }
-    let mut ledger = token_ledger
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let mut ledger = token_ledger.lock_recover();
     if let Some(entry) = ledger
         .iter_mut()
         .find(|entry| entry.identity.is_none() && entry.source == source && entry.model == model)
@@ -447,10 +441,7 @@ impl LiveChildUsageForwarder {
         after_live_accounting: impl std::future::Future<Output = ()>,
     ) {
         let (delta, cumulative) = {
-            let mut live_usage = self
-                .child_turn_live_usage
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut live_usage = self.child_turn_live_usage.lock_recover();
             // Ordering: the lease sets `turn_released` before it removes the
             // entry, and this check happens under the same lock the removal
             // takes, so an emit either observes a live entry (and is counted) or
@@ -544,7 +535,7 @@ mod staging_tests {
                 ..
             }
         ));
-        let pending = ledger.lock().expect("pending usage ledger");
+        let pending = ledger.lock_recover();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].usage.input_tokens, i64::MAX);
         assert!(pending[0].identity.is_some());
@@ -567,7 +558,7 @@ mod staging_tests {
         );
         let poison_target = Arc::clone(&ledger);
         let _ = std::panic::catch_unwind(move || {
-            let _guard = poison_target.lock().expect("acquire ledger before poison");
+            let _guard = poison_target.lock_recover();
             panic!("poison token ledger");
         });
         let identities = staged
@@ -578,7 +569,7 @@ mod staging_tests {
         staged
             .confirm_identities(&identities)
             .expect("confirm staged identities");
-        let pending = ledger.lock().unwrap_or_else(|poison| poison.into_inner());
+        let pending = ledger.lock_recover();
         assert_eq!(pending.len(), 1);
         assert!(pending[0].identity.is_none());
         assert_eq!(pending[0].usage.input_tokens, 7);
@@ -605,7 +596,7 @@ mod staging_tests {
                 staged_count: 1,
             }
         ));
-        let pending = ledger.lock().expect("pending usage ledger");
+        let pending = ledger.lock_recover();
         assert_eq!(pending.len(), 1);
         assert!(pending[0].identity.is_some());
     }

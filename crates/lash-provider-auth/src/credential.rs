@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use lash_core::runtime::{Clock, SystemClock};
+use lash_sansio::sync::RwLockExt;
 use std::fmt::{Debug, Display};
 use std::future::Future;
 use std::pin::Pin;
@@ -133,11 +134,7 @@ impl<C: Credential> Clone for CredentialManager<C> {
 
 impl<C: Credential> Debug for CredentialManager<C> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let state = self
-            .inner
-            .state
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let state = self.inner.state.read_recover();
         formatter
             .debug_struct("CredentialManager")
             .field("credential", &state.value)
@@ -212,25 +209,14 @@ impl<C: Credential> CredentialManager<C> {
         if current.generation != generation {
             return Ok(current);
         }
-        if let Some(error) = self
-            .inner
-            .state
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .failure_latch
-            .clone()
-        {
+        if let Some(error) = self.inner.state.read_recover().failure_latch.clone() {
             return Err(error);
         }
 
         let refreshed = match self.inner.refresher.refresh(&current.value, cause).await {
             Ok(value) => value,
             Err(error) => {
-                self.inner
-                    .state
-                    .write()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .failure_latch = Some(error.clone());
+                self.inner.state.write_recover().failure_latch = Some(error.clone());
                 return Err(error);
             }
         };
@@ -242,11 +228,7 @@ impl<C: Credential> CredentialManager<C> {
         };
 
         let next = {
-            let mut state = self
-                .inner
-                .state
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut state = self.inner.state.write_recover();
             state.value = refreshed;
             state.generation = state.generation.saturating_add(1);
             // Persistence failure is returned to the refresh leader below, but
@@ -283,20 +265,11 @@ impl<C: Credential> CredentialManager<C> {
     }
 
     pub fn snapshot(&self) -> C {
-        self.inner
-            .state
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .value
-            .clone()
+        self.inner.state.read_recover().value.clone()
     }
 
     fn current_lease(&self) -> Result<Lease<C>, CredentialError> {
-        let state = self
-            .inner
-            .state
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let state = self.inner.state.read_recover();
         if let Some(error) = &state.failure_latch {
             return Err(error.clone());
         }

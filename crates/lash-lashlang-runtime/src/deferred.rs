@@ -289,6 +289,7 @@ pub async fn link_with_deferred_resolution(
 mod tests {
     use super::*;
     use crate::{LashlangSurface, LashlangToolBinding, ToolDefinitionLashlangExt};
+    use lash_sansio::sync::MutexExt;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -316,8 +317,7 @@ mod tests {
         async fn resolve(&self, paths: &[&str]) -> BTreeMap<String, Resolution> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             self.batches
-                .lock()
-                .expect("batches")
+                .lock_recover()
                 .push(paths.iter().map(|path| (*path).to_string()).collect());
             paths
                 .iter()
@@ -333,8 +333,7 @@ mod tests {
 
         fn install_recorded_grant(&self, path: &str, grant: &ToolGrant) {
             self.installed
-                .lock()
-                .expect("installed grants")
+                .lock_recover()
                 .push((path.to_string(), grant.clone()));
         }
     }
@@ -425,10 +424,10 @@ mod tests {
 
         assert_eq!(harness.calls.load(Ordering::SeqCst), 1);
         assert_eq!(
-            *harness.batches.lock().expect("batches"),
+            *harness.batches.lock_recover(),
             vec![vec!["web.fetch".to_string()]]
         );
-        assert!(harness.installed.lock().expect("installed").is_empty());
+        assert!(harness.installed.lock_recover().is_empty());
         assert!(matches!(
             record.get("web.fetch"),
             Some(Resolution::Resolved(_))
@@ -450,7 +449,7 @@ mod tests {
         .await
         .expect("first link");
         assert_eq!(harness.calls.load(Ordering::SeqCst), 1);
-        assert!(harness.installed.lock().expect("installed").is_empty());
+        assert!(harness.installed.lock_recover().is_empty());
 
         // Re-drive the same link with the recorded resolutions: the resolver is
         // never called again.
@@ -467,7 +466,7 @@ mod tests {
             1,
             "replay must not re-resolve"
         );
-        let installed = harness.installed.lock().expect("installed");
+        let installed = harness.installed.lock_recover();
         assert_eq!(installed.len(), 1);
         assert_eq!(installed[0].0, "web.fetch");
         assert_eq!(
@@ -507,7 +506,7 @@ mod tests {
         .await
         .expect_err("replayed unavailable call-path still errors");
         assert_eq!(harness.calls.load(Ordering::SeqCst), calls_before);
-        assert!(harness.installed.lock().expect("installed").is_empty());
+        assert!(harness.installed.lock_recover().is_empty());
     }
 
     #[tokio::test]
@@ -528,7 +527,7 @@ mod tests {
 
         assert_eq!(harness.calls.load(Ordering::SeqCst), 1);
         assert_eq!(
-            *harness.batches.lock().expect("batches"),
+            *harness.batches.lock_recover(),
             vec![vec!["mystery.run".to_string(), "web.fetch".to_string()]]
         );
         assert!(host.resources.provides_module_operation("web", "fetch"));
@@ -550,7 +549,7 @@ mod tests {
         .await;
         assert_eq!(harness.calls.load(Ordering::SeqCst), 1);
         assert!(replayed.resources.provides_module_operation("web", "fetch"));
-        assert_eq!(harness.installed.lock().expect("installed").len(), 1);
+        assert_eq!(harness.installed.lock_recover().len(), 1);
     }
 
     #[tokio::test]
@@ -574,10 +573,10 @@ mod tests {
 
         assert_eq!(harness.calls.load(Ordering::SeqCst), 1);
         assert_eq!(
-            *harness.batches.lock().expect("batches"),
+            *harness.batches.lock_recover(),
             vec![vec!["mystery.run".to_string()]]
         );
-        assert_eq!(harness.installed.lock().expect("installed").len(), 1);
+        assert_eq!(harness.installed.lock_recover().len(), 1);
         assert!(host.resources.provides_module_operation("web", "fetch"));
         assert!(matches!(
             record.get("mystery.run"),

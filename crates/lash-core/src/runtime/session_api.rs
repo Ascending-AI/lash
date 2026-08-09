@@ -1,5 +1,6 @@
 use super::*;
 use crate::facade_support::{RuntimeSessionStateFacadeOps, ToolStateFacadeOps};
+use lash_sansio::sync::MutexExt;
 
 impl LashRuntime {
     pub fn session_id(&self) -> &str {
@@ -157,7 +158,7 @@ impl LashRuntime {
 
     pub fn usage_report(&self) -> SessionUsageReport {
         let mut entries = self.state.token_ledger.clone();
-        let drained = self.shared_token_ledger.lock().expect("token ledger lock");
+        let drained = self.shared_token_ledger.lock_recover();
         let mut saturated = false;
         for entry in drained.iter().cloned() {
             saturated |= merge_ledger_entry_saturating(&mut entries, entry.entry);

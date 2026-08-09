@@ -5,6 +5,7 @@
 //! Registered from `RlmProtocolPlugin::register` via
 //! [`register_stream_mask`].
 
+use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
 use lash_core::PluginRuntimeEvent;
@@ -28,7 +29,7 @@ pub fn register_stream_mask(reg: &mut PluginRegistrar) -> Result<(), PluginError
         .stream(Arc::new(move |ctx: AssistantStreamHookContext| {
             let state = Arc::clone(&stream_state);
             Box::pin(async move {
-                let mut detector = state.lock().expect("cell detector lock");
+                let mut detector = state.lock_recover();
                 Ok(detector.process_chunk(&ctx.chunk))
             })
         }));
@@ -39,7 +40,7 @@ pub fn register_stream_mask(reg: &mut PluginRegistrar) -> Result<(), PluginError
             let state = Arc::clone(&response_state);
             Box::pin(async move {
                 let response = {
-                    let mut detector = state.lock().expect("cell detector lock");
+                    let mut detector = state.lock_recover();
                     let response = transform_final_response(&detector, ctx.response);
                     detector.reset();
                     response
@@ -58,7 +59,7 @@ pub fn register_stream_mask(reg: &mut PluginRegistrar) -> Result<(), PluginError
             let state = Arc::clone(&cleanup_state);
             Box::pin(async move {
                 let _reason = ctx.reason;
-                let mut detector = state.lock().expect("cell detector lock");
+                let mut detector = state.lock_recover();
                 detector.reset();
                 Ok(())
             })

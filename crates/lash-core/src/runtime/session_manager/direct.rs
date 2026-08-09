@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 
 /// Runtime-backed direct completion source.
@@ -224,9 +225,7 @@ impl DirectInvocationContext<'_> {
         usage_source: &str,
     ) -> Result<u64, crate::PluginError> {
         let lane = Self::replay_lane(caused_by, usage_source);
-        let mut ordinals = self.replay_ordinals.lock().map_err(|_| {
-            crate::PluginError::Session("direct replay ordinal lock poisoned".to_string())
-        })?;
+        let mut ordinals = self.replay_ordinals.lock_recover();
         let ordinal = ordinals.entry(lane).or_default();
         *ordinal = ordinal.checked_add(1).ok_or_else(|| {
             crate::PluginError::Session("direct replay ordinal exhausted".to_string())
@@ -240,9 +239,7 @@ impl DirectInvocationContext<'_> {
         usage_source: &str,
     ) -> Result<DirectUnkeyedGuard<'_>, crate::PluginError> {
         let lane = Self::replay_lane(caused_by, usage_source);
-        let mut in_flight = self.unkeyed_in_flight.lock().map_err(|_| {
-            crate::PluginError::Session("direct unkeyed replay lock poisoned".to_string())
-        })?;
+        let mut in_flight = self.unkeyed_in_flight.lock_recover();
         if !in_flight.insert(lane.clone()) {
             return Err(crate::PluginError::Session(
                 "concurrent direct completions require distinct explicit replay keys".to_string(),
@@ -262,9 +259,7 @@ struct DirectUnkeyedGuard<'a> {
 
 impl Drop for DirectUnkeyedGuard<'_> {
     fn drop(&mut self) {
-        if let Ok(mut in_flight) = self.in_flight.lock() {
-            in_flight.remove(&self.lane);
-        }
+        self.in_flight.lock_recover().remove(&self.lane);
     }
 }
 

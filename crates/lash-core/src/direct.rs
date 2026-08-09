@@ -447,6 +447,7 @@ mod tests {
     use crate::llm::types::{LlmOutputPart, LlmTerminalReason, LlmUsage};
     use crate::provider::{ProviderOptions, ProviderReliability};
     use crate::testing::TestProvider;
+    use lash_sansio::sync::MutexExt;
     use serde_json::json;
     use std::sync::{Arc, Mutex};
 
@@ -508,7 +509,7 @@ mod tests {
             .complete(move |request| {
                 let captured_for_provider = Arc::clone(&captured_for_provider);
                 async move {
-                    *captured_for_provider.lock().expect("capture lock") = Some(request);
+                    *captured_for_provider.lock_recover() = Some(request);
                     Ok(LlmResponse {
                         full_text: "provider delegated response".to_string(),
                         parts: vec![LlmOutputPart::Text {
@@ -540,8 +541,7 @@ mod tests {
         assert_eq!(response.full_text, "provider delegated response");
         assert_eq!(response.llm_call.attempts.len(), 1);
         let captured = captured_request
-            .lock()
-            .expect("capture lock")
+            .lock_recover()
             .clone()
             .expect("provider should receive a request");
         assert_eq!(captured.model, "direct-model");
@@ -644,7 +644,7 @@ mod tests {
             .complete(move |_request| {
                 let called = Arc::clone(&called_for_provider);
                 async move {
-                    *called.lock().expect("called lock") = true;
+                    *called.lock_recover() = true;
                     Ok(LlmResponse::default())
                 }
             })
@@ -669,7 +669,7 @@ mod tests {
         ));
         assert!(err.to_string().contains("Unsupported effort `turbo`"));
         assert!(
-            !*called.lock().expect("called lock"),
+            !*called.lock_recover(),
             "the provider must not be called when the effort is rejected"
         );
     }
@@ -683,7 +683,7 @@ mod tests {
             .complete(move |request| {
                 let captured = Arc::clone(&captured_for_provider);
                 async move {
-                    *captured.lock().expect("capture lock") = Some(request.model_variant.clone());
+                    *captured.lock_recover() = Some(request.model_variant.clone());
                     Ok(LlmResponse {
                         full_text: "ok".to_string(),
                         terminal_reason: LlmTerminalReason::Stop,
@@ -702,8 +702,7 @@ mod tests {
 
         client.complete(request).await.expect("completion");
         let seen = captured
-            .lock()
-            .expect("capture lock")
+            .lock_recover()
             .clone()
             .expect("provider must be called");
         assert_eq!(
@@ -826,10 +825,7 @@ mod tests {
         let captured_events: Arc<Mutex<Vec<LlmStreamEvent>>> = Arc::new(Mutex::new(Vec::new()));
         let captured_for_sender = Arc::clone(&captured_events);
         let requested_sender = LlmEventSender::new(move |event| {
-            captured_for_sender
-                .lock()
-                .expect("stream event lock")
-                .push(event);
+            captured_for_sender.lock_recover().push(event);
         });
         let mut request = DirectRequest::text("model", "prompt");
         request.stream_events = Some(requested_sender);
@@ -840,7 +836,7 @@ mod tests {
             .stream_events
             .expect("explicit direct stream sender must be preserved");
         sender.send(LlmStreamEvent::Delta("delta".to_string()));
-        assert_eq!(captured_events.lock().expect("stream event lock").len(), 1);
+        assert_eq!(captured_events.lock_recover().len(), 1);
 
         let streaming_provider = TestProvider::builder()
             .requires_streaming(true)

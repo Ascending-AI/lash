@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use lash_sansio::sync::MutexExt;
 use tokio::sync::mpsc;
 
 use crate::plugin::{
@@ -16,21 +17,14 @@ pub(crate) struct CheckpointMessageBuffer {
 }
 
 impl CheckpointMessageBuffer {
-    pub(crate) fn enqueue(&self, messages: Vec<crate::PluginMessage>) -> Result<(), String> {
-        let mut queue = self
-            .queue
-            .lock()
-            .map_err(|_| "checkpoint message buffer poisoned".to_string())?;
+    pub(crate) fn enqueue(&self, messages: Vec<crate::PluginMessage>) {
+        let mut queue = self.queue.lock_recover();
         queue.extend(messages);
-        Ok(())
     }
 
-    pub(crate) fn drain(&self) -> Result<Vec<crate::PluginMessage>, String> {
-        let mut queue = self
-            .queue
-            .lock()
-            .map_err(|_| "checkpoint message buffer poisoned".to_string())?;
-        Ok(queue.drain(..).collect())
+    pub(crate) fn drain(&self) -> Vec<crate::PluginMessage> {
+        let mut queue = self.queue.lock_recover();
+        queue.drain(..).collect()
     }
 }
 
@@ -53,21 +47,14 @@ pub(crate) struct ToolTriggerOutcomeBuffer {
 }
 
 impl ToolTriggerOutcomeBuffer {
-    pub(crate) fn enqueue(&self, outcome: ToolTriggerEffectOutcome) -> Result<(), String> {
-        let mut queue = self
-            .queue
-            .lock()
-            .map_err(|_| "tool trigger outcome buffer poisoned".to_string())?;
+    pub(crate) fn enqueue(&self, outcome: ToolTriggerEffectOutcome) {
+        let mut queue = self.queue.lock_recover();
         queue.push(outcome);
-        Ok(())
     }
 
-    pub(crate) fn drain(&self) -> Result<Vec<ToolTriggerEffectOutcome>, String> {
-        let mut queue = self
-            .queue
-            .lock()
-            .map_err(|_| "tool trigger outcome buffer poisoned".to_string())?;
-        Ok(queue.drain(..).collect())
+    pub(crate) fn drain(&self) -> Vec<ToolTriggerEffectOutcome> {
+        let mut queue = self.queue.lock_recover();
+        queue.drain(..).collect()
     }
 }
 

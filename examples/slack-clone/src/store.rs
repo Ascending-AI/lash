@@ -10,6 +10,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context as _, Result};
+use lash::sync::MutexExt;
 use rusqlite::Connection;
 
 /// A cloneable handle to one SQLite connection.
@@ -52,9 +53,7 @@ impl SqliteHandle {
     {
         let connection = Arc::clone(&self.connection);
         tokio::task::spawn_blocking(move || {
-            let mut guard = connection
-                .lock()
-                .map_err(|_| anyhow::anyhow!("sqlite connection mutex poisoned"))?;
+            let mut guard = connection.lock_recover();
             work(&mut guard)
         })
         .await

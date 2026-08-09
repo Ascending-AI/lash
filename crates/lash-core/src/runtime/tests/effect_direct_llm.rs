@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::sync::MutexExt;
 
 #[tokio::test]
 async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() {
@@ -99,7 +100,7 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
         1,
         "the same request id is the same durable effect even when request content differs"
     );
-    let ledger = runtime.shared_token_ledger.lock().expect("token ledger");
+    let ledger = runtime.shared_token_ledger.lock_recover();
     assert_eq!(ledger.len(), 1);
     assert_eq!(ledger[0].source, "direct-llm-test");
     assert_eq!(ledger[0].model, "mock-model");

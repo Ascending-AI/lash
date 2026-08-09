@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -42,7 +43,7 @@ impl SimClock {
                 return;
             }
             let (next, waiters) = {
-                let mut sleepers = self.sleepers.lock().expect("sim clock sleepers");
+                let mut sleepers = self.sleepers.lock_recover();
                 let next_deadline = sleepers
                     .range((current + 1)..=target_ms)
                     .next()
@@ -74,7 +75,7 @@ impl SimClock {
     async fn wait_until_ms(&self, deadline_ms: u64) {
         let receiver = {
             let (sender, receiver) = tokio::sync::oneshot::channel();
-            let mut sleepers = self.sleepers.lock().expect("sim clock sleepers");
+            let mut sleepers = self.sleepers.lock_recover();
             if self.logical_ms() >= deadline_ms {
                 return;
             }

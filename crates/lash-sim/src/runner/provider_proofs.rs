@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::sync::MutexExt;
 
 pub(super) async fn prove_openai_compatible_tool_stream() -> Result<ProofRun, FixedScriptRunnerError>
 {
@@ -466,7 +467,7 @@ pub(super) async fn prove_openai_compatible_stream_chunk_timeout()
         .complete(openai_compatible_request_with_events(Some(sender)))
         .await
         .expect_err("stream chunk timeout script should fail");
-    let committed_events = events.lock().expect("event collector lock").len();
+    let committed_events = events.lock_recover().len();
     require(
         err.kind == ProviderFailureKind::Timeout
             && err.code.as_deref() == Some("timeout")
@@ -517,7 +518,7 @@ pub(super) async fn prove_openai_compatible_cancel_before_response_start()
         join_err.is_cancelled(),
         "cancellation before response start did not cancel the provider task",
     )?;
-    let committed_events = events.lock().expect("event collector lock").len();
+    let committed_events = events.lock_recover().len();
     require(
         committed_events == 0,
         "cancellation before response start committed stream events",
@@ -787,7 +788,7 @@ fn event_collector() -> (Arc<Mutex<Vec<LlmStreamEvent>>>, LlmEventSender) {
     let events = Arc::new(Mutex::new(Vec::new()));
     let captured = Arc::clone(&events);
     let sender = LlmEventSender::new(move |event| {
-        captured.lock().expect("event collector lock").push(event);
+        captured.lock_recover().push(event);
     });
     (events, sender)
 }

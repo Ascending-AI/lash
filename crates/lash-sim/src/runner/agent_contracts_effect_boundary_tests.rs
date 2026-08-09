@@ -1,6 +1,7 @@
 //! Effect-boundary invariant tests for scalar vs batched Lashlang tool dispatch.
 
 use super::*;
+use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -13,22 +14,20 @@ struct ToolAttemptInvariantRecorder {
 impl ToolAttemptInvariantRecorder {
     fn record_tool_attempt(&self, tool_name: &str) {
         self.tool_attempt_envelopes
-            .lock()
-            .expect("tool attempt envelopes")
+            .lock_recover()
             .push(tool_name.to_string());
     }
 
     fn record_provider_body_invocation(&self, tool_name: &str) {
         self.provider_body_invocations
-            .lock()
-            .expect("provider body invocations")
+            .lock_recover()
             .push(tool_name.to_string());
     }
 
     fn assert_every_provider_invocation_has_tool_attempt_envelope(&self) {
         let counts = |values: &Mutex<Vec<String>>| {
             let mut counts = HashMap::new();
-            for value in values.lock().expect("invariant records").iter() {
+            for value in values.lock_recover().iter() {
                 *counts.entry(value.clone()).or_insert(0usize) += 1;
             }
             counts

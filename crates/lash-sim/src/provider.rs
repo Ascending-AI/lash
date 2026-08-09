@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -358,20 +359,12 @@ impl ScriptedTransportSchedule {
                 .fetch_add(1, Ordering::SeqCst),
         };
         gate.open();
-        self.inner
-            .releases
-            .lock()
-            .expect("scripted transport release log lock")
-            .push(release.clone());
+        self.inner.releases.lock_recover().push(release.clone());
         release
     }
 
     pub fn releases(&self) -> Vec<ScriptedProviderEventRelease> {
-        self.inner
-            .releases
-            .lock()
-            .expect("scripted transport release log lock")
-            .clone()
+        self.inner.releases.lock_recover().clone()
     }
 
     async fn wait_for_release(&self, exchange_index: usize, event_index: usize) {
@@ -385,11 +378,7 @@ impl ScriptedTransportSchedule {
             exchange_index,
             event_index,
         };
-        let mut gates = self
-            .inner
-            .gates
-            .lock()
-            .expect("scripted transport event gate lock");
+        let mut gates = self.inner.gates.lock_recover();
         gates
             .entry(key)
             .or_insert_with(|| Arc::new(ScriptedTransportEventGate::default()))
@@ -449,26 +438,17 @@ impl ScriptedLlmHttpTransport {
     }
 
     pub fn remaining_scripts(&self) -> Result<usize, LlmTransportError> {
-        let scripts = self.scripts.lock().map_err(|_| {
-            LlmTransportError::new("Provider Wire Script queue lock poisoned")
-                .with_kind(ProviderFailureKind::Transport)
-        })?;
+        let scripts = self.scripts.lock_recover();
         Ok(scripts.len())
     }
 
     pub fn exchanges(&self) -> Result<Vec<ScriptedLlmHttpExchange>, LlmTransportError> {
-        let exchanges = self.exchanges.lock().map_err(|_| {
-            LlmTransportError::new("Provider Wire Script exchange log lock poisoned")
-                .with_kind(ProviderFailureKind::Transport)
-        })?;
+        let exchanges = self.exchanges.lock_recover();
         Ok(exchanges.clone())
     }
 
     fn next_script(&self) -> Result<ProviderWireScript, LlmTransportError> {
-        let mut scripts = self.scripts.lock().map_err(|_| {
-            LlmTransportError::new("Provider Wire Script queue lock poisoned")
-                .with_kind(ProviderFailureKind::Transport)
-        })?;
+        let mut scripts = self.scripts.lock_recover();
         scripts.pop_front().ok_or_else(|| {
             LlmTransportError::new("No Provider Wire Script remained for LLM request")
                 .with_kind(ProviderFailureKind::Transport)
@@ -476,10 +456,7 @@ impl ScriptedLlmHttpTransport {
     }
 
     fn record_exchange(&self, exchange: ScriptedLlmHttpExchange) -> Result<(), LlmTransportError> {
-        let mut exchanges = self.exchanges.lock().map_err(|_| {
-            LlmTransportError::new("Provider Wire Script exchange log lock poisoned")
-                .with_kind(ProviderFailureKind::Transport)
-        })?;
+        let mut exchanges = self.exchanges.lock_recover();
         exchanges.push(exchange);
         Ok(())
     }
@@ -488,10 +465,7 @@ impl ScriptedLlmHttpTransport {
         &self,
         exchange: ScriptedLlmHttpExchange,
     ) -> Result<(), LlmTransportError> {
-        let mut exchanges = self.exchanges.lock().map_err(|_| {
-            LlmTransportError::new("Provider Wire Script exchange log lock poisoned")
-                .with_kind(ProviderFailureKind::Transport)
-        })?;
+        let mut exchanges = self.exchanges.lock_recover();
         if let Some(existing) = exchanges.iter_mut().rev().find(|existing| {
             existing.script_name == exchange.script_name && existing.response.event_names.is_empty()
         }) {
@@ -1585,7 +1559,7 @@ mod tests {
         let join_err = task.await.expect_err("cancelled provider task");
         assert!(join_err.is_cancelled());
         assert!(
-            events.lock().expect("event collector lock").is_empty(),
+            events.lock_recover().is_empty(),
             "no stream events should be committed before response start"
         );
     }
@@ -1619,7 +1593,7 @@ mod tests {
         assert!(err.retryable);
         assert!(err.status.is_none());
         assert!(
-            events.lock().expect("event collector lock").is_empty(),
+            events.lock_recover().is_empty(),
             "response-start timeout should not commit stream events"
         );
 
@@ -1709,15 +1683,14 @@ mod tests {
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = Arc::clone(&events);
         let sender = LlmEventSender::new(move |event| {
-            captured.lock().expect("event collector lock").push(event);
+            captured.lock_recover().push(event);
         });
         (events, sender)
     }
 
     fn text_deltas(events: &Arc<Mutex<Vec<LlmStreamEvent>>>) -> Vec<String> {
         events
-            .lock()
-            .expect("event collector lock")
+            .lock_recover()
             .iter()
             .filter_map(|event| match event {
                 LlmStreamEvent::Delta(text) => Some(text.clone()),

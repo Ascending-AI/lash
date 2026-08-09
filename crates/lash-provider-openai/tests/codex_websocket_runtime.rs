@@ -8,6 +8,7 @@
 //! same injection philosophy as `with_http_transport`: nothing here touches
 //! env vars or serialized provider config.
 
+use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -117,7 +118,7 @@ struct EchoProbe {
 impl StaticToolExecute for EchoProbe {
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
         assert_eq!(call.name, "echo_probe");
-        self.seen.lock().expect("seen lock").push(call.args.clone());
+        self.seen.lock_recover().push(call.args.clone());
         ToolResult::ok(json!({ "echo": call.args }))
     }
 }
@@ -191,7 +192,7 @@ async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
         "tool round trip complete"
     );
     assert_eq!(
-        seen.lock().expect("seen lock").as_slice(),
+        seen.lock_recover().as_slice(),
         [json!({"value": "ping"})],
         "the runtime must execute the tool call streamed over the websocket"
     );

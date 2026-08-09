@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -59,8 +60,7 @@ impl EventCapture {
     /// Every captured event whose `event` field names this transition.
     pub(crate) fn named(&self, event: &str) -> Vec<CapturedEvent> {
         self.events
-            .lock()
-            .expect("lock captured events")
+            .lock_recover()
             .iter()
             .filter(|captured| {
                 captured
@@ -79,7 +79,7 @@ impl EventCapture {
             matched.len(),
             1,
             "expected exactly one `{event}` trace event, captured: {:?}",
-            self.events.lock().expect("lock captured events")
+            self.events.lock_recover()
         );
         matched.into_iter().next().expect("checked one event")
     }
@@ -116,14 +116,11 @@ impl<S: tracing::Subscriber> Layer<S> for EventCapture {
     fn on_event(&self, event: &tracing::Event<'_>, _context: Context<'_, S>) {
         let mut visitor = FieldVisitor(BTreeMap::new());
         event.record(&mut visitor);
-        self.events
-            .lock()
-            .expect("lock captured events")
-            .push(CapturedEvent {
-                level: event.metadata().level().to_string(),
-                target: event.metadata().target().to_string(),
-                fields: visitor.0,
-            });
+        self.events.lock_recover().push(CapturedEvent {
+            level: event.metadata().level().to_string(),
+            target: event.metadata().target().to_string(),
+            fields: visitor.0,
+        });
     }
 }
 

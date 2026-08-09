@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::sync::RwLockExt;
 
 /// Regression for the header-drop bug: custom/auth headers configured for
 /// an HTTP MCP server must be translated into the `http` header types the
@@ -487,8 +488,7 @@ async fn discovery_hang_surfaces_startup_timeout() {
     assert!(
         entry
             .last_error
-            .read()
-            .expect("error lock")
+            .read_recover()
             .as_deref()
             .is_some_and(|err| err.contains("timed out") || err.contains("timeout")),
         "the failure is recorded for status reporting"

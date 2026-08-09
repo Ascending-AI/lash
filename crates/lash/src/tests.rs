@@ -3,6 +3,7 @@ use lash_core::facade_support::{
     AgentFrameReasonFacadeOps, RuntimeSessionStateFacadeOps, SessionGraphFacadeOps,
     SessionNodeRecordFacadeOps, ToolStateFacadeOps,
 };
+use lash_sansio::sync::MutexExt;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -124,7 +125,7 @@ impl SnapshotStore {
     }
 
     fn set_head_provider_id(&self, provider_id: impl Into<String>) {
-        let mut read = self.read.lock().expect("snapshot store lock");
+        let mut read = self.read.lock_recover();
         let Some(read) = read.as_mut() else {
             panic!("snapshot store has no session head");
         };
@@ -151,7 +152,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
         binding: &lash_core::SessionBinding,
     ) -> std::result::Result<lash_core::SessionAdmission, lash_core::store::StoreError> {
         binding.validate()?;
-        let mut meta = self.session_meta.lock().expect("session metadata lock");
+        let mut meta = self.session_meta.lock_recover();
         if let Some(meta) = meta.as_ref() {
             if meta.session_id != binding.session_id {
                 return Err(lash_core::store::StoreError::SessionBindingMismatch {
@@ -178,7 +179,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
         Option<lash_core::store::PersistedSessionRead>,
         lash_core::store::StoreError,
     > {
-        Ok(self.read.lock().expect("snapshot store lock").clone())
+        Ok(self.read.lock_recover().clone())
     }
 
     async fn load_node(
@@ -196,7 +197,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
     {
         let turn_commit_hash = commit.turn_commit_hash()?;
         let session_id = commit.session_id.clone();
-        let mut read = self.read.lock().expect("snapshot store lock");
+        let mut read = self.read.lock_recover();
         let realized_node_timestamps = commit
             .graph
             .appended_nodes()
@@ -208,12 +209,8 @@ impl lash_core::SessionCommitStore for SnapshotStore {
         let completed = &commit.turn_commit;
         let operation_key = completed.operation.storage_key()?;
         let key = (session_id.clone(), operation_key.clone());
-        if let Some((stored_hash, result)) = self
-            .runtime_turn_commits
-            .lock()
-            .expect("runtime turn commits lock")
-            .get(&key)
-            .cloned()
+        if let Some((stored_hash, result)) =
+            self.runtime_turn_commits.lock_recover().get(&key).cloned()
         {
             if stored_hash == turn_commit_hash {
                 return Ok(result);
@@ -233,7 +230,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             });
         }
         {
-            let mut session_meta = self.session_meta.lock().expect("session metadata lock");
+            let mut session_meta = self.session_meta.lock_recover();
             if session_meta.is_none() {
                 *session_meta = Some(lash_core::SessionMeta {
                     session_id: commit.session_id.clone(),
@@ -256,10 +253,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             .as_ref()
             .map(|read| read.token_ledger.clone())
             .unwrap_or_default();
-        let mut usage_delta_identities = self
-            .usage_delta_identities
-            .lock()
-            .expect("usage delta identities lock");
+        let mut usage_delta_identities = self.usage_delta_identities.lock_recover();
         for delta in &commit.usage_deltas {
             if usage_delta_identities.insert(delta.identity.clone()) {
                 if let Some(existing) = token_ledger.iter_mut().find(|entry| {
@@ -316,18 +310,12 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             turn_input_applications: Vec::new(),
             receipt_replayed: false,
         };
-        self.runtime_turn_commits
-            .lock()
-            .expect("runtime turn commits lock")
-            .insert(
-                (session_id, completed.operation.storage_key()?),
-                (turn_commit_hash, result.clone()),
-            );
+        self.runtime_turn_commits.lock_recover().insert(
+            (session_id, completed.operation.storage_key()?),
+            (turn_commit_hash, result.clone()),
+        );
         if let Some(completion) = &commit.release_session_execution_lease {
-            let mut leases = self
-                .session_execution_leases
-                .lock()
-                .expect("session execution leases lock");
+            let mut leases = self.session_execution_leases.lock_recover();
             if leases
                 .get(&completion.session_id)
                 .is_some_and(|lease| session_completion_matches(lease, completion))
@@ -342,18 +330,14 @@ impl lash_core::SessionCommitStore for SnapshotStore {
         &self,
         meta: lash_core::SessionMeta,
     ) -> std::result::Result<(), lash_core::store::StoreError> {
-        *self.session_meta.lock().expect("session metadata lock") = Some(meta);
+        *self.session_meta.lock_recover() = Some(meta);
         Ok(())
     }
 
     async fn load_session_meta(
         &self,
     ) -> std::result::Result<Option<lash_core::SessionMeta>, lash_core::store::StoreError> {
-        Ok(self
-            .session_meta
-            .lock()
-            .expect("session metadata lock")
-            .clone())
+        Ok(self.session_meta.lock_recover().clone())
     }
 }
 
@@ -370,10 +354,7 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
         lash_core::store::StoreError,
     > {
         let lease_token = claim_nonce.as_str();
-        let mut leases = self
-            .session_execution_leases
-            .lock()
-            .expect("session execution leases lock");
+        let mut leases = self.session_execution_leases.lock_recover();
         if let Some(existing) = leases.get(session_id)
             && existing.expires_at_epoch_ms > now_epoch_ms()
         {
@@ -407,10 +388,7 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
         // Mint from the retained counter, not from the live row: the row is gone
         // after a release, and restarting the fence there would reissue a
         // generation a stale claim still pins.
-        let mut generations = self
-            .session_execution_lease_generations
-            .lock()
-            .expect("session execution lease generations lock");
+        let mut generations = self.session_execution_lease_generations.lock_recover();
         let next_fencing_token = generations
             .get(session_id)
             .copied()
@@ -442,10 +420,7 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
         fence: &lash_core::SessionExecutionLeaseAuthority,
         lease_ttl_ms: u64,
     ) -> std::result::Result<lash_core::SessionExecutionLease, lash_core::store::StoreError> {
-        let mut leases = self
-            .session_execution_leases
-            .lock()
-            .expect("session execution leases lock");
+        let mut leases = self.session_execution_leases.lock_recover();
         let Some(existing) = leases.get_mut(&fence.session_id) else {
             return Err(lash_core::store::StoreError::SessionExecutionLeaseExpired {
                 session_id: fence.session_id.clone(),
@@ -481,10 +456,7 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
         &self,
         completion: &lash_core::SessionExecutionLeaseAuthority,
     ) -> std::result::Result<(), lash_core::store::StoreError> {
-        let mut leases = self
-            .session_execution_leases
-            .lock()
-            .expect("session execution leases lock");
+        let mut leases = self.session_execution_leases.lock_recover();
         if leases
             .get(&completion.session_id)
             .is_some_and(|lease| session_completion_matches(lease, completion))
@@ -520,8 +492,7 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
     {
         Ok(self
             .session_execution_leases
-            .lock()
-            .expect("session execution leases lock")
+            .lock_recover()
             .get(session_id)
             .cloned())
     }
@@ -1083,8 +1054,7 @@ struct RecordingStoreFactory {
 impl RecordingStoreFactory {
     fn session_ids(&self) -> Vec<String> {
         self.requests
-            .lock()
-            .expect("recording factory lock")
+            .lock_recover()
             .iter()
             .map(|request| request.session_id.clone())
             .collect()
@@ -1097,10 +1067,7 @@ impl lash_core::SessionStoreFactory for RecordingStoreFactory {
         &self,
         request: &lash_core::SessionStoreCreateRequest,
     ) -> std::result::Result<Arc<dyn lash_core::RuntimePersistence>, lash_core::StoreError> {
-        self.requests
-            .lock()
-            .expect("recording factory lock")
-            .push(request.clone());
+        self.requests.lock_recover().push(request.clone());
         Ok(Arc::new(SnapshotStore::default()))
     }
 
@@ -1122,8 +1089,7 @@ impl lash_core::SessionStoreFactory for DeletingStoreFactory {
     ) -> std::result::Result<Arc<dyn lash_core::RuntimePersistence>, lash_core::StoreError> {
         let store = self
             .stores
-            .lock()
-            .expect("deleting factory lock")
+            .lock_recover()
             .entry(request.session_id.clone())
             .or_insert_with(|| Arc::new(SnapshotStore::default()))
             .clone();
@@ -1136,18 +1102,14 @@ impl lash_core::SessionStoreFactory for DeletingStoreFactory {
     ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
         Ok(self
             .stores
-            .lock()
-            .expect("deleting factory lock")
+            .lock_recover()
             .get(&request.session_id)
             .cloned()
             .map(|store| store as Arc<dyn lash_core::RuntimePersistence>))
     }
 
     async fn delete_session(&self, session_id: &str) -> std::result::Result<(), String> {
-        self.stores
-            .lock()
-            .expect("deleting factory lock")
-            .remove(session_id);
+        self.stores.lock_recover().remove(session_id);
         Ok(())
     }
 }
@@ -1248,7 +1210,7 @@ impl ToolProvider for PendingAppTools {
             Ok(key) => key,
             Err(err) => return lash_core::ToolResult::err_fmt(err),
         };
-        if let Some(tx) = self.key_tx.lock().expect("pending tool key tx").take() {
+        if let Some(tx) = self.key_tx.lock_recover().take() {
             let _ = tx.send(key);
         }
         lash_core::ToolResult::pending(lash_core::PendingCompletion::new())
@@ -1345,7 +1307,7 @@ impl DurableInputTools {
     }
 
     fn send_key_result(&self, result: std::result::Result<lash_core::AwaitEventKey, String>) {
-        if let Some(tx) = self.key_tx.lock().expect("durable input key tx").take() {
+        if let Some(tx) = self.key_tx.lock_recover().take() {
             let _ = tx.send(result);
         }
     }
@@ -1811,8 +1773,7 @@ fn recording_text_provider(
         .complete(move |request| {
             let seen = Arc::clone(&seen);
             async move {
-                seen.lock()
-                    .expect("seen requests")
+                seen.lock_recover()
                     .push((request.model, request.model_variant));
                 Ok(LlmResponse {
                     full_text: text.to_string(),
@@ -1888,9 +1849,7 @@ fn recording_prompt_provider(seen: Arc<std::sync::Mutex<Vec<String>>>) -> Provid
         .complete(move |request| {
             let seen = Arc::clone(&seen);
             async move {
-                seen.lock()
-                    .expect("seen prompts")
-                    .push(system_text(&request));
+                seen.lock_recover().push(system_text(&request));
                 Ok(LlmResponse {
                     full_text: "ok".to_string(),
                     parts: vec![LlmOutputPart::Text {
@@ -1913,9 +1872,7 @@ fn recording_request_provider(seen: Arc<std::sync::Mutex<Vec<String>>>) -> Provi
         .complete(move |request| {
             let seen = Arc::clone(&seen);
             async move {
-                seen.lock()
-                    .expect("seen prompts")
-                    .push(request_text(&request));
+                seen.lock_recover().push(request_text(&request));
                 Ok(text_response(&lashlang_block("finish \"ok\"")))
             }
         })
@@ -1972,7 +1929,7 @@ fn checkpoint_gated_provider(
             async move {
                 let call = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 if call == 0 {
-                    if let Some(tx) = entered_tx.lock().expect("entered tx").take() {
+                    if let Some(tx) = entered_tx.lock_recover().take() {
                         let _ = tx.send(());
                     }
                     if let Some(rx) = release_rx.lock().await.take() {

@@ -31,10 +31,7 @@ impl lash_core::facade_support::PluginFactory for ShutdownRecordingPluginFactory
     }
 
     async fn shutdown(&self) -> std::result::Result<(), lash_core::PluginError> {
-        self.calls
-            .lock()
-            .expect("shutdown calls lock")
-            .push(self.id);
+        self.calls.lock_recover().push(self.id);
         match self.failure {
             Some(message) => Err(lash_core::PluginError::Invoke(message.to_string())),
             None => Ok(()),
@@ -91,7 +88,7 @@ async fn core_shutdown_visits_protocol_then_common_factories_and_continues_after
         .expect_err("first factory failure surfaces");
 
     assert_eq!(
-        *calls.lock().expect("shutdown calls lock"),
+        *calls.lock_recover(),
         vec!["protocol", "first", "second"],
         "protocol factory is first and a failure does not stop the common-factory walk"
     );

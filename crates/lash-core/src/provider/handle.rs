@@ -1,4 +1,5 @@
 use super::support::*;
+use futures_util::FutureExt as _;
 
 /// Component bundle returned by provider factories.
 #[derive(Debug)]
@@ -147,7 +148,24 @@ impl ProviderHandle {
             let clock = self.components.rate_limiter.clock();
             let started_at = clock.timestamp_ms();
             let started = clock.now();
-            let result = self.components.provider.complete(request.clone()).await;
+            let (result, panic_payload) = match std::panic::AssertUnwindSafe(
+                self.components.provider.complete(request.clone()),
+            )
+            .catch_unwind()
+            .await
+            {
+                Ok(result) => (result, None),
+                Err(payload) => {
+                    let message = crate::panic_containment::payload_message(payload.as_ref());
+                    (
+                        Err(LlmTransportError::new(message)
+                            .with_kind(ProviderFailureKind::Unknown)
+                            .with_code("provider_panicked")
+                            .retryable(false)),
+                        Some(payload),
+                    )
+                }
+            };
             match result {
                 Ok(response) => {
                     let outcome = success_outcome(response.terminal_reason);
@@ -177,7 +195,13 @@ impl ProviderHandle {
                     });
                 }
                 Err(failure) => {
-                    let failure = self.components.failure_classifier.classify(failure);
+                    // Lash manufactured `provider_panicked`; it is not provider
+                    // text and must never pass through heuristic classification.
+                    let failure = if panic_payload.is_some() {
+                        failure
+                    } else {
+                        self.components.failure_classifier.classify(failure)
+                    };
                     // Throttle deference: when the provider signals a throttle
                     // (retryable `Quota`) AND states how long to back off
                     // (`Retry-After`), honor the wait without consuming a
@@ -252,14 +276,18 @@ impl ProviderHandle {
                                 reason: Some(reason.to_string()),
                             }),
                         ));
-                        return Err(ProviderCompletionError {
+                        let completion_error = ProviderCompletionError {
                             error: failure,
                             call_record: LlmCallRecord {
                                 call_id,
                                 label: None,
                                 attempts: records,
                             },
-                        });
+                        };
+                        if let Some(payload) = panic_payload {
+                            crate::panic_containment::enforce_loudness(payload);
+                        }
+                        return Err(completion_error);
                     }
                     let delay = reliability
                         .retry
@@ -309,7 +337,10 @@ impl ProviderHandle {
     /// core and call this before process exit. Providers with no reusable
     /// transport state close as a no-op.
     pub async fn close(&self) -> Result<(), LlmTransportError> {
-        self.components.provider.close().await
+        std::panic::AssertUnwindSafe(self.components.provider.close())
+            .catch_unwind()
+            .await
+            .unwrap_or_else(provider_close_panicked)
     }
 
     pub fn to_spec(&self) -> ProviderSpec {
@@ -318,6 +349,18 @@ impl ProviderHandle {
             config: self.components.provider.serialize_config(),
         }
     }
+}
+
+fn provider_close_panicked(
+    payload: Box<dyn std::any::Any + Send>,
+) -> Result<(), LlmTransportError> {
+    let message = crate::panic_containment::payload_message(payload.as_ref());
+    let failure = Err(LlmTransportError::new(message)
+        .with_kind(ProviderFailureKind::Unknown)
+        .with_code("provider_panicked")
+        .retryable(false));
+    crate::panic_containment::enforce_loudness(payload);
+    failure
 }
 
 fn success_outcome(reason: LlmTerminalReason) -> AttemptOutcome {

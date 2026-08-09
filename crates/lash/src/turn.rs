@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -73,7 +74,7 @@ impl TurnCancelRegistry {
         token: CancellationToken,
         origin_hint: TurnCancelOriginHint,
     ) -> TurnCancelGuard {
-        let mut inner = self.inner.lock().expect("turn cancel registry");
+        let mut inner = self.inner.lock_recover();
         let id = inner.next_id;
         inner.next_id += 1;
         inner
@@ -86,7 +87,7 @@ impl TurnCancelRegistry {
     }
 
     pub(crate) fn cancel_all(&self, origin: Option<String>) -> usize {
-        let inner = self.inner.lock().expect("turn cancel registry");
+        let inner = self.inner.lock_recover();
         for registered in inner.active.values() {
             registered.origin_hint.set(origin.clone());
             registered.token.cancel();
@@ -102,11 +103,7 @@ pub(crate) struct TurnCancelGuard {
 
 impl Drop for TurnCancelGuard {
     fn drop(&mut self) {
-        self.registry
-            .lock()
-            .expect("turn cancel registry")
-            .active
-            .remove(&self.id);
+        self.registry.lock_recover().active.remove(&self.id);
     }
 }
 
@@ -526,12 +523,31 @@ impl TurnStream {
     }
 
     pub async fn finish(self) -> Result<TurnResult> {
-        self.completion.await.map_err(|err| {
-            EmbedError::Runtime(lash_core::RuntimeError::new(
+        match self.completion.await {
+            Ok(result) => result,
+            Err(err) if err.is_panic() => {
+                let payload = err.into_panic();
+                let message = if let Some(message) = payload.downcast_ref::<&str>() {
+                    (*message).to_string()
+                } else if let Some(message) = payload.downcast_ref::<String>() {
+                    message.clone()
+                } else {
+                    "non-string panic payload".to_string()
+                };
+                let failure = EmbedError::Runtime(lash_core::RuntimeError::new(
+                    RuntimeErrorCode::TurnStreamJoin,
+                    format!("turn_panicked: {message}"),
+                ));
+                if lash_core::panic_containment::is_loud() {
+                    std::panic::resume_unwind(payload);
+                }
+                Err(failure)
+            }
+            Err(err) => Err(EmbedError::Runtime(lash_core::RuntimeError::new(
                 RuntimeErrorCode::TurnStreamJoin,
                 format!("turn stream task failed: {err}"),
-            ))
-        })?
+            ))),
+        }
     }
 }
 
@@ -1129,28 +1145,19 @@ pub(crate) struct RunActivityCollector {
 
 impl RunActivityCollector {
     fn into_activities(self) -> Vec<TurnActivity> {
-        self.activities
-            .lock()
-            .expect("run activity collector lock")
-            .clone()
+        self.activities.lock_recover().clone()
     }
 
     #[cfg(test)]
     pub(crate) fn snapshot(&self) -> Vec<TurnActivity> {
-        self.activities
-            .lock()
-            .expect("run activity collector lock")
-            .clone()
+        self.activities.lock_recover().clone()
     }
 }
 
 #[async_trait]
 impl TurnActivitySink for RunActivityCollector {
     async fn emit(&self, activity: TurnActivity) {
-        self.activities
-            .lock()
-            .expect("run activity collector lock")
-            .push(activity);
+        self.activities.lock_recover().push(activity);
     }
 }
 

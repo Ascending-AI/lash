@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use lash::sync::MutexExt;
 use lash::{
     PluginBinding,
     plugins::{PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin},
@@ -149,17 +150,13 @@ fn load_chat_board_for_plugin(
     db: &Arc<Mutex<AppDb>>,
     chat_id: &str,
 ) -> Result<BoardState, PluginError> {
-    let mut db = db
-        .lock()
-        .map_err(|_| PluginError::Session("database lock poisoned".to_string()))?;
+    let mut db = db.lock_recover();
     db.chat_board(chat_id)
         .map_err(|err| PluginError::Session(err.to_string()))
 }
 
 fn load_chat_board_for_tool(db: &Arc<Mutex<AppDb>>, chat_id: &str) -> Result<BoardState, String> {
-    let mut db = db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
+    let mut db = db.lock_recover();
     db.chat_board(chat_id).map_err(|err| err.to_string())
 }
 
@@ -168,9 +165,7 @@ fn apply_agent_move_for_tool(
     chat_id: &str,
     cell: usize,
 ) -> Result<serde_json::Value, String> {
-    let mut db = db
-        .lock()
-        .map_err(|_| "database lock poisoned".to_string())?;
+    let mut db = db.lock_recover();
     db.apply_agent_move(chat_id, cell)
         .map_err(|err| err.to_string())
 }

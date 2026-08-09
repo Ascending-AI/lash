@@ -11,6 +11,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use lash::sync::MutexExt;
 use lash::tools::{
     CataloguePreviewOptions, DeferredToolGrant, DeferredToolResolution, DeferredToolResolver,
     LashlangToolBinding, SharedDeferredToolResolver, StaticToolExecute, StaticToolProvider,
@@ -180,8 +181,7 @@ impl DeferredToolResolver for WorkbenchDeferredToolResolver {
                 let resolution = match self.store.load(path) {
                     Ok(Some(grant)) => {
                         self.installed
-                            .lock()
-                            .expect("deferred installed-grant lock")
+                            .lock_recover()
                             .insert((*path).to_string(), grant.clone());
                         DeferredToolResolution::Resolved(Box::new(grant))
                     }
@@ -204,8 +204,7 @@ impl DeferredToolResolver for WorkbenchDeferredToolResolver {
 
     fn install_recorded_grant(&self, path: &str, grant: &DeferredToolGrant) {
         self.installed
-            .lock()
-            .expect("deferred installed-grant lock")
+            .lock_recover()
             .insert(path.to_string(), grant.clone());
     }
 }
@@ -734,8 +733,7 @@ mod tests {
             reopened
                 .resolver
                 .installed
-                .lock()
-                .expect("installed grant lock")
+                .lock_recover()
                 .get("text.sha256")
                 .expect("reinstalled recorded grant")
                 .definition

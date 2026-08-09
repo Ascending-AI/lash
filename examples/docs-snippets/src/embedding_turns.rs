@@ -84,6 +84,7 @@ async fn update_child_usage(
 
 // docs:start:ui-sink
 use async_trait::async_trait;
+use lash::sync::MutexExt;
 use lash::{TurnActivity, TurnActivitySink, TurnEvent};
 
 struct AppEvents {
@@ -107,30 +108,24 @@ impl TurnActivitySink for AppEvents {
                 append_live_text(text.to_string()).await;
             }
             TurnEvent::ReasoningDelta { text } => {
-                let row = self.turn_state.lock().unwrap().reasoning.clone();
+                let row = self.turn_state.lock_recover().reasoning.clone();
                 let row = upsert_reasoning_row(row, text.to_string()).await;
-                self.turn_state.lock().unwrap().reasoning = Some(row);
+                self.turn_state.lock_recover().reasoning = Some(row);
             }
             TurnEvent::ToolCallStarted { name, args, .. } => {
                 let row = insert_tool_row(name, args).await;
                 self.turn_state
-                    .lock()
-                    .unwrap()
+                    .lock_recover()
                     .tools
                     .insert(correlation_id, row);
             }
             TurnEvent::ToolCallCompleted { name, output, .. } => {
-                let row = self
-                    .turn_state
-                    .lock()
-                    .unwrap()
-                    .tools
-                    .remove(&correlation_id);
+                let row = self.turn_state.lock_recover().tools.remove(&correlation_id);
                 update_or_insert_tool_row(row, name, output).await;
             }
             TurnEvent::CodeBlockStarted { language, code, .. } => {
                 let row = insert_code_row(language, code).await;
-                self.turn_state.lock().unwrap().code = Some(row);
+                self.turn_state.lock_recover().code = Some(row);
             }
             TurnEvent::CodeBlockCompleted {
                 language,
@@ -139,7 +134,7 @@ impl TurnActivitySink for AppEvents {
                 success,
                 ..
             } => {
-                let row = self.turn_state.lock().unwrap().code.take();
+                let row = self.turn_state.lock_recover().code.take();
                 update_or_insert_code_row(row, language, output, error, success).await;
             }
             TurnEvent::FinalValue { value } => {

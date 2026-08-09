@@ -1,6 +1,7 @@
 //! Cross-layer attachment owner / cold effect-replay conformance.
 
 use super::*;
+use lash_sansio::sync::MutexExt;
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -86,16 +87,8 @@ pub async fn attachment_owner_cold_replay(mut backend: AttachmentOwnerColdReplay
         .await
         .expect("journal typed attachment outcome");
     assert_eq!(first_local_calls.load(Ordering::SeqCst), 2);
-    let plain_id = plain_id
-        .lock()
-        .expect("plain id")
-        .clone()
-        .expect("plain put");
-    let typed_id = typed_id
-        .lock()
-        .expect("typed id")
-        .clone()
-        .expect("typed put");
+    let plain_id = plain_id.lock_recover().clone().expect("plain put");
+    let typed_id = typed_id.lock_recover().clone().expect("typed put");
     assert_plain_json_outcome(&plain_outcome, &plain_id);
     assert_typed_outcome(&typed_outcome, &typed_id);
 
@@ -217,7 +210,7 @@ fn attachment_put_executor(
             .map_err(|err| {
                 crate::RuntimeEffectControllerError::new("attachment_put", err.to_string())
             })?;
-        *captured_id.lock().expect("capture attachment id") = Some(reference.id.clone());
+        *captured_id.lock_recover() = Some(reference.id.clone());
         let output = if typed {
             crate::ToolCallOutput::success(crate::ToolValue::Attachment(
                 crate::AttachmentSource::stored(reference),

@@ -1,3 +1,4 @@
+use lash_sansio::sync::{LockResultExt, MutexExt};
 use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
@@ -82,10 +83,7 @@ impl<'run> HostBridge<'run> {
     }
 
     fn next_index(&self) -> usize {
-        let mut guard = self
-            .next_tool_index
-            .lock()
-            .expect("tool index lock poisoned");
+        let mut guard = self.next_tool_index.lock_recover();
         let next = *guard;
         *guard += 1;
         next
@@ -103,10 +101,7 @@ impl<'run> HostBridge<'run> {
             .unwrap_or(tool_name)
             .to_string();
         if let Some(record) = reply.record {
-            self.tool_calls
-                .lock()
-                .map_err(|_| ExecutionHostError::new("tool call buffer poisoned"))?
-                .push(record);
+            self.tool_calls.lock_recover().push(record);
         }
         if reply.output.is_success() {
             let value = reply.output.value_for_projection();
@@ -131,20 +126,19 @@ impl<'run> HostBridge<'run> {
         // pre-dispatch failures deliberately produce no `Calls:` entry because
         // the source operation did not execute.
         self.executed_calls
-            .lock()
-            .map_err(|_| ExecutionHostError::new("executed call buffer poisoned"))?
+            .lock_recover()
             .push((index, lash_core::ExecutedCallRecord { operation, outcome }));
         Ok(())
     }
 
     pub(super) fn into_collected(self) -> CollectedExecutionOutput {
-        let mut executed_calls = self.executed_calls.into_inner().unwrap_or_default();
+        let mut executed_calls = self.executed_calls.into_inner().recover();
         executed_calls.sort_by_key(|(index, _)| *index);
         CollectedExecutionOutput {
-            observations: self.observations.into_inner().unwrap_or_default(),
-            observation_truncation: self.observation_truncation.into_inner().unwrap_or_default(),
-            printed_images: self.printed_images.into_inner().unwrap_or_default(),
-            tool_calls: self.tool_calls.into_inner().unwrap_or_default(),
+            observations: self.observations.into_inner().recover(),
+            observation_truncation: self.observation_truncation.into_inner().recover(),
+            printed_images: self.printed_images.into_inner().recover(),
+            tool_calls: self.tool_calls.into_inner().recover(),
             executed_calls: executed_calls
                 .into_iter()
                 .map(|(_, record)| record)
@@ -890,19 +884,10 @@ impl HostBridge<'_> {
         };
         let raw_text = format_output_value(&value).await;
         let metadata = observation_projection_metadata(&raw_text, &projected_text);
-        self.observations
-            .lock()
-            .map_err(|_| ExecutionHostError::new("observation buffer poisoned"))?
-            .push(raw_text);
-        self.observation_truncation
-            .lock()
-            .map_err(|_| ExecutionHostError::new("observation metadata buffer poisoned"))?
-            .push(metadata);
+        self.observations.lock_recover().push(raw_text);
+        self.observation_truncation.lock_recover().push(metadata);
         if !images.is_empty() {
-            self.printed_images
-                .lock()
-                .map_err(|_| ExecutionHostError::new("printed image buffer poisoned"))?
-                .extend(images);
+            self.printed_images.lock_recover().extend(images);
         }
         Ok(())
     }

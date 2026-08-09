@@ -1335,8 +1335,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
                 let serialized =
                     serde_json::to_string(&request).expect("serialize provider request");
                 requests
-                    .lock()
-                    .expect("provider request lock")
+                    .lock_recover()
                     .push(serialized);
                 let call_index = response_index.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let _ = provider_call_tx.send(call_index);
@@ -1436,7 +1435,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     )
     .await;
 
-    let captured = requests.lock().expect("provider request lock").clone();
+    let captured = requests.lock_recover().clone();
     assert_eq!(captured.len(), 3, "unexpected provider request sequence");
     assert!(!captured[0].contains("active injection marker"));
     assert_eq!(

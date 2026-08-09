@@ -1,6 +1,7 @@
 use super::create_plan::{SessionCreatePlan, resolve_session_create_plan};
 use super::materialize::{MaterializedSession, materialize_session_create_plan};
 use super::*;
+use lash_sansio::sync::MutexExt;
 
 impl ManagedSessionCapability {
     async fn register_materialized_session(
@@ -66,8 +67,7 @@ impl ManagedSessionCapability {
         if let Some(source) = &plan.usage_source {
             usage
                 .child_sources
-                .lock()
-                .expect("child usage sources lock")
+                .lock_recover()
                 .insert(plan.session_id.clone(), source.clone());
         }
         Ok(SessionHandle {
@@ -123,11 +123,7 @@ impl ManagedSessionCapability {
             )));
         }
         self.registry.lock().await.remove(session_id);
-        usage
-            .child_sources
-            .lock()
-            .expect("child usage sources lock")
-            .remove(session_id);
+        usage.child_sources.lock_recover().remove(session_id);
         current.plugins.host().unregister_session(session_id)?;
         Ok(())
     }

@@ -1,5 +1,6 @@
 use super::*;
 use crate::SessionCommitStore as _;
+use lash_sansio::sync::MutexExt;
 
 #[tokio::test]
 async fn durable_turn_commit_rejects_token_usage_overflow() {
@@ -54,7 +55,7 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
         error.message,
         "token usage counter `input_tokens` overflowed while accumulating (turn, mock-model)"
     );
-    assert_eq!(*store.runtime_commit_count.lock().expect("commit count"), 0);
+    assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
 
     let next_error = runtime
         .run_turn_assembled(
@@ -66,7 +67,7 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
         .expect_err("the unconfirmed overflowing row must poison the next turn");
     assert_eq!(next_error.code, crate::RuntimeErrorCode::StoreCommitFailed);
     assert_eq!(next_error.message, error.message);
-    assert_eq!(*store.runtime_commit_count.lock().expect("commit count"), 0);
+    assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
 }
 
 #[tokio::test]
@@ -134,7 +135,7 @@ async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
         error.message,
         "token usage counter `input_tokens` overflowed while accumulating (turn, mock-model)"
     );
-    assert_eq!(*store.runtime_commit_count.lock().expect("commit count"), 0);
+    assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
 }
 
 // The in-memory `RecordingStore` stands in for the real store across these

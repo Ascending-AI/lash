@@ -107,8 +107,8 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
         ToolResult::Done(_) => result,
         ToolResult::Pending(pending) => {
             let key = match completion_context.take_completion_key() {
-                Ok(Some(key)) => key,
-                Ok(None) => {
+                Some(key) => key,
+                None => {
                     return launch_done(outcome(
                         tool_name,
                         args,
@@ -116,18 +116,6 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
                             ToolFailureClass::Internal,
                             "pending_tool_missing_completion_key",
                             "tool returned Pending without first obtaining a completion key",
-                        ),
-                        duration_ms,
-                    ));
-                }
-                Err(err) => {
-                    return launch_done(outcome(
-                        tool_name,
-                        args,
-                        runtime_failure(
-                            ToolFailureClass::Internal,
-                            "pending_tool_completion_key_failed",
-                            err.to_string(),
                         ),
                         duration_ms,
                     ));
@@ -200,8 +188,8 @@ pub(super) async fn dispatch_granted_prepared_tool_attempt_launch_with_execution
         ToolResult::Done(_) => result,
         ToolResult::Pending(pending) => {
             let key = match completion_context.take_completion_key() {
-                Ok(Some(key)) => key,
-                Ok(None) => {
+                Some(key) => key,
+                None => {
                     return launch_done(outcome(
                         tool_name,
                         args,
@@ -209,18 +197,6 @@ pub(super) async fn dispatch_granted_prepared_tool_attempt_launch_with_execution
                             ToolFailureClass::Internal,
                             "pending_tool_missing_completion_key",
                             "tool returned Pending without first obtaining a completion key",
-                        ),
-                        duration_ms,
-                    ));
-                }
-                Err(err) => {
-                    return launch_done(outcome(
-                        tool_name,
-                        args,
-                        runtime_failure(
-                            ToolFailureClass::Internal,
-                            "pending_tool_completion_key_failed",
-                            err.to_string(),
                         ),
                         duration_ms,
                     ));
@@ -295,9 +271,7 @@ pub(crate) async fn execute_prepared_tool_attempt_effect<'run>(
             duration_ms: pending.duration_ms,
         },
     };
-    let triggers = context.trigger_outcomes.drain().map_err(|err| {
-        crate::RuntimeEffectControllerError::new("tool_trigger_outcome_drain", err)
-    })?;
+    let triggers = context.trigger_outcomes.drain();
     Ok(crate::ToolAttemptEffectOutcome { launch, triggers })
 }
 

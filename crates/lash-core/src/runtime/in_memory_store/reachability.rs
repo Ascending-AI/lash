@@ -1,5 +1,6 @@
 //! Reachability-derived graph retirement for the in-memory store.
 
+use lash_sansio::sync::MutexExt;
 use std::collections::{HashMap, HashSet};
 
 use super::InMemorySessionStore;
@@ -65,30 +66,13 @@ impl InMemorySessionStore {
         &self,
         session_id: &str,
     ) -> Result<(), crate::StoreError> {
-        let mut heads = self
-            .global_session_heads
-            .lock()
-            .expect("lock global session heads")
-            .clone();
-        let graph = self
-            .global_session_graph
-            .lock()
-            .expect("lock global graph")
-            .clone();
-        let mut owners = self
-            .global_node_owners
-            .lock()
-            .expect("lock global node owners")
-            .clone();
-        let mut tombstoned = self
-            .tombstoned_node_ids
-            .lock()
-            .expect("lock tombstoned nodes")
-            .clone();
+        let mut heads = self.global_session_heads.lock_recover().clone();
+        let graph = self.global_session_graph.lock_recover().clone();
+        let mut owners = self.global_node_owners.lock_recover().clone();
+        let mut tombstoned = self.tombstoned_node_ids.lock_recover().clone();
         let anchors = self
             .node_anchors
-            .lock()
-            .expect("lock node anchors")
+            .lock_recover()
             .keys()
             .cloned()
             .collect::<HashSet<_>>();
@@ -139,45 +123,22 @@ impl InMemorySessionStore {
         owners.retain(|node_id, _| !reclaimed.contains(node_id));
         tombstoned.clear();
 
-        *self
-            .global_session_heads
-            .lock()
-            .expect("lock global session heads") = heads;
-        *self.global_session_graph.lock().expect("lock global graph") =
-            crate::SessionGraph::from_nodes(nodes, None);
-        *self
-            .global_node_owners
-            .lock()
-            .expect("lock global node owners") = owners;
-        *self
-            .tombstoned_node_ids
-            .lock()
-            .expect("lock tombstoned nodes") = tombstoned;
-        *self.session_graph.lock().expect("lock graph") = crate::SessionGraph::default();
-        *self.session_head_meta.lock().expect("lock session head") = None;
-        *self.session_meta.lock().expect("lock session meta") = None;
-        *self.checkpoint.lock().expect("lock checkpoint") = None;
-        self.attachment_manifest
-            .lock()
-            .expect("lock attachment manifest")
-            .clear();
-        self.usage_deltas.lock().expect("lock usage deltas").clear();
-        self.runtime_turn_commits
-            .lock()
-            .expect("lock runtime turn commits")
-            .clear();
-        self.queued_work.lock().expect("lock queued work").clear();
-        self.pending_turn_inputs
-            .lock()
-            .expect("lock pending turn input")
-            .clear();
-        self.session_execution_leases
-            .lock()
-            .expect("lock session execution leases")
-            .clear();
+        *self.global_session_heads.lock_recover() = heads;
+        *self.global_session_graph.lock_recover() = crate::SessionGraph::from_nodes(nodes, None);
+        *self.global_node_owners.lock_recover() = owners;
+        *self.tombstoned_node_ids.lock_recover() = tombstoned;
+        *self.session_graph.lock_recover() = crate::SessionGraph::default();
+        *self.session_head_meta.lock_recover() = None;
+        *self.session_meta.lock_recover() = None;
+        *self.checkpoint.lock_recover() = None;
+        self.attachment_manifest.lock_recover().clear();
+        self.usage_deltas.lock_recover().clear();
+        self.runtime_turn_commits.lock_recover().clear();
+        self.queued_work.lock_recover().clear();
+        self.pending_turn_inputs.lock_recover().clear();
+        self.session_execution_leases.lock_recover().clear();
         self.wake_redelivery_fences
-            .lock()
-            .expect("lock wake redelivery fences")
+            .lock_recover()
             .retain(|(target_session_id, _), _| target_session_id != session_id);
         Ok(())
     }

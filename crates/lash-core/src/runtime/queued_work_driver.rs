@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -345,9 +346,7 @@ impl QueuedWorkExecutionScheduler {
     }
 
     fn lock_state(&self) -> std::sync::MutexGuard<'_, QueuedWorkExecutionSchedulerState> {
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.state.lock_recover()
     }
 
     fn available_permits(&self) -> Option<usize> {
@@ -837,7 +836,7 @@ mod tests {
             &self,
             _session_id: Option<&str>,
         ) -> Result<Option<bool>, QueuedWorkRunError> {
-            Ok(Some(!self.pending.lock().expect("lock pending").is_empty()))
+            Ok(Some(!self.pending.lock_recover().is_empty()))
         }
 
         async fn run_queued_work(
@@ -845,16 +844,13 @@ mod tests {
             request: QueuedWorkRunRequest,
         ) -> Result<(), QueuedWorkRunError> {
             self.hydrations.fetch_add(1, Ordering::SeqCst);
-            self.reasons
-                .lock()
-                .expect("lock reasons")
-                .push(request.reason);
+            self.reasons.lock_recover().push(request.reason);
             let drained = {
-                let mut pending = self.pending.lock().expect("lock pending");
+                let mut pending = self.pending.lock_recover();
                 let limit = pending.len().min(3);
                 pending.drain(..limit).collect::<Vec<_>>()
             };
-            self.observed.lock().expect("lock observed").extend(drained);
+            self.observed.lock_recover().extend(drained);
             self.completed.notify_one();
             Ok(())
         }
@@ -892,7 +888,7 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
                 let completed = handle.completed.notified();
-                if handle.observed.lock().expect("lock observed").len() == SIGNALS {
+                if handle.observed.lock_recover().len() == SIGNALS {
                     break;
                 }
                 completed.await;
@@ -902,11 +898,11 @@ mod tests {
         .expect("all queued work drains in bounded batches");
         assert_eq!(handle.hydrations.load(Ordering::SeqCst), 3);
         assert_eq!(
-            *handle.observed.lock().expect("lock observed"),
+            *handle.observed.lock_recover(),
             (0..SIGNALS).collect::<Vec<_>>()
         );
         assert_eq!(
-            *handle.reasons.lock().expect("lock reasons"),
+            *handle.reasons.lock_recover(),
             vec![
                 "queued_turn_input,process_wake",
                 "queued_turn_input,process_wake",
@@ -1103,7 +1099,7 @@ mod tests {
             &self,
             _session_id: Option<&str>,
         ) -> Result<Option<bool>, QueuedWorkRunError> {
-            Ok(Some(!self.pending.lock().expect("lock pending").is_empty()))
+            Ok(Some(!self.pending.lock_recover().is_empty()))
         }
 
         async fn run_queued_work(
@@ -1111,17 +1107,9 @@ mod tests {
             request: QueuedWorkRunRequest,
         ) -> Result<(), QueuedWorkRunError> {
             let run = self.runs.fetch_add(1, Ordering::SeqCst);
-            self.reasons
-                .lock()
-                .expect("lock rerun reasons")
-                .push(request.reason);
-            let drained = self
-                .pending
-                .lock()
-                .expect("lock pending")
-                .drain(..)
-                .collect::<Vec<_>>();
-            self.observed.lock().expect("lock observed").extend(drained);
+            self.reasons.lock_recover().push(request.reason);
+            let drained = self.pending.lock_recover().drain(..).collect::<Vec<_>>();
+            self.observed.lock_recover().extend(drained);
             if run == 0 {
                 self.first_entered.notify_one();
                 self.release_first
@@ -1150,7 +1138,7 @@ mod tests {
         driver.notify_pending_work(Some("session-rerun"), "first");
         handle.first_entered.notified().await;
 
-        handle.pending.lock().expect("lock pending").push_back(1);
+        handle.pending.lock_recover().push_back(1);
         driver.notify_pending_work(Some("session-rerun"), "second");
         driver.notify_pending_work(Some("session-rerun"), "second");
         handle.release_first.add_permits(1);
@@ -1166,9 +1154,9 @@ mod tests {
         }
 
         assert_eq!(handle.runs.load(Ordering::SeqCst), 2);
-        assert_eq!(*handle.observed.lock().expect("lock observed"), vec![0, 1]);
+        assert_eq!(*handle.observed.lock_recover(), vec![0, 1]);
         assert_eq!(
-            *handle.reasons.lock().expect("lock rerun reasons"),
+            *handle.reasons.lock_recover(),
             vec!["first", "second"],
             "the in-flight signal is attributed to the rerun it schedules"
         );

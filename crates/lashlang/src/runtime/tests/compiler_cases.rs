@@ -268,8 +268,7 @@ async fn aggregate_await_evaluates_arguments_once_in_source_order_before_batch()
                 AbilityOp::ResourceOperation(operation) => {
                     let value = Self::echo_value(&operation);
                     self.events
-                        .lock()
-                        .expect("events")
+                        .lock_recover()
                         .push(format!("single:{value}"));
                     Ok(AbilityResult::Value(value))
                 }
@@ -279,7 +278,7 @@ async fn aggregate_await_evaluates_arguments_once_in_source_order_before_batch()
                         .iter()
                         .map(Self::echo_value)
                         .collect::<Vec<_>>();
-                    self.events.lock().expect("events").push(format!(
+                    self.events.lock_recover().push(format!(
                         "batch:{}",
                         values
                             .iter()
@@ -321,7 +320,7 @@ async fn aggregate_await_evaluates_arguments_once_in_source_order_before_batch()
         .expect("program should run");
     assert!(matches!(outcome, ExecutionOutcome::Finished(_)));
     assert_eq!(
-        host.events.lock().expect("events").as_slice(),
+        host.events.lock_recover().as_slice(),
         ["single:arg-a", "single:arg-b", "batch:arg-a,arg-b"]
     );
 }
@@ -456,8 +455,7 @@ async fn real_runs_correlate_every_execution_site_to_the_selected_workflow_path(
 
         fn observe_lashlang_execution(&self, observation: crate::LashlangExecutionObservation) {
             self.observations
-                .lock()
-                .expect("observations lock")
+                .lock_recover()
                 .push(observation);
         }
     }
@@ -489,7 +487,7 @@ async fn real_runs_correlate_every_execution_site_to_the_selected_workflow_path(
             ExecutionOutcome::Finished(Value::String("first".into()))
         );
 
-        let observations = host.observations.into_inner().expect("observations lock");
+        let observations = host.observations.into_inner().recover();
         let correlated = observations
             .iter()
             .map(|observation| {

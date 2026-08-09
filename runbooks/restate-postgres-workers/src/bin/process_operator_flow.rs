@@ -7,6 +7,7 @@
 //! lease, observer edge, abandon request, and terminal are the contract under
 //! judgment.
 
+use lash::sync::MutexExt;
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -223,21 +224,11 @@ struct JournalController {
 
 impl JournalController {
     fn active(&self) -> Vec<String> {
-        self.active
-            .lock()
-            .expect("active effect journal")
-            .iter()
-            .cloned()
-            .collect()
+        self.active.lock_recover().iter().cloned().collect()
     }
 
     fn completed(&self) -> Vec<String> {
-        self.completed
-            .lock()
-            .expect("completed effect journal")
-            .iter()
-            .cloned()
-            .collect()
+        self.completed.lock_recover().iter().cloned().collect()
     }
 }
 
@@ -310,20 +301,11 @@ impl RuntimeEffectController for JournalController {
             .replay_key()
             .map(ToOwned::to_owned)
             .unwrap_or_else(|| format!("{:?}", envelope.invocation.effect_kind()));
-        self.active
-            .lock()
-            .expect("active effect journal")
-            .insert(key.clone());
+        self.active.lock_recover().insert(key.clone());
         let result = self.inline.execute_effect(envelope, local_executor).await;
-        self.active
-            .lock()
-            .expect("active effect journal")
-            .remove(&key);
+        self.active.lock_recover().remove(&key);
         if result.is_ok() {
-            self.completed
-                .lock()
-                .expect("completed effect journal")
-                .insert(key);
+            self.completed.lock_recover().insert(key);
         }
         result
     }

@@ -65,6 +65,9 @@ impl RuntimeTurnDriver<'_> {
         if let Some(call_record) = call_record {
             self.llm_calls.push(call_record);
         }
+        let loud_provider_panic = result.as_ref().err().and_then(|error| {
+            (error.code.as_deref() == Some("provider_panicked")).then(|| error.message.clone())
+        });
         // FIG-793: the LLM run is the deployed first journal command for this
         // protocol iteration, so it must be emitted and awaited before any
         // cancellation observation is registered. Restate SDK 0.10 emits a
@@ -109,6 +112,9 @@ impl RuntimeTurnDriver<'_> {
                 text_streamed,
             },
         )?;
+        if let Some(message) = loud_provider_panic {
+            crate::panic_containment::enforce_message("provider_panicked", &message);
+        }
         Ok(())
     }
 

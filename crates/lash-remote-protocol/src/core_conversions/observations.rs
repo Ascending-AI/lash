@@ -1,3 +1,4 @@
+use lash_sansio::sync::{LockResultExt, MutexExt};
 impl RemoteTurnActivity {
     pub fn from_core(sequence: u64, activity: lash_core::TurnActivity) -> Self {
         let lash_core::TurnActivity {
@@ -372,11 +373,11 @@ impl<W: Write + Send + 'static> RemoteTurnActivitySink<W> {
     }
 
     pub fn take_errors(&self) -> Vec<String> {
-        std::mem::take(&mut *self.errors.lock().expect("remote sink errors lock"))
+        std::mem::take(&mut *self.errors.lock_recover())
     }
 
     pub fn into_inner(self) -> Result<W, W> {
-        self.writer.into_inner().map_err(|err| err.into_inner())
+        Ok(self.writer.into_inner().recover())
     }
 }
 
@@ -395,8 +396,7 @@ impl<W: Write + Send + 'static> lash_core::facade_support::TurnActivitySink for 
             let result = {
                 let mut writer = self
                     .writer
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    .lock_recover();
                 serde_json::to_writer(&mut *writer, &remote)
                     .and_then(|_| {
                         writer
@@ -407,8 +407,7 @@ impl<W: Write + Send + 'static> lash_core::facade_support::TurnActivitySink for 
             };
             if let Err(err) = result {
                 self.errors
-                    .lock()
-                    .expect("remote sink errors lock")
+                    .lock_recover()
                     .push(err.to_string());
             }
         })

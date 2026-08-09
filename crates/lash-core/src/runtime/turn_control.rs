@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -76,18 +77,14 @@ pub struct TurnCancelOriginHint {
 
 impl TurnCancelOriginHint {
     pub fn set(&self, origin: Option<String>) {
-        let mut hint = self.origin.lock().expect("turn cancel origin hint lock");
+        let mut hint = self.origin.lock_recover();
         if hint.is_none() {
             *hint = Some(origin);
         }
     }
 
     pub(crate) fn get(&self) -> Option<String> {
-        self.origin
-            .lock()
-            .expect("turn cancel origin hint lock")
-            .clone()
-            .flatten()
+        self.origin.lock_recover().clone().flatten()
     }
 }
 
@@ -553,17 +550,11 @@ impl ActiveTurnControl {
     }
 
     pub(crate) fn evidence(&self) -> Option<TurnCancellationEvidence> {
-        self.evidence
-            .lock()
-            .expect("turn cancellation evidence lock")
-            .clone()
+        self.evidence.lock_recover().clone()
     }
 
     fn remember(&self, evidence: TurnCancellationEvidence) {
-        *self
-            .evidence
-            .lock()
-            .expect("turn cancellation evidence lock") = Some(evidence);
+        *self.evidence.lock_recover() = Some(evidence);
     }
 
     fn internal_evidence(&self) -> TurnCancellationEvidence {

@@ -32,6 +32,7 @@
 //! line per backend. Session ids carry a per-run suffix, so a shared PostgreSQL
 //! database never collides with an earlier run and no phase truncates tables.
 
+use lash::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -127,11 +128,11 @@ impl LeaseTraceCapture {
     }
 
     fn reset(&self) {
-        self.events.lock().expect("lock lease trace").clear();
+        self.events.lock_recover().clear();
     }
 
     fn timeline(&self) -> Vec<Value> {
-        self.events.lock().expect("lock lease trace").clone()
+        self.events.lock_recover().clone()
     }
 
     fn named(&self, event: &str) -> Vec<Value> {
@@ -204,7 +205,7 @@ impl<S: tracing::Subscriber> Layer<S> for LeaseTraceCapture {
         for (key, value) in visitor.0 {
             captured[key] = value;
         }
-        self.events.lock().expect("lock lease trace").push(captured);
+        self.events.lock_recover().push(captured);
     }
 }
 

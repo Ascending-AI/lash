@@ -1,6 +1,7 @@
 //! Store-factory decorator that observes real runtime-checkpoint commits, so a
 //! harness can render durable-write lines from facts the backend accepted.
 
+use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -162,12 +163,7 @@ impl CheckpointWriteCollector {
     }
 
     pub fn events(&self) -> Vec<CheckpointWriteEvent> {
-        let mut events = self
-            .state
-            .lock()
-            .expect("checkpoint-write collector lock")
-            .events
-            .clone();
+        let mut events = self.state.lock_recover().events.clone();
         events.sort_by(|left, right| {
             (
                 left.attributed_session(),
@@ -190,7 +186,7 @@ impl CheckpointWriteCollector {
     /// Harnesses call this when re-attributing a commit that a separately
     /// executed proof produced; the decorator calls it for every commit it sees.
     pub fn push(&self, mut event: CheckpointWriteEvent) {
-        let mut state = self.state.lock().expect("checkpoint-write collector lock");
+        let mut state = self.state.lock_recover();
         let session_id = event.attributed_session().to_string();
         let next = state.next_commit_by_session.entry(session_id).or_insert(0);
         *next += 1;

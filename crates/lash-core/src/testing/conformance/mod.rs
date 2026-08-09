@@ -103,6 +103,7 @@ use lash_sansio::{AttachmentCreateMeta, AttachmentTypeMetadata, MediaType};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_sansio::sync::MutexExt;
 
     struct InMemoryFenceIntegrityInjector {
         runtime: Arc<crate::InMemorySessionStore>,
@@ -314,7 +315,7 @@ mod tests {
             BTreeMap::<String, Arc<dyn RuntimePersistence>>::new(),
         ));
         runtime_persistence_recovery_laws(move |scenario| {
-            let mut substrates = substrates.lock().expect("matrix substrates");
+            let mut substrates = substrates.lock_recover();
             let substrate = Arc::clone(
                 substrates
                     .entry(scenario.to_string())
@@ -331,7 +332,7 @@ mod tests {
             BTreeMap::<String, Arc<dyn RuntimePersistence>>::new(),
         ));
         Box::pin(turn_crash_trace_drift_check(move |scenario| {
-            let mut substrates = substrates.lock().expect("turn trace substrates");
+            let mut substrates = substrates.lock_recover();
             let substrate = Arc::clone(
                 substrates
                     .entry(scenario.to_string())
@@ -348,7 +349,7 @@ mod tests {
             BTreeMap::<String, Arc<dyn RuntimePersistence>>::new(),
         ));
         Box::pin(turn_crash_matrix_level_1(move |scenario| {
-            let mut substrates = substrates.lock().expect("turn matrix substrates");
+            let mut substrates = substrates.lock_recover();
             let substrate = Arc::clone(
                 substrates
                     .entry(scenario.to_string())

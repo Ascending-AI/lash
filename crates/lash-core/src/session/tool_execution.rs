@@ -828,7 +828,7 @@ impl RuntimeExecutionContext<'_> {
         outcomes: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
     ) {
         for outcome in outcomes {
-            let _ = self.dispatch.trigger_outcomes.enqueue(outcome);
+            self.dispatch.trigger_outcomes.enqueue(outcome);
         }
     }
 

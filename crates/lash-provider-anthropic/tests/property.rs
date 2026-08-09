@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
 use lash_core::llm::types::{
@@ -110,7 +111,7 @@ fn request(deltas: Arc<Mutex<Vec<String>>>) -> LlmRequest {
         output_spec: None,
         stream_events: Some(LlmEventSender::new(move |event| {
             if let LlmStreamEvent::Delta(piece) = event {
-                deltas.lock().expect("delta collector").push(piece);
+                deltas.lock_recover().push(piece);
             }
         })),
         generation: lash_core::GenerationOptions::default(),
@@ -128,7 +129,7 @@ fn complete_with_chunks(chunks: Vec<Vec<u8>>) -> (LlmResponse, Vec<String>) {
         .expect("test runtime")
         .block_on(provider.complete(request(Arc::clone(&deltas))))
         .expect("canonical stream completes");
-    let deltas = deltas.lock().expect("delta collector").clone();
+    let deltas = deltas.lock_recover().clone();
     (response, deltas)
 }
 

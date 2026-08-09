@@ -7,6 +7,7 @@
 //! they hold no reference to `ShellRuntime`/`StandardShell`, which lets the
 //! runtime and surface layers depend on them without a cycle.
 
+use lash_sansio::sync::MutexExt;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -26,6 +27,48 @@ use lash_core::{ToolFailure, ToolFailureClass, ToolResult, ToolValue};
 pub(crate) const MAX_OUTPUT: usize = 512_000;
 pub(crate) const SPILL_OUTPUT_THRESHOLD: usize = 50 * 1024;
 pub(crate) const OUTPUT_QUIET_PERIOD_MS: u64 = 75;
+pub(crate) const SHELL_READER_DIED: &str = "shell output reader died before EOF";
+
+struct ReaderDeathGuard {
+    reader_died: Arc<AtomicBool>,
+    armed: bool,
+}
+
+#[derive(Clone)]
+pub(crate) struct ReaderSignals {
+    output_notify: Arc<Notify>,
+    reader_died: Arc<AtomicBool>,
+}
+
+impl ReaderSignals {
+    pub(crate) fn new(output_notify: Arc<Notify>, reader_died: Arc<AtomicBool>) -> Self {
+        Self {
+            output_notify,
+            reader_died,
+        }
+    }
+}
+
+impl ReaderDeathGuard {
+    fn new(reader_died: Arc<AtomicBool>) -> Self {
+        Self {
+            reader_died,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ReaderDeathGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.reader_died.store(true, Ordering::SeqCst);
+        }
+    }
+}
 
 /// A snapshot of the shared handles needed to observe and steer a running
 /// child without holding the process map lock.
@@ -35,6 +78,7 @@ pub(crate) struct ProcessState {
     pub(crate) exit_code: Arc<StdMutex<Option<i32>>>,
     pub(crate) exit_notify: Arc<Notify>,
     pub(crate) output_notify: Arc<Notify>,
+    pub(crate) reader_died: Arc<AtomicBool>,
     pub(crate) killer: Arc<StdMutex<Option<Box<dyn portable_pty::ChildKiller + Send + Sync>>>>,
     /// PID of the direct PTY child. Because the PTY child is a session leader
     /// (portable-pty calls `setsid` in its `pre_exec`), this PID is also the
@@ -82,7 +126,7 @@ pub(crate) fn kill_process_group_and_reap(
     killer: &Arc<StdMutex<Option<Box<dyn portable_pty::ChildKiller + Send + Sync>>>>,
 ) {
     terminate_process_group(pid);
-    if let Some(mut killer) = killer.lock().unwrap().take() {
+    if let Some(mut killer) = killer.lock_recover().take() {
         let _ = killer.kill();
     }
 }
@@ -118,7 +162,7 @@ pub(crate) fn exit_status_code(status: std::process::ExitStatus) -> i32 {
 pub(crate) async fn wait_for_child_exit(state: &ProcessState, timeout: Duration) {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        if state.exit_code.lock().unwrap().is_some() {
+        if state.exit_code.lock_recover().is_some() {
             return;
         }
         if tokio::time::Instant::now() >= deadline {
@@ -126,7 +170,7 @@ pub(crate) async fn wait_for_child_exit(state: &ProcessState, timeout: Duration)
         }
         tokio::select! {
             _ = state.exit_notify.notified() => {
-                if state.exit_code.lock().unwrap().is_some() {
+                if state.exit_code.lock_recover().is_some() {
                     return;
                 }
             }
@@ -143,8 +187,8 @@ pub(crate) fn render_buffer_output(
     spill: &Arc<StdMutex<Option<ShellOutputSpill>>>,
     max_output_tokens: Option<usize>,
 ) -> (String, Option<usize>, Option<PathBuf>) {
-    let buf = buffer.lock().unwrap();
-    let start_offset = *buffer_start.lock().unwrap();
+    let buf = buffer.lock_recover();
+    let start_offset = *buffer_start.lock_recover();
     let mut rendered = String::from_utf8_lossy(&buf).to_string();
     if truncated.load(Ordering::SeqCst) || start_offset > 0 {
         if !rendered.ends_with('\n') {
@@ -155,7 +199,7 @@ pub(crate) fn render_buffer_output(
     let rendered = clean_terminal_output(&rendered);
     let (rendered, original_token_count, token_truncated) =
         truncate_exec_output(rendered, max_output_tokens);
-    let mut spill_guard = spill.lock().unwrap();
+    let mut spill_guard = spill.lock_recover();
     let mut full_output_path = spill_guard.as_ref().map(|spill| spill.path.clone());
     if token_truncated && full_output_path.is_none() {
         full_output_path = activate_spill(id, &buf, &mut spill_guard);
@@ -167,13 +211,13 @@ pub(crate) fn render_buffer_output(
 }
 
 pub(crate) async fn wait_for_buffer_settle(state: &ProcessState, quiet_period: Duration) {
-    let mut last_len = state.buffer.lock().unwrap().len();
+    let mut last_len = state.buffer.lock_recover().len();
     let mut quiet_until = tokio::time::Instant::now() + quiet_period;
 
     loop {
         tokio::select! {
             _ = state.output_notify.notified() => {
-                let buffer_len = state.buffer.lock().unwrap().len();
+                let buffer_len = state.buffer.lock_recover().len();
                 if buffer_len != last_len {
                     last_len = buffer_len;
                     quiet_until = tokio::time::Instant::now() + quiet_period;
@@ -191,17 +235,18 @@ pub(crate) fn spawn_reader_thread(
     buffer_start: Arc<StdMutex<usize>>,
     truncated: Arc<AtomicBool>,
     spill: Arc<StdMutex<Option<ShellOutputSpill>>>,
-    output_notify: Arc<Notify>,
-) {
+    signals: ReaderSignals,
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
+        let mut death_guard = ReaderDeathGuard::new(signals.reader_died);
         let mut chunk = [0u8; 4096];
         loop {
             match reader.read(&mut chunk) {
                 Ok(0) => break,
                 Ok(n) => {
                     {
-                        let mut buf = buffer.lock().unwrap();
-                        let mut spill = spill.lock().unwrap();
+                        let mut buf = buffer.lock_recover();
+                        let mut spill = spill.lock_recover();
                         if buf.len() + n > SPILL_OUTPUT_THRESHOLD {
                             let _ = activate_spill(&id, &buf, &mut spill);
                         }
@@ -219,18 +264,19 @@ pub(crate) fn spawn_reader_thread(
                         if buf.len() > MAX_OUTPUT {
                             let to_drop = buf.len() - MAX_OUTPUT;
                             buf.drain(..to_drop);
-                            *buffer_start.lock().unwrap() += to_drop;
+                            *buffer_start.lock_recover() += to_drop;
                             truncated.store(true, Ordering::SeqCst);
                         }
                     }
-                    output_notify.notify_waiters();
+                    signals.output_notify.notify_waiters();
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(_) => break,
             }
         }
-        output_notify.notify_waiters();
-    });
+        death_guard.disarm();
+        signals.output_notify.notify_waiters();
+    })
 }
 
 pub(crate) fn spawn_async_reader<R>(
@@ -240,20 +286,21 @@ pub(crate) fn spawn_async_reader<R>(
     buffer_start: Arc<StdMutex<usize>>,
     truncated: Arc<AtomicBool>,
     spill: Arc<StdMutex<Option<ShellOutputSpill>>>,
-    output_notify: Arc<Notify>,
+    signals: ReaderSignals,
 ) -> tokio::task::JoinHandle<()>
 where
     R: AsyncRead + Unpin + Send + 'static,
 {
     tokio::spawn(async move {
+        let mut death_guard = ReaderDeathGuard::new(signals.reader_died);
         let mut chunk = [0u8; 4096];
         loop {
             match reader.read(&mut chunk).await {
                 Ok(0) => break,
                 Ok(n) => {
                     {
-                        let mut buf = buffer.lock().unwrap();
-                        let mut spill = spill.lock().unwrap();
+                        let mut buf = buffer.lock_recover();
+                        let mut spill = spill.lock_recover();
                         if buf.len() + n > SPILL_OUTPUT_THRESHOLD {
                             let _ = activate_spill(&id, &buf, &mut spill);
                         }
@@ -271,17 +318,18 @@ where
                         if buf.len() > MAX_OUTPUT {
                             let to_drop = buf.len() - MAX_OUTPUT;
                             buf.drain(..to_drop);
-                            *buffer_start.lock().unwrap() += to_drop;
+                            *buffer_start.lock_recover() += to_drop;
                             truncated.store(true, Ordering::SeqCst);
                         }
                     }
-                    output_notify.notify_waiters();
+                    signals.output_notify.notify_waiters();
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(_) => break,
             }
         }
-        output_notify.notify_waiters();
+        death_guard.disarm();
+        signals.output_notify.notify_waiters();
     })
 }
 
@@ -296,7 +344,7 @@ pub(crate) fn spawn_wait_thread(
             .wait()
             .map(|status| i32::try_from(status.exit_code()).unwrap_or(i32::MAX))
             .unwrap_or(-1);
-        *exit_code.lock().unwrap() = Some(code);
+        *exit_code.lock_recover() = Some(code);
         exit_notify.notify_waiters();
         output_notify.notify_waiters();
     });
@@ -530,4 +578,57 @@ fn shell_failure(code: &str, message: impl Into<String>, raw: serde_json::Value)
     let mut failure = ToolFailure::tool(ToolFailureClass::Execution, code, message);
     failure.raw = Some(ToolValue::from(raw));
     ToolResult::failure(failure)
+}
+
+#[cfg(test)]
+fn shell_reader_died_result() -> ToolResult {
+    ToolResult::failure(*shell_reader_died_failure())
+}
+
+pub(crate) fn shell_reader_died_failure() -> Box<ToolFailure> {
+    let mut failure = ToolFailure::tool(
+        ToolFailureClass::Execution,
+        "shell_reader_died",
+        SHELL_READER_DIED,
+    );
+    failure.raw = Some(ToolValue::from(json!({ "reader_died": true })));
+    Box::new(failure)
+}
+
+#[cfg(test)]
+mod reader_death_tests {
+    use super::*;
+
+    struct PanickingReader;
+
+    impl Read for PanickingReader {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            panic!("simulated reader death");
+        }
+    }
+
+    #[test]
+    fn reader_unwind_is_a_typed_failure_not_silent_success() {
+        let reader_died = Arc::new(AtomicBool::new(false));
+        let handle = spawn_reader_thread(
+            "reader-death".to_string(),
+            Box::new(PanickingReader),
+            Arc::new(StdMutex::new(Vec::new())),
+            Arc::new(StdMutex::new(0)),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(StdMutex::new(None)),
+            ReaderSignals::new(Arc::new(Notify::new()), Arc::clone(&reader_died)),
+        );
+        assert!(handle.join().is_err());
+        assert!(reader_died.load(Ordering::SeqCst));
+
+        let result = shell_reader_died_result();
+        let lash_core::ToolResult::Done(output) = result else {
+            panic!("reader death cannot defer completion");
+        };
+        let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {
+            panic!("reader death must be typed as a failure");
+        };
+        assert_eq!(failure.code, "shell_reader_died");
+    }
 }

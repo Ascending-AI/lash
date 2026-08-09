@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(any(test, feature = "testing"))]
+use lash_sansio::sync::MutexExt;
 use std::sync::atomic::AtomicBool;
 
 mod api;
@@ -466,11 +468,7 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
     assert_eq!(replay_node_ids, first_node_ids);
     assert_eq!(replay_leaf, first_leaf);
     {
-        let ledger = retry_services
-            .usage
-            .token_ledger
-            .lock()
-            .expect("mixed-envelope ledger");
+        let ledger = retry_services.usage.token_ledger.lock_recover();
         assert_eq!(ledger.len(), 1);
         assert_eq!(ledger[0].source, "mixed-envelope-source");
         assert_eq!(ledger[0].model, "mixed-envelope-model");
@@ -506,11 +504,7 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
         other => panic!("expected a typed append identity conflict, got {other:?}"),
     }
     {
-        let ledger = retry_services
-            .usage
-            .token_ledger
-            .lock()
-            .expect("mixed-envelope ledger after rejection");
+        let ledger = retry_services.usage.token_ledger.lock_recover();
         assert_eq!(ledger.len(), 1);
         assert_eq!(ledger[0].usage, interleaved_usage);
     }
@@ -587,8 +581,7 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
         ordinal_services
             .usage
             .token_ledger
-            .lock()
-            .expect("ledger after U1 confirmation")
+            .lock_recover()
             .is_empty(),
         "U1 must be removed after its full identity is confirmed"
     );
@@ -618,11 +611,7 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
         }
     ));
     {
-        let ledger = ordinal_services
-            .usage
-            .token_ledger
-            .lock()
-            .expect("ledger after ordinal-reuse replay");
+        let ledger = ordinal_services.usage.token_ledger.lock_recover();
         assert_eq!(ledger.len(), 1);
         assert_eq!(ledger[0].usage, later_usage);
         let identity = ledger[0]
@@ -656,8 +645,7 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
         ordinal_services
             .usage
             .token_ledger
-            .lock()
-            .expect("ledger after U2 confirmation")
+            .lock_recover()
             .is_empty(),
         "U2 must clear only after natural commit B confirms its full identity"
     );

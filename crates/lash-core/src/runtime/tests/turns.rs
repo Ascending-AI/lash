@@ -2,6 +2,7 @@ use super::*;
 use crate::ToolProvider as _;
 use crate::facade_support::{RuntimeSessionStateFacadeOps, ToolStateFacadeOps};
 use lash_sansio::core_support::*;
+use lash_sansio::sync::MutexExt;
 use std::sync::atomic::AtomicUsize;
 
 type PluginErrorDiscriminant = std::mem::Discriminant<crate::PluginError>;
@@ -43,8 +44,7 @@ fn turn_persisted_borrowed_append_plugin(
                             )
                             .await
                         {
-                            *received_error.lock().expect("record borrowed append error") =
-                                Some(std::mem::discriminant(&error));
+                            *received_error.lock_recover() = Some(std::mem::discriminant(&error));
                             return Err(error);
                         }
                         Ok(())
@@ -69,16 +69,12 @@ fn turn_finalized_borrowed_append_plugin() -> Arc<dyn crate::PluginFactory> {
                     Box::pin(async move {
                         match event {
                             crate::PluginLifecycleEvent::TurnPersisted(ctx) => {
-                                *retained.lock().expect("retain borrowed graph service") =
-                                    Some(Arc::clone(&ctx.session_graph));
+                                *retained.lock_recover() = Some(Arc::clone(&ctx.session_graph));
                                 Ok(())
                             }
                             crate::PluginLifecycleEvent::TurnFinalized(turn) => {
                                 let graph: Option<Arc<dyn crate::plugin::SessionGraphService>> =
-                                    retained
-                                        .lock()
-                                        .expect("read borrowed graph service")
-                                        .clone();
+                                    retained.lock_recover().clone();
                                 let Some(graph) = graph else {
                                     return Ok(());
                                 };
@@ -122,8 +118,7 @@ fn retain_turn_persisted_graph_service_plugin(
                     let retained = Arc::clone(&retained);
                     Box::pin(async move {
                         if let crate::PluginLifecycleEvent::TurnPersisted(ctx) = event {
-                            *retained.lock().expect("retain turn graph service") =
-                                Some(Arc::clone(&ctx.session_graph));
+                            *retained.lock_recover() = Some(Arc::clone(&ctx.session_graph));
                             return Err(crate::PluginError::Session(
                                 "stop after retaining the turn-scoped graph service".to_string(),
                             ));
@@ -261,7 +256,7 @@ impl crate::plugin::CodeExecutorPlugin for FailingCaptureExecutor {
                 "injected dirty execution-state capture failure".to_string(),
             ));
         }
-        Ok(Some(self.snapshot.lock().expect("snapshot bytes").clone()))
+        Ok(Some(self.snapshot.lock_recover().clone()))
     }
 
     async fn restore_execution_state(
@@ -269,10 +264,7 @@ impl crate::plugin::CodeExecutorPlugin for FailingCaptureExecutor {
         _ctx: crate::plugin::ProtocolSessionContext<'_>,
         data: &[u8],
     ) -> Result<(), crate::SessionError> {
-        self.restored
-            .lock()
-            .expect("restored snapshots")
-            .push(data.to_vec());
+        self.restored.lock_recover().push(data.to_vec());
         Ok(())
     }
 }
@@ -757,8 +749,7 @@ async fn dirty_execution_state_capture_failure_aborts_commit_and_cold_reopens_pr
                 let text = match call {
                     0 => "first committed turn",
                     1 => {
-                        *executor.snapshot.lock().expect("snapshot bytes") =
-                            b"dirty-after-baseline".to_vec();
+                        *executor.snapshot.lock_recover() = b"dirty-after-baseline".to_vec();
                         executor.dirty.store(true, Ordering::SeqCst);
                         executor.fail_capture.store(true, Ordering::SeqCst);
                         "must not commit"
@@ -847,12 +838,7 @@ async fn dirty_execution_state_capture_failure_aborts_commit_and_cold_reopens_pr
     .await
     .expect("cold reopen restores the last committed execution state");
     assert_eq!(
-        executor
-            .restored
-            .lock()
-            .expect("restored snapshots")
-            .last()
-            .map(Vec::as_slice),
+        executor.restored.lock_recover().last().map(Vec::as_slice),
         Some(b"committed-before-failure".as_slice())
     );
 }
@@ -2105,10 +2091,7 @@ async fn queued_checkpoint_input_preserves_images() {
             let captured_requests = Arc::clone(&captured_requests);
             let captured_calls = Arc::clone(&captured_calls);
             async move {
-                captured_requests
-                    .lock()
-                    .expect("request capture lock")
-                    .push(request);
+                captured_requests.lock_recover().push(request);
                 let call = captured_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let text = if call == 0 {
                     "First answer."
@@ -2157,7 +2140,7 @@ async fn queued_checkpoint_input_preserves_images() {
         .await
         .expect("turn");
 
-    let requests = requests.lock().expect("request capture lock").clone();
+    let requests = requests.lock_recover().clone();
     assert_eq!(requests.len(), 2);
     assert!(requests[1].messages.iter().any(|message| {
         message.role == crate::llm::types::LlmRole::User
@@ -2626,8 +2609,7 @@ async fn active_input_after_last_call_is_first_admitted_on_next_turn() {
             let captured_calls = Arc::clone(&captured_calls);
             async move {
                 captured_requests
-                    .lock()
-                    .expect("request capture")
+                    .lock_recover()
                     .push(request.messages.clone());
                 let text = match captured_calls.fetch_add(1, Ordering::SeqCst) {
                     0 => "first turn complete",
@@ -2702,7 +2684,7 @@ async fn active_input_after_last_call_is_first_admitted_on_next_turn() {
         .expect("drain deferred input")
         .expect("deferred input starts a turn");
 
-    let requests = requests.lock().expect("request capture");
+    let requests = requests.lock_recover();
     assert_eq!(requests.len(), 2);
     assert_eq!(
         serde_json::to_string(&requests[1][1..]).expect("serialize next-turn first-call messages"),
@@ -2760,10 +2742,7 @@ async fn next_turn_input_turn_claims_process_wake_at_active_checkpoint() {
             let captured_requests = Arc::clone(&captured_requests);
             let captured_calls = Arc::clone(&captured_calls);
             async move {
-                captured_requests
-                    .lock()
-                    .expect("request capture lock")
-                    .push(req);
+                captured_requests.lock_recover().push(req);
                 let call = captured_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let text = if call == 0 {
                     "turn input response"
@@ -2852,7 +2831,7 @@ async fn next_turn_input_turn_claims_process_wake_at_active_checkpoint() {
         wake.wake_id
     );
 
-    let requests = requests.lock().expect("request capture lock").clone();
+    let requests = requests.lock_recover().clone();
     assert_eq!(requests.len(), 2);
     assert!(request_contains_text(&requests[0], "queued user input"));
     assert!(!request_contains_text(&requests[0], "wake should wait"));
@@ -2979,10 +2958,7 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
             let captured_calls = Arc::clone(&captured_calls);
             let captured_wake_started_tx = Arc::clone(&captured_wake_started_tx);
             async move {
-                captured_requests
-                    .lock()
-                    .expect("request capture lock")
-                    .push(req);
+                captured_requests.lock_recover().push(req);
                 let call = captured_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 if call == 0 {
                     return Ok(LlmResponse {
@@ -2995,11 +2971,7 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
                         ..LlmResponse::default()
                     });
                 }
-                if let Some(tx) = captured_wake_started_tx
-                    .lock()
-                    .expect("wake started signal")
-                    .take()
-                {
+                if let Some(tx) = captured_wake_started_tx.lock_recover().take() {
                     let _ = tx.send(());
                 }
                 std::future::pending::<Result<LlmResponse, _>>().await
@@ -3099,7 +3071,7 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
             .is_none(),
         "neither the cancelled input nor the claimed wake should replay"
     );
-    let requests = requests.lock().expect("request capture lock").clone();
+    let requests = requests.lock_recover().clone();
     assert_eq!(requests.len(), 2);
     assert!(request_contains_text(
         &requests[0],
@@ -3289,7 +3261,7 @@ async fn queued_frame_switch_finishes_follow_on_before_next_queued_turn() {
             let requests = Arc::clone(&captured_requests);
             let call_index = Arc::clone(&captured_call_index);
             async move {
-                requests.lock().expect("request capture lock").push(request);
+                requests.lock_recover().push(request);
                 match call_index.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
                     0 => {
                         enqueue_idle_turn_input(store.as_ref(), "root", "second queued turn").await;
@@ -3364,7 +3336,7 @@ async fn queued_frame_switch_finishes_follow_on_before_next_queued_turn() {
             .expect("pending inputs after frame follow");
     assert_eq!(pending_after_follow.len(), 1);
     assert_ne!(pending_after_follow[0].input_id, first.input_id);
-    let requests_after_follow = requests.lock().expect("request capture lock").clone();
+    let requests_after_follow = requests.lock_recover().clone();
     assert_eq!(requests_after_follow.len(), 2);
     assert!(request_contains_text(
         &requests_after_follow[1],
@@ -3394,7 +3366,7 @@ async fn queued_frame_switch_finishes_follow_on_before_next_queued_turn() {
             .expect("pending inputs after second turn")
             .is_empty()
     );
-    let requests = requests.lock().expect("request capture lock");
+    let requests = requests.lock_recover();
     assert_eq!(requests.len(), 3);
     assert!(request_contains_text(&requests[2], "second queued turn"));
 }
@@ -4004,8 +3976,7 @@ async fn retained_turn_graph_service_does_not_extend_the_execution_lane() {
     ));
 
     let graph = retained
-        .lock()
-        .expect("read retained graph service")
+        .lock_recover()
         .clone()
         .expect("TurnPersisted retained its graph service");
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -4144,9 +4115,7 @@ async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff() {
         });
     assert_eq!(issue.retryable, Some(false));
     assert_eq!(
-        *borrowed_append_error
-            .lock()
-            .expect("read borrowed append error"),
+        *borrowed_append_error.lock_recover(),
         Some(std::mem::discriminant(
             &crate::PluginError::SessionExecutionLeaseLost {
                 session_id: "root".to_string(),
@@ -4286,9 +4255,7 @@ async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff() {
         });
     assert_eq!(issue.retryable, Some(false));
     assert_eq!(
-        *borrowed_append_error
-            .lock()
-            .expect("read borrowed append error"),
+        *borrowed_append_error.lock_recover(),
         Some(std::mem::discriminant(
             &crate::PluginError::SessionExecutionLeaseLost {
                 session_id: "root".to_string(),
@@ -4831,10 +4798,7 @@ async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_event() {
         .complete(move |req| {
             let captured_requests = Arc::clone(&captured_requests);
             async move {
-                captured_requests
-                    .lock()
-                    .expect("request capture lock")
-                    .push(req);
+                captured_requests.lock_recover().push(req);
                 Ok(LlmResponse {
                     full_text: "saw event".to_string(),
                     parts: vec![LlmOutputPart::Text {
@@ -4939,7 +4903,7 @@ async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_event() {
     }));
 
     let requests = {
-        let guard = requests.lock().expect("request capture lock");
+        let guard = requests.lock_recover();
         guard.clone()
     };
     assert_eq!(requests.len(), 1);
@@ -5010,7 +4974,7 @@ async fn cancelled_provider_stream_does_not_commit_partial_output() {
                         .stream_events
                         .expect("streaming runtime should request provider stream events");
                     stream.send(LlmStreamEvent::Delta("partial provider text".to_string()));
-                    if let Some(tx) = delta_sent_tx.lock().expect("delta signal").take() {
+                    if let Some(tx) = delta_sent_tx.lock_recover().take() {
                         let _ = tx.send(());
                     }
                     std::future::pending::<Result<LlmResponse, LlmTransportError>>().await
@@ -5452,16 +5416,11 @@ async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit()
                 let provider_started_tx = Arc::clone(&provider_started_tx);
                 let provider_continue_rx = Arc::clone(&provider_continue_rx);
                 async move {
-                    if let Some(tx) = provider_started_tx
-                        .lock()
-                        .expect("provider started sender")
-                        .take()
-                    {
+                    if let Some(tx) = provider_started_tx.lock_recover().take() {
                         let _ = tx.send(());
                     }
                     let rx = provider_continue_rx
-                        .lock()
-                        .expect("provider continue receiver")
+                        .lock_recover()
                         .take()
                         .expect("provider continue receiver available");
                     let _ = rx.await;
@@ -5540,7 +5499,7 @@ async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit()
     .expect("steal expired session execution lease")
     .acquired()
     .expect("expired session execution lease should be claimable");
-    let commits_before_lease_loss = *store.runtime_commit_count.lock().expect("commit count");
+    let commits_before_lease_loss = *store.runtime_commit_count.lock_recover();
     provider_continue_tx
         .send(())
         .expect("provider should still be waiting");
@@ -5554,7 +5513,7 @@ async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit()
         "committed under head CAS"
     );
     assert!(
-        *store.runtime_commit_count.lock().expect("commit count") > commits_before_lease_loss,
+        *store.runtime_commit_count.lock_recover() > commits_before_lease_loss,
         "the current-head turn must checkpoint and commit despite advisory lease loss"
     );
     let still_owned = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
@@ -5633,16 +5592,11 @@ async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
                         ..LlmResponse::default()
                     });
                 }
-                if let Some(tx) = captured_provider_stalled_tx
-                    .lock()
-                    .expect("provider stalled sender")
-                    .take()
-                {
+                if let Some(tx) = captured_provider_stalled_tx.lock_recover().take() {
                     let _ = tx.send(());
                 }
                 let rx = captured_provider_continue_rx
-                    .lock()
-                    .expect("provider continue receiver")
+                    .lock_recover()
                     .take()
                     .expect("provider continue receiver available");
                 let _ = rx.await;
@@ -5791,11 +5745,7 @@ async fn cancellation_sealed_before_renewal_failure_remains_evidence_bearing_can
         .complete(move |_request| {
             let captured_provider_started_tx = Arc::clone(&captured_provider_started_tx);
             async move {
-                if let Some(tx) = captured_provider_started_tx
-                    .lock()
-                    .expect("provider started sender")
-                    .take()
-                {
+                if let Some(tx) = captured_provider_started_tx.lock_recover().take() {
                     let _ = tx.send(());
                 }
                 std::future::pending::<Result<LlmResponse, _>>().await
@@ -6349,10 +6299,7 @@ async fn plugin_command_reuses_caller_scope_on_lost_response_retry() {
         .run_plugin_command("test.emit", json!({}), None, operation_scope.clone())
         .await
         .expect("first command attempt");
-    let committed_after_first = *store
-        .runtime_commit_count
-        .lock()
-        .expect("runtime commit count");
+    let committed_after_first = *store.runtime_commit_count.lock_recover();
     let mut retry = runtime_with_plugins_and_tools_and_host_and_store(
         vec![plugin],
         Arc::new(EmptyTools),
@@ -6369,10 +6316,7 @@ async fn plugin_command_reuses_caller_scope_on_lost_response_retry() {
 
     assert_eq!(committed_after_first, 2);
     assert_eq!(
-        *store
-            .runtime_commit_count
-            .lock()
-            .expect("runtime commit count"),
+        *store.runtime_commit_count.lock_recover(),
         committed_after_first,
         "retrying one command scope must receipt-hit both durable effects"
     );
@@ -6752,7 +6696,7 @@ async fn turn_driver_normalizes_alias_effort_into_outgoing_request() {
         .complete(move |req| {
             let captured = Arc::clone(&captured_for_provider);
             async move {
-                *captured.lock().expect("capture lock") = Some(req.model_variant.clone());
+                *captured.lock_recover() = Some(req.model_variant.clone());
                 Ok(LlmResponse {
                     full_text: "ok".to_string(),
                     parts: vec![LlmOutputPart::Text {
@@ -6816,8 +6760,7 @@ async fn turn_driver_normalizes_alias_effort_into_outgoing_request() {
 
     assert_eq!(turn.assistant_output.safe_text, "ok");
     let seen = captured
-        .lock()
-        .expect("capture lock")
+        .lock_recover()
         .clone()
         .expect("provider must be called");
     assert_eq!(
@@ -6924,10 +6867,7 @@ async fn session_generation_options_reach_every_provider_request() {
         .complete(move |req| {
             let captured = Arc::clone(&captured_for_provider);
             async move {
-                captured
-                    .lock()
-                    .expect("capture lock")
-                    .push(req.generation.clone());
+                captured.lock_recover().push(req.generation.clone());
                 Ok(LlmResponse {
                     full_text: "ok".to_string(),
                     parts: vec![LlmOutputPart::Text {
@@ -6987,7 +6927,7 @@ async fn session_generation_options_reach_every_provider_request() {
         .expect("update session config");
     run_turn(&mut runtime, "generation-requested-turn").await;
 
-    let seen = captured.lock().expect("capture lock").clone();
+    let seen = captured.lock_recover().clone();
     assert_eq!(seen.len(), 2, "each turn issues one provider call");
     assert_eq!(
         seen[0],
@@ -7106,10 +7046,7 @@ async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
         .complete(move |req| {
             let captured = Arc::clone(&captured_for_provider);
             async move {
-                captured
-                    .lock()
-                    .expect("capture lock")
-                    .push(req.generation.clone());
+                captured.lock_recover().push(req.generation.clone());
                 Ok(LlmResponse {
                     full_text: "ok".to_string(),
                     parts: vec![LlmOutputPart::Text {
@@ -7176,7 +7113,7 @@ async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
         .await
         .expect("a cap above the model's capacity must not fail the turn");
 
-    let seen = captured.lock().expect("capture lock").clone();
+    let seen = captured.lock_recover().clone();
     assert_eq!(
         seen.first().expect("one provider call").output_token_cap,
         NonZeroUsize::new(2_048),

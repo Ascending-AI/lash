@@ -139,10 +139,8 @@ use lash::rlm::RlmTurnBuilderExt as _;
 let turn = session.turn(TurnInput::text(text)).require_finish()?;
 
 let output = turn.stream_to(&amp;ui_events).await?;
-let assistant_text = assistant_text_for_persistence(
-    &amp;output,
-    &amp;turn_state.lock().expect("turn state lock").assistant_prose,
-);</code></pre>
+let assistant_text =
+    assistant_text_for_persistence(&amp;output, &amp;turn_state.lock_recover().assistant_prose);</code></pre>
           <p>The board is app-owned SQLite state. User message payloads keep board snapshots so the browser can replay the game, while the plugin prompt and <code>read_board</code> / <code>play_move</code> tools read and mutate the canonical row. <code>assistant_text_for_persistence</code> derives the product chat row from terminal semantics: final values render from <code>TurnFinish::FinalValue</code>, while prose comes from <code>TurnFinish::AssistantMessage</code> with streamed prose only as a live UI preview.</p>
           <p>The route starts live replay from <code>replay_cursor</code> through <code>ObservableSession::subscribe_and_recover_remote(...)</code> and emits an NDJSON <code>replay_cursor</code> row followed by <code>RemoteSessionObservationEvent</code> <code>observation</code> rows. If the cursor is trimmed or unavailable, it emits <code>replay_gap</code> with <code>RemoteLiveReplayGap</code> fields for <code>session_id</code>, <code>requested_cursor</code>, <code>latest_cursor</code>, <code>latest_revision</code>, and <code>reason</code>, plus a fresh <code>RemoteSessionObservation</code> snapshot inside the helper item; the browser replaces product state from its normal endpoints and continues from the latest cursor. Restate mode reuses this observation stream for semantic progress while its app outbox persists product rows for route restart and workflow handoff.</p>
         </div>

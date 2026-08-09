@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use super::*;
 #[cfg(feature = "rlm")]
 use crate::rlm::{RlmFinalAnswerFormat, RlmSessionBuilderExt as _, RlmTurnBuilderExt as _};
@@ -101,8 +102,7 @@ impl lash_core::facade_support::TurnContextTransform for ReconciliationTransform
     ) -> std::result::Result<lash_core::facade_support::PreparedContext, lash_core::facade_support::ContextError> {
         let snapshot = ctx.sessions.snapshot_session(&ctx.session_id).await?;
         self.observations
-            .lock()
-            .expect("reconciliation observations")
+            .lock_recover()
             .push(ReconciliationTransformObservation {
                 max_context_tokens: ctx.max_context_tokens,
                 session_model: snapshot.policy.model.id,
@@ -433,7 +433,7 @@ async fn prompt_layers_apply_across_core_session_turn_and_mutation_scopes() -> R
         .await?;
     session.turn(TurnInput::text("third")).run().await?;
 
-    let prompts = seen.lock().expect("seen prompts");
+    let prompts = seen.lock_recover();
     assert_eq!(prompts.len(), 3);
     for prompt in prompts.iter() {
         assert!(prompt.contains("Alpha session instruction."));
@@ -564,7 +564,7 @@ async fn provider_only_overrides_keep_session_model_and_variant() -> Result<()> 
     session.turn(TurnInput::text("hello")).run().await?;
 
     assert_eq!(
-        *seen.lock().expect("seen requests"),
+        *seen.lock_recover(),
         vec![
             (
                 "core-model".to_string(),
@@ -606,8 +606,7 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
             move |request| {
                 let seen = Arc::clone(&seen);
                 async move {
-                    seen.lock()
-                        .expect("seen prompts")
+                    seen.lock_recover()
                         .push(system_text(&request));
                     Ok(text_response(&lashlang_block("finish \"ok\"")))
                 }
@@ -641,7 +640,7 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
         .run()
         .await?;
 
-    let prompts = seen.lock().expect("seen prompts");
+    let prompts = seen.lock_recover();
     assert!(prompts[0].contains("Trigger registry"));
     assert!(prompts[0].contains("trigger registration connects"));
     assert!(prompts[0].contains("process definition"));
@@ -672,7 +671,7 @@ async fn rlm_completed_finish_is_single_copy_in_next_turn_request() -> Result<()
                 let seen = Arc::clone(&seen);
                 async move {
                     let request_index = {
-                        let mut seen = seen.lock().expect("seen requests");
+                        let mut seen = seen.lock_recover();
                         seen.push(request_text(&request));
                         seen.len()
                     };
@@ -719,7 +718,7 @@ async fn rlm_completed_finish_is_single_copy_in_next_turn_request() -> Result<()
         .await?;
     core.flush_trace_sink()?;
 
-    let seen = seen.lock().expect("seen requests");
+    let seen = seen.lock_recover();
     assert_eq!(seen.len(), 2);
     assert_eq!(
         seen[1].matches(ANSWER).count(),
@@ -940,7 +939,7 @@ async fn rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_ra
         .run()
         .await?;
 
-    let prompts = seen.lock().expect("seen prompts");
+    let prompts = seen.lock_recover();
     assert!(prompts[0].contains("=== FINAL ANSWER FORMAT ==="));
     assert!(prompts[0].contains("Markdown string"));
     assert!(!prompts[1].contains("=== FINAL ANSWER FORMAT ==="));
@@ -1591,12 +1590,10 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
             let request_probe = Arc::clone(&request_probe);
             async move {
                 request_probe
-                    .lock()
-                    .expect("reconciliation requests")
+                    .lock_recover()
                     .push(request.model);
                 let response_index = request_probe
-                    .lock()
-                    .expect("reconciliation requests")
+                    .lock_recover()
                     .len();
                 if response_index == 1 {
                     Ok(text_response(&lashlang_block(
@@ -1641,8 +1638,7 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
         .await?;
 
     let observations = transform_observations
-        .lock()
-        .expect("reconciliation observations")
+        .lock_recover()
         .clone();
     assert!(!observations.is_empty());
     assert!(observations.iter().all(|observation| {
@@ -1658,7 +1654,7 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
         observations[0].session_model
     );
 
-    let requests = requests.lock().expect("reconciliation requests").clone();
+    let requests = requests.lock_recover().clone();
     assert!(!requests.is_empty());
     assert!(requests.iter().all(|model| model == "builder-model"));
     println!("consumer 3 primary LlmRequest.model: {}", requests[0]);

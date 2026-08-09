@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 mod file_store;
 
 pub use file_store::FileAttachmentStore;
@@ -441,8 +442,7 @@ impl InMemoryAttachmentStore {
     pub fn raw_blobs_for_testing(&self) -> Vec<(AttachmentId, Vec<u8>)> {
         let mut rows = self
             .attachments
-            .lock()
-            .expect("attachment store lock")
+            .lock_recover()
             .iter()
             .map(|(id, blob)| (id.clone(), blob.stored.bytes.clone()))
             .collect::<Vec<_>>();
@@ -461,7 +461,7 @@ impl AttachmentStore for InMemoryAttachmentStore {
         let meta = stored_meta(&bytes, meta);
         let reference = meta.as_ref();
         let now = now_epoch_ms();
-        let mut attachments = self.attachments.lock().expect("attachment store lock");
+        let mut attachments = self.attachments.lock_recover();
         match attachments.entry(reference.id.clone()) {
             std::collections::hash_map::Entry::Occupied(mut existing) => {
                 // Dedup hit: refresh the freshness signal so a GC sweep that
@@ -481,26 +481,21 @@ impl AttachmentStore for InMemoryAttachmentStore {
 
     async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
         self.attachments
-            .lock()
-            .expect("attachment store lock")
+            .lock_recover()
             .get(id)
             .map(|blob| blob.stored.clone())
             .ok_or_else(|| AttachmentStoreError::NotFound(id.clone()))
     }
 
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
-        self.attachments
-            .lock()
-            .expect("attachment store lock")
-            .remove(id);
+        self.attachments.lock_recover().remove(id);
         Ok(())
     }
 
     async fn list(&self) -> Result<Vec<StoredBlobRef>, AttachmentStoreError> {
         Ok(self
             .attachments
-            .lock()
-            .expect("attachment store lock")
+            .lock_recover()
             .iter()
             .map(|(id, blob)| StoredBlobRef {
                 id: id.clone(),
@@ -512,8 +507,7 @@ impl AttachmentStore for InMemoryAttachmentStore {
     async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {
         Ok(self
             .attachments
-            .lock()
-            .expect("attachment store lock")
+            .lock_recover()
             .get(id)
             .map(|blob| StoredBlobRef {
                 id: id.clone(),
@@ -639,11 +633,7 @@ impl SessionAttachmentStore {
         kind: crate::AttachmentOwnerKind,
         owner_id: String,
     ) -> AttachmentOwnerBinding {
-        let previous = self
-            .owner
-            .lock()
-            .expect("attachment owner binding lock")
-            .replace((kind, owner_id.clone()));
+        let previous = self.owner.lock_recover().replace((kind, owner_id.clone()));
         AttachmentOwnerBinding {
             store: Arc::clone(self),
             kind,
@@ -658,7 +648,7 @@ impl SessionAttachmentStore {
         owner_id: &str,
         previous: Option<(crate::AttachmentOwnerKind, String)>,
     ) {
-        let mut owner = self.owner.lock().expect("attachment owner binding lock");
+        let mut owner = self.owner.lock_recover();
         if owner
             .as_ref()
             .is_some_and(|(current_kind, id)| *current_kind == kind && id == owner_id)
@@ -673,11 +663,7 @@ impl SessionAttachmentStore {
         meta: AttachmentCreateMeta,
     ) -> Result<AttachmentRef, AttachmentStoreError> {
         let attachment_id = content_id(&bytes);
-        let owner = self
-            .owner
-            .lock()
-            .expect("attachment owner binding lock")
-            .clone();
+        let owner = self.owner.lock_recover().clone();
         let intent = AttachmentIntent {
             attachment_id: attachment_id.clone(),
             session_id: self.session_id.clone(),
@@ -873,8 +859,7 @@ mod tests {
         fn record_intent(&self, intent: AttachmentIntent) -> Result<(), crate::StoreError> {
             let key = (intent.session_id.clone(), intent.attachment_id.clone());
             self.entries
-                .lock()
-                .expect("lock entries")
+                .lock_recover()
                 .entry(key)
                 .or_insert(crate::AttachmentManifestEntry {
                     attachment_id: intent.attachment_id,
@@ -893,7 +878,7 @@ mod tests {
             session_id: &str,
             attachment_ids: &[AttachmentId],
         ) -> Result<(), crate::StoreError> {
-            let mut entries = self.entries.lock().expect("lock entries");
+            let mut entries = self.entries.lock_recover();
             for attachment_id in attachment_ids {
                 if let Some(entry) =
                     entries.get_mut(&(session_id.to_string(), attachment_id.clone()))
@@ -910,8 +895,7 @@ mod tests {
         ) -> Result<Vec<crate::AttachmentManifestEntry>, crate::StoreError> {
             Ok(self
                 .entries
-                .lock()
-                .expect("lock entries")
+                .lock_recover()
                 .values()
                 .filter(|entry| {
                     entry.committed_at_epoch_ms.is_none()
@@ -927,8 +911,7 @@ mod tests {
             attachment_id: &AttachmentId,
         ) -> Result<(), crate::StoreError> {
             self.entries
-                .lock()
-                .expect("lock entries")
+                .lock_recover()
                 .remove(&(session_id.to_string(), attachment_id.clone()));
             Ok(())
         }
@@ -940,16 +923,14 @@ mod tests {
         ) -> Result<bool, crate::StoreError> {
             Ok(self
                 .entries
-                .lock()
-                .expect("lock entries")
+                .lock_recover()
                 .contains_key(&(session_id.to_string(), attachment_id.clone())))
         }
 
         fn list_all_refs(&self) -> Result<Vec<AttachmentId>, crate::StoreError> {
             Ok(self
                 .entries
-                .lock()
-                .expect("lock entries")
+                .lock_recover()
                 .values()
                 .map(|entry| entry.attachment_id.clone())
                 .collect())
@@ -1219,7 +1200,7 @@ mod tests {
                 Err(AttachmentStoreError::NotFound(id.clone()))
             }
             async fn delete(&self, _id: &AttachmentId) -> Result<(), AttachmentStoreError> {
-                *self.deleted.lock().expect("lock") = true;
+                *self.deleted.lock_recover() = true;
                 Ok(())
             }
             async fn list(&self) -> Result<Vec<StoredBlobRef>, AttachmentStoreError> {
@@ -1261,7 +1242,7 @@ mod tests {
             "the delete-time re-check must spare a blob refreshed after the snapshot"
         );
         assert!(
-            !*backend.deleted.lock().expect("lock"),
+            !*backend.deleted.lock_recover(),
             "the freshly-refreshed blob must not be deleted"
         );
     }
@@ -1292,7 +1273,7 @@ mod tests {
             Err(AttachmentStoreError::NotFound(id.clone()))
         }
         async fn delete(&self, _id: &AttachmentId) -> Result<(), AttachmentStoreError> {
-            *self.deleted.lock().expect("lock") = true;
+            *self.deleted.lock_recover() = true;
             Ok(())
         }
         async fn list(&self) -> Result<Vec<StoredBlobRef>, AttachmentStoreError> {
@@ -1335,12 +1316,7 @@ mod tests {
             _id: &AttachmentId,
             _intent_grace_cutoff_epoch_ms: u64,
         ) -> Result<bool, crate::StoreError> {
-            Ok(self
-                .answers
-                .lock()
-                .expect("lock answers")
-                .pop_front()
-                .unwrap_or(false))
+            Ok(self.answers.lock_recover().pop_front().unwrap_or(false))
         }
     }
 
@@ -1368,7 +1344,7 @@ mod tests {
         );
         assert!(report.deleted_while_referenced.is_empty());
         assert!(
-            !*backend.deleted.lock().expect("lock"),
+            !*backend.deleted.lock_recover(),
             "a blob re-referenced before delete must not be deleted"
         );
     }
@@ -1392,7 +1368,7 @@ mod tests {
             .await
             .expect("sweep");
         assert_eq!(report.reclaimed_count, 1, "the blob is deleted");
-        assert!(*backend.deleted.lock().expect("lock"), "delete happened");
+        assert!(*backend.deleted.lock_recover(), "delete happened");
         assert_eq!(
             report.deleted_while_referenced,
             vec![id],
@@ -1412,7 +1388,7 @@ mod tests {
 
         let reference = store.put(vec![8, 9, 10], meta()).await.expect("put");
         {
-            let entries = manifest.entries.lock().expect("lock entries");
+            let entries = manifest.entries.lock_recover();
             let entry = entries
                 .get(&("session-1".to_string(), reference.id))
                 .expect("manifest entry");
@@ -1422,7 +1398,7 @@ mod tests {
 
         drop(binding);
         let host_reference = store.put(vec![11, 12], meta()).await.expect("host put");
-        let entries = manifest.entries.lock().expect("lock entries");
+        let entries = manifest.entries.lock_recover();
         let host_entry = entries
             .get(&("session-1".to_string(), host_reference.id))
             .expect("host manifest entry");
@@ -1447,7 +1423,7 @@ mod tests {
         drop(process_binding);
         let host_ref = store.put(vec![3], meta()).await.expect("host put");
 
-        let entries = manifest.entries.lock().expect("lock entries");
+        let entries = manifest.entries.lock_recover();
         let turn = entries
             .get(&("session-1".to_string(), turn_ref.id))
             .expect("turn entry");

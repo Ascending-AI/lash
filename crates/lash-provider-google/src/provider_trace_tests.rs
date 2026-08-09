@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
 use crate::GoogleOAuthProvider;
@@ -32,7 +33,7 @@ impl LlmHttpTransport for RecordingTransport {
         request: LlmHttpRequest,
         _timeout: Option<std::time::Duration>,
     ) -> Result<LlmHttpResponse, LlmTransportError> {
-        self.requests.lock().expect("request lock").push(request);
+        self.requests.lock_recover().push(request);
         let body = if self.status == 200 {
             r#"{"response":{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"done"}]}}]}}"#
         } else {
@@ -84,7 +85,7 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
             request.clone(),
             None,
             Some(LlmProviderTraceSender::new(move |event| {
-                event_sink.lock().expect("event lock").push(event);
+                event_sink.lock_recover().push(event);
             })),
             StreamTermination::EofTolerated,
             None,
@@ -92,8 +93,7 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
         .await
         .expect("completion succeeds");
     let request_event = events
-        .lock()
-        .expect("event lock")
+        .lock_recover()
         .iter()
         .find(|event| event.request_endpoint().is_some())
         .cloned()
@@ -103,7 +103,7 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
     assert_auth_material_absent(&request_event);
 
     let traced_body = {
-        let requests = transport.requests.lock().expect("request lock");
+        let requests = transport.requests.lock_recover();
         assert_eq!(requests.len(), 1);
         requests[0].body.clone()
     };
@@ -124,7 +124,7 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
             request,
             None,
             Some(LlmProviderTraceSender::new(move |event| {
-                error_event_sink.lock().expect("event lock").push(event);
+                error_event_sink.lock_recover().push(event);
             })),
             StreamTermination::EofTolerated,
             None,
@@ -132,8 +132,7 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
         .await
         .expect_err("provider error is returned");
     let error_event = error_events
-        .lock()
-        .expect("event lock")
+        .lock_recover()
         .iter()
         .find(|event| event.request_endpoint().is_some())
         .cloned()

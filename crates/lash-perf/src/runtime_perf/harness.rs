@@ -1,3 +1,4 @@
+use lash_sansio::sync::MutexExt;
 use std::{
     collections::HashMap,
     fmt::Write as _,
@@ -835,10 +836,7 @@ impl lash_core::AwaitEventResolver for RetryingStartGateController {
         key: &lash_core::AwaitEventKey,
     ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
         if matches!(key.wait, lash_core::AwaitEventWaitIdentity::TurnCancelGate) {
-            let mut attempts = self
-                .attempts_by_key
-                .lock()
-                .expect("start gate attempt counter");
+            let mut attempts = self.attempts_by_key.lock_recover();
             let attempt = attempts.entry(key.key_id.clone()).or_default();
             *attempt += 1;
             if *attempt < 3 {

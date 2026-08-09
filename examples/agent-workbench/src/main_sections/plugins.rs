@@ -198,8 +198,7 @@ impl WorkbenchContextBudget {
     #[cfg(test)]
     fn observation(&self) -> Option<WorkbenchContextObservation> {
         self.observed
-            .lock()
-            .expect("workbench context budget lock")
+            .lock_recover()
             .clone()
     }
 }
@@ -230,8 +229,7 @@ impl lash::plugins::TurnContextTransform for WorkbenchContextBudget {
         };
         *self
             .observed
-            .lock()
-            .expect("workbench context budget lock") = Some(observation.clone());
+            .lock_recover() = Some(observation.clone());
 
         let mut output = input;
         output.prompt_contributions.push(
@@ -276,8 +274,7 @@ impl WorkbenchConfigChanges {
         let snapshot = ctx.sessions.snapshot_current().await?;
         *self
             .latest
-            .lock()
-            .expect("workbench config change lock") = Some(WorkbenchConfigChange {
+            .lock_recover() = Some(WorkbenchConfigChange {
             session_id: ctx.session_id.clone(),
             previous_model_id: ctx.previous.model_id().to_string(),
             current_model_id: ctx.current.model_id().to_string(),
@@ -289,8 +286,7 @@ impl WorkbenchConfigChanges {
     #[cfg(test)]
     fn latest(&self) -> Option<WorkbenchConfigChange> {
         self.latest
-            .lock()
-            .expect("workbench config change lock")
+            .lock_recover()
             .clone()
     }
 }
@@ -352,8 +348,7 @@ impl WorkbenchDerivedNotes {
             let summary = workbench_note_summary(&ctx.state);
             self.inner
                 .pending
-                .lock()
-                .expect("workbench derived notes lock")
+                .lock_recover()
                 .push(WorkbenchPendingNote {
                     base_node_id,
                     summary,
@@ -406,8 +401,7 @@ impl WorkbenchDerivedNotes {
                 eprintln!("workbench derived note write-back failed: {error}");
                 self.inner
                     .pending
-                    .lock()
-                    .expect("workbench derived notes lock")
+                    .lock_recover()
                     .push(note);
                 return;
             }
@@ -422,8 +416,7 @@ impl WorkbenchDerivedNotes {
         let mut log = self
             .inner
             .settled
-            .lock()
-            .expect("workbench derived notes lock");
+            .lock_recover();
         log.push(settled);
         // The decision log is a rolling operator aid, not a record: a long-lived
         // workbench must not accumulate one entry per turn forever.
@@ -436,8 +429,7 @@ impl WorkbenchDerivedNotes {
             &mut *self
                 .inner
                 .pending
-                .lock()
-                .expect("workbench derived notes lock"),
+                .lock_recover(),
         )
     }
 
@@ -445,8 +437,7 @@ impl WorkbenchDerivedNotes {
     fn settled(&self) -> Vec<WorkbenchSettledNote> {
         self.inner
             .settled
-            .lock()
-            .expect("workbench derived notes lock")
+            .lock_recover()
             .clone()
     }
 }

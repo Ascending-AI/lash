@@ -1,4 +1,5 @@
 use super::support::*;
+use lash_sansio::sync::MutexExt;
 
 #[derive(Debug)]
 pub struct ProviderRateLimiter {
@@ -55,7 +56,7 @@ impl ProviderRateLimiter {
     }
 
     pub fn configure(&self, policy: ProviderRateLimitPolicy) {
-        let mut state = self.state.lock().expect("provider rate limiter lock");
+        let mut state = self.state.lock_recover();
         if state.policy.max_concurrency != policy.max_concurrency {
             state.semaphore = policy
                 .max_concurrency
@@ -71,12 +72,7 @@ impl ProviderRateLimiter {
     }
 
     pub async fn admit(&self, request: &LlmRequest) -> ProviderRateLimitPermit {
-        let semaphore = self
-            .state
-            .lock()
-            .expect("provider rate limiter lock")
-            .semaphore
-            .clone();
+        let semaphore = self.state.lock_recover().semaphore.clone();
         let concurrency = match semaphore {
             Some(semaphore) => Some(semaphore.acquire_owned().await.expect("semaphore open")),
             None => None,
@@ -91,7 +87,7 @@ impl ProviderRateLimiter {
     async fn wait_for_buckets(&self, requests: u32, tokens: u32) {
         loop {
             let wait = {
-                let mut state = self.state.lock().expect("provider rate limiter lock");
+                let mut state = self.state.lock_recover();
                 let now = self.clock.now();
                 let policy = state.policy.clone();
                 let request_wait = bucket_wait(
@@ -224,14 +220,7 @@ mod tests {
             max_concurrency: Some(0),
             ..Default::default()
         });
-        assert!(
-            limiter
-                .state
-                .lock()
-                .expect("rate limiter lock")
-                .semaphore
-                .is_none()
-        );
+        assert!(limiter.state.lock_recover().semaphore.is_none());
         limiter.configure(ProviderRateLimitPolicy {
             max_concurrency: Some(2),
             ..Default::default()
@@ -239,8 +228,7 @@ mod tests {
         assert_eq!(
             limiter
                 .state
-                .lock()
-                .expect("rate limiter lock")
+                .lock_recover()
                 .semaphore
                 .as_ref()
                 .expect("configured semaphore")
