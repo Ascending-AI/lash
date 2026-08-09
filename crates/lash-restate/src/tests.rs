@@ -3355,6 +3355,10 @@ fn recorded_runtime_effect_hash_mismatch_fails_explicitly() {
         .expect_err("hash mismatch");
 
     assert_eq!(err.code, "restate_effect_hash_mismatch");
+    assert!(
+        lash_core::RuntimeErrorCode::from_wire_code(&err.code).is_replay_mismatch(),
+        "Restate replay divergence must retain the shared typed classification"
+    );
     assert_eq!(
         err.summary.expect("mismatch summary"),
         lash_core::RuntimeEffectReplayMismatchSummary {

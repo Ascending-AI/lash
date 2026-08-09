@@ -632,6 +632,10 @@ pub async fn effect_controller_replay_mismatch_diagnostics(
         .await
         .expect_err("reusing a replay key with a divergent envelope must fail");
     assert_eq!(error.code, mismatch_code);
+    assert!(
+        crate::RuntimeErrorCode::from_wire_code(&error.code).is_replay_mismatch(),
+        "{mismatch_code} must retain the shared typed replay-mismatch classification"
+    );
     assert_eq!(
         error.summary,
         Some(crate::RuntimeEffectReplayMismatchSummary {

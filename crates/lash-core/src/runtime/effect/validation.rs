@@ -126,6 +126,10 @@ pub fn validate_replayed_effect_envelope(
     mismatch_code: &str,
     trace: Option<&RuntimeEffectReplayTrace>,
 ) -> Result<(), RuntimeEffectControllerError> {
+    debug_assert!(
+        crate::RuntimeErrorCode::from_wire_code(mismatch_code).is_replay_mismatch(),
+        "replay-validation seam requires a classified replay-mismatch code: {mismatch_code}"
+    );
     recorded.verify("recorded")?;
     reconstructed.verify("reconstructed")?;
 

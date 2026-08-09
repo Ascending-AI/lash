@@ -242,6 +242,21 @@ impl RuntimeErrorCode {
         }
     }
 
+    /// Whether this code reports that a replayed runtime effect diverged from
+    /// the effect envelope recorded by its durable controller.
+    ///
+    /// The store-qualified wire codes remain available for display and
+    /// diagnostics. Hosts should use this predicate instead of matching those
+    /// backend-specific strings when choosing alerting or drain policy.
+    pub fn is_replay_mismatch(&self) -> bool {
+        matches!(
+            self.as_str(),
+            "sqlite_effect_replay_hash_conflict"
+                | "postgres_effect_replay_hash_conflict"
+                | "restate_effect_hash_mismatch"
+        )
+    }
+
     /// Whether retrying the identical operation is explicitly safe.
     pub fn is_retryable(&self) -> bool {
         matches!(
@@ -550,6 +565,37 @@ mod tests {
         assert_eq!(json["code"], "missing_process_execution_id");
         let decoded: RuntimeError = serde_json::from_value(json).expect("decode runtime error");
         assert_eq!(decoded.code, RuntimeErrorCode::MissingProcessExecutionId);
+    }
+
+    #[test]
+    fn replay_mismatch_classification_covers_every_durable_controller_code() {
+        for code in [
+            "sqlite_effect_replay_hash_conflict",
+            "postgres_effect_replay_hash_conflict",
+            "restate_effect_hash_mismatch",
+        ] {
+            let typed = RuntimeErrorCode::from_wire_code(code);
+            assert!(typed.is_replay_mismatch(), "{code}");
+            assert_eq!(
+                typed.as_str(),
+                code,
+                "classification must preserve display code"
+            );
+        }
+    }
+
+    #[test]
+    fn nearby_mismatch_codes_are_not_replay_divergence() {
+        for code in [
+            "runtime_effect_envelope_canonical_hash_invariant",
+            "runtime_effect_local_executor_mismatch",
+            "restate_segment_program_hash_mismatch",
+        ] {
+            assert!(
+                !RuntimeErrorCode::from_wire_code(code).is_replay_mismatch(),
+                "{code}"
+            );
+        }
     }
 
     #[test]

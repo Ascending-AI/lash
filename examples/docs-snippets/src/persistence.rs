@@ -121,6 +121,21 @@ fn retry_later(_err: lash::runtime::RuntimeError) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn requires_replay_mismatch_drain(err: &lash::runtime::RuntimeError) -> bool {
+    // Store-qualified codes remain useful in logs, while host policy branches
+    // on the typed semantic classification and survives backend renames.
+    err.code.is_replay_mismatch()
+}
+
+#[test]
+fn replay_mismatch_classification_is_host_usable() {
+    let error = lash::runtime::RuntimeError::new(
+        lash::runtime::RuntimeErrorCode::from_wire_code("sqlite_effect_replay_hash_conflict"),
+        "recorded effect diverged",
+    );
+    assert!(requires_replay_mismatch_drain(&error));
+}
+
 async fn commit_conflict_retry(
     core: &LashCore,
     session: &LashSession,
