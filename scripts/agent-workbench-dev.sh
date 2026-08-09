@@ -150,18 +150,62 @@ port_owner() {
   fi
 }
 
-pid_alive() {
+process_start_time() {
   local pid="${1:-}"
-  [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" >/dev/null 2>&1
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  [[ -r "/proc/$pid/stat" ]] || return 1
+  local start_time
+  start_time="$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null || true)"
+  [[ "$start_time" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$start_time"
 }
 
 read_pid_file() {
   local file="$1"
   [[ -f "$file" ]] || return 1
-  local pid
-  pid="$(tr -d '[:space:]' < "$file")"
-  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
-  printf '%s\n' "$pid"
+  local pid start_time extra
+  read -r pid start_time extra < "$file" || return 1
+  [[ "$pid" =~ ^[0-9]+$ && "$start_time" =~ ^[0-9]+$ && -z "$extra" ]] || return 1
+  printf '%s %s\n' "$pid" "$start_time"
+}
+
+pid_identity_matches() {
+  local pid="$1" expected_start_time="$2" current_start_time
+  current_start_time="$(process_start_time "$pid" 2>/dev/null || true)"
+  [[ -n "$current_start_time" && "$current_start_time" = "$expected_start_time" ]]
+}
+
+pid_file_identity() {
+  local file="$1" record pid start_time
+  record="$(read_pid_file "$file" 2>/dev/null || true)"
+  [[ -n "$record" ]] || return 1
+  read -r pid start_time <<<"$record"
+  pid_identity_matches "$pid" "$start_time" || return 1
+  printf '%s\n' "$record"
+}
+
+write_pid_file() {
+  local file="$1" pid="$2" start_time
+  start_time="$(process_start_time "$pid")" || return 1
+  printf '%s %s\n' "$pid" "$start_time" > "$file"
+}
+
+remove_stale_pid_file() {
+  local file="$1"
+  if [[ -e "$file" ]]; then
+    log "removing stale or mismatched PID file $file"
+  fi
+  rm -f "$file" "${file%.pid}.meta"
+}
+
+signal_verified_process() {
+  local signal="$1" pid="$2" start_time="$3"
+  pid_identity_matches "$pid" "$start_time" || return 1
+  if kill "-$signal" "-$pid" >/dev/null 2>&1; then
+    return 0
+  fi
+  pid_identity_matches "$pid" "$start_time" || return 1
+  kill "-$signal" "$pid" >/dev/null 2>&1
 }
 
 tail_log() {
@@ -174,9 +218,12 @@ tail_log() {
 
 require_workbench_alive() {
   local phase="$1"
-  local pid=""
-  pid="$(read_pid_file "$pid_file" 2>/dev/null || true)"
-  if [[ -n "$pid" ]] && pid_alive "$pid"; then
+  local record="" pid="" start_time=""
+  record="$(read_pid_file "$pid_file" 2>/dev/null || true)"
+  if [[ -n "$record" ]]; then
+    read -r pid start_time <<<"$record"
+  fi
+  if [[ -n "$pid" ]] && pid_identity_matches "$pid" "$start_time"; then
     return
   fi
 
@@ -189,7 +236,7 @@ require_workbench_alive() {
     fi
   fi
   tail_log
-  rm -f "$pid_file" "$meta_file"
+  remove_stale_pid_file "$pid_file"
   if [[ -z "$pid" ]]; then
     die "workbench process metadata disappeared $phase"
   fi
@@ -202,33 +249,37 @@ workbench_ready() {
 }
 
 cleanup_stale_pid() {
-  local pid=""
-  pid="$(read_pid_file "$pid_file" 2>/dev/null || true)"
-  if [[ -n "$pid" ]] && pid_alive "$pid"; then
+  [[ -e "$pid_file" ]] || return 0
+  if pid_file_identity "$pid_file" >/dev/null; then
     return
   fi
-  rm -f "$pid_file" "$meta_file"
+  remove_stale_pid_file "$pid_file"
 }
 
 stop_pid_file() {
   local file="$1"
-  local pid=""
-  pid="$(read_pid_file "$file" 2>/dev/null || true)"
-  if [[ -z "$pid" ]]; then
-    rm -f "$file"
+  [[ -e "$file" ]] || return 0
+  local record="" pid="" start_time=""
+  record="$(pid_file_identity "$file" 2>/dev/null || true)"
+  if [[ -z "$record" ]]; then
+    remove_stale_pid_file "$file"
     return
   fi
+  read -r pid start_time <<<"$record"
 
-  if pid_alive "$pid"; then
-    log "stopping process $pid"
-    kill "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
-    for _ in {1..30}; do
-      pid_alive "$pid" || break
-      sleep 0.5
-    done
-    if pid_alive "$pid"; then
-      log "process $pid did not exit; sending SIGKILL"
-      kill -KILL "-$pid" >/dev/null 2>&1 || kill -KILL "$pid" >/dev/null 2>&1 || true
+  log "stopping process $pid"
+  if ! signal_verified_process TERM "$pid" "$start_time"; then
+    remove_stale_pid_file "$file"
+    return
+  fi
+  for _ in {1..30}; do
+    pid_identity_matches "$pid" "$start_time" || break
+    sleep 0.5
+  done
+  if pid_identity_matches "$pid" "$start_time"; then
+    log "process $pid did not exit; sending SIGKILL"
+    if ! signal_verified_process KILL "$pid" "$start_time"; then
+      log "process identity changed before SIGKILL; refusing to signal PID $pid"
     fi
   fi
 
@@ -420,7 +471,7 @@ start_detached() {
       "$workbench_bin" >> "$log_file" 2>&1 < /dev/null &
   fi
   local pid="$!"
-  printf '%s\n' "$pid" > "$pid_file"
+  write_pid_file "$pid_file" "$pid" || die "could not record process identity for $pid"
   write_meta
   log "started process $pid; log: $log_file"
 }
@@ -484,10 +535,14 @@ run_foreground() {
   ensure_restate
   ensure_postgres
 
-  local started_pid=""
+  local started_pid="" started_start_time=""
   cleanup_foreground() {
     if [[ -n "$started_pid" ]]; then
-      kill "$started_pid" >/dev/null 2>&1 || true
+      if pid_identity_matches "$started_pid" "$started_start_time"; then
+        kill "$started_pid" >/dev/null 2>&1 || true
+      else
+        log "process identity changed before foreground cleanup; refusing to signal PID $started_pid"
+      fi
       wait "$started_pid" >/dev/null 2>&1 || true
     fi
     stop_started_restate
@@ -508,7 +563,8 @@ run_foreground() {
   fi
   env "${workbench_env[@]}" cargo run -p agent-workbench &
   started_pid="$!"
-  printf '%s\n' "$started_pid" > "$pid_file"
+  write_pid_file "$pid_file" "$started_pid" || die "could not record process identity for $started_pid"
+  started_start_time="$(process_start_time "$started_pid")"
   write_meta
 
   wait_workbench_ready 90
@@ -527,8 +583,11 @@ run_foreground() {
 
 run_status_one() {
   cleanup_stale_pid
-  local pid=""
-  pid="$(read_pid_file "$pid_file" 2>/dev/null || true)"
+  local record="" pid="" start_time=""
+  record="$(pid_file_identity "$pid_file" 2>/dev/null || true)"
+  if [[ -n "$record" ]]; then
+    read -r pid start_time <<<"$record"
+  fi
   if workbench_ready; then
     if [[ -n "$pid" ]]; then
       log "running: $workbench_url (pid $pid, log $log_file)"
@@ -537,7 +596,7 @@ run_status_one() {
     fi
     return 0
   fi
-  if [[ -n "$pid" ]] && pid_alive "$pid"; then
+  if [[ -n "$pid" ]] && pid_identity_matches "$pid" "$start_time"; then
     log "process $pid exists but health check failed: $workbench_url/healthz"
     return 1
   fi
