@@ -491,6 +491,9 @@ pub enum RuntimeErrorCause {
 pub struct RuntimeError {
     pub code: RuntimeErrorCode,
     pub message: String,
+    /// Structured, content-free evidence for a replay mismatch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<crate::RuntimeEffectReplayMismatchSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause: Option<RuntimeErrorCause>,
 }
@@ -502,6 +505,7 @@ impl RuntimeError {
         Self {
             code,
             message: message.into(),
+            summary: None,
             cause: None,
         }
     }

@@ -504,8 +504,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         RuntimeEffectLocalExecutor<'static>,
         Arc<std::sync::Mutex<Option<TurnEffectStateUpdate>>>,
     ) {
-        let replay_trace = super::RuntimeEffectReplayTrace::gated(
-            driver.host.core.tracing.trace_level,
+        let replay_trace = super::RuntimeEffectReplayTrace::for_divergence(
             driver.host.core.tracing.trace_sink.as_ref(),
             driver.host.core.tracing.trace_context.clone(),
             driver.trace_context(machine.protocol_iteration()),
@@ -632,7 +631,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     }
 
     /// Exposes structured replay-comparison evidence to effect-host and conformance implementors,
-    /// returning `None` when validation tracing was not requested.
+    /// returning `None` when the runtime has no configured trace sink.
     pub fn replay_validation_trace(&self) -> Option<&super::RuntimeEffectReplayTrace> {
         self.replay_trace.as_ref()
     }

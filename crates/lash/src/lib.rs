@@ -557,9 +557,9 @@ pub mod runtime {
         QueuedWorkWakeDisposition, QueuedWorkWakeFailure, RuntimeEffectCommand,
         RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
         RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-        RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeHandle,
-        RuntimeInvocation, RuntimeObservation, RuntimeScope, RuntimeTurnPhase,
-        RuntimeTurnPhaseProbe, ScopedEffectController, TurnContext,
+        RuntimeEffectReplayMismatchSummary, RuntimeEnvironmentBuilder, RuntimeError,
+        RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeObservation, RuntimeScope,
+        RuntimeTurnPhase, RuntimeTurnPhaseProbe, ScopedEffectController, TurnContext,
     };
     /// The host clock accepted by
     /// [`LashCoreBuilder::clock`](crate::LashCoreBuilder::clock), used for

@@ -42,7 +42,6 @@ impl RuntimeTurnDriver<'_> {
         tracing.trace_sink.as_ref().map(|sink| {
             crate::RuntimeExecutionTracing::new(
                 std::sync::Arc::clone(sink),
-                tracing.trace_level,
                 tracing.trace_context.clone(),
                 self.trace_context(protocol_iteration),
             )
