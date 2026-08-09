@@ -60,9 +60,36 @@ pub struct FreshRuntimeCommitFacts {
     /// this from an active-path read or a targeted liveness query under their
     /// commit authority.
     pub old_leaf_is_live: bool,
-    /// Nearest live FrameOpen ancestor of the selected leaf after applying the
-    /// append, or `None` when the resulting graph is empty.
-    pub derived_frame_node_id: Option<String>,
+    /// Immutable facts for the previously published leaf, when one exists.
+    /// Backends obtain these with one indexed row lookup; the core planner
+    /// derives every appended node's facts from this seed.
+    pub parent_node_facts: Option<ParentNodeFacts>,
+}
+
+/// Immutable derived facts for an append's durable parent node.
+///
+/// Integrator class (ADR 0051): **store and durable-substrate implementors**.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParentNodeFacts {
+    /// Parent identity cross-checked against the append edge.
+    pub node_id: String,
+    /// Zero-based distance from the graph root.
+    pub generation: u64,
+    /// Nearest frame boundary at or above the parent.
+    pub frame_node_id: String,
+}
+
+/// Immutable facts the core planner prescribes for one appended node.
+///
+/// Integrator class (ADR 0051): **store and durable-substrate implementors**.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlannedNodeFacts {
+    /// Appended node identity.
+    pub node_id: String,
+    /// Zero-based distance from the graph root.
+    pub generation: u64,
+    /// Nearest frame boundary at or above this node.
+    pub frame_node_id: String,
 }
 
 /// A replay decision for an already committed operation.
@@ -339,7 +366,30 @@ impl RuntimeCommitPlanner {
             }
             _ => {}
         }
-        if self.commit.graph.leaf_node_id.is_some() && facts.derived_frame_node_id.is_none() {
+
+        if facts
+            .parent_node_facts
+            .as_ref()
+            .map(|parent| parent.node_id.as_str())
+            != old_leaf_node_id.as_deref()
+        {
+            return Err(StoreError::InvalidGraphParent {
+                node_id: self
+                    .commit
+                    .graph
+                    .nodes
+                    .first()
+                    .map_or_else(|| "selected leaf".to_string(), |node| node.node_id.clone()),
+                expected: old_leaf_node_id.clone(),
+                actual: facts
+                    .parent_node_facts
+                    .as_ref()
+                    .map(|parent| parent.node_id.clone()),
+            });
+        }
+        let (planned_node_facts, derived_frame_node_id) =
+            derive_appended_node_facts(&self.commit.graph, facts.parent_node_facts)?;
+        if self.commit.graph.leaf_node_id.is_some() && derived_frame_node_id.is_none() {
             return Err(StoreError::MissingFrameOpenAncestor {
                 leaf_node_id: self
                     .commit
@@ -349,10 +399,10 @@ impl RuntimeCommitPlanner {
                     .expect("checked selected leaf"),
             });
         }
-        if self.commit.current_frame_node_id != facts.derived_frame_node_id {
+        if self.commit.current_frame_node_id != derived_frame_node_id {
             return Err(StoreError::CurrentFrameNodeMismatch {
                 claimed: self.commit.current_frame_node_id.clone(),
-                derived: facts.derived_frame_node_id,
+                derived: derived_frame_node_id,
             });
         }
         for completion in &self.commit.completed_queue_claims {
@@ -400,7 +450,8 @@ impl RuntimeCommitPlanner {
             actual_head_revision: facts.actual_head_revision,
             next_head_revision,
             old_leaf_node_id,
-            derived_frame_node_id: facts.derived_frame_node_id,
+            derived_frame_node_id,
+            planned_node_facts,
             realized_node_timestamps: self.realized_node_timestamps.clone(),
             committed_usage_delta_identities: self.committed_usage_delta_identities.clone(),
             turn_input_applications: self.turn_input_applications.clone(),
@@ -422,12 +473,17 @@ pub struct RuntimeCommitPlan<'a> {
     next_head_revision: u64,
     old_leaf_node_id: Option<String>,
     derived_frame_node_id: Option<String>,
+    planned_node_facts: Vec<PlannedNodeFacts>,
     realized_node_timestamps: Vec<crate::session_graph::RealizedNodeTimestamp>,
     committed_usage_delta_identities: Vec<RuntimeUsageDeltaIdentity>,
     turn_input_applications: Vec<crate::TurnInputApplication>,
 }
 
 impl<'a> RuntimeCommitPlan<'a> {
+    /// Derived facts to persist beside appended nodes, in append order.
+    pub fn planned_node_facts(&self) -> &[PlannedNodeFacts] {
+        &self.planned_node_facts
+    }
     /// Head revision observed under backend commit authority.
     pub fn actual_head_revision(&self) -> u64 {
         self.actual_head_revision
@@ -515,6 +571,44 @@ impl<'a> RuntimeCommitPlan<'a> {
     }
 }
 
+fn derive_appended_node_facts(
+    graph: &super::GraphAppend,
+    mut parent: Option<ParentNodeFacts>,
+) -> Result<(Vec<PlannedNodeFacts>, Option<String>), StoreError> {
+    let mut planned = Vec::with_capacity(graph.nodes.len());
+    for node in &graph.nodes {
+        let generation = match parent.as_ref() {
+            Some(parent) => StoreError::checked_monotonic_increment(
+                "session_graph_generation",
+                parent.generation,
+            )?,
+            None => 0,
+        };
+        let frame_node_id = if matches!(node.payload, crate::SessionNodePayload::FrameOpen { .. }) {
+            node.node_id.clone()
+        } else {
+            parent
+                .as_ref()
+                .map(|parent| parent.frame_node_id.clone())
+                .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
+                    leaf_node_id: node.node_id.clone(),
+                })?
+        };
+        let node_facts = PlannedNodeFacts {
+            node_id: node.node_id.clone(),
+            generation,
+            frame_node_id,
+        };
+        parent = Some(ParentNodeFacts {
+            node_id: node_facts.node_id.clone(),
+            generation: node_facts.generation,
+            frame_node_id: node_facts.frame_node_id.clone(),
+        });
+        planned.push(node_facts);
+    }
+    Ok((planned, parent.map(|parent| parent.frame_node_id)))
+}
+
 fn validate_session_execution_lease_plan(commit: &RuntimeCommit) -> Result<(), StoreError> {
     if commit.session_execution_lease_fence.is_some()
         && commit.release_session_execution_lease.is_some()
@@ -585,7 +679,7 @@ mod tests {
             selected_leaf_is_live: false,
             has_live_nodes: false,
             old_leaf_is_live: false,
-            derived_frame_node_id: None,
+            parent_node_facts: None,
         }) {
             Ok(_) => panic!("exhausted head revision must refuse"),
             Err(error) => error,

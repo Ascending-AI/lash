@@ -63,6 +63,7 @@ fn normalize_postgres_table(name: &str) -> Option<String> {
     let name = name.strip_prefix("lash_").unwrap_or(name);
     match name {
         "schema_versions" => None,
+        "fork_lineage" => Some("fork_lineage".to_string()),
         "sessions" => Some("session_head".to_string()),
         "lashlang_artifacts" => Some("artifact_refs".to_string()),
         name => Some(name.to_string()),
@@ -76,12 +77,12 @@ fn sqlite_and_postgres_table_sets_are_congruent() {
 
     assert_eq!(
         sqlite.len(),
-        32,
+        33,
         "SQLite schema table count changed; update the explicit cross-backend mapping"
     );
     assert_eq!(
         postgres_raw.len(),
-        33,
+        34,
         "Postgres schema table count changed; update the explicit cross-backend mapping"
     );
     assert!(

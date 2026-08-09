@@ -344,8 +344,8 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 session_id: request.session_id.clone(),
             });
         }
-        let live_node = sqlx::query_scalar::<_, bool>(
-            "SELECT TRUE FROM lash_graph_nodes
+        let node_facts = sqlx::query_as::<_, (String, i64, String)>(
+            "SELECT session_id, generation, frame_node_id FROM lash_graph_nodes
              WHERE node_id = $1 AND tombstoned = FALSE
              FOR UPDATE",
         )
@@ -353,11 +353,10 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .fetch_optional(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        if live_node.is_none() {
-            return Err(StoreError::ForkPointNotRetained {
+        let (_owning_session_id, fork_generation, current_frame_node_id) =
+            node_facts.ok_or_else(|| StoreError::ForkPointNotRetained {
                 node_id: request.node_id.clone(),
-            });
-        }
+            })?;
         let retained = sqlx::query_as::<_, (String, String)>(
             "SELECT source_session_id, checkpoint_ref FROM (
                  SELECT source_session_id, checkpoint_ref, 0 AS priority
@@ -376,15 +375,57 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             retained.ok_or_else(|| StoreError::ForkPointNotRetained {
                 node_id: request.node_id.clone(),
             })?;
-        // The relation records which session the host branched from, while the
-        // retained point records which session originally wrote the node. Those
-        // identities legitimately differ after a rewind.
-        let current_frame_node_id =
-            crate::runtime_persistence::nearest_frame_node_id_tx(&mut tx, &request.node_id)
-                .await?
-                .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
-                    leaf_node_id: request.node_id.clone(),
-                })?;
+        // Relation and retention-source identities are metadata, not ancestry.
+        // Reconstruct every inherited ceiling from the retained parent edges so
+        // deleted owners need no surviving head or descendant carrier row.
+        let fork_generation = u64_from_sql("SessionGraph node", "generation", fork_generation)?;
+        let mut edge_path = Vec::new();
+        let mut current_node_id = request.node_id.clone();
+        let mut expected_generation = fork_generation;
+        loop {
+            let facts = sqlx::query_as::<_, (String, Option<String>, String, i64)>(
+                "SELECT node_id, parent_node_id, session_id, generation
+                 FROM lash_graph_nodes
+                 WHERE node_id = $1 AND tombstoned = FALSE
+                 FOR SHARE",
+            )
+            .bind(&current_node_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .ok_or_else(|| StoreError::StoredDataCorrupt {
+                record_kind: "SessionGraph",
+                message: format!(
+                    "retained fork path is missing or tombstoned at `{current_node_id}`"
+                ),
+            })?;
+            let generation = u64_from_sql("SessionGraph node", "generation", facts.3)?;
+            if generation != expected_generation {
+                return Err(StoreError::StoredDataCorrupt {
+                    record_kind: "SessionGraph",
+                    message: format!(
+                        "parent generation {generation} does not match expected {expected_generation}"
+                    ),
+                });
+            }
+            let parent_node_id = facts.1.clone();
+            edge_path.push(lash_core::store::ForkNodeFacts {
+                node_id: facts.0,
+                parent_node_id: facts.1,
+                owning_session_id: facts.2,
+                generation,
+            });
+            if expected_generation == 0 {
+                break;
+            }
+            current_node_id = parent_node_id.ok_or_else(|| StoreError::StoredDataCorrupt {
+                record_kind: "SessionGraph",
+                message: "retained fork path ended before generation zero".to_string(),
+            })?;
+            expected_generation -= 1;
+        }
+        edge_path.reverse();
+        let fork_plan = lash_core::store::ForkPlan::derive(&request.session_id, edge_path)?;
         let config = lash_core::PersistedSessionConfig {
             provider_id: request.policy.recorded_provider_id().to_string(),
             model: request.policy.model.clone(),
@@ -413,6 +454,22 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
+        for ancestor in fork_plan.ancestors() {
+            sqlx::query(
+                "INSERT INTO lash_fork_lineage
+                 (session_id, ancestor_session_id, fork_node_id, fork_generation)
+                 VALUES ($1, $2, $3, $4)",
+            )
+            .bind(fork_plan.session_id())
+            .bind(&ancestor.ancestor_session_id)
+            .bind(&ancestor.fork_node_id)
+            .bind(i64::try_from(ancestor.fork_generation).map_err(|_| {
+                StoreError::Backend("fork generation does not fit PostgreSQL BIGINT".to_string())
+            })?)
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        }
         let meta = SessionMeta {
             session_id: request.session_id.clone(),
             session_name: request.session_id.clone(),
@@ -630,6 +687,7 @@ pub(crate) async fn delete_session_tx(
         "DELETE FROM lash_session_execution_leases WHERE session_id = $1",
         "DELETE FROM lash_usage_deltas WHERE session_id = $1",
         "DELETE FROM lash_runtime_turn_commits WHERE session_id = $1",
+        "DELETE FROM lash_fork_lineage WHERE session_id = $1",
         "DELETE FROM lash_session_meta WHERE session_id = $1",
     ] {
         sqlx::query(sql)
@@ -800,6 +858,11 @@ pub(crate) async fn delete_process_sessions_tx(
              WHERE session_id = ANY($1)
              RETURNING session_id
          ),
+         deleted_fork_lineage AS (
+             DELETE FROM lash_fork_lineage
+             WHERE session_id = ANY($1)
+             RETURNING session_id
+         ),
          deleted_session_meta AS (
              DELETE FROM lash_session_meta
              WHERE session_id = ANY($1)
@@ -820,6 +883,7 @@ pub(crate) async fn delete_process_sessions_tx(
               + (SELECT count(*) FROM deleted_session_execution_leases)
               + (SELECT count(*) FROM deleted_usage_deltas)
               + (SELECT count(*) FROM deleted_runtime_turn_commits)
+              + (SELECT count(*) FROM deleted_fork_lineage)
               + (SELECT count(*) FROM deleted_session_meta)
               + (SELECT count(*) FROM deleted_trigger_manifests)",
     )

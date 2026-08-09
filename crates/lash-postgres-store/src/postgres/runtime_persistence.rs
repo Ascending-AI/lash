@@ -142,20 +142,8 @@ pub(crate) async fn nearest_frame_node_id_tx(
     leaf_node_id: &str,
 ) -> Result<Option<String>, StoreError> {
     sqlx::query_scalar(
-        "WITH RECURSIVE ancestry(node_id, parent_node_id, node_json, depth) AS (
-            SELECT node_id, parent_node_id, node_json, 0
-            FROM lash_graph_nodes
-            WHERE node_id = $1 AND tombstoned = FALSE
-          UNION ALL
-            SELECT parent.node_id, parent.parent_node_id, parent.node_json, ancestry.depth + 1
-            FROM lash_graph_nodes AS parent
-            JOIN ancestry ON parent.node_id = ancestry.parent_node_id
-            WHERE parent.tombstoned = FALSE
-        )
-        SELECT node_id FROM ancestry
-        WHERE node_json::jsonb ->> 'kind' = 'frame_open'
-        ORDER BY depth ASC
-        LIMIT 1",
+        "SELECT frame_node_id FROM lash_graph_nodes
+         WHERE node_id = $1 AND tombstoned = FALSE",
     )
     .bind(leaf_node_id)
     .fetch_optional(&mut **tx)
@@ -344,7 +332,7 @@ impl SessionCommitStore for PostgresSessionStore {
             return Ok(None);
         };
         let leaf_node_id = meta.leaf_node_id.clone();
-        let graph = load_graph_tx(&mut tx, &session_id, leaf_node_id.clone(), true).await?;
+        let graph = load_graph_tx(&mut tx, &session_id, leaf_node_id.clone()).await?;
         let checkpoint = match meta.checkpoint_ref.as_ref() {
             Some(blob_ref) => get_checkpoint_tx(&mut tx, blob_ref).await?,
             None => None,
@@ -370,41 +358,150 @@ impl SessionCommitStore for PostgresSessionStore {
         let Some(session_id) = self.selected_session_id().await? else {
             return Ok(None);
         };
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         let row = sqlx::query(
-            "WITH RECURSIVE ancestry(node_id, parent_node_id) AS (
-                 SELECT node.node_id, node.parent_node_id
-                 FROM lash_graph_nodes node
-                 JOIN lash_sessions head ON head.leaf_node_id = node.node_id
-                 WHERE head.session_id = $2 AND node.tombstoned = FALSE
-                 UNION ALL
-                 SELECT parent.node_id, parent.parent_node_id
-                 FROM lash_graph_nodes parent
-                 JOIN ancestry child ON parent.node_id = child.parent_node_id
-                 WHERE parent.tombstoned = FALSE
-             )
-             SELECT node_id, parent_node_id, node_json FROM lash_graph_nodes
-             WHERE node_id = $1 AND tombstoned = FALSE
+            "SELECT node.node_id, node.parent_node_id, node.node_json,
+                    node.session_id, node.generation
+             FROM lash_graph_nodes AS node
+             WHERE node.node_id = $1 AND node.tombstoned = FALSE
                AND (
-                   session_id = $2
+                   node.session_id = $2
                    OR EXISTS (
-                       SELECT 1 FROM ancestry
-                       WHERE ancestry.node_id = lash_graph_nodes.node_id
+                       SELECT 1 FROM lash_fork_lineage AS lineage
+                       WHERE lineage.session_id = $2
+                         AND lineage.ancestor_session_id = node.session_id
+                         AND node.generation <= lineage.fork_generation
                    )
                )",
         )
         .bind(node_id)
-        .bind(session_id)
-        .fetch_optional(&self.pool)
+        .bind(&session_id)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        row.map(|row| {
-            let node_id = row.get(0);
-            let parent_node_id = row.get(1);
-            let json: String = row.get(2);
-            SessionNodeRecord::decode_storage_body(node_id, parent_node_id, &json)
-                .map_err(|err| StoreError::Backend(format!("failed to decode graph node: {err}")))
-        })
-        .transpose()
+        let Some(row) = row else {
+            tx.commit().await.map_err(store_sqlx_error)?;
+            return Ok(None);
+        };
+        let candidate_id: String = row.get(0);
+        let parent_node_id: Option<String> = row.get(1);
+        let json: String = row.get(2);
+        let owner: String = row.get(3);
+        let candidate_generation: i64 = row.get(4);
+        if owner != session_id {
+            let rows = sqlx::query(
+                "WITH readable_sessions(session_id, generation_ceiling) AS (
+                     SELECT $1::TEXT, NULL::BIGINT
+                     UNION ALL
+                     SELECT lineage.ancestor_session_id, lineage.fork_generation
+                     FROM lash_fork_lineage AS lineage
+                     WHERE lineage.session_id = $1
+                 )
+                 SELECT session.leaf_node_id, head.generation, head.tombstoned,
+                        node.node_id, node.parent_node_id,
+                        node.generation, node.tombstoned
+                 FROM lash_sessions AS session
+                 LEFT JOIN lash_graph_nodes AS head
+                   ON head.node_id = session.leaf_node_id
+                 LEFT JOIN readable_sessions AS readable ON TRUE
+                 LEFT JOIN lash_graph_nodes AS node
+                   ON node.session_id = readable.session_id
+                  AND node.generation BETWEEN $2 AND head.generation
+                  AND (
+                      readable.generation_ceiling IS NULL
+                      OR node.generation <= readable.generation_ceiling
+                  )
+                 WHERE session.session_id = $1",
+            )
+            .bind(&session_id)
+            .bind(candidate_generation)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            let Some(first) = rows.first() else {
+                tx.commit().await.map_err(store_sqlx_error)?;
+                return Ok(None);
+            };
+            let head_id: Option<String> = first.get(0);
+            let Some(head_id) = head_id else {
+                tx.commit().await.map_err(store_sqlx_error)?;
+                return Ok(None);
+            };
+            let head_generation: Option<i64> = first.get(1);
+            let head_tombstoned: Option<bool> = first.get(2);
+            let (Some(head_generation), Some(head_tombstoned)) = (head_generation, head_tombstoned)
+            else {
+                return Err(StoreError::StoredDataCorrupt {
+                    record_kind: "SessionGraph",
+                    message: "head leaf is missing".to_string(),
+                });
+            };
+            if head_tombstoned {
+                return Err(StoreError::StoredDataCorrupt {
+                    record_kind: "SessionGraph",
+                    message: "head leaf is tombstoned".to_string(),
+                });
+            }
+            if candidate_generation < 0 || candidate_generation > head_generation {
+                tx.commit().await.map_err(store_sqlx_error)?;
+                return Ok(None);
+            }
+            let mut range = std::collections::HashMap::new();
+            for row in rows {
+                let node_id: Option<String> = row.get(3);
+                let generation: Option<i64> = row.get(5);
+                let tombstoned: Option<bool> = row.get(6);
+                if let (Some(node_id), Some(generation), Some(tombstoned)) =
+                    (node_id, generation, tombstoned)
+                {
+                    range.insert(
+                        node_id,
+                        (row.get::<Option<String>, _>(4), generation, tombstoned),
+                    );
+                }
+            }
+            let mut current_id = head_id;
+            let mut current_generation = head_generation;
+            loop {
+                let Some((parent_id, generation, tombstoned)) = range.get(&current_id) else {
+                    return Err(StoreError::StoredDataCorrupt {
+                        record_kind: "SessionGraph",
+                        message: "readable generation range omits an edge-path node".to_string(),
+                    });
+                };
+                if *tombstoned || *generation != current_generation {
+                    return Err(StoreError::StoredDataCorrupt {
+                        record_kind: "SessionGraph",
+                        message: "parent edge crosses a tombstone or generation gap".to_string(),
+                    });
+                }
+                if current_generation == candidate_generation {
+                    if current_id != candidate_id {
+                        tx.commit().await.map_err(store_sqlx_error)?;
+                        return Ok(None);
+                    }
+                    break;
+                }
+                current_id = parent_id
+                    .clone()
+                    .ok_or_else(|| StoreError::StoredDataCorrupt {
+                        record_kind: "SessionGraph",
+                        message: "parent edge ended before the candidate generation".to_string(),
+                    })?;
+                current_generation -= 1;
+            }
+        }
+        let node = SessionNodeRecord::decode_storage_body(candidate_id, parent_node_id, &json)
+            .map_err(|err| StoreError::StoredDataCorrupt {
+                record_kind: "SessionGraph node",
+                message: err.to_string(),
+            })?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(Some(node))
     }
 
     async fn commit_runtime_state(
@@ -496,41 +593,100 @@ impl SessionCommitStore for PostgresSessionStore {
             }
         }
         let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
-        let locked_revision = if existing.is_some() {
-            let locked_revision = sqlx::query_scalar::<_, i64>(
-                "SELECT head_revision
-                 FROM lash_sessions
-                 WHERE session_id = $1
-                 FOR UPDATE",
+        if existing.is_none() {
+            let placeholder = SessionHeadMeta::assemble(
+                SessionHeadPayload {
+                    schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                    session_id: commit.session_id.clone(),
+                    config: commit.config.clone(),
+                    current_frame_node_id: None,
+                },
+                0,
+                None,
+                None,
+            );
+            sqlx::query(
+                "INSERT INTO lash_sessions
+                 (session_id, head_revision, head_json, checkpoint_ref, leaf_node_id)
+                 VALUES ($1, 0, $2, NULL, NULL)
+                 ON CONFLICT (session_id) DO NOTHING",
             )
             .bind(&commit.session_id)
-            .fetch_optional(&mut *tx)
+            .bind(encode_json(&placeholder.payload()))
+            .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
-            Some(
-                locked_revision
-                    .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
-                    .transpose()?
-                    .unwrap_or(0),
-            )
-        } else {
-            None
-        };
+        }
+        let locked_revision = sqlx::query_scalar::<_, i64>(
+            "SELECT head_revision
+             FROM lash_sessions
+             WHERE session_id = $1
+             FOR UPDATE",
+        )
+        .bind(&commit.session_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
+        .transpose()?
+        .ok_or_else(|| StoreError::StoredDataCorrupt {
+            record_kind: "SessionHeadMeta",
+            message: "head row disappeared while commit authority was held".to_string(),
+        })?;
         let old_leaf_node_id = existing.as_ref().and_then(|head| head.leaf_node_id.clone());
-        let active_graph = if commit.turn_commit.requested_ancestor_node_id.is_some() {
-            Some(load_graph_tx(&mut tx, &commit.session_id, old_leaf_node_id.clone(), true).await?)
-        } else {
-            None
+        let parent_node_facts = match old_leaf_node_id.as_deref() {
+            Some(leaf_node_id) => sqlx::query_as::<_, (i64, String)>(
+                "SELECT generation, frame_node_id FROM lash_graph_nodes
+                 WHERE node_id = $1 AND tombstoned = FALSE
+                 FOR UPDATE",
+            )
+            .bind(leaf_node_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .map(|(generation, frame_node_id)| {
+                Ok(lash_core::store::ParentNodeFacts {
+                    node_id: leaf_node_id.to_string(),
+                    generation: u64_from_sql("SessionGraph node", "generation", generation)?,
+                    frame_node_id,
+                })
+            })
+            .transpose()?,
+            None => None,
         };
         let requested_ancestor_is_active = match (
             commit.turn_commit.requested_ancestor_node_id.as_deref(),
-            active_graph.as_ref(),
+            parent_node_facts.as_ref(),
         ) {
-            (Some(required), Some(graph)) => graph.active_path_contains(required),
-            (None, None) => true,
-            _ => unreachable!("active graph is loaded exactly for ancestor-fenced appends"),
+            (None, _) => true,
+            (Some(_), None) => false,
+            (Some(required), Some(parent)) => sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(
+                     SELECT 1 FROM lash_graph_nodes AS node
+                     WHERE node.node_id = $1
+                       AND node.tombstoned = FALSE
+                       AND node.generation <= $3
+                       AND (
+                           node.session_id = $2
+                           OR EXISTS (
+                               SELECT 1 FROM lash_fork_lineage AS lineage
+                               WHERE lineage.session_id = $2
+                                 AND lineage.ancestor_session_id = node.session_id
+                                 AND node.generation <= lineage.fork_generation
+                           )
+                       )
+                 )",
+            )
+            .bind(required)
+            .bind(&commit.session_id)
+            .bind(i64::try_from(parent.generation).map_err(|_| {
+                StoreError::Backend("parent generation does not fit PostgreSQL BIGINT".to_string())
+            })?)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?,
         };
-        let authoritative_revision = locked_revision.unwrap_or(actual_revision);
+        let authoritative_revision = locked_revision.max(actual_revision);
         let node_ids = commit
             .graph
             .nodes
@@ -571,31 +727,7 @@ impl SessionCommitStore for PostgresSessionStore {
         .fetch_one(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        let old_leaf_is_live = match old_leaf_node_id.as_deref() {
-            Some(old_leaf_node_id) => sqlx::query_scalar::<_, bool>(
-                "SELECT TRUE FROM lash_graph_nodes
-                 WHERE node_id = $1 AND tombstoned = FALSE
-                 FOR UPDATE",
-            )
-            .bind(old_leaf_node_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?
-            .is_some(),
-            None => true,
-        };
-        let derived_frame_node_id = match commit.graph.nodes.iter().rev().find(|node| {
-            matches!(
-                node.payload,
-                lash_core::SessionNodePayload::FrameOpen { .. }
-            )
-        }) {
-            Some(frame) => Some(frame.node_id.clone()),
-            None => match old_leaf_node_id.as_deref() {
-                Some(leaf) => nearest_frame_node_id_tx(&mut tx, leaf).await?,
-                None => None,
-            },
-        };
+        let old_leaf_is_live = old_leaf_node_id.is_none() || parent_node_facts.is_some();
         let plan = planner.plan(lash_core::store::FreshRuntimeCommitFacts {
             actual_head_revision: authoritative_revision,
             old_leaf_node_id,
@@ -604,7 +736,7 @@ impl SessionCommitStore for PostgresSessionStore {
             selected_leaf_is_live,
             has_live_nodes,
             old_leaf_is_live,
-            derived_frame_node_id,
+            parent_node_facts,
         })?;
         let sql_head_revision = sql_monotonic_counter_value(
             "session_head_revision",
@@ -645,22 +777,28 @@ impl SessionCommitStore for PostgresSessionStore {
             .await
             .map_err(store_sqlx_error)?;
         }
-        for node in &commit.graph.nodes {
+        for (node, facts) in commit.graph.nodes.iter().zip(plan.planned_node_facts()) {
             let node_json = node.encode_storage_body().map_err(|err| {
                 StoreError::Backend(format!("failed to encode graph node body: {err}"))
             })?;
             sqlx::query(
                 "INSERT INTO lash_graph_nodes
-                     (session_id, node_id, parent_node_id, node_json)
-                     VALUES ($1, $2, $3, $4)",
+                     (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
+                     VALUES ($1, $2, $3, $4, $5, $6)",
             )
             .bind(&commit.session_id)
             .bind(&node.node_id)
             .bind(&node.parent_node_id)
+            .bind(i64::try_from(facts.generation).map_err(|_| {
+                StoreError::Backend("node generation does not fit PostgreSQL BIGINT".to_string())
+            })?)
+            .bind(&facts.frame_node_id)
             .bind(node_json)
             .execute(&mut *tx)
             .await
-            .map_err(store_sqlx_error)?;
+            .map_err(|error| {
+                graph_node_insert_error(error, &commit.session_id, facts.generation, &node.node_id)
+            })?;
         }
         let meta = plan.head_meta(checkpoint_ref.clone());
         // Conditional publication is still required for concurrent first

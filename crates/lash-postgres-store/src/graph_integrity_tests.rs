@@ -28,10 +28,17 @@ impl GraphIntegrityInjector for PostgresGraphIntegrityInjector {
                     .await
                     .expect("remove Postgres graph-node uniqueness for corruption injection");
                 sqlx::query(
+                    "ALTER TABLE lash_graph_nodes
+                     DROP CONSTRAINT lash_graph_nodes_session_id_generation_key",
+                )
+                .execute(self.storage.pool())
+                .await
+                .expect("remove Postgres graph-generation uniqueness for corruption injection");
+                sqlx::query(
                     "INSERT INTO lash_graph_nodes (
-                         session_id, node_id, parent_node_id, node_json, tombstoned
+                         session_id, node_id, parent_node_id, generation, frame_node_id, node_json, tombstoned
                      )
-                     SELECT session_id, node_id, parent_node_id, node_json, tombstoned
+                     SELECT session_id, node_id, parent_node_id, generation, frame_node_id, node_json, tombstoned
                      FROM lash_graph_nodes WHERE node_id = $1 LIMIT 1",
                 )
                 .bind(&target.leaf_node_id)
@@ -61,19 +68,21 @@ impl GraphIntegrityInjector for PostgresGraphIntegrityInjector {
                     let node_a_id = format!("{}-a", target.missing_node_id);
                     let node_b_id = format!("{}-b", target.missing_node_id);
                     let mut last_result = None;
-                    for (node_id, parent_node_id) in
-                        [(&node_a_id, &node_b_id), (&node_b_id, &node_a_id)]
-                    {
+                    for (node_id, parent_node_id, generation_offset) in [
+                        (&node_a_id, &node_b_id, 1_i64),
+                        (&node_b_id, &node_a_id, 2_i64),
+                    ] {
                         let result = sqlx::query(
                             "INSERT INTO lash_graph_nodes (
-                                 session_id, node_id, parent_node_id, node_json, tombstoned
+                                 session_id, node_id, parent_node_id, generation, frame_node_id, node_json, tombstoned
                              )
-                             SELECT session_id, $1, $2, node_json, tombstoned
+                             SELECT session_id, $1, $2, generation + $4, frame_node_id, node_json, tombstoned
                              FROM lash_graph_nodes WHERE node_id = $3 LIMIT 1",
                         )
                         .bind(node_id)
                         .bind(parent_node_id)
                         .bind(&target.leaf_node_id)
+                        .bind(generation_offset)
                         .execute(self.storage.pool())
                         .await
                         .expect("inject inactive Postgres graph cycle node");
@@ -100,7 +109,7 @@ impl GraphIntegrityInjector for PostgresGraphIntegrityInjector {
         let leaf_node_id = load_session_head_meta_tx(&mut tx, session_id, false)
             .await?
             .and_then(|meta| meta.leaf_node_id);
-        let graph = load_graph_tx(&mut tx, session_id, leaf_node_id, false).await?;
+        let graph = load_whole_graph_tx(&mut tx, session_id, leaf_node_id).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(graph)
     }
@@ -125,6 +134,14 @@ impl GraphIntegrityInjector for PostgresGraphIntegrityInjector {
         .execute(self.storage.pool())
         .await
         .expect("restore Postgres graph-node primary key after injection");
+        sqlx::query(
+            "ALTER TABLE lash_graph_nodes
+             ADD CONSTRAINT lash_graph_nodes_session_id_generation_key
+             UNIQUE (session_id, generation)",
+        )
+        .execute(self.storage.pool())
+        .await
+        .expect("restore Postgres graph-generation uniqueness after injection");
     }
 }
 

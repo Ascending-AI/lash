@@ -56,13 +56,24 @@ CREATE TABLE IF NOT EXISTS graph_nodes (
     session_id     TEXT NOT NULL,
     node_id        TEXT NOT NULL UNIQUE,
     parent_node_id TEXT,
+    generation     INTEGER NOT NULL CHECK (generation >= 0),
+    frame_node_id  TEXT NOT NULL,
     node_json      TEXT NOT NULL,
-    tombstoned     INTEGER NOT NULL DEFAULT 0
+    tombstoned     INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (session_id, generation)
 );
 CREATE INDEX IF NOT EXISTS idx_graph_nodes_session_seq
     ON graph_nodes(session_id, seq);
 CREATE INDEX IF NOT EXISTS idx_graph_nodes_parent
     ON graph_nodes(parent_node_id);
+
+CREATE TABLE IF NOT EXISTS fork_lineage (
+    session_id         TEXT NOT NULL,
+    ancestor_session_id TEXT NOT NULL,
+    fork_node_id       TEXT NOT NULL,
+    fork_generation    INTEGER NOT NULL CHECK (fork_generation >= 0),
+    PRIMARY KEY (session_id, ancestor_session_id)
+);
 
 CREATE TABLE IF NOT EXISTS usage_deltas (
     seq                  INTEGER PRIMARY KEY,
@@ -288,7 +299,10 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// Version 27 adds the required per-turn budget to session-head configuration,
 /// frame policy snapshots, and process execution environment artifacts. Older
 /// databases are rejected and recreated; there is no compatibility read path.
-pub(crate) const SCHEMA_VERSION: i32 = 27;
+/// Version 28 adds immutable graph generations and frame pointers plus
+/// zero-copy fork-lineage accelerators. Older databases are rejected and
+/// recreated; there is no backfill or compatibility read path.
+pub(crate) const SCHEMA_VERSION: i32 = 28;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

@@ -152,6 +152,7 @@ fn store_error_variant(error: &StoreError) -> String {
         StoreError::AppendAncestorNotActive { .. } => "AppendAncestorNotActive",
         StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch",
         StoreError::NodeIdCollision { .. } => "NodeIdCollision",
+        StoreError::GraphGenerationCollision { .. } => "GraphGenerationCollision",
         StoreError::InvalidGraphLeaf { .. } => "InvalidGraphLeaf",
         StoreError::ForkPointNotRetained { .. } => "ForkPointNotRetained",
         StoreError::ForkSessionAlreadyExists { .. } => "ForkSessionAlreadyExists",

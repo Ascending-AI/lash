@@ -186,6 +186,31 @@ fn sqlite_error(err: rusqlite::Error) -> StoreError {
     }
 }
 
+fn sqlite_graph_node_insert_error(
+    err: rusqlite::Error,
+    session_id: &str,
+    generation: u64,
+    node_id: &str,
+) -> StoreError {
+    if let rusqlite::Error::SqliteFailure(code, message) = &err
+        && code.code == rusqlite::ErrorCode::ConstraintViolation
+    {
+        let message = message.as_deref().unwrap_or_default();
+        if message.contains("graph_nodes.session_id, graph_nodes.generation") {
+            return StoreError::GraphGenerationCollision {
+                session_id: session_id.to_string(),
+                generation,
+            };
+        }
+        if message.contains("graph_nodes.node_id") {
+            return StoreError::NodeIdCollision {
+                node_id: node_id.to_string(),
+            };
+        }
+    }
+    sqlite_error(err)
+}
+
 fn sqlite_conversion_error(error: StoreError) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(error))
 }
@@ -927,6 +952,11 @@ async fn delete_session_from_catalog(
             tx.execute("DELETE FROM graph_nodes WHERE tombstoned = 1", [])
                 .map_err(sqlite_error)?;
             tx.execute(
+                "DELETE FROM fork_lineage WHERE session_id = ?1",
+                params![session_id],
+            )
+            .map_err(sqlite_error)?;
+            tx.execute(
                 "DELETE FROM queued_work_batches WHERE session_id = ?1",
                 params![session_id],
             )
@@ -1206,6 +1236,8 @@ fn decode_msgpack<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Option<T> {
 }
 
 #[cfg(test)]
+mod graph_error_tests;
+#[cfg(test)]
 mod read_failure_tests;
 
 #[cfg(test)]
@@ -1248,21 +1280,6 @@ mod tests {
             lash_core::RecoveryDisposition::ExternallyOwned,
             lash_core::ProcessProvenance::session(lash_core::SessionScope::new("session")),
         )
-    }
-
-    #[test]
-    fn sqlite_busy_and_locked_errors_are_typed_as_contention() {
-        for code in [
-            rusqlite::ffi::SQLITE_BUSY,
-            rusqlite::ffi::SQLITE_LOCKED,
-            rusqlite::ffi::SQLITE_BUSY_SNAPSHOT,
-        ] {
-            let error = rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(code),
-                Some("synthetic contention".to_string()),
-            );
-            assert!(matches!(sqlite_error(error), StoreError::Contended));
-        }
     }
 
     #[tokio::test]

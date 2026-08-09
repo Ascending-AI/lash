@@ -17,7 +17,7 @@
 # in this file records how the DDL declares it and is documentation, not a
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
-version 39
+version 40
 table lash_attachment_manifest
   column attachment_id text not-null
   column canonical_uri text not-null
@@ -52,13 +52,22 @@ table lash_blobs
 table lash_deleted_sessions
   column session_id text not-null
   primary-key (session_id)
+table lash_fork_lineage
+  column ancestor_session_id text not-null
+  column fork_generation bigint not-null
+  column fork_node_id text not-null
+  column session_id text not-null
+  primary-key (session_id, ancestor_session_id)
 table lash_graph_nodes
+  column frame_node_id text not-null
+  column generation bigint not-null
   column node_id text not-null
   column node_json text not-null
   column parent_node_id text nullable
   column seq bigint not-null default
   column session_id text not-null
   column tombstoned boolean not-null default
+  unique (session_id, generation)
   primary-key (node_id)
 table lash_lashlang_artifacts
   column artifact_bytes bytea not-null
