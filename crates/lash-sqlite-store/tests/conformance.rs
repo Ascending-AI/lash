@@ -1228,10 +1228,10 @@ async fn sqlite_real_turn_crash_matrix() {
 }
 
 #[tokio::test]
-async fn sqlite_checkpoint_component_refs_survive_cold_reopens() {
+async fn sqlite_complete_runtime_checkpoint_component_set_survives_cold_reopens() {
     let dir = tempfile::tempdir().expect("checkpoint-component tempdir");
     let path = dir.path().join("checkpoint-components.db");
-    lash_core::testing::conformance::checkpoint_component_refs_survive_cold_reopens(|| {
+    lash_core::testing::conformance::complete_runtime_checkpoint_component_set_survives_cold_reopens(|| {
         open_store(&path)
     })
     .await;

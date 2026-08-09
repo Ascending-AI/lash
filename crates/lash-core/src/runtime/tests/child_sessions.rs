@@ -254,6 +254,75 @@ async fn inherited_child_session_carries_parent_tool_state() {
 }
 
 #[tokio::test]
+async fn existing_session_start_propagates_unknown_checkpoint_component_into_child_first_root() {
+    let runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
+    let lifecycle = runtime
+        .session_lifecycle_service()
+        .expect("session lifecycle");
+    let source = lifecycle
+        .create_session(
+            crate::SessionCreateRequest::root(
+                crate::SessionStartPoint::Empty,
+                crate::PluginOptions::default(),
+            )
+            .with_session_id("checkpoint-source")
+            .with_plugin_source(crate::SessionPluginSource::CurrentHostFresh),
+        )
+        .await
+        .expect("source session");
+    let source_handle = runtime
+        .managed_sessions
+        .lock()
+        .await
+        .get(&source.session_id)
+        .cloned()
+        .expect("managed source runtime");
+    let unknown_ref = crate::BlobRef("future-component-ref".to_string());
+    {
+        let mut source_runtime = source_handle.runtime.lock().await;
+        source_runtime.state.checkpoint_components =
+            crate::runtime::state::RuntimeCheckpointComponents::complete_refs_for_testing([(
+                "extension/future-component".to_string(),
+                unknown_ref.clone(),
+            )]);
+        source_handle.publish_from(&source_runtime);
+    }
+
+    let child = lifecycle
+        .create_session(
+            crate::SessionCreateRequest::root(
+                crate::SessionStartPoint::ExistingSession {
+                    session_id: source.session_id,
+                },
+                crate::PluginOptions::default(),
+            )
+            .with_session_id("checkpoint-child")
+            .with_plugin_source(crate::SessionPluginSource::CurrentHostFresh),
+        )
+        .await
+        .expect("child inherits the complete resident component set");
+    let child_handle = runtime
+        .managed_sessions
+        .lock()
+        .await
+        .get(&child.session_id)
+        .cloned()
+        .expect("managed child runtime");
+    let child_state = child_handle.observe().persisted_state.clone();
+    let first_root = child_state
+        .checkpoint_components
+        .build_checkpoint(crate::PersistedTurnState::default(), None)
+        .expect("child first checkpoint root");
+    let carried = first_root
+        .components
+        .get("extension/future-component")
+        .expect("unknown component survives ExistingSession inheritance");
+
+    assert_eq!(carried.blob_ref(), Some(&unknown_ref));
+    assert_eq!(carried.body(), None, "unknown component remains ref-only");
+}
+
+#[tokio::test]
 async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
     let transport = mock_provider(vec![
         MockCall {

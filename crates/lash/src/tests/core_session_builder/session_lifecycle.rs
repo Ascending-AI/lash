@@ -1298,7 +1298,7 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
             lash_core::TurnBudget::Unbounded,
         ))
     };
-    state.execution_state_snapshot = Some(old_version_snapshot);
+    state.set_execution_state_snapshot(Some(old_version_snapshot));
     let store: Arc<dyn lash_core::RuntimePersistence> =
         Arc::new(SnapshotStore::with_state(state));
     let core = explicit_ephemeral_facets(rlm_core_builder())
@@ -1838,11 +1838,10 @@ async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<(
         .await?
         .generation()
         .saturating_add(5);
-    persisted.tool_state_generation = Some(expected_generation);
-    persisted.tool_state_snapshot = Some(persisted_tool_state_at_generation(
+    persisted.set_tool_state_snapshot(Some(persisted_tool_state_at_generation(
         opened.admin().tools().state().await?,
         expected_generation,
-    ));
+    )));
     drop(opened);
 
     let reopened = core

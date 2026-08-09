@@ -302,7 +302,11 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// Version 28 adds immutable graph generations and frame pointers plus
 /// zero-copy fork-lineage accelerators. Older databases are rejected and
 /// recreated; there is no backfill or compatibility read path.
-pub(crate) const SCHEMA_VERSION: i32 = 28;
+/// Version 29 replaces the fixed checkpoint slots with a complete keyed
+/// component descriptor set carrying per-component encoding versions. Older
+/// roots have no honest compatibility interpretation and are rejected with the
+/// existing recreate-store remedy.
+pub(crate) const SCHEMA_VERSION: i32 = 29;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

@@ -293,8 +293,7 @@ impl crate::plugin::ProtocolSessionPlugin for ResetExecutorOnSwitchProtocol {
         state: &crate::RuntimeSessionState,
     ) -> Result<(), crate::SessionError> {
         let snapshot = state
-            .execution_state_snapshot
-            .as_deref()
+            .execution_state_snapshot()
             .unwrap_or(b"fresh-frame-execution-state");
         crate::plugin::CodeExecutorPlugin::restore_execution_state(
             self.executor.as_ref(),
@@ -326,10 +325,9 @@ impl crate::plugin::ProtocolSessionPlugin for SwitchBeforeLlmProtocol {
         ctx: crate::plugin::ProtocolSessionContext<'_>,
         state: &crate::RuntimeSessionState,
     ) -> Result<(), crate::SessionError> {
-        if let (Some(executor), Some(snapshot)) = (
-            self.executor.as_ref(),
-            state.execution_state_snapshot.as_deref(),
-        ) {
+        if let (Some(executor), Some(snapshot)) =
+            (self.executor.as_ref(), state.execution_state_snapshot())
+        {
             crate::plugin::CodeExecutorPlugin::restore_execution_state(
                 executor.as_ref(),
                 ctx,
@@ -362,7 +360,7 @@ impl crate::plugin::ProtocolSessionPlugin for RestoreExecutorFromRuntimeState {
         ctx: crate::plugin::ProtocolSessionContext<'_>,
         state: &crate::RuntimeSessionState,
     ) -> Result<(), crate::SessionError> {
-        if let Some(snapshot) = state.execution_state_snapshot.as_deref() {
+        if let Some(snapshot) = state.execution_state_snapshot() {
             crate::plugin::CodeExecutorPlugin::restore_execution_state(
                 self.executor.as_ref(),
                 ctx,
@@ -892,7 +890,7 @@ async fn dirty_execution_state_capture_failure_aborts_commit_and_cold_reopens_pr
         .expect("baseline state exists");
     assert_eq!(durable.head_revision, 1);
     assert_eq!(
-        durable.execution_state_snapshot.as_deref(),
+        durable.execution_state_snapshot(),
         Some(b"committed-before-failure".as_slice())
     );
 
@@ -1001,7 +999,7 @@ async fn already_current_protocol_frame_switch_preserves_dirty_execution_state_o
         .expect("load no-op switch state")
         .expect("no-op switch state is durable");
     assert_eq!(
-        durable.execution_state_snapshot.as_deref(),
+        durable.execution_state_snapshot(),
         Some(b"live-frame-execution-state".as_slice())
     );
     drop(runtime);
@@ -1104,8 +1102,8 @@ async fn materialized_frame_switch_clears_checkpoint_and_resets_resident_executo
         .expect("load materialized switch state")
         .expect("materialized switch state is durable");
     assert!(
-        durable.execution_state_ref.is_none()
-            && durable.execution_state_snapshot.is_none()
+        durable.execution_state_ref().is_none()
+            && durable.execution_state_snapshot().is_none()
             && executor.restored.lock_recover().last().map(Vec::as_slice)
                 == Some(b"fresh-frame-execution-state".as_slice()),
         "one committed switch must durably clear the checkpoint and reset the resident executor"

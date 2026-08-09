@@ -63,6 +63,10 @@ async fn factory_state(
 #[tokio::test]
 async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
     let store = Store::memory().await.expect("store");
+    let tool_state = persisted_tool_state_at_generation(7);
+    let plugin_snapshot = PluginSessionSnapshot {
+        plugins: Default::default(),
+    };
     let checkpoint = HydratedSessionCheckpoint {
         turn_state: PersistedTurnState {
             turn_index: 1,
@@ -70,30 +74,39 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
             last_prompt_usage: None,
             protocol_turn_options: Default::default(),
         },
-        tool_state_ref: None,
-        tool_state: Some(persisted_tool_state_at_generation(7)),
-        plugin_snapshot_ref: None,
+        components: [
+            (
+                lash_core::store::TOOL_STATE_CHECKPOINT_COMPONENT.to_string(),
+                lash_core::HydratedCheckpointComponent::changed(
+                    rmp_serde::to_vec_named(&tool_state).expect("encode tool state"),
+                ),
+            ),
+            (
+                lash_core::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT.to_string(),
+                lash_core::HydratedCheckpointComponent::changed(
+                    rmp_serde::to_vec_named(&plugin_snapshot).expect("encode plugin snapshot"),
+                ),
+            ),
+        ]
+        .into_iter()
+        .collect(),
         plugin_snapshot_revision: Some(11),
-        plugin_snapshot: Some(PluginSessionSnapshot {
-            plugins: Default::default(),
-        }),
-        execution_state_ref: None,
-        execution_state: None,
     };
-    let stored = store.put_checkpoint(&checkpoint).await;
+    let stored = store
+        .put_checkpoint(&checkpoint)
+        .await
+        .expect("store checkpoint");
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
         turn_index: checkpoint.turn_state.turn_index,
-        tool_state_ref: stored.manifest.tool_state_ref.clone(),
-        tool_state_snapshot: checkpoint.tool_state.clone(),
-        plugin_snapshot_ref: stored.manifest.plugin_snapshot_ref.clone(),
         plugin_snapshot_revision: checkpoint.plugin_snapshot_revision,
-        plugin_snapshot: checkpoint.plugin_snapshot.clone(),
         checkpoint_ref: Some(stored.checkpoint_ref.clone()),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
     };
+    state.set_tool_state_snapshot(Some(tool_state));
+    state.set_plugin_snapshot(Some(plugin_snapshot));
     store
         .admit_and_bind_session(&lash_core::SessionBinding::root(
             state.session_id.clone(),
@@ -107,8 +120,9 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
         .await
         .expect("commit session state");
     let orphan = store
-        .put_artifact_blob(BlobArtifactDescriptor::plugin_session_snapshot(), b"orphan")
-        .await;
+        .put_artifact_blob(BlobArtifactDescriptor::checkpoint_component(), b"orphan")
+        .await
+        .expect("store orphan");
 
     let report = store.gc_unreachable().await;
 
@@ -118,8 +132,14 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
         .await
         .expect("read checkpoint")
         .expect("checkpoint manifest");
-    let dynamic_ref = checkpoint.tool_state_ref.expect("dynamic state ref");
-    let plugin_ref = checkpoint.plugin_snapshot_ref.expect("plugin snapshot ref");
+    let dynamic_ref = checkpoint
+        .component_ref(lash_core::store::TOOL_STATE_CHECKPOINT_COMPONENT)
+        .expect("dynamic state ref")
+        .clone();
+    let plugin_ref = checkpoint
+        .component_ref(lash_core::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT)
+        .expect("plugin snapshot ref")
+        .clone();
     assert!(
         store
             .get_blob(&stored.checkpoint_ref)
@@ -161,8 +181,9 @@ async fn auto_gc_runs_after_commit_without_reentrant_locking() {
     .await
     .expect("store");
     let orphan = store
-        .put_artifact_blob(BlobArtifactDescriptor::plugin_session_snapshot(), b"orphan")
-        .await;
+        .put_artifact_blob(BlobArtifactDescriptor::checkpoint_component(), b"orphan")
+        .await
+        .expect("store orphan");
     let state = RuntimeSessionState {
         session_id: "auto-gc".to_string(),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
@@ -356,7 +377,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         .await
         .expect("create retained session");
     let mut deleted_state = factory_state(&deleted_store, "delete/me", 0).await;
-    deleted_state.execution_state_snapshot = Some(vec![1, 2, 3]);
+    deleted_state.set_execution_state_snapshot(Some(vec![1, 2, 3]));
     deleted_store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&deleted_state, &[]))
         .await

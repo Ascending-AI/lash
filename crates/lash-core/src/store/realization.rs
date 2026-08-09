@@ -61,13 +61,7 @@ mod tests {
                     timestamp: node.timestamp.clone(),
                 })
                 .collect();
-            let manifest = super::super::SessionCheckpoint::new(
-                commit.checkpoint.turn_state,
-                commit.checkpoint.tool_state_ref,
-                commit.checkpoint.plugin_snapshot_ref,
-                commit.checkpoint.plugin_snapshot_revision,
-                commit.checkpoint.execution_state_ref,
-            );
+            let manifest = commit.checkpoint.manifest()?;
             Ok(RuntimeCommitResult {
                 head_revision: commit.expected_head_revision + 1,
                 checkpoint_ref: "empty-frame-facade".to_string().into(),

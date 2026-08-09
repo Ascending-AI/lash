@@ -1,6 +1,7 @@
 //! The runtime's settled-session persistence contract and shared store types.
 use crate::facade_support::SessionGraphFacadeOps;
 mod attachment_manifest;
+include!("checkpoint.rs");
 mod claim_settlement;
 mod commit_budget;
 mod commit_identity;
@@ -61,7 +62,6 @@ fn default_root_session_id() -> String {
     "root".to_string()
 }
 pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 3;
-pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 1;
 
 #[cfg(test)]
 mod persisted_state_tests {
@@ -291,65 +291,6 @@ pub struct VacuumReport {
     pub removed_pending_turn_input_tombstone_count: usize,
 }
 
-/// Result of explicitly pruning settled process-wake idempotency evidence.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct SessionCheckpoint {
-    pub schema_version: u32,
-    pub turn_state: crate::PersistedTurnState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_state_ref: Option<BlobRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plugin_snapshot_ref: Option<BlobRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plugin_snapshot_revision: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub execution_state_ref: Option<BlobRef>,
-}
-
-impl Default for SessionCheckpoint {
-    fn default() -> Self {
-        Self {
-            schema_version: SESSION_CHECKPOINT_SCHEMA_VERSION,
-            turn_state: crate::PersistedTurnState::default(),
-            tool_state_ref: None,
-            plugin_snapshot_ref: None,
-            plugin_snapshot_revision: None,
-            execution_state_ref: None,
-        }
-    }
-}
-
-impl SessionCheckpoint {
-    pub fn new(
-        turn_state: crate::PersistedTurnState,
-        tool_state_ref: Option<BlobRef>,
-        plugin_snapshot_ref: Option<BlobRef>,
-        plugin_snapshot_revision: Option<u64>,
-        execution_state_ref: Option<BlobRef>,
-    ) -> Self {
-        Self {
-            schema_version: SESSION_CHECKPOINT_SCHEMA_VERSION,
-            turn_state,
-            tool_state_ref,
-            plugin_snapshot_ref,
-            plugin_snapshot_revision,
-            execution_state_ref,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-pub struct HydratedSessionCheckpoint {
-    pub turn_state: crate::PersistedTurnState,
-    pub tool_state_ref: Option<BlobRef>,
-    pub tool_state: Option<crate::ToolState>,
-    pub plugin_snapshot_ref: Option<BlobRef>,
-    pub plugin_snapshot: Option<crate::PluginSessionSnapshot>,
-    pub plugin_snapshot_revision: Option<u64>,
-    pub execution_state_ref: Option<BlobRef>,
-    pub execution_state: Option<Vec<u8>>,
-}
-
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SessionHead {
     #[serde(default = "default_root_session_id")]
@@ -539,19 +480,23 @@ fn build_persisted_turn_state(state: &crate::RuntimeSessionState) -> crate::Pers
     }
 }
 
+pub(crate) fn encode_checkpoint_component<T: serde::Serialize>(
+    key: &str,
+    value: &T,
+) -> Result<Vec<u8>, StoreError> {
+    rmp_serde::to_vec_named(value).map_err(|error| StoreError::RecordEncodingFailed {
+        record_kind: format!("checkpoint component `{key}`"),
+        message: error.to_string(),
+    })
+}
+
 fn build_checkpoint_from_persisted_state(
     state: &crate::RuntimeSessionState,
-) -> HydratedSessionCheckpoint {
-    HydratedSessionCheckpoint {
-        turn_state: build_persisted_turn_state(state),
-        tool_state_ref: state.tool_state_ref.clone(),
-        tool_state: state.tool_state_snapshot.clone(),
-        plugin_snapshot_ref: state.plugin_snapshot_ref.clone(),
-        plugin_snapshot_revision: state.plugin_snapshot_revision,
-        plugin_snapshot: state.plugin_snapshot.clone(),
-        execution_state_ref: state.execution_state_ref.clone(),
-        execution_state: state.execution_state_snapshot.clone(),
-    }
+) -> Result<HydratedSessionCheckpoint, StoreError> {
+    state.checkpoint_components.build_checkpoint(
+        build_persisted_turn_state(state),
+        state.plugin_snapshot_revision,
+    )
 }
 
 impl RuntimeCommit {
@@ -810,7 +755,7 @@ impl RuntimeCommit {
             config: persisted_session_config_from_state(state),
             current_frame_node_id,
             graph,
-            checkpoint: build_checkpoint_from_persisted_state(state),
+            checkpoint: build_checkpoint_from_persisted_state(state)?,
             usage_deltas: usage_deltas.to_vec(),
             turn_commit: RuntimeTurnCommitStamp::new(operation),
             completed_queue_claims: Vec::new(),
@@ -971,14 +916,8 @@ fn persisted_session_state_from_head(
         token_usage: crate::TokenUsage::default(),
         last_prompt_usage: None,
         protocol_turn_options: crate::ProtocolTurnOptions::default(),
-        tool_state_ref: None,
-        tool_state_generation: None,
-        tool_state_snapshot: None,
-        plugin_snapshot_ref: None,
+        checkpoint_components: crate::runtime::state::RuntimeCheckpointComponents::unproven(),
         plugin_snapshot_revision: None,
-        plugin_snapshot: None,
-        execution_state_ref: None,
-        execution_state_snapshot: None,
         token_ledger: head.token_ledger,
         checkpoint_ref: head.checkpoint_ref.clone(),
         head_revision: head.head_revision,

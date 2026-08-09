@@ -5580,7 +5580,9 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         .as_ref()
         .expect("frame-switch commit has a checkpoint");
     assert!(
-        checkpoint.execution_state_ref.is_none() && checkpoint.execution_state.is_none(),
+        checkpoint
+            .component_ref(lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
+            .is_none(),
         "the accepted switch commit and resident reset must agree on cleared execution state"
     );
     let switch_writes = checkpoint_writes

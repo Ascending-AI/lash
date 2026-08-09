@@ -1333,7 +1333,7 @@ async fn property_runtime(
             ..crate::RuntimeSessionState::new(request.policy.clone())
         });
     let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
-        .build_session(request.session_id.clone(), state.plugin_snapshot.as_ref())
+        .build_session(request.session_id.clone(), state.plugin_snapshot())
         .map_err(|error| error.to_string())?;
     crate::LashRuntime::from_persistent_embedded_state(
         request.policy.clone(),

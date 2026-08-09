@@ -2,6 +2,21 @@ use super::*;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 
 impl CurrentSessionCapability {
+    pub(in crate::runtime::session_manager) async fn resident_state_by_id(
+        &self,
+        managed: &ManagedSessionCapability,
+        session_id: &str,
+    ) -> Option<RuntimeSessionState> {
+        if session_id == self.session_id {
+            return Some(self.snapshot.to_runtime_state());
+        }
+        let runtime = {
+            let registry = managed.registry.lock().await;
+            registry.get(session_id).cloned()
+        }?;
+        Some(runtime.observe().persisted_state.clone())
+    }
+
     pub(in crate::runtime::session_manager) async fn turn_scope_by_id(
         &self,
         managed: &ManagedSessionCapability,
@@ -40,16 +55,10 @@ impl CurrentSessionCapability {
         managed: &ManagedSessionCapability,
         session_id: &str,
     ) -> Result<SessionSnapshot, crate::PluginError> {
-        if session_id == self.session_id {
-            let state = self.snapshot.to_runtime_state();
-            return Ok(state.to_snapshot());
-        }
-        let runtime = {
-            let registry = managed.registry.lock().await;
-            registry.get(session_id).cloned()
-        }
-        .ok_or_else(|| crate::PluginError::Session(format!("unknown session `{session_id}`")))?;
-        Ok(runtime.observe().persisted_state.to_snapshot())
+        self.resident_state_by_id(managed, session_id)
+            .await
+            .map(|state| state.to_snapshot())
+            .ok_or_else(|| crate::PluginError::Session(format!("unknown session `{session_id}`")))
     }
 
     pub(in crate::runtime::session_manager) async fn tool_catalog_by_id(

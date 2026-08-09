@@ -1560,9 +1560,9 @@ mod tests {
         let usage = vec![usage_entry("turn", "model", 5)];
         let mut state = state_with_graph(graph.clone());
         state.token_ledger = usage.clone();
-        state.tool_state_snapshot = Some(crate::ToolState::default());
-        state.plugin_snapshot = Some(crate::PluginSessionSnapshot::default());
-        state.execution_state_snapshot = Some(b"runtime".to_vec());
+        state.set_tool_state_snapshot(Some(crate::ToolState::default()));
+        state.set_plugin_snapshot(Some(crate::PluginSessionSnapshot::default()));
+        state.set_execution_state_snapshot(Some(b"runtime".to_vec()));
         let mut pipeline = TurnBoundary::from_state(state);
         let returned_state = pipeline.export_state_for_assembly();
 
@@ -1593,8 +1593,8 @@ mod tests {
         let state = pipeline.state_mut();
         assert_eq!(state.session_graph.nodes.len(), graph.nodes.len() + 1);
         assert_eq!(state.token_ledger.len(), usage.len());
-        assert!(state.tool_state_snapshot.is_none());
-        assert!(state.plugin_snapshot.is_none());
-        assert!(state.execution_state_snapshot.is_none());
+        assert!(state.tool_state_snapshot().is_none());
+        assert!(state.plugin_snapshot().is_none());
+        assert!(state.execution_state_snapshot().is_none());
     }
 }

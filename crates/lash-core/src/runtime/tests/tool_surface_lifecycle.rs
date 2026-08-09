@@ -863,8 +863,7 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
         .expect("load committed state")
         .expect("persisted session");
     let persisted_tools = persisted
-        .tool_state_snapshot
-        .as_ref()
+        .tool_state_snapshot()
         .expect("changed generation re-exported on next commit");
     assert_eq!(
         serde_json::to_value(persisted_tools).expect("serialize persisted tools"),
@@ -1120,7 +1119,7 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
         plugin_host.as_ref(),
         "cold-hidden-child",
         hidden.name,
-        state.plugin_snapshot.as_ref(),
+        state.plugin_snapshot(),
     );
     let rebuilt = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),

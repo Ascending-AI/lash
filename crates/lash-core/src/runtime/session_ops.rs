@@ -26,7 +26,7 @@ impl LashRuntime {
             // `state`. `restore_state` accepts the snapshot's generation, so a
             // surface that reached generation >= 2 restores cleanly; live
             // changes bump once so the next commit captures them.
-            if let Some(tool_state) = state.tool_state_snapshot.clone() {
+            if let Some(tool_state) = state.tool_state_snapshot().cloned() {
                 let report = session
                     .plugins()
                     .tool_registry()
@@ -41,7 +41,7 @@ impl LashRuntime {
                     );
                 }
             }
-            let snapshot = state.plugin_snapshot.clone().unwrap_or_default();
+            let snapshot = state.plugin_snapshot().cloned().unwrap_or_default();
             session
                 .plugins()
                 .restore(&snapshot)
@@ -404,7 +404,7 @@ impl LashRuntime {
                 &session_id,
             ))
             .await?;
-        self.state.execution_state_snapshot = blob.clone();
+        self.state.set_execution_state_snapshot(blob.clone());
         Ok(blob)
     }
 
@@ -428,7 +428,8 @@ impl LashRuntime {
                 snapshot,
             )
             .await?;
-        self.state.execution_state_snapshot = Some(snapshot.to_vec());
+        self.state
+            .set_execution_state_snapshot(Some(snapshot.to_vec()));
         Ok(())
     }
 

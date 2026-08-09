@@ -606,14 +606,14 @@ mod tests {
         let mut state = RuntimeSessionState {
             session_id: "mutation-session".to_string(),
             turn_index: 1,
-            tool_state_snapshot: Some(tool_state(1)),
-            plugin_snapshot: Some(PluginSessionSnapshot::default()),
             plugin_snapshot_revision: Some(1),
-            execution_state_snapshot: Some(b"first execution state".to_vec()),
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
             ))
         };
+        state.set_tool_state_snapshot(Some(tool_state(1)));
+        state.set_plugin_snapshot(Some(PluginSessionSnapshot::default()));
+        state.set_execution_state_snapshot(Some(b"first execution state".to_vec()));
         let first = store
             .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await
@@ -621,10 +621,10 @@ mod tests {
         state.apply_persisted_commit_result(first);
 
         state.turn_index = 2;
-        state.tool_state_snapshot = Some(tool_state(2));
-        state.plugin_snapshot = Some(PluginSessionSnapshot::default());
+        state.set_tool_state_snapshot(Some(tool_state(2)));
+        state.set_plugin_snapshot(Some(PluginSessionSnapshot::default()));
         state.plugin_snapshot_revision = Some(2);
-        state.execution_state_snapshot = Some(b"changed execution state".to_vec());
+        state.set_execution_state_snapshot(Some(b"changed execution state".to_vec()));
         let second = store
             .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await

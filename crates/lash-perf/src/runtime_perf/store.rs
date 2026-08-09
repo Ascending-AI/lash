@@ -8,9 +8,7 @@ use lash_core::runtime::{
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkItem,
 };
 use lash_core::store;
-use lash_core::store::{
-    PersistedSessionRead, RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
-};
+use lash_core::store::{PersistedSessionRead, RuntimeCommitResult, SessionHeadMeta};
 use lash_core::{
     BlobRef, GcReport, LeaseOwnerIdentity, QueuedWorkStore, RuntimeCommit, RuntimePersistence,
     SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
@@ -757,29 +755,7 @@ impl SessionCommitStore for RuntimePerfStore {
                 }
             }
         }
-        let next_checkpoint_blob_ref = |kind: &str| {
-            let id = self.next_blob_id.fetch_add(1, Ordering::Relaxed);
-            BlobRef(format!("perf-{kind}-{id}"))
-        };
-        let manifest = SessionCheckpoint::new(
-            commit.checkpoint.turn_state.clone(),
-            if commit.checkpoint.tool_state.is_some() {
-                Some(next_checkpoint_blob_ref("tool-state"))
-            } else {
-                commit.checkpoint.tool_state_ref.clone()
-            },
-            if commit.checkpoint.plugin_snapshot.is_some() {
-                Some(next_checkpoint_blob_ref("plugin-snapshot"))
-            } else {
-                commit.checkpoint.plugin_snapshot_ref.clone()
-            },
-            commit.checkpoint.plugin_snapshot_revision,
-            if commit.checkpoint.execution_state.is_some() {
-                Some(next_checkpoint_blob_ref("execution-state"))
-            } else {
-                commit.checkpoint.execution_state_ref.clone()
-            },
-        );
+        let manifest = commit.checkpoint.manifest()?;
         drop(graph);
         let id = self.next_blob_id.fetch_add(1, Ordering::Relaxed);
         let checkpoint_ref = BlobRef(format!("perf-checkpoint-{id}"));

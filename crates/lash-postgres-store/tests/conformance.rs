@@ -713,7 +713,8 @@ async fn postgres_real_turn_crash_matrix_when_configured() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_checkpoint_component_refs_survive_cold_reopens_when_configured() {
+async fn postgres_complete_runtime_checkpoint_component_set_survives_cold_reopens_when_configured()
+{
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres checkpoint-component recovery: LASH_POSTGRES_DATABASE_URL is not set"
@@ -722,7 +723,7 @@ async fn postgres_checkpoint_component_refs_survive_cold_reopens_when_configured
     };
     reset(&storage).await;
     let database_url = database_url().expect("configured Postgres database URL");
-    lash_core::testing::conformance::checkpoint_component_refs_survive_cold_reopens(|| {
+    lash_core::testing::conformance::complete_runtime_checkpoint_component_set_survives_cold_reopens(|| {
         let database_url = database_url.clone();
         let storage = sync_await(async move {
             PostgresStorage::connect(&database_url)
@@ -1499,7 +1500,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 41, "Postgres component schema pin");
+    assert_eq!(current_version, 42, "Postgres component schema pin");
     let payload_hash_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
          WHERE table_schema = 'public'

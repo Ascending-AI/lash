@@ -34,12 +34,23 @@ impl Store {
         content: &[u8],
         profile: BuiltinBlobProfile,
     ) -> rusqlite::Result<BlobRef> {
+        Self::insert_artifact_blob_conn_typed(conn, descriptor, content, profile)
+            .map_err(sqlite_conversion_error)
+    }
+
+    fn insert_artifact_blob_conn_typed(
+        conn: &Connection,
+        descriptor: BlobArtifactDescriptor,
+        content: &[u8],
+        profile: BuiltinBlobProfile,
+    ) -> Result<BlobRef, StoreError> {
         let hash = blob_content_hash(content);
-        let stored = encode_artifact_blob(&descriptor, profile, content);
+        let stored = encode_artifact_blob(&descriptor, profile, content)?;
         conn.execute(
             "INSERT OR IGNORE INTO blobs (hash, content) VALUES (?1, ?2)",
             params![hash, stored],
-        )?;
+        )
+        .map_err(sqlite_error)?;
         Ok(BlobRef(hash))
     }
 
@@ -48,50 +59,45 @@ impl Store {
         descriptor: BlobArtifactDescriptor,
         value: &T,
         profile: BuiltinBlobProfile,
-    ) -> rusqlite::Result<BlobRef> {
-        let bytes = encode_msgpack(value);
-        Self::insert_artifact_blob_conn(conn, descriptor, &bytes, profile)
+    ) -> Result<BlobRef, StoreError> {
+        let bytes = encode_msgpack(value, "SQLite typed artifact blob")?;
+        Self::insert_artifact_blob_conn_typed(conn, descriptor, &bytes, profile)
     }
 
+    /// Persist the complete checkpoint root and every changed leaf inside the
+    /// caller's commit transaction. This is the GC-safety argument: no
+    /// collector can observe the git-loose-object race where a leaf exists
+    /// without its root, or a root becomes visible before all leaves exist.
     pub(crate) fn put_checkpoint_conn(
         conn: &Connection,
         checkpoint: &HydratedSessionCheckpoint,
         profile: BuiltinBlobProfile,
-    ) -> rusqlite::Result<StoredSessionCheckpoint> {
-        let tool_state_ref = match checkpoint.tool_state.as_ref() {
-            Some(snapshot) => Some(Self::put_typed_artifact_blob_conn(
-                conn,
-                BlobArtifactDescriptor::tool_state_snapshot(),
-                snapshot,
-                profile,
-            )?),
-            None => checkpoint.tool_state_ref.clone(),
-        };
-        let plugin_snapshot_ref = match checkpoint.plugin_snapshot.as_ref() {
-            Some(snapshot) => Some(Self::put_typed_artifact_blob_conn(
-                conn,
-                BlobArtifactDescriptor::plugin_session_snapshot(),
-                snapshot,
-                profile,
-            )?),
-            None => checkpoint.plugin_snapshot_ref.clone(),
-        };
-        let execution_state_ref = match checkpoint.execution_state.as_ref() {
-            Some(snapshot) => Some(Self::put_typed_artifact_blob_conn(
-                conn,
-                BlobArtifactDescriptor::execution_state_snapshot(),
-                snapshot,
-                profile,
-            )?),
-            None => checkpoint.execution_state_ref.clone(),
-        };
-        let manifest = SessionCheckpoint::new(
-            checkpoint.turn_state.clone(),
-            tool_state_ref,
-            plugin_snapshot_ref,
-            checkpoint.plugin_snapshot_revision,
-            execution_state_ref,
-        );
+    ) -> Result<StoredSessionCheckpoint, StoreError> {
+        Self::validate_checkpoint_component_refs_conn(conn, checkpoint)?;
+        let manifest = checkpoint.manifest()?;
+        for (key, descriptor) in &manifest.components {
+            let component =
+                checkpoint
+                    .components
+                    .get(key)
+                    .ok_or_else(|| StoreError::StoredDataCorrupt {
+                        record_kind: "HydratedSessionCheckpoint",
+                        message: format!("manifest projection lost component `{key}`"),
+                    })?;
+            if let Some(body) = component.body() {
+                let stored_ref = Self::insert_artifact_blob_conn_typed(
+                    conn,
+                    BlobArtifactDescriptor::checkpoint_component(),
+                    body,
+                    profile,
+                )?;
+                lash_core::store::ensure_checkpoint_component_hash_agreement(
+                    key,
+                    &stored_ref,
+                    &descriptor.blob_ref,
+                )?;
+            }
+        }
         let checkpoint_ref = Self::put_typed_artifact_blob_conn(
             conn,
             BlobArtifactDescriptor::checkpoint_manifest(),
@@ -108,24 +114,12 @@ impl Store {
         conn: &Connection,
         checkpoint: &HydratedSessionCheckpoint,
     ) -> Result<(), StoreError> {
-        for (component, body_is_present, blob_ref) in [
-            (
-                "tool-state",
-                checkpoint.tool_state.is_some(),
-                checkpoint.tool_state_ref.as_ref(),
-            ),
-            (
-                "plugin-snapshot",
-                checkpoint.plugin_snapshot.is_some(),
-                checkpoint.plugin_snapshot_ref.as_ref(),
-            ),
-            (
-                "execution-state",
-                checkpoint.execution_state.is_some(),
-                checkpoint.execution_state_ref.as_ref(),
-            ),
-        ] {
-            let Some(blob_ref) = blob_ref.filter(|_| !body_is_present) else {
+        for (key, component) in &checkpoint.components {
+            lash_core::store::ensure_checkpoint_component_encoding_version(
+                key,
+                component.encoding_version(),
+            )?;
+            let Some(blob_ref) = component.blob_ref().filter(|_| component.body().is_none()) else {
                 continue;
             };
             let exists: bool = conn
@@ -137,7 +131,7 @@ impl Store {
                 .map_err(sqlite_error)?;
             if !exists {
                 return Err(StoreError::CheckpointComponentMissing {
-                    component,
+                    key: key.clone(),
                     blob_ref: blob_ref.clone(),
                 });
             }
@@ -162,26 +156,26 @@ impl Store {
             .transpose()
     }
 
-    fn get_checkpoint_component_conn<T: serde::de::DeserializeOwned>(
+    fn get_checkpoint_component_conn(
         conn: &Connection,
-        component: &'static str,
-        blob_ref: Option<&BlobRef>,
-    ) -> Result<Option<T>, StoreError> {
-        let Some(blob_ref) = blob_ref else {
-            return Ok(None);
-        };
+        key: &str,
+        descriptor: &lash_core::CheckpointComponentDescriptor,
+    ) -> Result<lash_core::HydratedCheckpointComponent, StoreError> {
+        lash_core::store::ensure_checkpoint_component_encoding_version(
+            key,
+            descriptor.encoding_version,
+        )?;
+        let blob_ref = &descriptor.blob_ref;
         let bytes = Self::get_blob_conn(conn, blob_ref)?.ok_or_else(|| {
             StoreError::CheckpointComponentMissing {
-                component,
+                key: key.to_string(),
                 blob_ref: blob_ref.clone(),
             }
         })?;
-        decode_msgpack(&bytes).map(Some).ok_or_else(|| {
-            stored_data_corrupt(
-                "SessionCheckpoint component",
-                format_args!("failed to decode {component} component `{blob_ref}`"),
-            )
-        })
+        Ok(lash_core::HydratedCheckpointComponent::hydrated(
+            descriptor.clone(),
+            bytes,
+        ))
     }
 
     pub(crate) fn get_checkpoint_conn(
@@ -192,27 +186,18 @@ impl Store {
             return Ok(None);
         };
         let record = decode_checkpoint(&bytes)?;
+        record.validate_component_encoding_versions()?;
+        let mut components = std::collections::BTreeMap::new();
+        for (key, descriptor) in &record.components {
+            components.insert(
+                key.clone(),
+                Self::get_checkpoint_component_conn(conn, key, descriptor)?,
+            );
+        }
         Ok(Some(HydratedSessionCheckpoint {
             turn_state: record.turn_state,
-            tool_state_ref: record.tool_state_ref.clone(),
-            tool_state: Self::get_checkpoint_component_conn(
-                conn,
-                "tool-state",
-                record.tool_state_ref.as_ref(),
-            )?,
-            plugin_snapshot_ref: record.plugin_snapshot_ref.clone(),
-            plugin_snapshot: Self::get_checkpoint_component_conn(
-                conn,
-                "plugin-snapshot",
-                record.plugin_snapshot_ref.as_ref(),
-            )?,
+            components,
             plugin_snapshot_revision: record.plugin_snapshot_revision,
-            execution_state_ref: record.execution_state_ref.clone(),
-            execution_state: Self::get_checkpoint_component_conn(
-                conn,
-                "execution-state",
-                record.execution_state_ref.as_ref(),
-            )?,
         }))
     }
 
@@ -273,11 +258,12 @@ impl Store {
         &self,
         descriptor: BlobArtifactDescriptor,
         content: &[u8],
-    ) -> BlobRef {
+    ) -> Result<BlobRef, StoreError> {
         let hash = blob_content_hash(content);
-        let stored = encode_artifact_blob(&descriptor, self.options.blob_profile, content);
-        self.insert_blob_row(hash, stored, "failed to persist artifact blob")
-            .await
+        let stored = encode_artifact_blob(&descriptor, self.options.blob_profile, content)?;
+        Ok(self
+            .insert_blob_row(hash, stored, "failed to persist artifact blob")
+            .await)
     }
 
     pub async fn get_blob(&self, blob_ref: &BlobRef) -> Result<Option<Vec<u8>>, StoreError> {
@@ -288,17 +274,20 @@ impl Store {
             .map_err(sqlite_error)
     }
 
-    pub async fn put_typed_blob<T: serde::Serialize>(&self, value: &T) -> BlobRef {
-        let bytes = encode_msgpack(value);
-        self.put_blob(&bytes).await
+    pub async fn put_typed_blob<T: serde::Serialize>(
+        &self,
+        value: &T,
+    ) -> Result<BlobRef, StoreError> {
+        let bytes = encode_msgpack(value, "SQLite typed blob")?;
+        Ok(self.put_blob(&bytes).await)
     }
 
     pub async fn put_typed_artifact_blob<T: serde::Serialize>(
         &self,
         descriptor: BlobArtifactDescriptor,
         value: &T,
-    ) -> BlobRef {
-        let bytes = encode_msgpack(value);
+    ) -> Result<BlobRef, StoreError> {
+        let bytes = encode_msgpack(value, "SQLite typed artifact blob")?;
         self.put_artifact_blob(descriptor, &bytes).await
     }
 
@@ -320,13 +309,18 @@ impl Store {
     pub async fn put_checkpoint(
         &self,
         checkpoint: &HydratedSessionCheckpoint,
-    ) -> StoredSessionCheckpoint {
+    ) -> Result<StoredSessionCheckpoint, StoreError> {
         let checkpoint = checkpoint.clone();
         let profile = self.options.blob_profile;
         self.conn
-            .write(move |tx| Self::put_checkpoint_conn(tx, &checkpoint, profile))
+            .write_flow(move |tx| {
+                Ok(match Self::put_checkpoint_conn(tx, &checkpoint, profile) {
+                    Ok(stored) => TxOutcome::Commit(Ok(stored)),
+                    Err(error) => TxOutcome::Rollback(Err(error)),
+                })
+            })
             .await
-            .expect("checkpoint blob should persist")
+            .map_err(sqlite_error)?
     }
 
     pub async fn get_checkpoint(

@@ -11,6 +11,10 @@ use proptest::test_runner::{Config, RngSeed, TestRunner};
 
 use super::*;
 use crate::StoreError::SessionExecutionLeaseRenewalRefused as RenewalRefused;
+use crate::store::{
+    EXECUTION_STATE_CHECKPOINT_COMPONENT, PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT,
+    TOOL_STATE_CHECKPOINT_COMPONENT,
+};
 use crate::{
     LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputDraft,
     PluginSessionSnapshot, PluginSnapshotEntry, PluginSnapshotMeta, QueuedWorkBatch,
@@ -30,7 +34,7 @@ mod usage_conservation;
 pub use attachment_conservation::RuntimePersistenceStateMachineHandles;
 use attachment_conservation::{apply_attachment_operation, assert_attachment_conservation};
 use counterexample::persist_counterexample;
-use generator::{component_selection, generated_case};
+use generator::{component_selection, generated_case, plugin_snapshot};
 use usage_conservation::{
     assert_usage_conservation, confirm_usage, record_usage, register_committed_usage,
     replay_usage_receipt, stage_usage,
@@ -1142,7 +1146,7 @@ fn update_components_after_commit(
         before.tool_value,
         Some(value),
         before.tool_ref.as_ref(),
-        manifest.tool_state_ref.as_ref(),
+        manifest.component_ref(TOOL_STATE_CHECKPOINT_COMPONENT),
         shape,
     )?;
     check_component_ref(
@@ -1151,11 +1155,14 @@ fn update_components_after_commit(
         before.plugin_value,
         Some(value),
         before.plugin_ref.as_ref(),
-        manifest.plugin_snapshot_ref.as_ref(),
+        manifest.component_ref(PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT),
         shape,
     )?;
     if selection.clear_execution {
-        if manifest.execution_state_ref.is_some() {
+        if manifest
+            .component_ref(EXECUTION_STATE_CHECKPOINT_COMPONENT)
+            .is_some()
+        {
             return Err("cleared execution-state transition retained its ref".to_string());
         }
         if before.execution_ref.is_some() {
@@ -1168,7 +1175,7 @@ fn update_components_after_commit(
             before.execution_value,
             Some(value),
             before.execution_ref.as_ref(),
-            manifest.execution_state_ref.as_ref(),
+            manifest.component_ref(EXECUTION_STATE_CHECKPOINT_COMPONENT),
             shape,
         )?;
     }
@@ -1183,9 +1190,15 @@ fn update_components_after_commit(
     } else if selection.store_execution {
         model.components.execution_value = Some(value);
     }
-    model.components.tool_ref = manifest.tool_state_ref.clone();
-    model.components.plugin_ref = manifest.plugin_snapshot_ref.clone();
-    model.components.execution_ref = manifest.execution_state_ref.clone();
+    model.components.tool_ref = manifest
+        .component_ref(TOOL_STATE_CHECKPOINT_COMPONENT)
+        .cloned();
+    model.components.plugin_ref = manifest
+        .component_ref(PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT)
+        .cloned();
+    model.components.execution_ref = manifest
+        .component_ref(EXECUTION_STATE_CHECKPOINT_COMPONENT)
+        .cloned();
     Ok(())
 }
 
@@ -1367,47 +1380,47 @@ fn fresh_commit(
 }
 
 fn modeled_state(model: &ReferenceModel) -> RuntimeSessionState {
-    RuntimeSessionState {
+    let mut state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
         head_revision: model.head_revision,
-        tool_state_ref: model.components.tool_ref.clone(),
-        plugin_snapshot_ref: model.components.plugin_ref.clone(),
         plugin_snapshot_revision: model.components.plugin_value.map(u64::from),
-        execution_state_ref: model.components.execution_ref.clone(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    }
+    };
+    state.checkpoint_components =
+        crate::runtime::state::RuntimeCheckpointComponents::complete_refs_for_testing(
+            [
+                (
+                    TOOL_STATE_CHECKPOINT_COMPONENT.to_string(),
+                    model.components.tool_ref.clone(),
+                ),
+                (
+                    PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT.to_string(),
+                    model.components.plugin_ref.clone(),
+                ),
+                (
+                    EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
+                    model.components.execution_ref.clone(),
+                ),
+            ]
+            .into_iter()
+            .filter_map(|(key, blob_ref)| blob_ref.map(|blob_ref| (key, blob_ref))),
+        );
+    state
 }
 
 fn install_component_bodies(state: &mut RuntimeSessionState, mode: u8, value: u8) {
     let selection = component_selection(mode);
     if selection.store_tool {
-        state.tool_state_snapshot = Some(ToolState::default().with_generation(u64::from(value)));
+        state.set_tool_state_snapshot(Some(ToolState::default().with_generation(u64::from(value))));
     }
     if selection.store_plugin {
         state.plugin_snapshot_revision = Some(u64::from(value));
-        state.plugin_snapshot = Some(plugin_snapshot(value));
+        state.set_plugin_snapshot(Some(plugin_snapshot(value)));
     }
     if selection.clear_execution {
         state.set_execution_state_snapshot(None);
     } else if selection.store_execution {
-        state.execution_state_snapshot = Some(vec![value, value.wrapping_add(1)]);
-    }
-}
-
-fn plugin_snapshot(value: u8) -> PluginSessionSnapshot {
-    PluginSessionSnapshot {
-        plugins: BTreeMap::from([(
-            "property-plugin".to_string(),
-            PluginSnapshotEntry {
-                meta: PluginSnapshotMeta {
-                    plugin_id: "property-plugin".to_string(),
-                    plugin_version: "1".to_string(),
-                    revision: u64::from(value),
-                    state: Some(serde_json::json!({"value": value})),
-                },
-                artifacts: Vec::new(),
-            },
-        )]),
+        state.set_execution_state_snapshot(Some(vec![value, value.wrapping_add(1)]));
     }
 }
 
@@ -1623,19 +1636,31 @@ async fn assert_model_agreement(
     let checkpoint = loaded
         .checkpoint
         .ok_or_else(|| "committed checkpoint did not hydrate".to_string())?;
-    if checkpoint.tool_state_ref != model.components.tool_ref
-        || checkpoint.plugin_snapshot_ref != model.components.plugin_ref
-        || checkpoint.execution_state_ref != model.components.execution_ref
+    if checkpoint.component_ref(TOOL_STATE_CHECKPOINT_COMPONENT)
+        != model.components.tool_ref.as_ref()
+        || checkpoint.component_ref(PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT)
+            != model.components.plugin_ref.as_ref()
+        || checkpoint.component_ref(EXECUTION_STATE_CHECKPOINT_COMPONENT)
+            != model.components.execution_ref.as_ref()
     {
         return Err("checkpoint component refs differ from the reference model".to_string());
     }
-    if checkpoint.tool_state.as_ref().map(ToolState::generation)
+    if checkpoint
+        .decode_component::<ToolState>(TOOL_STATE_CHECKPOINT_COMPONENT)
+        .map_err(|error| error.to_string())?
+        .as_ref()
+        .map(ToolState::generation)
         != model.components.tool_value.map(u64::from)
     {
         return Err("hydrated tool-state body differs from the reference model".to_string());
     }
     if checkpoint.plugin_snapshot_revision != model.components.plugin_value.map(u64::from)
-        || checkpoint.plugin_snapshot.as_ref().map(json).transpose()?
+        || checkpoint
+            .decode_component::<PluginSessionSnapshot>(PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT)
+            .map_err(|error| error.to_string())?
+            .as_ref()
+            .map(json)
+            .transpose()?
             != model
                 .components
                 .plugin_value
@@ -1646,7 +1671,9 @@ async fn assert_model_agreement(
     {
         return Err("hydrated plugin-snapshot body differs from the reference model".to_string());
     }
-    if checkpoint.execution_state
+    if checkpoint
+        .component_body(EXECUTION_STATE_CHECKPOINT_COMPONENT)
+        .map(<[u8]>::to_vec)
         != model
             .components
             .execution_value
@@ -1665,13 +1692,8 @@ async fn session_snapshot(store: &dyn RuntimePersistence) -> Result<serde_json::
     let head = loaded.map(|loaded| {
         let checkpoint = loaded.checkpoint.map(|checkpoint| {
             serde_json::json!({
-                "tool_state_ref": checkpoint.tool_state_ref,
-                "tool_state": checkpoint.tool_state,
-                "plugin_snapshot_ref": checkpoint.plugin_snapshot_ref,
-                "plugin_snapshot": checkpoint.plugin_snapshot,
+                "components": checkpoint.components,
                 "plugin_snapshot_revision": checkpoint.plugin_snapshot_revision,
-                "execution_state_ref": checkpoint.execution_state_ref,
-                "execution_state": checkpoint.execution_state,
             })
         });
         serde_json::json!({
@@ -1939,11 +1961,11 @@ async fn law_reclaim_mediates_supersession(
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("successor did not reclaim selected batch"))?;
 
-    let state = RuntimeSessionState {
+    let mut state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
-        tool_state_snapshot: Some(ToolState::default().with_generation(31)),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
+    state.set_tool_state_snapshot(Some(ToolState::default().with_generation(31)));
     let before = session_snapshot(store.as_ref())
         .await
         .map_err(TestCaseError::fail)?;
@@ -2060,11 +2082,11 @@ async fn law_head_cas_serializes_competing_commits(
         .acquired()
         .ok_or_else(|| TestCaseError::fail("successor lease busy"))?;
 
-    let loser_state = RuntimeSessionState {
+    let mut loser_state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
-        tool_state_snapshot: Some(ToolState::default().with_generation(41)),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
+    loser_state.set_tool_state_snapshot(Some(ToolState::default().with_generation(41)));
     let (loser, _) = RuntimeCommit::persisted_state_for_test(&loser_state, &[])
         .with_operation(crate::OperationId::new(
             crate::ExecutionScope::runtime_operation("runtime-persistence-law:cas-loser"),
@@ -2075,11 +2097,11 @@ async fn law_head_cas_serializes_competing_commits(
         .releasing_session_execution_lease(stale_lease.completion())
         .completing_queue_claim(stale_work.completion())
         .completing_turn_input_claim(stale_input.completion());
-    let winner_state = RuntimeSessionState {
+    let mut winner_state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
-        tool_state_snapshot: Some(ToolState::default().with_generation(42)),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
+    winner_state.set_tool_state_snapshot(Some(ToolState::default().with_generation(42)));
     let (winner, _) = RuntimeCommit::persisted_state_for_test(&winner_state, &[])
         .with_operation(crate::OperationId::new(
             crate::ExecutionScope::runtime_operation("runtime-persistence-law:cas-winner"),
@@ -2170,9 +2192,9 @@ async fn law_stale_settlement_cannot_damage_successor(
     stale_completion.batch_ids = vec![second.batch_id.clone()];
     let mut state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
-        tool_state_snapshot: Some(ToolState::default().with_generation(51)),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
+    state.set_tool_state_snapshot(Some(ToolState::default().with_generation(51)));
     let stale_result = store
         .commit_runtime_state(
             RuntimeCommit::persisted_state_for_test(&state, &[])

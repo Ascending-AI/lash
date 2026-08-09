@@ -26,6 +26,23 @@ pub(super) fn component_selection(mode: u8) -> ComponentSelection {
     }
 }
 
+pub(super) fn plugin_snapshot(value: u8) -> PluginSessionSnapshot {
+    PluginSessionSnapshot {
+        plugins: BTreeMap::from([(
+            "property-plugin".to_string(),
+            PluginSnapshotEntry {
+                meta: PluginSnapshotMeta {
+                    plugin_id: "property-plugin".to_string(),
+                    plugin_version: "1".to_string(),
+                    revision: u64::from(value),
+                    state: Some(serde_json::json!({"value": value})),
+                },
+                artifacts: Vec::new(),
+            },
+        )]),
+    }
+}
+
 pub(super) fn generated_case() -> impl Strategy<Value = GeneratedCase> {
     (
         any::<u64>(),

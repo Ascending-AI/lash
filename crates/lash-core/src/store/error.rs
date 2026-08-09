@@ -318,10 +318,54 @@ pub enum StoreError {
     },
     /// Checkpoint-specialized dangling-pointer failure; other unreadable durable
     /// records use [`Self::StoredDataCorrupt`].
-    #[error("checkpoint {component} component `{blob_ref}` is not present in the store")]
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**
+    /// return this when a complete checkpoint manifest names a component blob
+    /// the backend cannot resolve. They must fail the load or commit rather than
+    /// silently treating the key as deleted.
+    #[error(
+        "checkpoint component `{key}` references `{blob_ref}`, which is not present in the store"
+    )]
     CheckpointComponentMissing {
-        component: &'static str,
+        /// Stable logical key from the checkpoint root's complete component listing.
+        key: String,
+        /// Content address named by the manifest but absent from the backend.
         blob_ref: crate::BlobRef,
+    },
+    /// A component's persisted codec is not the codec implemented by this build.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**
+    /// return this before publishing or exposing a component with an unknown
+    /// encoding; they must not reinterpret its bytes with the current codec.
+    #[error(
+        "checkpoint component `{key}` uses encoding version {actual}, but this build requires \
+         version {expected}; remedy: drain affected sessions and recreate the store with this \
+         Lash version"
+    )]
+    CheckpointComponentEncodingVersionMismatch {
+        /// Stable logical key naming the incompatible component.
+        key: String,
+        /// Encoding version carried by the submitted or durable descriptor.
+        actual: u32,
+        /// Sole encoding version implemented by this Lash build.
+        expected: u32,
+    },
+    /// A runtime commit was assembled from a projection that cannot prove it
+    /// contains the checkpoint root's complete keyed component listing.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**
+    /// preserve this refusal: only a set derived from a full hydrated manifest
+    /// is `Complete`, and only then may absent keys be interpreted as deletion.
+    /// A commit built from an `Unproven` set must fail before any backend write.
+    #[error(
+        "runtime checkpoint component set is incomplete; hydrate the durable checkpoint before committing"
+    )]
+    IncompleteCheckpointComponentSet,
+    /// A durable value failed to encode before its bytes were written.
+    #[error("failed to encode {record_kind}: {message}")]
+    RecordEncodingFailed {
+        record_kind: String,
+        message: String,
     },
     /// A durable row was present but unreadable; checkpoint dangling pointers
     /// use the specialized [`Self::CheckpointComponentMissing`] variant.
@@ -419,6 +463,11 @@ impl StoreError {
             Self::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion",
             Self::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion",
             Self::CheckpointComponentMissing { .. } => "CheckpointComponentMissing",
+            Self::CheckpointComponentEncodingVersionMismatch { .. } => {
+                "CheckpointComponentEncodingVersionMismatch"
+            }
+            Self::IncompleteCheckpointComponentSet => "IncompleteCheckpointComponentSet",
+            Self::RecordEncodingFailed { .. } => "RecordEncodingFailed",
             Self::StoredDataCorrupt { .. } => "StoredDataCorrupt",
             Self::StorageFailure { .. } => "StorageFailure",
             Self::Backend(_) => "Backend",

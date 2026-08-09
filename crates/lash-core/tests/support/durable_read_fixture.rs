@@ -30,7 +30,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 5;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 6;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -112,13 +112,13 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         cache_write_input_tokens: 3,
         reasoning_output_tokens: 2,
     };
-    loaded.tool_state_snapshot = Some(
+    loaded.set_tool_state_snapshot(Some(
         serde_json::from_value(serde_json::json!({"generation": 887, "tools": {}}))
             .expect("build distinctive fixture tool state"),
-    );
+    ));
     loaded.plugin_snapshot_revision = Some(4);
-    loaded.plugin_snapshot = Some(fixture_plugin_snapshot());
-    loaded.execution_state_snapshot = Some(vec![0x46, 0x49, 0x47, 0x38, 0x38, 0x37]);
+    loaded.set_plugin_snapshot(Some(fixture_plugin_snapshot()));
+    loaded.set_execution_state_snapshot(Some(vec![0x46, 0x49, 0x47, 0x38, 0x38, 0x37]));
     let usage = TokenLedgerEntry {
         source: "durable-read-turn".to_string(),
         model: "durable-read-model".to_string(),
@@ -543,7 +543,10 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert_eq!(
         serde_json::to_value(
             checkpoint
-                .tool_state
+                .decode_component::<lash_core::ToolState>(
+                    lash_core::store::TOOL_STATE_CHECKPOINT_COMPONENT,
+                )
+                .expect("decode durable fixture tool state")
                 .as_ref()
                 .expect("durable fixture semantic drift: tool-state component disappeared")
         )
@@ -554,7 +557,10 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert_eq!(
         serde_json::to_value(
             checkpoint
-                .plugin_snapshot
+                .decode_component::<PluginSessionSnapshot>(
+                    lash_core::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT,
+                )
+                .expect("decode durable fixture plugin snapshot")
                 .as_ref()
                 .expect("durable fixture semantic drift: plugin snapshot disappeared")
         )
@@ -568,7 +574,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         "durable fixture semantic drift: plugin snapshot revision changed"
     );
     assert_eq!(
-        checkpoint.execution_state.as_deref(),
+        checkpoint.component_body(lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT),
         Some(&[0x46, 0x49, 0x47, 0x38, 0x38, 0x37][..]),
         "durable fixture semantic drift: execution-state component changed"
     );

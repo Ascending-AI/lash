@@ -30,6 +30,7 @@ lash-sansio = { workspace = true }
 lash-trace = { workspace = true }
 tokio = { workspace = true, features = ["process", "io-util", "sync", "time", "rt", "rt-multi-thread", "macros"] }
 serde = { workspace = true, features = ["derive", "rc"] }
+serde_bytes = { workspace = true }
 serde_json = { workspace = true }
 rmp-serde = { workspace = true }
 schemars = { workspace = true, features = ["derive"] }

@@ -11746,6 +11746,33 @@ disposition = "unused-remove"
 reason = "No example or concrete unrepresented host class establishes a need for lash_core::GcReport::root_count. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
 
 [[api]]
+symbol = "lash::persistence::CheckpointComponentDescriptor"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::CheckpointComponentDescriptor"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers consume this keyed checkpoint manifest descriptor; bundled examples use repository backends."
+
+[[api]]
+symbol = "lash::persistence::CheckpointComponentDescriptor::blob_ref"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::CheckpointComponentDescriptor::blob_ref"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers persist the content-addressed component reference."
+
+[[api]]
+symbol = "lash::persistence::CheckpointComponentDescriptor::encoding_version"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::CheckpointComponentDescriptor::encoding_version"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers validate the per-component codec contract."
+
+[[api]]
 symbol = "lash::persistence::GraphAppend"
 kind = "struct"
 availability = "default+all-features"
@@ -11800,64 +11827,64 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
-symbol = "lash::persistence::HydratedSessionCheckpoint::execution_state"
-kind = "field"
+symbol = "lash::persistence::HydratedSessionCheckpoint::component"
+kind = "function"
 availability = "default+all-features"
-aliases = ["lash_core::HydratedSessionCheckpoint::execution_state"]
+aliases = ["lash_core::HydratedSessionCheckpoint::component"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+reason = "Concrete host class: custom durable store implementers inspect keyed checkpoint components through this lookup."
 
 [[api]]
-symbol = "lash::persistence::HydratedSessionCheckpoint::execution_state_ref"
-kind = "field"
+symbol = "lash::persistence::HydratedSessionCheckpoint::component_body"
+kind = "function"
 availability = "default+all-features"
-aliases = ["lash_core::HydratedSessionCheckpoint::execution_state_ref"]
+aliases = ["lash_core::HydratedSessionCheckpoint::component_body"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+reason = "Concrete host class: runtime and protocol adapters decode optional component bodies without fixed slots."
 
 [[api]]
-symbol = "lash::persistence::HydratedSessionCheckpoint::plugin_snapshot"
-kind = "field"
+symbol = "lash::persistence::HydratedSessionCheckpoint::component_ref"
+kind = "function"
 availability = "default+all-features"
-aliases = ["lash_core::HydratedSessionCheckpoint::plugin_snapshot"]
-area = "plugins"
+aliases = ["lash_core::HydratedSessionCheckpoint::component_ref"]
+area = "stores"
 disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+reason = "Concrete host class: durable adapters inspect the content-addressed reference for a keyed component."
 
 [[api]]
-symbol = "lash::persistence::HydratedSessionCheckpoint::plugin_snapshot_ref"
+symbol = "lash::persistence::HydratedSessionCheckpoint::components"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::HydratedSessionCheckpoint::plugin_snapshot_ref"]
-area = "plugins"
+aliases = ["lash_core::HydratedSessionCheckpoint::components"]
+area = "stores"
 disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+reason = "Concrete host class: custom durable store implementers consume the complete keyed checkpoint component set."
+
+[[api]]
+symbol = "lash::persistence::HydratedSessionCheckpoint::decode_component"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedSessionCheckpoint::decode_component"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime and protocol adapters decode a named component with typed missing-body and codec failures."
+
+[[api]]
+symbol = "lash::persistence::HydratedSessionCheckpoint::manifest"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedSessionCheckpoint::manifest"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable adapters project hydrated component state into the content-addressed root manifest."
 
 [[api]]
 symbol = "lash::persistence::HydratedSessionCheckpoint::plugin_snapshot_revision"
 kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::HydratedSessionCheckpoint::plugin_snapshot_revision"]
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
-
-[[api]]
-symbol = "lash::persistence::HydratedSessionCheckpoint::tool_state"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::HydratedSessionCheckpoint::tool_state"]
-area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
-
-[[api]]
-symbol = "lash::persistence::HydratedSessionCheckpoint::tool_state_ref"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::HydratedSessionCheckpoint::tool_state_ref"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
@@ -11870,6 +11897,150 @@ aliases = ["lash_core::HydratedSessionCheckpoint::turn_state"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash::persistence::HydratedCheckpointComponent"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedCheckpointComponent"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers distinguish changed bodies from unchanged content references."
+
+[[api]]
+symbol = "lash::persistence::HydratedCheckpointComponent::Changed"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedCheckpointComponent::Changed"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers receive a changed component body whose durable reference must be minted."
+
+[[api]]
+symbol = "lash::persistence::HydratedCheckpointComponent::Changed::body"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedCheckpointComponent::Changed::body"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers persist the logical bytes of a changed component."
+
+[[api]]
+symbol = "lash::persistence::HydratedCheckpointComponent::Changed::encoding_version"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedCheckpointComponent::Changed::encoding_version"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers validate the codec version before storing changed bytes."
+
+[[api]]
+symbol = "lash::persistence::HydratedCheckpointComponent::Hydrated"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedCheckpointComponent::Hydrated"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers return a descriptor together with its verified logical bytes."
+
+[[api]]
+symbol = "lash::persistence::HydratedCheckpointComponent::Hydrated::body"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedCheckpointComponent::Hydrated::body"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers return exact logical bytes during hydration."
+
+[[api]]
+symbol = "lash::persistence::HydratedCheckpointComponent::Hydrated::descriptor"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedCheckpointComponent::Hydrated::descriptor"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers return the durable identity paired with hydrated bytes."
+
+[[api]]
+symbol = "lash::persistence::HydratedCheckpointComponent::Unchanged"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedCheckpointComponent::Unchanged"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers resolve an unchanged content reference without rewriting its body."
+
+[[api]]
+symbol = "lash::persistence::HydratedCheckpointComponent::Unchanged::descriptor"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedCheckpointComponent::Unchanged::descriptor"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers validate and resolve an unchanged durable descriptor."
+
+[[api]]
+symbol = "lash::persistence::HydratedCheckpointComponent::blob_ref"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedCheckpointComponent::blob_ref"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers persist and hydrate content-addressed component references."
+
+[[api]]
+symbol = "lash::persistence::HydratedCheckpointComponent::body"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedCheckpointComponent::body"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers receive logical component bytes only when changed."
+
+[[api]]
+symbol = "lash::persistence::HydratedCheckpointComponent::descriptor"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedCheckpointComponent::descriptor"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers inspect the durable descriptor of unchanged or hydrated components."
+
+[[api]]
+symbol = "lash::persistence::HydratedCheckpointComponent::changed"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedCheckpointComponent::changed"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime and backend adapters construct changed keyed checkpoint components."
+
+[[api]]
+symbol = "lash::persistence::HydratedCheckpointComponent::encoding_version"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedCheckpointComponent::encoding_version"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers validate the per-component codec contract."
+
+[[api]]
+symbol = "lash::persistence::HydratedCheckpointComponent::hydrated"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedCheckpointComponent::hydrated"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers construct a verified descriptor and logical-body hydration result."
+
+[[api]]
+symbol = "lash::persistence::HydratedCheckpointComponent::unchanged"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedCheckpointComponent::unchanged"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime and backend adapters carry forward unchanged content references without rewriting bodies."
 
 [[api]]
 symbol = "lash::persistence::InMemoryAttachmentStore"
@@ -13747,6 +13918,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
+symbol = "lash::persistence::RuntimeCheckpointComponents"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeCheckpointComponents"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Runtime state exposes this opaque type so external struct-update construction remains possible while only Lash can assemble or mutate the authoritative complete keyed component set."
+
+[[api]]
 symbol = "lash::persistence::RuntimeSessionState"
 kind = "struct"
 availability = "default+all-features"
@@ -13874,21 +14054,12 @@ reason = "Concrete consumer: runtime turn-boundary and plugin state handling use
 
 [[api]]
 symbol = "lash::persistence::RuntimeSessionState::execution_state_ref"
-kind = "field"
+kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeSessionState::execution_state_ref"]
 area = "stores"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeSessionState::execution_state_ref. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash::persistence::RuntimeSessionState::execution_state_snapshot"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::RuntimeSessionState::execution_state_snapshot"]
-area = "stores"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::RuntimeSessionState::execution_state_snapshot. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Concrete consumer: runtime turn-boundary and protocol state handling reads the execution-state content reference through the typed view over the complete component set."
 
 [[api]]
 symbol = "lash::persistence::RuntimeSessionState::from_snapshot"
@@ -13928,7 +14099,7 @@ reason = "Concrete host class: direct runtime embedders initialize empty state f
 
 [[api]]
 symbol = "lash::persistence::RuntimeSessionState::plugin_snapshot"
-kind = "field"
+kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeSessionState::plugin_snapshot"]
 area = "plugins"
@@ -13937,12 +14108,30 @@ reason = "Concrete host class: third-party plugin, provider, or tool-source impl
 
 [[api]]
 symbol = "lash::persistence::RuntimeSessionState::plugin_snapshot_ref"
-kind = "field"
+kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeSessionState::plugin_snapshot_ref"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+
+[[api]]
+symbol = "lash::persistence::RuntimeSessionState::set_plugin_snapshot"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeSessionState::set_plugin_snapshot"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete consumer: runtime plugin lifecycle code updates the typed plugin view and authoritative complete component set atomically."
+
+[[api]]
+symbol = "lash::persistence::RuntimeSessionState::set_tool_state_snapshot"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeSessionState::set_tool_state_snapshot"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete consumer: runtime tool lifecycle code updates the typed tool-state view and authoritative complete component set atomically."
 
 [[api]]
 symbol = "lash::persistence::RuntimeSessionState::plugin_snapshot_revision"
@@ -14063,7 +14252,7 @@ reason = "No example or concrete unrepresented host class establishes a need for
 
 [[api]]
 symbol = "lash::persistence::RuntimeSessionState::tool_state_generation"
-kind = "field"
+kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeSessionState::tool_state_generation"]
 area = "plugins"
@@ -14072,7 +14261,7 @@ reason = "Concrete host class: third-party plugin, provider, or tool-source impl
 
 [[api]]
 symbol = "lash::persistence::RuntimeSessionState::tool_state_ref"
-kind = "field"
+kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeSessionState::tool_state_ref"]
 area = "plugins"
@@ -14081,7 +14270,7 @@ reason = "Concrete host class: third-party plugin, provider, or tool-source impl
 
 [[api]]
 symbol = "lash::persistence::RuntimeSessionState::tool_state_snapshot"
-kind = "field"
+kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeSessionState::tool_state_snapshot"]
 area = "plugins"
@@ -14458,13 +14647,22 @@ disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: `lash::persistence::SessionCheckpoint` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::store::runtime_commit::RuntimeCommitResult::manifest` because its canonical identity is the lash-core one. Consumer class: the performance harness and the Postgres store adapter -- this type is exercised in-repo at crates/lash-perf/src/runtime_perf/store.rs:11, crates/lash-perf/src/runtime_perf/store.rs:794, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash::persistence::SessionCheckpoint::execution_state_ref"
-kind = "field"
+symbol = "lash::persistence::SessionCheckpoint::component_ref"
+kind = "function"
 availability = "default+all-features"
-aliases = ["lash_core::store::SessionCheckpoint::execution_state_ref"]
+aliases = ["lash_core::store::SessionCheckpoint::component_ref"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::SessionCheckpoint::execution_state_ref` directly; the gate reaches the same item a second time through `lash_core::store::runtime_commit::RuntimeCommitResult::manifest`. Consumer class: the performance harness and in-repo workspace code -- this field is exercised in-repo at crates/lash-perf/src/runtime_perf/store.rs:810, crates/lash/tests/ui/facade_boundary_types_are_public.rs:77, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface for custom durable stores that inspect a named component reference in the complete checkpoint manifest."
+
+[[api]]
+symbol = "lash::persistence::SessionCheckpoint::components"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::store::SessionCheckpoint::components"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Facade contract surface for custom durable stores that persist the complete keyed component manifest."
 
 [[api]]
 symbol = "lash::persistence::SessionCheckpoint::new"
@@ -14474,15 +14672,6 @@ aliases = ["lash_core::store::SessionCheckpoint::new"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::SessionCheckpoint::new` directly; the gate reaches the same item a second time through `lash_core::store::runtime_commit::RuntimeCommitResult::manifest`. Consumer class: the Postgres store adapter -- this function is exercised in-repo at crates/lash-postgres-store/src/lib.rs:277, crates/lash-postgres-store/src/lib.rs:536, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash::persistence::SessionCheckpoint::plugin_snapshot_ref"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::store::SessionCheckpoint::plugin_snapshot_ref"]
-area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::SessionCheckpoint::plugin_snapshot_ref` directly; the gate reaches the same item a second time through `lash_core::store::runtime_commit::RuntimeCommitResult::manifest`. Consumer class: the Postgres store adapter and in-repo workspace code -- this field is exercised in-repo at crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2462, crates/lash-postgres-store/src/postgres/support.rs:193, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::persistence::SessionCheckpoint::plugin_snapshot_revision"
@@ -14503,15 +14692,6 @@ disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::SessionCheckpoint::schema_version` directly; the gate reaches the same item a second time through `lash_core::store::runtime_commit::RuntimeCommitResult::manifest`. Consumer class: the performance harness and the deterministic simulation harness -- this field is exercised in-repo at crates/lash-perf/src/runtime_perf/store.rs:819, crates/lash-sim/tests/cross_backend_store_differential.rs:860, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash::persistence::SessionCheckpoint::tool_state_ref"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::store::SessionCheckpoint::tool_state_ref"]
-area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::SessionCheckpoint::tool_state_ref` directly; the gate reaches the same item a second time through `lash_core::store::runtime_commit::RuntimeCommitResult::manifest`. Consumer class: the performance harness and in-repo workspace code -- this field is exercised in-repo at crates/lash-perf/src/runtime_perf/store.rs:799, crates/lash/tests/ui/facade_boundary_types_are_public.rs:74, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
 symbol = "lash::persistence::SessionCheckpoint::turn_state"
 kind = "field"
 availability = "default+all-features"
@@ -14519,6 +14699,15 @@ aliases = ["lash_core::store::SessionCheckpoint::turn_state"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::SessionCheckpoint::turn_state` directly; the gate reaches the same item a second time through `lash_core::store::runtime_commit::RuntimeCommitResult::manifest`. Consumer class: the SQLite store adapter and the performance harness -- this field is exercised in-repo at crates/lash-sqlite-store/src/blobs.rs:89, crates/lash-sqlite-store/src/blobs.rs:191, and no example reaches it, which is what keeps the row unused."
+
+[[api]]
+symbol = "lash::persistence::SessionCheckpoint::validate_component_encoding_versions"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::store::SessionCheckpoint::validate_component_encoding_versions"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Facade contract surface for custom durable stores that reject checkpoint components written with an unsupported codec version."
 
 [[api]]
 symbol = "lash::persistence::SessionCommitStore"
@@ -16236,13 +16425,76 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
-symbol = "lash::persistence::StoreError::CheckpointComponentMissing::component"
+symbol = "lash::persistence::StoreError::CheckpointComponentMissing::key"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::StoreError::CheckpointComponentMissing::component"]
+aliases = ["lash_core::StoreError::CheckpointComponentMissing::key"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+reason = "Concrete host class: custom durable stores report the logical key of a dangling checkpoint component."
+
+[[api]]
+symbol = "lash::persistence::StoreError::CheckpointComponentEncodingVersionMismatch"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::CheckpointComponentEncodingVersionMismatch"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable stores surface a typed codec mismatch with a reject-and-recreate remedy."
+
+[[api]]
+symbol = "lash::persistence::StoreError::CheckpointComponentEncodingVersionMismatch::actual"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::CheckpointComponentEncodingVersionMismatch::actual"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable stores report the incompatible persisted component codec version."
+
+[[api]]
+symbol = "lash::persistence::StoreError::CheckpointComponentEncodingVersionMismatch::expected"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::CheckpointComponentEncodingVersionMismatch::expected"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable stores report the codec version implemented by this build."
+
+[[api]]
+symbol = "lash::persistence::StoreError::CheckpointComponentEncodingVersionMismatch::key"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::CheckpointComponentEncodingVersionMismatch::key"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable stores report the logical key of an incompatible component."
+
+[[api]]
+symbol = "lash::persistence::StoreError::RecordEncodingFailed"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::RecordEncodingFailed"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable stores preserve typed encode failures before any bytes are written."
+
+[[api]]
+symbol = "lash::persistence::StoreError::RecordEncodingFailed::message"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::RecordEncodingFailed::message"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable stores attach the codec diagnostic to an encode failure."
+
+[[api]]
+symbol = "lash::persistence::StoreError::RecordEncodingFailed::record_kind"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::RecordEncodingFailed::record_kind"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable stores identify which durable record failed to encode."
 
 [[api]]
 symbol = "lash::persistence::StoreError::CheckpointTokenUsageOutOfRange"
@@ -16576,6 +16828,15 @@ aliases = ["lash_core::StoreError::HeadRevisionConflict::expected"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash::persistence::StoreError::IncompleteCheckpointComponentSet"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::IncompleteCheckpointComponentSet"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator contract: runtime commit construction rejects a checkpoint projection whose complete keyed membership cannot be proven, preventing silent deletion by partial write."
 
 [[api]]
 symbol = "lash::persistence::StoreError::InvalidGraphLeaf"
@@ -46378,6 +46639,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: runtime hosts match the typed diagnostic to choose retry, terminal settlement, or caller-bug handling."
 
 [[api]]
+symbol = "lash::runtime::RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this deterministic codec incompatibility to stop retrying and require a compatible Lash version or store recreation."
+
+[[api]]
 symbol = "lash::runtime::RuntimeErrorCode::ContextPrepareTurn"
 kind = "variant"
 availability = "default+all-features"
@@ -46656,6 +46926,15 @@ aliases = ["lash_core::RuntimeErrorCode::QueuedWork"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: runtime hosts match the typed diagnostic to choose retry, terminal settlement, or caller-bug handling."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RecordEncodingFailed"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RecordEncodingFailed"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this deterministic serialization failure to stop retrying the identical value with the same build."
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::ResidentSessionReloadFailed"
@@ -51469,12 +51748,12 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::checkpoint_claim_probe_transaction_counts to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::testing::conformance::checkpoint_component_refs_survive_cold_reopens"
+symbol = "lash::testing::conformance::complete_runtime_checkpoint_component_set_survives_cold_reopens"
 kind = "function"
 availability = "all-features"
 area = "stores"
-disposition = "unused-add"
-reason = "Add lash::testing::conformance::checkpoint_component_refs_survive_cold_reopens to the agent-service persistence setup example and assert its externally observable result."
+disposition = "unused-justify"
+reason = "Conformance-only class 4 contract consumed by all bundled durable backends; it proves production hydration and ordinary commit preserve arbitrary keys as budget-free unchanged refs and exact bytes, while intentional absence still deletes."
 
 [[api]]
 symbol = "lash::testing::conformance::checkpoint_rejects_unknown_component_ref"

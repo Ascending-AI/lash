@@ -637,9 +637,7 @@ fn runtime_commit(
 
 #[derive(Clone, Debug)]
 struct CheckpointComponentRefs {
-    tool_state: Option<BlobRef>,
-    plugin_snapshot: Option<BlobRef>,
-    execution_state: Option<BlobRef>,
+    components: BTreeMap<String, lash_core::CheckpointComponentDescriptor>,
 }
 
 fn checkpoint_bodies() -> HydratedSessionCheckpoint {
@@ -667,6 +665,31 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
         .into_iter()
         .collect(),
     };
+    let components = [
+        (
+            lash_core::store::TOOL_STATE_CHECKPOINT_COMPONENT.to_string(),
+            lash_core::HydratedCheckpointComponent::changed(
+                rmp_serde::to_vec_named(&tool_state).expect("encode differential tool state"),
+            ),
+        ),
+        (
+            lash_core::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT.to_string(),
+            lash_core::HydratedCheckpointComponent::changed(
+                rmp_serde::to_vec_named(&plugin_snapshot)
+                    .expect("encode differential plugin snapshot"),
+            ),
+        ),
+        (
+            lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
+            lash_core::HydratedCheckpointComponent::changed(vec![9, 8, 7, 6]),
+        ),
+        (
+            "arbitrary/differential".to_string(),
+            lash_core::HydratedCheckpointComponent::changed(b"arbitrary-component-body".to_vec()),
+        ),
+    ]
+    .into_iter()
+    .collect();
     HydratedSessionCheckpoint {
         turn_state: lash_core::PersistedTurnState {
             turn_index: 37,
@@ -679,11 +702,8 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
             },
             ..Default::default()
         },
-        tool_state: Some(tool_state),
-        plugin_snapshot: Some(plugin_snapshot),
+        components,
         plugin_snapshot_revision: Some(11),
-        execution_state: Some(vec![9, 8, 7, 6]),
-        ..Default::default()
     }
 }
 
@@ -696,30 +716,58 @@ fn checkpoint_from_spec(
         CheckpointSpec::Bodies => checkpoint_bodies(),
         CheckpointSpec::PriorRefs => {
             let refs = prior_refs.expect("body commit recorded component refs");
+            let components = refs
+                .components
+                .iter()
+                .map(|(key, descriptor)| {
+                    (
+                        key.clone(),
+                        lash_core::HydratedCheckpointComponent::unchanged(descriptor),
+                    )
+                })
+                .collect();
             HydratedSessionCheckpoint {
                 turn_state: checkpoint_bodies().turn_state,
-                tool_state_ref: refs.tool_state.clone(),
-                plugin_snapshot_ref: refs.plugin_snapshot.clone(),
+                components,
                 plugin_snapshot_revision: Some(11),
-                execution_state_ref: refs.execution_state.clone(),
-                ..Default::default()
             }
         }
         CheckpointSpec::ClearedComponents => {
             let refs = prior_refs.expect("body commit recorded component refs");
+            let components = refs
+                .components
+                .iter()
+                .filter(|(key, _)| {
+                    key.as_str() != lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
+                })
+                .map(|(key, descriptor)| {
+                    (
+                        key.clone(),
+                        lash_core::HydratedCheckpointComponent::unchanged(descriptor),
+                    )
+                })
+                .collect();
             HydratedSessionCheckpoint {
                 turn_state: checkpoint_bodies().turn_state,
-                tool_state_ref: refs.tool_state.clone(),
-                plugin_snapshot_ref: refs.plugin_snapshot.clone(),
+                components,
                 plugin_snapshot_revision: Some(11),
-                execution_state_ref: None,
-                ..Default::default()
             }
         }
         CheckpointSpec::MissingExecutionStateRef => HydratedSessionCheckpoint {
-            execution_state_ref: Some(BlobRef(
-                "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string(),
-            )),
+            components: [(
+                lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
+                lash_core::HydratedCheckpointComponent::Unchanged {
+                    descriptor: lash_core::CheckpointComponentDescriptor {
+                        blob_ref: BlobRef(
+                            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                                .to_string(),
+                        ),
+                        encoding_version: lash_core::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
+                    },
+                },
+            )]
+            .into_iter()
+            .collect(),
             ..Default::default()
         },
     }
@@ -796,109 +844,6 @@ enum RawDurableReader {
         session_id: String,
         store: Option<Arc<dyn RuntimePersistence>>,
     },
-}
-
-fn checkpoint_observation(
-    checkpoint_ref: Option<BlobRef>,
-    checkpoint: HydratedSessionCheckpoint,
-) -> CheckpointObservation {
-    CheckpointObservation {
-        checkpoint_ref,
-        turn_state: serde_json::to_value(checkpoint.turn_state)
-            .expect("encode checkpoint turn state"),
-        tool_state_ref: checkpoint.tool_state_ref,
-        tool_state: checkpoint
-            .tool_state
-            .map(|body| serde_json::to_value(body).expect("encode checkpoint tool state")),
-        plugin_snapshot_ref: checkpoint.plugin_snapshot_ref,
-        plugin_snapshot: checkpoint
-            .plugin_snapshot
-            .map(|body| serde_json::to_value(body).expect("encode checkpoint plugin snapshot")),
-        plugin_snapshot_revision: checkpoint.plugin_snapshot_revision,
-        execution_state_ref: checkpoint.execution_state_ref,
-        execution_state: checkpoint.execution_state,
-    }
-}
-
-fn read_sqlite_checkpoint_observation(
-    path: &Path,
-    raw_checkpoint_ref: Option<BlobRef>,
-) -> Option<CheckpointObservation> {
-    let raw_checkpoint_ref = raw_checkpoint_ref?;
-    let checkpoint =
-        lash_sqlite_store::Store::raw_checkpoint_from_path_for_testing(path, &raw_checkpoint_ref)
-            .expect("decode SQLite checkpoint through raw durable reader")
-            .expect("checkpoint ref must address a SQLite checkpoint manifest");
-    Some(checkpoint_observation(Some(raw_checkpoint_ref), checkpoint))
-}
-
-async fn read_postgres_checkpoint_observation(
-    pool: &PgPool,
-    raw_checkpoint_ref: Option<BlobRef>,
-) -> Option<CheckpointObservation> {
-    let raw_checkpoint_ref = raw_checkpoint_ref?;
-    let manifest_bytes: Vec<u8> =
-        sqlx::query_scalar("SELECT content FROM lash_blobs WHERE hash = $1")
-            .bind(raw_checkpoint_ref.as_str())
-            .fetch_one(pool)
-            .await
-            .expect("read PostgreSQL checkpoint manifest blob");
-    let manifest: lash_core::store::SessionCheckpoint =
-        rmp_serde::from_slice(&manifest_bytes).expect("decode PostgreSQL checkpoint manifest");
-    assert_eq!(
-        manifest.schema_version,
-        lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
-        "PostgreSQL checkpoint manifest schema version"
-    );
-    let tool_state = read_postgres_checkpoint_component::<ToolState>(
-        pool,
-        "tool-state",
-        manifest.tool_state_ref.as_ref(),
-    )
-    .await;
-    let plugin_snapshot = read_postgres_checkpoint_component::<PluginSessionSnapshot>(
-        pool,
-        "plugin-snapshot",
-        manifest.plugin_snapshot_ref.as_ref(),
-    )
-    .await;
-    let execution_state = read_postgres_checkpoint_component::<Vec<u8>>(
-        pool,
-        "execution-state",
-        manifest.execution_state_ref.as_ref(),
-    )
-    .await;
-    Some(checkpoint_observation(
-        Some(raw_checkpoint_ref),
-        HydratedSessionCheckpoint {
-            turn_state: manifest.turn_state,
-            tool_state_ref: manifest.tool_state_ref,
-            tool_state,
-            plugin_snapshot_ref: manifest.plugin_snapshot_ref,
-            plugin_snapshot,
-            plugin_snapshot_revision: manifest.plugin_snapshot_revision,
-            execution_state_ref: manifest.execution_state_ref,
-            execution_state,
-        },
-    ))
-}
-
-async fn read_postgres_checkpoint_component<T: serde::de::DeserializeOwned>(
-    pool: &PgPool,
-    component: &str,
-    blob_ref: Option<&BlobRef>,
-) -> Option<T> {
-    let blob_ref = blob_ref?;
-    let bytes: Vec<u8> = sqlx::query_scalar("SELECT content FROM lash_blobs WHERE hash = $1")
-        .bind(blob_ref.as_str())
-        .fetch_one(pool)
-        .await
-        .unwrap_or_else(|error| panic!("read PostgreSQL {component} blob `{blob_ref}`: {error}"));
-    Some(
-        rmp_serde::from_slice(&bytes).unwrap_or_else(|error| {
-            panic!("decode PostgreSQL {component} blob `{blob_ref}`: {error}")
-        }),
-    )
 }
 
 fn attachment_manifest_observation(
@@ -1537,14 +1482,16 @@ impl BackendRunner {
                         self.current_leaf_node_id = next_leaf_node_id;
                         if matches!(*checkpoint, CheckpointSpec::Bodies) {
                             self.checkpoint_component_refs = Some(CheckpointComponentRefs {
-                                tool_state: result.manifest.tool_state_ref.clone(),
-                                plugin_snapshot: result.manifest.plugin_snapshot_ref.clone(),
-                                execution_state: result.manifest.execution_state_ref.clone(),
+                                components: result.manifest.components.clone(),
                             });
                         }
                         match checkpoint {
                             CheckpointSpec::Bodies => {
-                                self.expected_execution_state = checkpoint_bodies().execution_state;
+                                self.expected_execution_state = checkpoint_bodies()
+                                    .component_body(
+                                        lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT,
+                                    )
+                                    .map(ToOwned::to_owned);
                             }
                             CheckpointSpec::PriorRefs => {}
                             CheckpointSpec::Empty | CheckpointSpec::ClearedComponents => {
@@ -1854,25 +1801,41 @@ impl BackendRunner {
                     .expect("cold-reopened session must hydrate its checkpoint");
                 let expected = checkpoint_bodies();
                 assert_eq!(
-                    checkpoint.tool_state.as_ref().map(ToolState::generation),
-                    expected.tool_state.as_ref().map(ToolState::generation),
+                    checkpoint
+                        .decode_component::<ToolState>(
+                            lash_core::store::TOOL_STATE_CHECKPOINT_COMPONENT,
+                        )?
+                        .as_ref()
+                        .map(ToolState::generation),
+                    expected
+                        .decode_component::<ToolState>(
+                            lash_core::store::TOOL_STATE_CHECKPOINT_COMPONENT,
+                        )?
+                        .as_ref()
+                        .map(ToolState::generation),
                     "{} cold reopen must rehydrate the tool-state body",
                     self.name
                 );
                 assert_eq!(
                     checkpoint
-                        .plugin_snapshot
+                        .decode_component::<PluginSessionSnapshot>(
+                            lash_core::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT,
+                        )?
                         .as_ref()
                         .map(|snapshot| serde_json::to_value(snapshot).expect("encode snapshot")),
                     expected
-                        .plugin_snapshot
+                        .decode_component::<PluginSessionSnapshot>(
+                            lash_core::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT,
+                        )?
                         .as_ref()
                         .map(|snapshot| serde_json::to_value(snapshot).expect("encode snapshot")),
                     "{} cold reopen must rehydrate the plugin-snapshot body",
                     self.name
                 );
                 assert_eq!(
-                    checkpoint.execution_state, self.expected_execution_state,
+                    checkpoint
+                        .component_body(lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT),
+                    self.expected_execution_state.as_deref(),
                     "{} cold reopen must rehydrate the execution-state body",
                     self.name
                 );

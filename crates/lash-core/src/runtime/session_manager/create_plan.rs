@@ -42,7 +42,8 @@ pub(in crate::runtime::session_manager) async fn resolve_session_create_plan(
         start_state,
         &policy,
         current.host.core.clock.as_ref(),
-    );
+    )
+    .map_err(|error| crate::PluginError::Session(error.to_string()))?;
     let plugin_authority = crate::plugin::SessionAuthorityContext {
         tool_access: request.tool_access.clone(),
         subagent: request.subagent.clone(),
@@ -80,11 +81,16 @@ async fn resolve_start_state(
         }),
         SessionStartPoint::CurrentSession => Ok(current.snapshot.to_runtime_state()),
         SessionStartPoint::ExistingSession { session_id } => current
-            .snapshot_by_id(managed, session_id)
+            .resident_state_by_id(managed, session_id)
             .await
-            .map(RuntimeSessionState::from_snapshot),
+            .ok_or_else(|| crate::PluginError::Session(format!("unknown session `{session_id}`"))),
         SessionStartPoint::Snapshot { snapshot } => {
-            Ok(RuntimeSessionState::from_snapshot((**snapshot).clone()))
+            let mut state = current
+                .resident_state_by_id(managed, &snapshot.session_id)
+                .await
+                .unwrap_or_else(|| RuntimeSessionState::from_snapshot((**snapshot).clone()));
+            state.apply_snapshot(snapshot);
+            Ok(state)
         }
     }
 }
@@ -114,13 +120,14 @@ fn build_runtime_state(
     mut base: RuntimeSessionState,
     policy: &SessionPolicy,
     clock: &dyn crate::Clock,
-) -> RuntimeSessionState {
+) -> Result<RuntimeSessionState, crate::StoreError> {
     let inherited_nodes = match &request.start {
         SessionStartPoint::Empty => Vec::new(),
         _ => current_frame_node_drafts(&base),
     };
     base.session_id = session_id;
     base.head_revision = 0;
+    base.checkpoint_components.complete_for_new_session()?;
     base.policy = policy.clone();
     base.session_graph = crate::SessionGraph::default();
     base.agent_frames.clear();
@@ -144,7 +151,7 @@ fn build_runtime_state(
         &draft_namespace,
         clock,
     );
-    base
+    Ok(base)
 }
 
 fn current_frame_node_drafts(

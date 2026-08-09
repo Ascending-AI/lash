@@ -398,7 +398,7 @@ pub(super) async fn fork_at_in_catalog(
                  VALUES (?1, ?2, 0, ?3, ?4)",
                 params![
                     request.session_id,
-                    encode_json(&meta.payload()),
+                    encode_json(&meta.payload())?,
                     request.node_id,
                     checkpoint_ref
                 ],
@@ -448,7 +448,7 @@ pub(super) async fn fork_at_in_catalog(
                     session_meta.created_at,
                     session_meta.model,
                     session_meta.cwd,
-                    encode_json(&session_meta.relation)
+                    encode_json(&session_meta.relation)?
                 ],
             )
             .map_err(sqlite_error)?;

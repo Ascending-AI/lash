@@ -231,19 +231,18 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
         .await?;
     let persisted_tool_state =
         persisted_tool_state_at_generation(session.admin().tools().state().await?, 9);
-    let state = RuntimeSessionState {
+    let mut state = RuntimeSessionState {
         session_id: "persisted-tools".to_string(),
         policy: lash_core::SessionPolicy {
             provider_id: mock_provider().kind().to_string(),
             model: mock_model_spec(),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
-        tool_state_generation: Some(persisted_tool_state.generation()),
-        tool_state_snapshot: Some(persisted_tool_state),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
     };
+    state.set_tool_state_snapshot(Some(persisted_tool_state));
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
     let reopened_core =
         explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))

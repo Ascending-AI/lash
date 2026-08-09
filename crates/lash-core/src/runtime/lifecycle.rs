@@ -204,7 +204,7 @@ impl LashRuntime {
             .with_process_env_store(Arc::clone(&host.core.durability.process_env_store))
             .with_clock(Arc::clone(&host.core.clock));
         let mut session = Session::new(services.clone(), &state.session_id).await?;
-        if let Some(tool_state) = state.tool_state_snapshot.clone() {
+        if let Some(tool_state) = state.tool_state_snapshot().cloned() {
             // Cold rebuild reconciles the persisted catalog over live tools,
             // adopting its generation when the surface is unchanged.
             // `apply_state` (a delta-apply that
@@ -229,7 +229,7 @@ impl LashRuntime {
             }
         }
         session.refresh_tool_catalog().await?;
-        if let Some(snapshot) = state.plugin_snapshot.clone() {
+        if let Some(snapshot) = state.plugin_snapshot().cloned() {
             session
                 .plugins()
                 .restore(&snapshot)
@@ -431,7 +431,7 @@ impl LashRuntime {
             )
         })?;
         let plugin_session = plugin_host
-            .build_session(state.session_id.as_str(), state.plugin_snapshot.as_ref())
+            .build_session(state.session_id.as_str(), state.plugin_snapshot())
             .map_err(|err| SessionError::Protocol(err.to_string()))?;
         let mut embedded = EmbeddedRuntimeHost::new(env.core.clone());
         if let Some(factory) = env.session_store_factory.as_ref() {

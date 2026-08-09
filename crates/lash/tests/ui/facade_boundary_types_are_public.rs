@@ -70,13 +70,7 @@ impl SessionCommitStore for FacadeStore {
                 timestamp: node.timestamp.clone(),
             })
             .collect();
-        let manifest = SessionCheckpoint::new(
-            commit.checkpoint.turn_state,
-            commit.checkpoint.tool_state_ref,
-            commit.checkpoint.plugin_snapshot_ref,
-            commit.checkpoint.plugin_snapshot_revision,
-            commit.checkpoint.execution_state_ref,
-        );
+        let manifest: SessionCheckpoint = commit.checkpoint.manifest()?;
         Ok(RuntimeCommitResult {
             head_revision: commit.expected_head_revision + 1,
             checkpoint_ref: "checkpoint".to_string().into(),

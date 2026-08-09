@@ -84,7 +84,13 @@ fn realistic_commit(
         leaf_node_id: nodes.last().map(|node| node.node_id.clone()),
         nodes,
     };
-    commit.checkpoint.execution_state = Some(vec![sample as u8; checkpoint_payload_bytes]);
+    commit.checkpoint.components.insert(
+        lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
+        lash_core::HydratedCheckpointComponent::changed(vec![
+            sample as u8;
+            checkpoint_payload_bytes
+        ]),
+    );
     commit.committed_attachment_ids = attachment_ids;
     commit
         .with_operation(lash_core::store::OperationId::new(

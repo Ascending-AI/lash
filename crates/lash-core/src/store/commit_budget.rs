@@ -1,4 +1,4 @@
-use super::{RuntimeCommit, StoreError};
+use super::{HydratedCheckpointComponent, RuntimeCommit, StoreError};
 
 /// An explicit finite runtime-commit limit or an explicit opt-out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -182,13 +182,20 @@ impl RuntimeCommit {
                 Ok(total.saturating_add(measure_json(serde_json::to_vec(node))?))
             },
         )?;
-        let checkpoint_bytes = rmp_serde::to_vec_named(&self.checkpoint)
+        let checkpoint_root = self.checkpoint.manifest()?;
+        let checkpoint_root_bytes = rmp_serde::to_vec_named(&checkpoint_root)
             .map(|bytes| bytes.len())
-            .map_err(|err| {
-                StoreError::Backend(format!(
-                    "failed to measure runtime commit transaction budget: {err}"
-                ))
+            .map_err(|err| StoreError::RecordEncodingFailed {
+                record_kind: "checkpoint root budget measurement".to_string(),
+                message: err.to_string(),
             })?;
+        let changed_component_bytes = self
+            .checkpoint
+            .components
+            .values()
+            .filter_map(HydratedCheckpointComponent::body)
+            .fold(0usize, |total, body| total.saturating_add(body.len()));
+        let checkpoint_bytes = checkpoint_root_bytes.saturating_add(changed_component_bytes);
         let attachment_manifest_bytes = self
             .committed_attachment_ids
             .iter()
@@ -250,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn reports_each_byte_component() {
+    fn keyed_budget_counts_root_and_changed_bodies_but_excludes_unchanged_refs() {
         let state = crate::RuntimeSessionState {
             session_id: "budget-bytes".to_string(),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
@@ -274,13 +281,32 @@ mod tests {
             nodes: vec![node.clone()],
             leaf_node_id: Some(node.node_id.clone()),
         };
-        commit.checkpoint.execution_state = Some(vec![0; 129]);
+        let changed_body = vec![0; 129];
+        commit.checkpoint.components.insert(
+            "arbitrary/changed".to_string(),
+            crate::HydratedCheckpointComponent::changed(changed_body.clone()),
+        );
+        commit.checkpoint.components.insert(
+            "arbitrary/unchanged".to_string(),
+            crate::HydratedCheckpointComponent::Unchanged {
+                descriptor: crate::CheckpointComponentDescriptor {
+                    blob_ref: crate::BlobRef("existing-content-ref".to_string()),
+                    encoding_version: crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
+                },
+            },
+        );
         commit.committed_attachment_ids = vec![crate::AttachmentId::new("budget-attachment")];
 
         let expected_graph_bytes = serde_json::to_vec(&node).expect("encode graph node").len();
-        let expected_checkpoint_bytes = rmp_serde::to_vec_named(&commit.checkpoint)
-            .expect("encode hydrated checkpoint")
-            .len();
+        let expected_root_bytes = rmp_serde::to_vec_named(
+            &commit
+                .checkpoint
+                .manifest()
+                .expect("project checkpoint root"),
+        )
+        .expect("encode checkpoint root")
+        .len();
+        let expected_checkpoint_bytes = expected_root_bytes + changed_body.len();
         let expected_attachment_bytes = "budget-attachment".len();
 
         assert!(matches!(

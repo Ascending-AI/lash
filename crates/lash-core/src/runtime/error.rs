@@ -24,6 +24,13 @@ pub enum RuntimeErrorCode {
     /// shared transaction budget permits. The same turn will fail identically
     /// until the host produces a smaller turn.
     StoreCommitByteBudgetExceeded,
+    /// A checkpoint component uses a codec version this build cannot read or
+    /// write. The same commit cannot succeed until the store/session is
+    /// recreated with a compatible Lash version.
+    CheckpointComponentEncodingVersionMismatch,
+    /// A durable record failed deterministic serialization before publication.
+    /// Retrying the same value with the same build cannot change the result.
+    RecordEncodingFailed,
     /// A process (re-)execution was handed an empty/non-persisted process id.
     /// Process execution identity is the persisted `process_id`; a retry that
     /// cannot present that stable id has lost its idempotency anchor.
@@ -153,6 +160,10 @@ impl RuntimeErrorCode {
             Self::StoreCommitContended => "store_commit_contended",
             Self::StoreCommitNodeBudgetExceeded => "store_commit_node_budget_exceeded",
             Self::StoreCommitByteBudgetExceeded => "store_commit_byte_budget_exceeded",
+            Self::CheckpointComponentEncodingVersionMismatch => {
+                "checkpoint_component_encoding_version_mismatch"
+            }
+            Self::RecordEncodingFailed => "record_encoding_failed",
             Self::MissingProcessExecutionId => "missing_process_execution_id",
             Self::ExecutionStateCaptureFailed => "execution_state_capture_failed",
             Self::ResidentSessionReloadFailed => "resident_session_reload_failed",
@@ -302,6 +313,8 @@ impl RuntimeErrorCode {
                 | Self::ExecutionScopeTurnIdMismatch
                 | Self::StoreCommitNodeBudgetExceeded
                 | Self::StoreCommitByteBudgetExceeded
+                | Self::CheckpointComponentEncodingVersionMismatch
+                | Self::RecordEncodingFailed
                 | Self::MissingProcessExecutionId
                 | Self::DurableEffectLiveProtocolExtension
                 | Self::DurableEffectLivePluginInput
@@ -361,6 +374,10 @@ impl RuntimeErrorCode {
             "store_commit_contended" => Self::StoreCommitContended,
             "store_commit_node_budget_exceeded" => Self::StoreCommitNodeBudgetExceeded,
             "store_commit_byte_budget_exceeded" => Self::StoreCommitByteBudgetExceeded,
+            "checkpoint_component_encoding_version_mismatch" => {
+                Self::CheckpointComponentEncodingVersionMismatch
+            }
+            "record_encoding_failed" => Self::RecordEncodingFailed,
             "missing_process_execution_id" => Self::MissingProcessExecutionId,
             "execution_state_capture_failed" => Self::ExecutionStateCaptureFailed,
             "resident_session_reload_failed" => Self::ResidentSessionReloadFailed,
@@ -666,6 +683,8 @@ mod tests {
             | RuntimeErrorCode::ExecutionScopeTurnIdMismatch
             | RuntimeErrorCode::StoreCommitNodeBudgetExceeded
             | RuntimeErrorCode::StoreCommitByteBudgetExceeded
+            | RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch
+            | RuntimeErrorCode::RecordEncodingFailed
             | RuntimeErrorCode::MissingProcessExecutionId
             | RuntimeErrorCode::DurableEffectLiveProtocolExtension
             | RuntimeErrorCode::DurableEffectLivePluginInput
@@ -743,6 +762,8 @@ mod tests {
             RuntimeErrorCode::StoreCommitContended,
             RuntimeErrorCode::StoreCommitNodeBudgetExceeded,
             RuntimeErrorCode::StoreCommitByteBudgetExceeded,
+            RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch,
+            RuntimeErrorCode::RecordEncodingFailed,
             RuntimeErrorCode::MissingProcessExecutionId,
             RuntimeErrorCode::ExecutionStateCaptureFailed,
             RuntimeErrorCode::ResidentSessionReloadFailed,
