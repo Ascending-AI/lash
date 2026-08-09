@@ -284,16 +284,9 @@ pub(super) async fn fork_at_in_catalog(
                 retained.ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
                     node_id: request.node_id.clone(),
                 })?;
-            if let lash_core::SessionRelation::Fork {
-                source_session_id: expected,
-                ..
-            } = &request.relation
-                && expected != &source_session_id
-            {
-                return Err(lash_core::StoreError::ForkPointNotRetained {
-                    node_id: request.node_id.clone(),
-                });
-            }
+            // The relation records which session the host branched from, while
+            // the retained point records which session originally wrote the
+            // node. Those identities legitimately differ after a rewind.
             let current_frame_node_id =
                 persistence::nearest_frame_node_id_conn(tx, &request.node_id)?.ok_or_else(
                     || lash_core::StoreError::MissingFrameOpenAncestor {

@@ -1356,6 +1356,32 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .await
         .expect("fork pinned root");
     assert_eq!(forked.node_id, root_node_id);
+
+    // A `Fork` relation's `source_session_id` is host-declared lineage, not a
+    // store-validated argument: forks are addressed by node id, and repeated
+    // rewinds legitimately name superseded intermediate sessions (FIG-1174).
+    let lineage_relation_fork = factory
+        .fork_at(&crate::ForkSessionRequest {
+            session_id: "fork-relation-lineage".to_string(),
+            node_id: root_node_id.clone(),
+            relation: crate::SessionRelation::Fork {
+                source_session_id: "no-such-session".to_string(),
+                source_node_id: "no-such-node".to_string(),
+                observer_inheritance: crate::ObserverInheritance::default(),
+                pending_observer_process_ids: Vec::new(),
+            },
+            policy: source_request.policy.clone(),
+        })
+        .await
+        .expect("fork relation lineage must not gate a retained fork point");
+    assert_eq!(
+        lineage_relation_fork.source_session_id, source_request.session_id,
+        "fork result reports anchor provenance, never the relation's declared lineage"
+    );
+    factory
+        .delete_session("fork-relation-lineage")
+        .await
+        .expect("remove lineage fork");
     let branch = factory
         .open_existing_store(&crate::SessionStoreCreateRequest {
             session_id: fork_request.session_id.clone(),

@@ -355,16 +355,10 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 node_id: request.node_id.clone(),
             });
         };
-        if let crate::SessionRelation::Fork {
-            source_session_id: expected,
-            ..
-        } = &request.relation
-            && expected != &source_session_id
-        {
-            return Err(crate::StoreError::ForkPointNotRetained {
-                node_id: request.node_id.clone(),
-            });
-        }
+        // The relation records which session the host branched from, while the
+        // retained point records which session originally wrote the node. A
+        // repeated rewind can therefore name a newer source session while
+        // legitimately reusing the original continuation anchor.
         let graph = self.global_session_graph.lock_recover();
         let tombstoned = self.tombstoned_node_ids.lock_recover();
         if graph.find_node(&request.node_id).is_none() || tombstoned.contains(&request.node_id) {
