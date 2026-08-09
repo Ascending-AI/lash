@@ -202,6 +202,7 @@ mod tests {
             .attachment_store(Arc::new(
                 lash::persistence::InMemoryAttachmentStore::default(),
             ))
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .process_env_store(Arc::new(
                 lash::persistence::InMemoryProcessExecutionEnvStore::default(),
             ))

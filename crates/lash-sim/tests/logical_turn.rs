@@ -181,6 +181,7 @@ fn standard_core_with_attachment_policy(
     lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
@@ -194,8 +195,10 @@ fn standard_core_with_attachment_policy(
         .disable_queued_work_driver()
         .advanced()
         .runtime_host_config(
-            lash_core::facade_support::RuntimeHostConfig::in_memory()
-                .with_attachment_source_policy(attachment_source_policy),
+            lash_core::facade_support::RuntimeHostConfig::in_memory(
+                lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            )
+            .with_attachment_source_policy(attachment_source_policy),
         )
         .build()
         .expect("build logical-turn sim core")
@@ -282,6 +285,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
@@ -735,6 +739,7 @@ finish { baton: baton }
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))

@@ -309,6 +309,7 @@ pub mod facade_support {
     pub use crate::store::LeaseTimingsError;
     pub use crate::store::SessionHead;
     pub use crate::store::SessionPickerInfo;
+    pub use crate::store::{CommitBudget, CommitBudgetLimit};
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
     pub use crate::tool_provider::ToolSessionProcessAdmin;
     pub use crate::tool_provider::ToolTriggerClient;
@@ -878,14 +879,14 @@ pub use store::{
     SessionExecutionLeaseStore, SessionMeta, StoreError, StoreMaintenance, TurnInputStore,
     VacuumReport,
 };
+pub use store::{
+    CommitBudget, CommitBudgetLimit, HydratedSessionCheckpoint, OperationId, RuntimeCommit,
+    RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
+};
 #[allow(unused_imports)]
 pub(crate) use store::{
     GraphAppend, PersistedSessionRead, RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
     SessionHeadPayload, ensure_supported_schema_version, load_persisted_session_state,
-};
-pub use store::{
-    HydratedSessionCheckpoint, OperationId, RuntimeCommit, RuntimeTurnCommitStamp,
-    RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
 };
 pub use tool_provider::{
     PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolContext,

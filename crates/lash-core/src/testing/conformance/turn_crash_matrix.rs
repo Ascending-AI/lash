@@ -1252,6 +1252,7 @@ async fn build_runtime(
         Arc::new(crate::InlineEffectHost::new(Arc::clone(&effect_controller))),
         Arc::new(crate::InMemoryAttachmentStore::new()),
         Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+        crate::CommitBudget::bounded(1024 * 1024, 512),
     )
     .with_lease_timings(recovery_timings());
     trace_tool.control = control.clone();
@@ -1263,7 +1264,7 @@ async fn build_runtime(
         PluginSpec::new().with_tool_provider(Arc::new(trace_tool)),
     )));
     Box::pin(
-        crate::LashRuntime::builder()
+        crate::LashRuntime::builder(crate::CommitBudget::bounded(1024 * 1024, 512))
             .with_session_id(&identity.session_id)
             .with_policy(runtime_policy())
             .with_runtime_host(host)

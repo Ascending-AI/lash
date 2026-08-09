@@ -1337,7 +1337,9 @@ async fn property_runtime(
         .map_err(|error| error.to_string())?;
     crate::LashRuntime::from_persistent_embedded_state(
         request.policy.clone(),
-        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory()),
+        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+        )),
         crate::PersistentRuntimeServices::new(plugins, Arc::clone(store)),
         state,
     )

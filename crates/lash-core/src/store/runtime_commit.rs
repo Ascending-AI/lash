@@ -55,6 +55,10 @@ fn usage_payload_identity_hash(entry: &crate::TokenLedgerEntry) -> String {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeCommit {
+    /// Host policy carried to the shared facade and backend validation seams.
+    /// It is operational authority and intentionally excluded from the durable
+    /// semantic commit identity projection.
+    pub commit_budget: super::CommitBudget,
     pub session_id: String,
     pub expected_head_revision: u64,
     /// Current execution-lane authority required by a borrowed-lane commit.
@@ -95,6 +99,55 @@ pub struct RuntimeCommit {
 
 #[cfg(any(test, feature = "testing"))]
 impl RuntimeCommit {
+    const fn recommended_test_commit_budget() -> super::CommitBudget {
+        super::CommitBudget::bounded(1024 * 1024, 512)
+    }
+
+    #[doc(hidden)]
+    #[track_caller]
+    pub fn persisted_state_for_test(
+        state: &crate::RuntimeSessionState,
+        usage_deltas: &[crate::TokenLedgerEntry],
+    ) -> Self {
+        Self::persisted_state_for_test_with_budget(
+            state,
+            usage_deltas,
+            Self::recommended_test_commit_budget(),
+        )
+    }
+
+    /// Build a test commit with explicit host-owned byte and node limits.
+    #[doc(hidden)]
+    #[track_caller]
+    pub fn persisted_state_for_test_with_budget(
+        state: &crate::RuntimeSessionState,
+        usage_deltas: &[crate::TokenLedgerEntry],
+        commit_budget: super::CommitBudget,
+    ) -> Self {
+        let caller = std::panic::Location::caller();
+        let operation = OperationId::new(
+            crate::ExecutionScope::runtime_operation(format!(
+                "test-commit:{}:{}:{}",
+                caller.file(),
+                caller.line(),
+                state.head_revision
+            )),
+            "commit",
+        );
+        let mut graph = state.pending_graph_commit();
+        graph
+            .derive_node_ids(&state.session_id, &operation)
+            .expect("test commit node ids must be derivable");
+        Self::persisted_state_with_graph_commit_and_operation_and_budget(
+            state,
+            graph,
+            usage_deltas,
+            operation,
+            commit_budget,
+        )
+        .expect("test commit must be hashable")
+    }
+
     /// Build a test commit with a fixed operation identity.
     #[doc(hidden)]
     pub fn persisted_state_with_operation_for_testing(
@@ -106,8 +159,85 @@ impl RuntimeCommit {
         graph
             .derive_node_ids(&state.session_id, &operation)
             .expect("fixed-identity test commit node ids must be derivable");
-        Self::persisted_state_with_graph_commit_and_operation(state, graph, usage_deltas, operation)
-            .expect("fixed-identity test commit must be hashable")
+        Self::persisted_state_with_graph_commit_and_operation_and_budget(
+            state,
+            graph,
+            usage_deltas,
+            operation,
+            Self::recommended_test_commit_budget(),
+        )
+        .expect("fixed-identity test commit must be hashable")
+    }
+
+    #[doc(hidden)]
+    #[track_caller]
+    pub(crate) fn persisted_state_with_graph_commit(
+        state: &crate::RuntimeSessionState,
+        mut graph: GraphAppend,
+        usage_deltas: &[crate::TokenLedgerEntry],
+    ) -> Self {
+        let caller = std::panic::Location::caller();
+        let operation = OperationId::new(
+            crate::ExecutionScope::runtime_operation(format!(
+                "test-graph-commit:{}:{}:{}",
+                caller.file(),
+                caller.line(),
+                state.head_revision
+            )),
+            "commit",
+        );
+        graph
+            .derive_node_ids(&state.session_id, &operation)
+            .expect("test graph commit node ids must be derivable");
+        Self::persisted_state_with_graph_commit_and_operation_and_budget(
+            state,
+            graph,
+            usage_deltas,
+            operation,
+            Self::recommended_test_commit_budget(),
+        )
+        .expect("test graph commit must be hashable")
+    }
+
+    pub(crate) fn persisted_state_with_operation(
+        state: &mut crate::RuntimeSessionState,
+        usage_deltas: &[crate::TokenLedgerEntry],
+        operation: OperationId,
+    ) -> Result<(Self, Vec<String>), StoreError> {
+        Self::persisted_state_with_operation_and_budget(
+            state,
+            usage_deltas,
+            operation,
+            Self::recommended_test_commit_budget(),
+        )
+    }
+
+    pub(crate) fn persisted_state_with_operation_and_staged_usage(
+        state: &mut crate::RuntimeSessionState,
+        usage_deltas: &[RuntimeUsageDelta],
+        operation: OperationId,
+    ) -> Result<(Self, Vec<String>), StoreError> {
+        Self::persisted_state_with_operation_and_staged_usage_and_budget(
+            state,
+            usage_deltas,
+            operation,
+            Self::recommended_test_commit_budget(),
+        )
+    }
+
+    pub(crate) fn persisted_state_with_graph_commit_and_operation(
+        state: &crate::RuntimeSessionState,
+        graph: GraphAppend,
+        usage_deltas: &[crate::TokenLedgerEntry],
+        operation: OperationId,
+    ) -> Result<Self, StoreError> {
+        Self::persisted_state_with_graph_commit_and_operation_and_budget(
+            state,
+            graph,
+            usage_deltas,
+            operation,
+            Self::recommended_test_commit_budget(),
+        )
     }
 }
 

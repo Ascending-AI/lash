@@ -67,6 +67,7 @@ async fn build_core_with_effect_host(
     let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .effect_host(effect_host)
         .attachment_store(attachment_store)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .process_env_store(process_env_store)
         .store_factory(store_factory)
         .provider(provider_handle)

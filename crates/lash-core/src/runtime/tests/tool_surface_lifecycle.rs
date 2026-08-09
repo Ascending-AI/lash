@@ -111,7 +111,7 @@ fn dynamic_plugin_host(provider: Arc<dyn crate::ToolProvider>) -> Arc<crate::Plu
 }
 
 fn runtime_environment(plugin_host: Arc<crate::PluginHost>) -> crate::RuntimeEnvironment {
-    crate::RuntimeEnvironment::builder()
+    crate::RuntimeEnvironment::builder(crate::CommitBudget::bounded(1024 * 1024, 512))
         .with_plugin_host(plugin_host)
         .with_runtime_host_config(test_host_config().core)
         .build()
@@ -257,7 +257,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         .with_process_tool_visibility_filter(Arc::new(AllowNamedProcess {
             allowed: "allowed-process".to_string(),
         }));
-    let env = crate::RuntimeEnvironment::builder()
+    let env = crate::RuntimeEnvironment::builder(crate::CommitBudget::bounded(1024 * 1024, 512))
         .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
         .with_runtime_host_config(core)
         .with_process_registry(registry.clone())
@@ -435,7 +435,7 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
     let session_id = "pruned-model-handle-session";
     let process_id = "pruned-previous-turn-process";
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());
-    let env = crate::RuntimeEnvironment::builder()
+    let env = crate::RuntimeEnvironment::builder(crate::CommitBudget::bounded(1024 * 1024, 512))
         .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
         .with_runtime_host_config(test_host_config().core)
         .with_process_registry(registry.clone())
@@ -547,7 +547,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     let parent_session_id = "observer-parent";
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());
     let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
-    let env = crate::RuntimeEnvironment::builder()
+    let env = crate::RuntimeEnvironment::builder(crate::CommitBudget::bounded(1024 * 1024, 512))
         .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
         .with_runtime_host_config(test_host_config().core)
         .with_process_registry(registry.clone())

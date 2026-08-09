@@ -231,7 +231,9 @@ fn process_test_core(
     .process_registry(registry)
     .advanced()
     .runtime_host_config({
-        let mut config = lash_core::facade_support::RuntimeHostConfig::in_memory();
+        let mut config = lash_core::facade_support::RuntimeHostConfig::in_memory(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        );
         config.durability.process_env_store = process_env_store;
         config
     })
@@ -1077,7 +1079,9 @@ fn process_test_core_with_sink(
     .process_event_sink(sink)
     .advanced()
     .runtime_host_config({
-        let mut config = lash_core::facade_support::RuntimeHostConfig::in_memory();
+        let mut config = lash_core::facade_support::RuntimeHostConfig::in_memory(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        );
         config.durability.process_env_store = process_env_store;
         config
     })
@@ -1252,7 +1256,9 @@ fn recovery_process_worker(
     lash_core::facade_support::DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(Vec::new())),
-            lash_core::facade_support::RuntimeHostConfig::in_memory(),
+            lash_core::facade_support::RuntimeHostConfig::in_memory(
+                lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            ),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             registry,
         )

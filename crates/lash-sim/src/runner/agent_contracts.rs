@@ -646,6 +646,7 @@ async fn facade_final_value_execution_inner(
         ))
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
@@ -970,6 +971,7 @@ fn agent_process_contract_core_with_options_and_effect_host(
         .effect_host(effect_host)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))

@@ -170,6 +170,7 @@ pub async fn build_core(
         .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
             data_dir.join("attachments"),
         )))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .process_env_store(process_env_store)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .tools(tools::workspace_tools(api))

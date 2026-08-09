@@ -127,12 +127,12 @@ pub(super) fn session_commit_error(
     match source {
         source @ (crate::store::StoreError::SessionDeleted { .. }
         | crate::store::StoreError::AppendOperationIdentityConflict { .. }
-        | crate::store::StoreError::AppendReceiptRequestedNodeCountCorrupt { .. }) => {
-            SessionError::Store {
-                context: context.to_string(),
-                source,
-            }
-        }
+        | crate::store::StoreError::AppendReceiptRequestedNodeCountCorrupt { .. }
+        | crate::store::StoreError::CommitNodeBudgetExceeded { .. }
+        | crate::store::StoreError::CommitByteBudgetExceeded { .. }) => SessionError::Store {
+            context: context.to_string(),
+            source,
+        },
         source => SessionError::Protocol(format!("{context}: {source}")),
     }
 }

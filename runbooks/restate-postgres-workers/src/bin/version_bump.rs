@@ -210,6 +210,7 @@ async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str)
         .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
             attachments.path().to_path_buf(),
         )))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .process_env_store(Arc::new(storage.process_env_store()))
         .process_registry(Arc::new(storage.process_registry()))
         .trigger_store(Arc::new(storage.trigger_store()))

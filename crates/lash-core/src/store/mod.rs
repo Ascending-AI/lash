@@ -24,6 +24,7 @@ pub use crate::session_graph::RealizedNodeTimestamp;
 pub use attachment_manifest::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
 };
+pub use commit_budget::{CommitBudget, CommitBudgetLimit};
 pub use commit_identity::{
     OperationId, RuntimeCommitReceiptDecision, decide_runtime_commit_receipt,
     derive_history_node_id,
@@ -626,6 +627,7 @@ impl RuntimeCommit {
     /// exactly-once identity.
     pub(crate) fn debug_assert_append_envelope_scope(&self) {
         let RuntimeCommit {
+            commit_budget: _,
             session_id: _,
             expected_head_revision: _,
             session_execution_lease_fence: _,
@@ -717,34 +719,11 @@ impl RuntimeCommit {
         commit_identity::turn_commit_hash(self)
     }
 
-    #[doc(hidden)]
-    #[track_caller]
-    pub fn persisted_state_for_test(
-        state: &crate::RuntimeSessionState,
-        usage_deltas: &[crate::TokenLedgerEntry],
-    ) -> Self {
-        let caller = std::panic::Location::caller();
-        let operation = OperationId::new(
-            crate::ExecutionScope::runtime_operation(format!(
-                "test-commit:{}:{}:{}",
-                caller.file(),
-                caller.line(),
-                state.head_revision
-            )),
-            "commit",
-        );
-        let mut graph = state.pending_graph_commit();
-        graph
-            .derive_node_ids(&state.session_id, &operation)
-            .expect("test commit node ids must be derivable");
-        Self::persisted_state_with_graph_commit_and_operation(state, graph, usage_deltas, operation)
-            .expect("test commit must be hashable")
-    }
-
-    pub(crate) fn persisted_state_with_operation(
+    pub(crate) fn persisted_state_with_operation_and_budget(
         state: &mut crate::RuntimeSessionState,
         usage_deltas: &[crate::TokenLedgerEntry],
         operation: OperationId,
+        commit_budget: CommitBudget,
     ) -> Result<(Self, Vec<String>), StoreError> {
         let mut graph = state.pending_graph_commit();
         let mapping = graph.derive_node_ids(&state.session_id, &operation)?;
@@ -754,19 +733,21 @@ impl RuntimeCommit {
         remap_optional_node_id(&mut state.current_frame_node_id, &mapping);
         state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
         let persisted_node_ids = mapping.iter().map(|(_, derived)| derived.clone()).collect();
-        let commit = Self::persisted_state_with_graph_commit_and_operation(
+        let commit = Self::persisted_state_with_graph_commit_and_operation_and_budget(
             state,
             graph,
             usage_deltas,
             operation,
+            commit_budget,
         )?;
         Ok((commit, persisted_node_ids))
     }
 
-    pub(crate) fn persisted_state_with_operation_and_staged_usage(
+    pub(crate) fn persisted_state_with_operation_and_staged_usage_and_budget(
         state: &mut crate::RuntimeSessionState,
         usage_deltas: &[RuntimeUsageDelta],
         operation: OperationId,
+        commit_budget: CommitBudget,
     ) -> Result<(Self, Vec<String>), StoreError> {
         let mut graph = state.pending_graph_commit();
         let mapping = graph.derive_node_ids(&state.session_id, &operation)?;
@@ -776,60 +757,39 @@ impl RuntimeCommit {
         remap_optional_node_id(&mut state.current_frame_node_id, &mapping);
         state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
         let persisted_node_ids = mapping.iter().map(|(_, derived)| derived.clone()).collect();
-        let commit = Self::persisted_state_with_graph_commit_and_staged_usage(
+        let commit = Self::persisted_state_with_graph_commit_and_staged_usage_and_budget(
             state,
             graph,
             usage_deltas,
             operation,
+            commit_budget,
         )?;
         Ok((commit, persisted_node_ids))
     }
 
-    #[doc(hidden)]
-    #[track_caller]
-    #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn persisted_state_with_graph_commit(
-        state: &crate::RuntimeSessionState,
-        mut graph: GraphAppend,
-        usage_deltas: &[crate::TokenLedgerEntry],
-    ) -> Self {
-        let caller = std::panic::Location::caller();
-        let operation = OperationId::new(
-            crate::ExecutionScope::runtime_operation(format!(
-                "test-graph-commit:{}:{}:{}",
-                caller.file(),
-                caller.line(),
-                state.head_revision
-            )),
-            "commit",
-        );
-        graph
-            .derive_node_ids(&state.session_id, &operation)
-            .expect("test graph commit node ids must be derivable");
-        Self::persisted_state_with_graph_commit_and_operation(state, graph, usage_deltas, operation)
-            .expect("test graph commit must be hashable")
-    }
-
-    pub(crate) fn persisted_state_with_graph_commit_and_operation(
+    pub(crate) fn persisted_state_with_graph_commit_and_operation_and_budget(
         state: &crate::RuntimeSessionState,
         graph: GraphAppend,
         usage_deltas: &[crate::TokenLedgerEntry],
         operation: OperationId,
+        commit_budget: CommitBudget,
     ) -> Result<Self, StoreError> {
         let usage_deltas = RuntimeUsageDelta::for_operation(&operation, usage_deltas)?;
-        Self::persisted_state_with_graph_commit_and_staged_usage(
+        Self::persisted_state_with_graph_commit_and_staged_usage_and_budget(
             state,
             graph,
             &usage_deltas,
             operation,
+            commit_budget,
         )
     }
 
-    pub(crate) fn persisted_state_with_graph_commit_and_staged_usage(
+    pub(crate) fn persisted_state_with_graph_commit_and_staged_usage_and_budget(
         state: &crate::RuntimeSessionState,
         graph: GraphAppend,
         usage_deltas: &[RuntimeUsageDelta],
         operation: OperationId,
+        commit_budget: CommitBudget,
     ) -> Result<Self, StoreError> {
         let mut projected_graph = state.session_graph.clone();
         for node in &graph.nodes {
@@ -842,6 +802,7 @@ impl RuntimeCommit {
             .nearest_frame_node_id(projected_graph.leaf_node_id.as_deref())
             .map(ToOwned::to_owned);
         Ok(Self {
+            commit_budget,
             session_id: state.session_id.clone(),
             expected_head_revision: state.head_revision,
             session_execution_lease_fence: None,

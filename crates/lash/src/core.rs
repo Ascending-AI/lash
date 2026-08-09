@@ -9,6 +9,7 @@ use lash_core::runtime::{
 use std::collections::HashSet;
 
 mod queued_work;
+mod runtime_host_config;
 mod worker_capacity;
 
 use queued_work::{InlineQueuedWorkRunConfig, InlineQueuedWorkRunHandle};
@@ -897,6 +898,7 @@ pub struct LashCoreBuilder {
     effect_host: Option<Arc<dyn EffectHost>>,
     attachment_store: Option<Arc<dyn AttachmentStore>>,
     process_env_store: Option<Arc<dyn ProcessExecutionEnvStore>>,
+    commit_budget: Option<facade_support::CommitBudget>,
     trigger_store: Option<Arc<dyn lash_core::TriggerStore>>,
     // Benign core overrides applied on top of the resolved core.
     prompt: Option<PromptLayer>,
@@ -940,6 +942,7 @@ impl LashCoreBuilder {
             effect_host: None,
             attachment_store: None,
             process_env_store: None,
+            commit_budget: None,
             trigger_store: None,
             prompt: None,
             trace_sink: None,
@@ -1042,6 +1045,13 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Configure the byte and graph-node limits for each atomic runtime
+    /// commit. Hosts must choose bounded or unbounded behavior explicitly for
+    /// both dimensions.
+    pub fn commit_budget(mut self, commit_budget: facade_support::CommitBudget) -> Self {
+        self.commit_budget = Some(commit_budget);
+        self
+    }
     /// Configure how process wake events are drafted into queued turns.
     ///
     /// The default preserves the original behavior: earliest-safe-boundary
@@ -1145,71 +1155,6 @@ impl LashCoreBuilder {
     pub fn live_replay_store(mut self, live_replay_store: Arc<dyn LiveReplayStore>) -> Self {
         self.live_replay_store = Some(live_replay_store);
         self
-    }
-
-    /// Resolve the runtime host config, requiring the generic host-owned
-    /// durability dependencies to have been named.
-    fn resolve_runtime_host_config(&mut self) -> Result<RuntimeHostConfig> {
-        if let Some(base) = self.runtime_host_config.take() {
-            return Ok(self.apply_core_overrides(base));
-        }
-        let effect_host = self
-            .effect_host
-            .take()
-            .ok_or(EmbedError::MissingEffectHost)?;
-        let attachment_store = self
-            .attachment_store
-            .take()
-            .ok_or(EmbedError::MissingAttachmentStore)?;
-        let process_env_store = self
-            .process_env_store
-            .take()
-            .ok_or(EmbedError::MissingProcessEnvStore)?;
-        let core = RuntimeHostConfig::new(effect_host, attachment_store, process_env_store);
-        Ok(self.apply_core_overrides(core))
-    }
-
-    /// Apply benign + still-set dependency overrides on top of a base core.
-    fn apply_core_overrides(&mut self, mut core: RuntimeHostConfig) -> RuntimeHostConfig {
-        if let Some(effect_host) = self.effect_host.take() {
-            core.control.effect_host = effect_host;
-        }
-        if let Some(attachment_store) = self.attachment_store.take() {
-            core.durability.attachment_store = Arc::new(
-                facade_support::SessionAttachmentStore::ephemeral(attachment_store),
-            );
-        }
-        if let Some(process_env_store) = self.process_env_store.take() {
-            core.durability.process_env_store = process_env_store;
-        }
-        if let Some(prompt) = self.prompt.take() {
-            core.prompt.prompt = prompt;
-        }
-        if let Some(trace_sink) = self.trace_sink.take() {
-            core.tracing.trace_sink = Some(trace_sink);
-        }
-        if let Some(trace_level) = self.trace_level.take() {
-            core.tracing.trace_level = trace_level;
-        }
-        if let Some(trace_context) = self.trace_context.take() {
-            core.tracing.trace_context = trace_context;
-        }
-        if let Some(termination) = self.termination.take() {
-            core.control.termination = termination;
-        }
-        if let Some(lease_timings) = self.lease_timings.take() {
-            core.control.lease_timings = lease_timings;
-        }
-        if let Some(clock) = self.clock.take() {
-            core.clock = clock;
-        }
-        if let Some(wake_turn_policy) = self.wake_turn_policy.take() {
-            core.control.wake_turn_policy = wake_turn_policy;
-        }
-        if let Some(filter) = self.process_tool_visibility_filter.take() {
-            core.control.process_tool_visibility_filter = Some(filter);
-        }
-        core
     }
 
     pub fn build(mut self) -> Result<LashCore> {
@@ -1320,7 +1265,7 @@ impl LashCoreBuilder {
         )?;
 
         let live_replay_clock = Arc::clone(&core.clock);
-        let mut env_builder = RuntimeEnvironment::builder()
+        let mut env_builder = RuntimeEnvironment::builder(core.durability.commit_budget)
             .with_plugin_host(Arc::new(default_plugin_host))
             .with_runtime_host_config(core);
         if let Some(process_registry) = process_registry.as_ref() {

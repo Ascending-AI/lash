@@ -2,16 +2,18 @@ use super::*;
 
 fn initial_park_preview(
     state: &crate::RuntimeSessionState,
+    commit_budget: crate::CommitBudget,
 ) -> Result<crate::store::RuntimeCommit, crate::StoreError> {
     let operation =
         super::state::boundary_operation(&state.session_id, "initial-park-preview", "preview");
     let mut graph = state.pending_graph_commit();
     graph.derive_node_ids(&state.session_id, &operation)?;
-    crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
+    crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
         state,
         graph,
         &[],
         operation,
+        commit_budget,
     )
 }
 
@@ -478,15 +480,17 @@ impl LashRuntime {
         if self.state.checkpoint_ref.is_none()
             || !self.state.pending_graph_commit().nodes.is_empty()
         {
-            let proposed = initial_park_preview(&self.state)
-                .map_err(|err| SessionError::Protocol(err.to_string()))?;
+            let proposed =
+                initial_park_preview(&self.state, self.host.core.durability.commit_budget)
+                    .map_err(|err| SessionError::Protocol(err.to_string()))?;
             let operation = initial_park_operation(&proposed)
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
             let (commit, persisted_node_ids) =
-                crate::store::RuntimeCommit::persisted_state_with_operation(
+                crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                     &mut self.state,
                     &[],
                     operation,
+                    self.host.core.durability.commit_budget,
                 )
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
             // Lane-less host lifecycle boundary: `park` runs between turns and
@@ -564,15 +568,16 @@ mod tests {
             "pending-user-message",
             "persist me before parking",
         )]);
-        let first = initial_park_preview(&state).expect("first park preview");
+        let budget = crate::CommitBudget::bounded(1024 * 1024, 512);
+        let first = initial_park_preview(&state, budget).expect("first park preview");
 
         let mut retry_state = state.clone();
         retry_state.head_revision = 41;
-        let retry = initial_park_preview(&retry_state).expect("retry park preview");
+        let retry = initial_park_preview(&retry_state, budget).expect("retry park preview");
 
         let mut changed_state = retry_state;
         changed_state.turn_index = 1;
-        let changed = initial_park_preview(&changed_state).expect("changed park preview");
+        let changed = initial_park_preview(&changed_state, budget).expect("changed park preview");
 
         let first = initial_park_operation(&first).expect("first park identity");
         let retry = initial_park_operation(&retry).expect("retry park identity");

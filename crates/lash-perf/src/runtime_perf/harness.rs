@@ -59,6 +59,7 @@ impl ExplicitEphemeralFacets for lash::LashCoreBuilder {
             lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
@@ -1039,6 +1040,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                 .model(benchmark_model_spec())
                 .effect_host(effect_host.clone())
                 .attachment_store(attachment_store.clone())
+                .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                 .process_env_store(process_env_store.clone())
                 .process_registry(process_registry.clone())
                 .trigger_store(trigger_store.clone())
@@ -1065,6 +1067,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                     .model(benchmark_model_spec())
                     .effect_host(effect_host.clone())
                     .attachment_store(attachment_store.clone())
+                    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                     .process_env_store(process_env_store.clone())
                     .process_registry(process_registry.clone())
                     .trigger_store(trigger_store.clone())

@@ -648,10 +648,11 @@ impl LashRuntime {
                 )
             })?;
         let (mut commit, persisted_node_ids) =
-            crate::store::RuntimeCommit::persisted_state_with_operation(
+            crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                 &mut self.state,
                 &[],
                 operation,
+                self.host.core.durability.commit_budget,
             )
             .map_err(super::runtime_error_from_store_commit)?;
         // Queue-claim settlement is generation-pinned per ADR 0029; presenting

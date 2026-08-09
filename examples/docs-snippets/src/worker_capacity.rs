@@ -78,6 +78,7 @@ fn builder_with_external_capacity_signal(
 ) -> (lash::LashCoreBuilder, Arc<ExternallyGatedSlots>) {
     let supplier = Arc::new(ExternallyGatedSlots::new(enabled, 1, 1));
     let builder = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .worker_slot_supplier(supplier.clone());
     (builder, supplier)
 }

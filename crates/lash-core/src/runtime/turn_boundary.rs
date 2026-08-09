@@ -38,6 +38,7 @@ pub(super) struct TurnBoundary {
     stage: TurnCommitStage,
     clock: Arc<dyn crate::Clock>,
     operation_scope: crate::ExecutionScope,
+    commit_budget: crate::CommitBudget,
 }
 
 /// Explicit two-phase lifecycle for a turn commit.
@@ -109,13 +110,18 @@ impl TurnBoundary {
     #[cfg(test)]
     pub(super) fn from_state(state: RuntimeSessionState) -> Self {
         let scope = crate::ExecutionScope::turn(&state.session_id, "test-turn");
-        Self::from_state_with_clock(state, Arc::new(crate::SystemClock), scope)
+        Self::from_state_with_clock(
+            state,
+            Arc::new(crate::SystemClock),
+            scope,
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+        )
     }
-
     pub(super) fn from_state_with_clock(
         state: RuntimeSessionState,
         clock: Arc<dyn crate::Clock>,
         operation_scope: crate::ExecutionScope,
+        commit_budget: crate::CommitBudget,
     ) -> Self {
         let draft_clock = Arc::clone(&clock);
         Self {
@@ -126,6 +132,7 @@ impl TurnBoundary {
             ))),
             clock,
             operation_scope,
+            commit_budget,
         }
     }
 
@@ -535,19 +542,22 @@ impl TurnBoundary {
                     .agent_frame_records(&session_id);
             }
         }
+        let commit_budget = self.commit_budget;
         let state = self.state_mut();
         let persisted_node_ids = graph
             .nodes
             .iter()
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();
-        let mut commit = RuntimeCommit::persisted_state_with_graph_commit_and_staged_usage(
-            state,
-            graph,
-            usage_deltas,
-            operation,
-        )?
-        .with_committed_attachments(committed_attachment_ids);
+        let mut commit =
+            RuntimeCommit::persisted_state_with_graph_commit_and_staged_usage_and_budget(
+                state,
+                graph,
+                usage_deltas,
+                operation,
+                commit_budget,
+            )?
+            .with_committed_attachments(committed_attachment_ids);
         if let Some(completion) = session_execution_lease_completion {
             commit = commit.releasing_session_execution_lease(completion);
         }

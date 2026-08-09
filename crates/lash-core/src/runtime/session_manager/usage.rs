@@ -148,10 +148,11 @@ impl UsageCapability {
             return Ok(());
         }
         let (commit, persisted_node_ids) =
-            crate::store::RuntimeCommit::persisted_state_with_operation_and_staged_usage(
+            crate::store::RuntimeCommit::persisted_state_with_operation_and_staged_usage_and_budget(
                 &mut state,
                 staged.deltas(),
                 operation,
+                current.host.core.durability.commit_budget,
             )
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         // Dual-context site: ordinary host services are lane-less, but a

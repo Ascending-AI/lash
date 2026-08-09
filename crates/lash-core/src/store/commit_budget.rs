@@ -1,5 +1,64 @@
 use super::{RuntimeCommit, StoreError};
 
+/// An explicit finite runtime-commit limit or an explicit opt-out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommitBudgetLimit {
+    /// Reject a commit whose measured dimension exceeds this non-zero limit.
+    Bounded(std::num::NonZeroUsize),
+    /// Apply no limit to this dimension.
+    Unbounded,
+}
+
+impl CommitBudgetLimit {
+    /// Construct a finite, non-zero commit limit.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `limit` is zero.
+    pub const fn bounded(limit: usize) -> Self {
+        match std::num::NonZeroUsize::new(limit) {
+            Some(limit) => Self::Bounded(limit),
+            None => panic!("commit budget limit must be non-zero"),
+        }
+    }
+}
+
+/// Host-owned limits on one atomic runtime commit.
+///
+/// Bytes cover the graph delta, hydrated checkpoint, and attachment-manifest
+/// ids. Nodes cover the graph delta. Hosts must choose bounded or unbounded
+/// behavior for both dimensions; this type deliberately has no `Default`.
+/// A 1 MiB byte limit and 512-node limit are the documented recommended
+/// starting point; hosts should tune them for their backend latency envelope.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommitBudget {
+    /// Aggregate logical persisted-payload byte limit.
+    pub bytes: CommitBudgetLimit,
+    /// Graph nodes written by one commit.
+    pub nodes: CommitBudgetLimit,
+}
+
+impl CommitBudget {
+    /// Construct a budget from independently explicit byte and node limits.
+    pub const fn new(bytes: CommitBudgetLimit, nodes: CommitBudgetLimit) -> Self {
+        Self { bytes, nodes }
+    }
+
+    /// Construct a budget with finite byte and node limits.
+    ///
+    /// # Panics
+    ///
+    /// Panics when either limit is zero.
+    pub const fn bounded(bytes: usize, nodes: usize) -> Self {
+        Self::new(
+            CommitBudgetLimit::bounded(bytes),
+            CommitBudgetLimit::bounded(nodes),
+        )
+    }
+}
+
 pub(crate) struct RuntimeCommitBudgetMeasurement {
     pub(crate) graph_delta_bytes: usize,
     pub(crate) checkpoint_bytes: usize,
@@ -8,24 +67,12 @@ pub(crate) struct RuntimeCommitBudgetMeasurement {
 }
 
 impl RuntimeCommit {
-    /// Maximum number of graph nodes a single commit may write.
-    ///
-    /// This and [`MAX_COMMIT_BUDGET_BYTES`](Self::MAX_COMMIT_BUDGET_BYTES) bound
-    /// work before any backend opens
-    /// a transaction. They were selected from the SQL commit-size benchmark at
-    /// `lash-postgres-store/tests/commit_size_benchmark.rs`.
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
     pub const MAX_COMMIT_NODE_COUNT: usize = 512;
 
-    /// Maximum aggregate persisted-payload bytes for the graph delta,
-    /// checkpoint, and attachment-manifest ids a single commit may carry.
-    ///
-    /// Graph nodes use their exact JSON row representation. Checkpoints use a
-    /// backend-neutral named-MessagePack representation of the hydrated value.
-    /// Durable backends store the manifest and present component bodies as
-    /// separately addressed named-MessagePack blobs; SQLite may compress them.
-    /// Attachment ids use the exact UTF-8 bytes bound into manifest updates.
-    /// Backend envelope, compression, row, and page overhead is deliberately
-    /// outside this caller-controlled logical-payload budget.
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
     pub const MAX_COMMIT_BUDGET_BYTES: usize = 1024 * 1024;
 
     /// Bound the graph, hydrated checkpoint, and attachment-adoption payloads
@@ -36,23 +83,88 @@ impl RuntimeCommit {
     /// outside it.
     pub fn validate_budget(&self) -> Result<(), StoreError> {
         let node_count = self.graph.nodes.len();
-        if node_count > Self::MAX_COMMIT_NODE_COUNT {
-            return Err(StoreError::CommitNodeBudgetExceeded {
-                node_count,
-                max_nodes: Self::MAX_COMMIT_NODE_COUNT,
-            });
+        match self.commit_budget.nodes {
+            CommitBudgetLimit::Bounded(max_nodes) if node_count > max_nodes.get() => {
+                tracing::warn!(
+                    target: "lash.runtime_commit.budget",
+                    session_id = %self.session_id,
+                    dimension = "nodes",
+                    actual = node_count,
+                    limit = max_nodes.get(),
+                    outcome = "rejected",
+                    "runtime commit budget decision"
+                );
+                return Err(StoreError::CommitNodeBudgetExceeded {
+                    node_count,
+                    max_nodes: max_nodes.get(),
+                });
+            }
+            CommitBudgetLimit::Bounded(max_nodes) => tracing::trace!(
+                target: "lash.runtime_commit.budget",
+                session_id = %self.session_id,
+                dimension = "nodes",
+                actual = node_count,
+                limit = max_nodes.get(),
+                outcome = "admitted",
+                "runtime commit budget decision"
+            ),
+            CommitBudgetLimit::Unbounded => tracing::trace!(
+                target: "lash.runtime_commit.budget",
+                session_id = %self.session_id,
+                dimension = "nodes",
+                actual = node_count,
+                limit = "unbounded",
+                outcome = "admitted",
+                "runtime commit budget decision"
+            ),
         }
 
+        let CommitBudgetLimit::Bounded(max_bytes) = self.commit_budget.bytes else {
+            tracing::trace!(
+                target: "lash.runtime_commit.budget",
+                session_id = %self.session_id,
+                dimension = "bytes",
+                measurement = "skipped_unbounded",
+                limit = "unbounded",
+                outcome = "admitted",
+                "runtime commit budget decision"
+            );
+            return Ok(());
+        };
         let measurement = self.measure_budget()?;
-        if measurement.total_bytes > Self::MAX_COMMIT_BUDGET_BYTES {
+        if measurement.total_bytes > max_bytes.get() {
+            tracing::warn!(
+                target: "lash.runtime_commit.budget",
+                session_id = %self.session_id,
+                dimension = "bytes",
+                graph_delta_bytes = measurement.graph_delta_bytes,
+                checkpoint_bytes = measurement.checkpoint_bytes,
+                attachment_manifest_bytes = measurement.attachment_manifest_bytes,
+                actual = measurement.total_bytes,
+                limit = max_bytes.get(),
+                outcome = "rejected",
+                "runtime commit budget decision"
+            );
             return Err(StoreError::CommitByteBudgetExceeded {
                 graph_delta_bytes: measurement.graph_delta_bytes,
                 checkpoint_bytes: measurement.checkpoint_bytes,
                 attachment_manifest_bytes: measurement.attachment_manifest_bytes,
                 total_bytes: measurement.total_bytes,
-                max_bytes: Self::MAX_COMMIT_BUDGET_BYTES,
+                max_bytes: max_bytes.get(),
             });
         }
+        tracing::trace!(
+            target: "lash.runtime_commit.budget",
+            session_id = %self.session_id,
+            dimension = "bytes",
+            graph_delta_bytes = measurement.graph_delta_bytes,
+            checkpoint_bytes = measurement.checkpoint_bytes,
+            attachment_manifest_bytes = measurement.attachment_manifest_bytes,
+            actual = measurement.total_bytes,
+            limit = max_bytes.get(),
+            outcome = "admitted",
+            "runtime commit budget decision"
+        );
         Ok(())
     }
 
@@ -116,9 +228,10 @@ mod tests {
                 ),
             },
         };
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let budget = CommitBudget::bounded(1024 * 1024, 2);
+        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
         commit.graph = crate::GraphAppend {
-            nodes: (0..=RuntimeCommit::MAX_COMMIT_NODE_COUNT)
+            nodes: (0..=2)
                 .map(|index| crate::SessionNodeRecord {
                     node_id: format!("node-{index}"),
                     ..node.clone()
@@ -132,8 +245,7 @@ mod tests {
             Err(StoreError::CommitNodeBudgetExceeded {
                 node_count,
                 max_nodes
-            }) if node_count == RuntimeCommit::MAX_COMMIT_NODE_COUNT + 1
-                && max_nodes == RuntimeCommit::MAX_COMMIT_NODE_COUNT
+            }) if node_count == 3 && max_nodes == 2
         ));
     }
 
@@ -145,7 +257,8 @@ mod tests {
                 crate::TurnBudget::Unbounded,
             ))
         };
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let budget = CommitBudget::bounded(128, 512);
+        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
         let node = crate::SessionNodeRecord {
             node_id: "budget-node".to_string(),
             parent_node_id: None,
@@ -161,8 +274,7 @@ mod tests {
             nodes: vec![node.clone()],
             leaf_node_id: Some(node.node_id.clone()),
         };
-        commit.checkpoint.execution_state =
-            Some(vec![0; RuntimeCommit::MAX_COMMIT_BUDGET_BYTES + 1]);
+        commit.checkpoint.execution_state = Some(vec![0; 129]);
         commit.committed_attachment_ids = vec![crate::AttachmentId::new("budget-attachment")];
 
         let expected_graph_bytes = serde_json::to_vec(&node).expect("encode graph node").len();
@@ -186,7 +298,34 @@ mod tests {
                     == expected_graph_bytes
                         + expected_checkpoint_bytes
                         + expected_attachment_bytes
-                && max_bytes == RuntimeCommit::MAX_COMMIT_BUDGET_BYTES
+                && max_bytes == 128
         ));
+    }
+
+    #[test]
+    fn serialized_commit_budget_requires_both_limits() {
+        let missing_bytes = serde_json::json!({ "nodes": "unbounded" });
+        let error = serde_json::from_value::<CommitBudget>(missing_bytes)
+            .expect_err("byte budget must be explicit");
+        assert!(error.to_string().contains("bytes"));
+
+        let missing_nodes = serde_json::json!({ "bytes": "unbounded" });
+        let error = serde_json::from_value::<CommitBudget>(missing_nodes)
+            .expect_err("node budget must be explicit");
+        assert!(error.to_string().contains("nodes"));
+    }
+
+    #[test]
+    fn commit_budget_uses_host_friendly_json_shapes() {
+        let budget = CommitBudget::new(
+            CommitBudgetLimit::bounded(1_048_576),
+            CommitBudgetLimit::Unbounded,
+        );
+        let encoded = serde_json::to_value(budget).expect("serialize commit budget");
+        assert_eq!(
+            encoded["bytes"],
+            serde_json::json!({ "bounded": 1_048_576 })
+        );
+        assert_eq!(encoded["nodes"], serde_json::json!("unbounded"));
     }
 }

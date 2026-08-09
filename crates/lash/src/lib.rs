@@ -51,12 +51,12 @@ pub use crate::turn::{
 };
 pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::{
-    AwaitEventKey, AwaitEventWaitIdentity, EffectReplayOwnership, InputItem, LlmCallRecord,
-    ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder, PendingTurnInput,
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelResult, PendingTurnInputCancelTarget,
-    PendingTurnInputSuffixCancelOutcome, Resolution, ResolveOutcome, SessionCreateRequest,
-    SessionError, SessionStartPoint, TurnActivity, TurnActivityId, TurnBudget,
-    TurnCancelOriginHint, TurnCause, TurnEvent, TurnInput, TurnInputApplication,
+    AwaitEventKey, AwaitEventWaitIdentity, CommitBudget, CommitBudgetLimit, EffectReplayOwnership,
+    InputItem, LlmCallRecord, ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder,
+    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
+    PendingTurnInputCancelTarget, PendingTurnInputSuffixCancelOutcome, Resolution, ResolveOutcome,
+    SessionCreateRequest, SessionError, SessionStartPoint, TurnActivity, TurnActivityId,
+    TurnBudget, TurnCancelOriginHint, TurnCause, TurnEvent, TurnInput, TurnInputApplication,
     facade_support::ExecutionSummary, facade_support::GenerationOverlay,
     facade_support::PluginStack, facade_support::SessionCommand,
     facade_support::SessionCommandReceipt, facade_support::SessionConfigPatch,

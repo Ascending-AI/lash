@@ -53,6 +53,11 @@ does not fabricate a terminal or call a registry completion method.
    are also untouched.
 5. **Docs claims are assertions.** A documented claim with no companion evidence is a
    finding. Any observed contradiction is a real-defect stop; do not weaken this runbook.
+6. **A commit-budget rejection is terminal.** The host must supply explicit byte and node
+   policy. If turn settlement or `park()` reports the typed byte/node rejection, do not
+   retry the identical operation: raise the configured limit or make the commit smaller.
+   The 1 MiB / 512-node pair used by first-party hosts is a recommended starting point,
+   not Lash-owned authority.
 
 ## Working material
 
@@ -60,7 +65,8 @@ does not fabricate a terminal or call a registry completion method.
 - Docs surface: serve checked-in `docs/` on an unused loopback port and open
   `/operations.html#graceful-drain`.
 - Source truth: `crates/lash-core/src/runtime/process_worker/mod.rs` and
-  `crates/lash/src/process_admin.rs`.
+  `crates/lash/src/process_admin.rs`; the budget error contract is covered by
+  `crates/lash/src/tests/core_session_builder/session_lifecycle.rs`.
 - Save rendered section text, the named screenshot, and the completed scorecard in the
   artifact directory. Do not edit docs or sources during judgment.
 

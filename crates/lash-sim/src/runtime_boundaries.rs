@@ -854,7 +854,9 @@ impl RuntimeBoundaryHarness {
             LeaseOwnerIdentity::opaque("sim-dead-owner", format!("before-the-crash:{session}"));
         let silent_owner =
             LeaseOwnerIdentity::opaque("sim-silent-owner", format!("sim-silent-owner:{session}"));
-        let mut runtime_host = lash_core::facade_support::RuntimeHostConfig::in_memory();
+        let mut runtime_host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        );
         runtime_host.process_engines = lash_core::facade_support::ProcessEngineRegistry::new()
             .with_engine(Arc::new(LifecycleSuccessEngine));
         let policy = lash_core::SessionPolicy {

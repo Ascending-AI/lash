@@ -5581,6 +5581,7 @@ async fn restate_enqueue_never_errors_after_commit() {
         )))
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(DurableMemoryAttachmentStore::default()))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .process_env_store(Arc::new(DurableMemoryProcessEnvStore::default()))
         .queued_work_driver(lash_core::facade_support::QueuedWorkDriver::new(
             queued_work.clone(),
@@ -5726,13 +5727,15 @@ async fn replay_test_runtime_with_plugins_and_registry(
     plugin_factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
     process_registry: Option<Arc<dyn ProcessRegistry>>,
 ) -> lash_core::facade_support::LashRuntime {
-    let mut builder = lash_core::facade_support::LashRuntime::builder()
-        .with_session_id(session_id)
-        .with_policy(policy)
-        .with_initial_state(initial_state)
-        .with_runtime_host(host)
-        .with_plugin_factories(plugin_factories)
-        .with_store(store);
+    let mut builder = lash_core::facade_support::LashRuntime::builder(
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+    )
+    .with_session_id(session_id)
+    .with_policy(policy)
+    .with_initial_state(initial_state)
+    .with_runtime_host(host)
+    .with_plugin_factories(plugin_factories)
+    .with_store(store);
     if let Some(process_registry) = process_registry {
         builder = builder.with_process_registry(process_registry);
     }
@@ -5795,7 +5798,9 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
         })
         .build()
         .into_handle();
-    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory();
+    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+    );
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
@@ -5915,7 +5920,9 @@ async fn restate_replay_lease_acquisition_takes_recorded_branch() {
         })
         .build()
         .into_handle();
-    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory();
+    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+    );
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
@@ -6174,7 +6181,9 @@ finish (await handle)?
         })
         .build()
         .into_handle();
-    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory();
+    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+    );
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
@@ -8335,13 +8344,15 @@ fn recovery_worker_with_plugins(
     let plugin_host = lash_core::facade_support::PluginHost::new(plugins);
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         RECOVERY_PROCESS_ENV_STORE.clone();
-    let runtime_host = lash_core::facade_support::RuntimeHostConfig::in_memory()
-        .with_process_env_store(process_env_store)
-        .with_process_engine(Arc::new(
-            lash_lashlang_runtime::LashlangProcessEngine::in_memory(
-                lash_lashlang_runtime::LashlangSurface::default(),
-            ),
-        ));
+    let runtime_host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+    )
+    .with_process_env_store(process_env_store)
+    .with_process_engine(Arc::new(
+        lash_lashlang_runtime::LashlangProcessEngine::in_memory(
+            lash_lashlang_runtime::LashlangSurface::default(),
+        ),
+    ));
     DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(plugin_host),
@@ -9219,7 +9230,9 @@ async fn process_deployment_driver_and_workflow_share_registry() {
     let worker = DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::empty()),
-            lash_core::facade_support::RuntimeHostConfig::in_memory(),
+            lash_core::facade_support::RuntimeHostConfig::in_memory(
+                lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            ),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             Arc::clone(&driver_registry),
         )

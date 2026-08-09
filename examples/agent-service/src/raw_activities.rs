@@ -342,6 +342,7 @@ finish "done through raw activities"
                 lash::durability::InlineEffectHost::default()
                     .allow_process_lifetime_completion_keys(),
             ))
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .process_env_store(Arc::new(
                 lash_sqlite_store::Store::open(&data_dir.join("process-env.db"))
                     .await

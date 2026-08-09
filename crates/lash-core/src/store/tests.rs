@@ -410,6 +410,21 @@ fn intent_projection_keeps_payload_timestamp_but_excludes_node_timestamp() {
 }
 
 #[test]
+fn intent_projection_excludes_host_commit_budget() {
+    let bounded = intent_fixture();
+    let mut unbounded = bounded.clone();
+    unbounded.commit_budget = crate::CommitBudget::new(
+        crate::CommitBudgetLimit::Unbounded,
+        crate::CommitBudgetLimit::Unbounded,
+    );
+
+    assert_eq!(
+        bounded.turn_commit_hash().expect("bounded budget hash"),
+        unbounded.turn_commit_hash().expect("unbounded budget hash")
+    );
+}
+
+#[test]
 fn derived_node_ids_are_session_operation_and_ordinal_scoped() {
     let first = OperationId::turn("session-a", "turn", "final");
     let other = OperationId::turn("session-a", "other-turn", "final");

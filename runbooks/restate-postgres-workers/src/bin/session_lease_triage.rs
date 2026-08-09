@@ -296,6 +296,7 @@ impl Backend {
             .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
                 attachments.path().to_path_buf(),
             )))
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .process_env_store(match &self.postgres {
                 Some(storage) => Arc::new(storage.process_env_store()),
                 None => Arc::new(lash::persistence::InMemoryProcessExecutionEnvStore::default()),

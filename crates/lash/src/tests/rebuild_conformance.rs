@@ -126,6 +126,7 @@ fn runtime_rebuild_and_worker_recovery_with_durable_stores() {
                     builder
                         .store_factory(Arc::clone(&store_factory))
                         .attachment_store(Arc::clone(&attachment))
+                        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
                         .process_env_store(Arc::clone(&process_env_store))
                         .trigger_store(Arc::clone(&trigger_store))
                         .effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
