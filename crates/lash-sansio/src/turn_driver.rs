@@ -18,7 +18,7 @@ use crate::llm::types::{
 use crate::sansio::{
     ChatContextProjector, ContextProjector, ProtocolDriverHandle, TurnProtocol, UnitTurnProtocol,
 };
-use crate::session_model::{Part, PartKind, PruneState};
+use crate::session_model::Part;
 
 pub type TurnLimitFinalMessage =
     Arc<dyn Fn(String, usize) -> crate::Message + Send + Sync + 'static>;
@@ -137,18 +137,7 @@ pub fn reasoning_part(
     text: String,
     meta: Option<ProviderReasoningReplay>,
 ) -> Part {
-    Part {
-        id: format!("{asst_id}.p{index}"),
-        kind: PartKind::Reasoning,
-        content: text,
-        attachment: None,
-        tool_call_id: None,
-        tool_name: None,
-        tool_replay: None,
-        prune_state: PruneState::Intact,
-        reasoning_meta: meta,
-        response_meta: None,
-    }
+    Part::reasoning(format!("{asst_id}.p{index}"), text, meta)
 }
 
 /// Append a streamed text part to the running assistant text, inserting

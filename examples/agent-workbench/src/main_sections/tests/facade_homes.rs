@@ -379,18 +379,11 @@
                 lash_core::Message {
                     id: id.to_string(),
                     role,
-                    parts: vec![lash_core::Part {
-                        id: format!("{id}.p0"),
-                        kind: lash_core::PartKind::Text,
-                        content: content.to_string(),
-                        attachment: None,
-                        tool_call_id: None,
-                        tool_name: None,
-                        tool_replay: None,
-                        prune_state: lash_core::PruneState::Intact,
-                        reasoning_meta: None,
-                        response_meta: None,
-                    }]
+                    parts: vec![lash_core::Part::text(
+                        format!("{id}.p0"),
+                        content.to_string(),
+                        None,
+                    )]
                     .into(),
                     origin: None,
                 }

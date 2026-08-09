@@ -521,33 +521,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
         {
             let message_id = self.next_synthetic_message_id("checkpoint");
             let mut parts = if message.parts.is_empty() && !message.content.is_empty() {
-                vec![Part {
-                    id: format!("{message_id}.p0"),
-                    kind: PartKind::Text,
-                    content: message.content.clone(),
-                    attachment: None,
-                    tool_call_id: None,
-                    tool_name: None,
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                }]
+                vec![Part::text(format!("{message_id}.p0"), message.content.clone(), None)]
             } else {
                 message.parts.clone()
             };
-            parts.extend(message.attachments.iter().cloned().map(|source| Part {
-                id: String::new(),
-                kind: PartKind::Attachment,
-                content: String::new(),
-                attachment: Some(crate::PartAttachment { source }),
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }));
+            parts.extend(message.attachments.iter().cloned().map(|source| Part::attachment_part(String::new(), String::new(), Some(crate::PartAttachment { source }))));
             reassign_part_ids(&message_id, &mut parts);
             appended.push(Message {
                 id: message_id.clone(),

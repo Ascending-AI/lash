@@ -3698,18 +3698,11 @@ async fn stream_prepared_turn_tool_put_is_bound_to_the_turn_id() {
     let messages = crate::MessageSequence::from_owned(vec![Message {
         id: "prepared-attachment-user".to_string(),
         role: MessageRole::User,
-        parts: vec![Part {
-            id: "prepared-attachment-user.p0".to_string(),
-            kind: PartKind::Text,
-            content: "store an attachment".to_string(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]
+        parts: vec![Part::text(
+            "prepared-attachment-user.p0".to_string(),
+            "store an attachment".to_string(),
+            None,
+        )]
         .into(),
         origin: None,
     }]);
@@ -3787,18 +3780,11 @@ async fn stream_prepared_turn_follows_agent_frame_switch() {
     let messages = crate::MessageSequence::from_owned(vec![Message {
         id: "prepared-user".to_string(),
         role: MessageRole::User,
-        parts: vec![Part {
-            id: "prepared-user.p0".to_string(),
-            kind: PartKind::Text,
-            content: "prepared input".to_string(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]
+        parts: vec![Part::text(
+            "prepared-user.p0".to_string(),
+            "prepared input".to_string(),
+            None,
+        )]
         .into(),
         origin: None,
     }]);
@@ -6204,18 +6190,11 @@ async fn external_invoke_can_create_session_from_current_snapshot() {
         Message {
             id: "m0".to_string(),
             role: MessageRole::User,
-            parts: vec![Part {
-                id: "m0.p0".to_string(),
-                kind: PartKind::Text,
-                content: "root msg".to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]
+            parts: vec![Part::text(
+                "m0.p0".to_string(),
+                "root msg".to_string(),
+                None,
+            )]
             .into(),
             origin: None,
         },
@@ -6404,18 +6383,11 @@ async fn session_manager_persists_child_sessions_in_separate_store() {
         Message {
             id: "u1".to_string(),
             role: MessageRole::User,
-            parts: vec![Part {
-                id: "u1.p0".to_string(),
-                kind: PartKind::Text,
-                content: "parent hello".to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]
+            parts: vec![Part::text(
+                "u1.p0".to_string(),
+                "parent hello".to_string(),
+                None,
+            )]
             .into(),
             origin: None,
         },

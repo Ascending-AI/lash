@@ -575,34 +575,16 @@ async fn committed_message_from_pending_input(
         match item {
             super::NormalizedItem::Text(text) if !text.is_empty() => {
                 let part_id = format!("{message_id}.p{}", parts.len());
-                parts.push(crate::Part {
-                    id: part_id,
-                    kind: crate::PartKind::Text,
-                    content: text,
-                    attachment: None,
-                    tool_call_id: None,
-                    tool_name: None,
-                    tool_replay: None,
-                    prune_state: crate::PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                });
+                parts.push(crate::Part::text(part_id, text, None));
             }
             super::NormalizedItem::Text(_) => {}
             super::NormalizedItem::Attachment(source) => {
                 let part_id = format!("{message_id}.p{}", parts.len());
-                parts.push(crate::Part {
-                    id: part_id,
-                    kind: crate::PartKind::Attachment,
-                    content: String::new(),
-                    attachment: Some(crate::session_model::message::PartAttachment { source }),
-                    tool_call_id: None,
-                    tool_name: None,
-                    tool_replay: None,
-                    prune_state: crate::PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                });
+                parts.push(crate::Part::attachment_part(
+                    part_id,
+                    String::new(),
+                    Some(crate::session_model::message::PartAttachment { source }),
+                ));
             }
         }
     }

@@ -29,7 +29,7 @@ pub(crate) use lash_core::{
 pub(crate) use lash_llm_transport::normalize::{
     http_error_envelope, merge_usage, serialize_options_tail, terminal_reason_from_parts,
 };
-pub(crate) use lash_llm_transport::streaming::drive_sse_response;
+pub(crate) use lash_llm_transport::streaming::{SseStreamBounds, drive_sse_response};
 pub(crate) use lash_llm_transport::timeouts::response_start_timeout;
 pub(crate) use lash_llm_transport::util::{emit_provider_request_trace, emit_provider_trace};
 pub(crate) use lash_llm_transport::{

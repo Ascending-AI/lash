@@ -23,9 +23,8 @@ pub struct Message {
     pub origin: Option<MessageOrigin>,
 }
 
-/// Wrap a `Vec<Part>` for the `Message::parts` field. Use this in struct
-/// literals and tests (`parts: shared_parts(vec![Part { ... }])`) so the
-/// call sites stay short and uniform.
+/// Wrap a `Vec<Part>` for the `Message::parts` field so construction sites stay
+/// short and uniform.
 #[inline]
 pub fn shared_parts(parts: Vec<Part>) -> Arc<Vec<Part>> {
     Arc::new(parts)
@@ -72,6 +71,7 @@ pub enum MessageOrigin {
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct Part {
     /// e.g. "m3.p0"
     pub id: String,
@@ -142,6 +142,112 @@ pub enum PruneState {
 }
 
 impl Part {
+    fn base(id: String, kind: PartKind, content: String) -> Self {
+        Self {
+            id,
+            kind,
+            content,
+            attachment: None,
+            tool_call_id: None,
+            tool_name: None,
+            tool_replay: None,
+            prune_state: PruneState::Intact,
+            reasoning_meta: None,
+            response_meta: None,
+        }
+    }
+
+    pub fn text(id: String, content: String, response_meta: Option<ResponseTextMeta>) -> Self {
+        Self {
+            response_meta,
+            ..Self::base(id, PartKind::Text, content)
+        }
+    }
+
+    pub fn attachment_part(
+        id: String,
+        content: String,
+        attachment: Option<PartAttachment>,
+    ) -> Self {
+        Self {
+            attachment,
+            ..Self::base(id, PartKind::Attachment, content)
+        }
+    }
+
+    pub fn tool_result_attachment(
+        id: String,
+        content: String,
+        attachment: PartAttachment,
+        tool_call_id: String,
+        tool_name: String,
+    ) -> Self {
+        Self {
+            attachment: Some(attachment),
+            tool_call_id: Some(tool_call_id),
+            tool_name: Some(tool_name),
+            ..Self::base(id, PartKind::Attachment, content)
+        }
+    }
+
+    pub fn code(id: String, content: String) -> Self {
+        Self::base(id, PartKind::Code, content)
+    }
+
+    pub fn output(id: String, content: String) -> Self {
+        Self::base(id, PartKind::Output, content)
+    }
+
+    pub fn error(id: String, content: String) -> Self {
+        Self::base(id, PartKind::Error, content)
+    }
+
+    pub fn prose(id: String, content: String, response_meta: Option<ResponseTextMeta>) -> Self {
+        Self {
+            response_meta,
+            ..Self::base(id, PartKind::Prose, content)
+        }
+    }
+
+    pub fn tool_call(
+        id: String,
+        content: String,
+        tool_call_id: String,
+        tool_name: String,
+        tool_replay: Option<ProviderReplayMeta>,
+    ) -> Self {
+        Self {
+            tool_call_id: Some(tool_call_id),
+            tool_name: Some(tool_name),
+            tool_replay,
+            ..Self::base(id, PartKind::ToolCall, content)
+        }
+    }
+
+    pub fn tool_result(
+        id: String,
+        content: String,
+        tool_call_id: String,
+        tool_name: String,
+    ) -> Self {
+        Self {
+            tool_call_id: Some(tool_call_id),
+            tool_name: Some(tool_name),
+            ..Self::base(id, PartKind::ToolResult, content)
+        }
+    }
+
+    pub fn reasoning(
+        id: String,
+        content: String,
+        reasoning_meta: Option<ProviderReasoningReplay>,
+    ) -> Self {
+        Self {
+            reasoning_meta,
+            ..Self::base(id, PartKind::Reasoning, content)
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn prompt_char_count(&self) -> usize {
         // Reasoning parts are not user-visible text and aren't sent to the
@@ -754,22 +860,34 @@ fn llm_role_for_message(role: MessageRole) -> LlmRole {
 
 #[cfg(test)]
 mod tests {
+    /// Commit-identity tripwire: `Part` is `#[non_exhaustive]`, so downstream
+    /// exhaustive destructures (e.g. lash-core's commit-identity hasher) are
+    /// forced to carry `..` and no longer break the compile when a field is
+    /// added. This in-crate exhaustive destructure restores that tripwire:
+    /// adding a `Part` field fails here, forcing a deliberate decision about
+    /// commit-identity inclusion and constructor coverage.
+    #[test]
+    fn part_field_additions_trip_this_exhaustive_destructure() {
+        let part = super::Part::text("m0.p0".into(), "x".into(), None);
+        let super::Part {
+            id: _,
+            kind: _,
+            content: _,
+            attachment: _,
+            tool_call_id: _,
+            tool_name: _,
+            tool_replay: _,
+            prune_state: _,
+            reasoning_meta: _,
+            response_meta: _,
+        } = part;
+    }
+
     use super::*;
     use crate::AttachmentRef;
 
     fn part(kind: PartKind, content: &str) -> Part {
-        Part {
-            id: "p0".to_string(),
-            kind,
-            content: content.to_string(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }
+        Part::base("p0".to_string(), kind, content.to_string())
     }
 
     fn test_attachment_ref(byte_len: u64) -> AttachmentRef {
@@ -783,20 +901,54 @@ mod tests {
     }
 
     fn attachment_part(bytes: &[u8]) -> Part {
-        Part {
-            id: "p0".to_string(),
-            kind: PartKind::Attachment,
-            content: String::new(),
-            attachment: Some(PartAttachment {
+        Part::attachment_part(
+            "p0".to_string(),
+            String::new(),
+            Some(PartAttachment {
                 source: AttachmentSource::stored(test_attachment_ref(bytes.len() as u64)),
             }),
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }
+        )
+    }
+
+    #[test]
+    fn replay_carrying_constructors_preserve_provider_metadata() {
+        let tool_replay = ProviderReplayMeta {
+            item_id: Some("call-item".to_string()),
+            opaque: Some("opaque-call-state".to_string()),
+        };
+        let tool_call = Part::tool_call(
+            "m0.p0".to_string(),
+            r#"{"path":"README.md"}"#.to_string(),
+            "call-1".to_string(),
+            "read_file".to_string(),
+            Some(tool_replay.clone()),
+        );
+
+        let response_meta = ResponseTextMeta {
+            id: Some("msg-item".to_string()),
+            provider_payload: Some("opaque-message-state".to_string()),
+            ..ResponseTextMeta::default()
+        };
+        let prose = Part::prose(
+            "m0.p1".to_string(),
+            "done".to_string(),
+            Some(response_meta.clone()),
+        );
+
+        let reasoning_meta = ProviderReasoningReplay {
+            item_id: Some("reasoning-item".to_string()),
+            encrypted_content: Some("ciphertext".to_string()),
+            ..ProviderReasoningReplay::default()
+        };
+        let reasoning = Part::reasoning(
+            "m0.p2".to_string(),
+            "summary".to_string(),
+            Some(reasoning_meta.clone()),
+        );
+
+        assert_eq!(tool_call.tool_replay, Some(tool_replay));
+        assert_eq!(prose.response_meta, Some(response_meta));
+        assert_eq!(reasoning.reasoning_meta, Some(reasoning_meta));
     }
 
     #[test]
@@ -895,36 +1047,25 @@ mod tests {
             Message {
                 id: "m2".to_string(),
                 role: MessageRole::Assistant,
-                parts: vec![Part {
-                    id: "m2.p0".to_string(),
-                    kind: PartKind::ToolCall,
-                    content: r#"{"path":"README.md"}"#.to_string(),
-                    attachment: None,
-                    tool_call_id: Some("tc1".to_string()),
-                    tool_name: Some("read_file".to_string()),
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                }]
+                parts: vec![Part::tool_call(
+                    "m2.p0".to_string(),
+                    r#"{"path":"README.md"}"#.to_string(),
+                    "tc1".to_string(),
+                    "read_file".to_string(),
+                    None,
+                )]
                 .into(),
                 origin: None,
             },
             Message {
                 id: "m3".to_string(),
                 role: MessageRole::User,
-                parts: vec![Part {
-                    id: "m3.p0".to_string(),
-                    kind: PartKind::ToolResult,
-                    content: "ok".to_string(),
-                    attachment: None,
-                    tool_call_id: Some("tc1".to_string()),
-                    tool_name: Some("read_file".to_string()),
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                }]
+                parts: vec![Part::tool_result(
+                    "m3.p0".to_string(),
+                    "ok".to_string(),
+                    "tc1".to_string(),
+                    "read_file".to_string(),
+                )]
                 .into(),
                 origin: None,
             },
@@ -961,36 +1102,25 @@ mod tests {
             Message {
                 id: "m0".to_string(),
                 role: MessageRole::Assistant,
-                parts: vec![Part {
-                    id: "m0.p0".to_string(),
-                    kind: PartKind::ToolCall,
-                    content: r#"{"question":"Pick one"}"#.to_string(),
-                    attachment: None,
-                    tool_call_id: Some("ask_1".to_string()),
-                    tool_name: Some("ask".to_string()),
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                }]
+                parts: vec![Part::tool_call(
+                    "m0.p0".to_string(),
+                    r#"{"question":"Pick one"}"#.to_string(),
+                    "ask_1".to_string(),
+                    "ask".to_string(),
+                    None,
+                )]
                 .into(),
                 origin: None,
             },
             Message {
                 id: "m1".to_string(),
                 role: MessageRole::User,
-                parts: vec![Part {
-                    id: "m1.p0".to_string(),
-                    kind: PartKind::ToolResult,
-                    content: String::new(),
-                    attachment: None,
-                    tool_call_id: Some("ask_1".to_string()),
-                    tool_name: Some("ask".to_string()),
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                }]
+                parts: vec![Part::tool_result(
+                    "m1.p0".to_string(),
+                    String::new(),
+                    "ask_1".to_string(),
+                    "ask".to_string(),
+                )]
                 .into(),
                 origin: None,
             },
@@ -1075,18 +1205,13 @@ mod tests {
             Message {
                 id: "m1".to_string(),
                 role: MessageRole::Assistant,
-                parts: vec![Part {
-                    id: "m1.p0".to_string(),
-                    kind: PartKind::ToolCall,
-                    content: r#"{"cmd":"date"}"#.to_string(),
-                    attachment: None,
-                    tool_call_id: Some("tc1".to_string()),
-                    tool_name: Some("exec_command".to_string()),
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                }]
+                parts: vec![Part::tool_call(
+                    "m1.p0".to_string(),
+                    r#"{"cmd":"date"}"#.to_string(),
+                    "tc1".to_string(),
+                    "exec_command".to_string(),
+                    None,
+                )]
                 .into(),
                 origin: None,
             },
@@ -1118,36 +1243,25 @@ mod tests {
             Message {
                 id: "m0".to_string(),
                 role: MessageRole::Assistant,
-                parts: vec![Part {
-                    id: "m0.p0".to_string(),
-                    kind: PartKind::ToolCall,
-                    content: r#"{"path":"README.md"}"#.to_string(),
-                    attachment: None,
-                    tool_call_id: Some("tc1".to_string()),
-                    tool_name: Some("read_file".to_string()),
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                }]
+                parts: vec![Part::tool_call(
+                    "m0.p0".to_string(),
+                    r#"{"path":"README.md"}"#.to_string(),
+                    "tc1".to_string(),
+                    "read_file".to_string(),
+                    None,
+                )]
                 .into(),
                 origin: None,
             },
             Message {
                 id: "m1".to_string(),
                 role: MessageRole::User,
-                parts: vec![Part {
-                    id: "m1.p0".to_string(),
-                    kind: PartKind::ToolResult,
-                    content: "ok".to_string(),
-                    attachment: None,
-                    tool_call_id: Some("tc1".to_string()),
-                    tool_name: Some("read_file".to_string()),
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                }]
+                parts: vec![Part::tool_result(
+                    "m1.p0".to_string(),
+                    "ok".to_string(),
+                    "tc1".to_string(),
+                    "read_file".to_string(),
+                )]
                 .into(),
                 origin: None,
             },
@@ -1158,18 +1272,11 @@ mod tests {
 
     #[test]
     fn reasoning_parts_survive_snapshot_but_never_reach_the_model() {
-        let reasoning_part = Part {
-            id: "m1.p0".to_string(),
-            kind: PartKind::Reasoning,
-            content: "Thinking about how to answer.".to_string(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        };
+        let reasoning_part = Part::reasoning(
+            "m1.p0".to_string(),
+            "Thinking about how to answer.".to_string(),
+            None,
+        );
 
         let msgs = vec![Message {
             id: "m1".to_string(),
@@ -1228,18 +1335,13 @@ mod tests {
         let msgs = vec![Message {
             id: "m0".to_string(),
             role: MessageRole::Assistant,
-            parts: vec![Part {
-                id: "m0.p0".to_string(),
-                kind: PartKind::ToolCall,
-                content: r#"{"path":"README.md"}"#.to_string(),
-                attachment: None,
-                tool_call_id: Some("tc1".to_string()),
-                tool_name: Some("read_file".to_string()),
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]
+            parts: vec![Part::tool_call(
+                "m0.p0".to_string(),
+                r#"{"path":"README.md"}"#.to_string(),
+                "tc1".to_string(),
+                "read_file".to_string(),
+                None,
+            )]
             .into(),
             origin: None,
         }];
@@ -1255,24 +1357,17 @@ mod tests {
     // `kind == "reasoning"` LlmMessages.
 
     fn reasoning_part_fixture(encrypted: Option<&str>) -> Part {
-        Part {
-            id: "m0.p0".to_string(),
-            kind: PartKind::Reasoning,
-            content: "Thinking.".to_string(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: encrypted.map(|encrypted| ProviderReasoningReplay {
+        Part::reasoning(
+            "m0.p0".to_string(),
+            "Thinking.".to_string(),
+            encrypted.map(|encrypted| ProviderReasoningReplay {
                 item_id: Some("rs_xyz".to_string()),
                 summary: vec!["Thinking.".to_string()],
                 encrypted_content: Some(encrypted.to_string()),
                 signature: None,
                 redacted: false,
             }),
-            response_meta: None,
-        }
+        )
     }
 
     #[test]

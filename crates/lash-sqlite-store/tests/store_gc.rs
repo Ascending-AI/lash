@@ -1,7 +1,7 @@
 use lash_core::store::GraphAppend;
 use lash_core::{
-    HydratedSessionCheckpoint, LeaseOwnerIdentity, Message, MessageRole, ModelSpec, Part, PartKind,
-    PersistedTurnState, PluginSessionSnapshot, PruneState, RuntimeCommit, RuntimeSessionState,
+    HydratedSessionCheckpoint, LeaseOwnerIdentity, Message, MessageRole, ModelSpec, Part,
+    PersistedTurnState, PluginSessionSnapshot, RuntimeCommit, RuntimeSessionState,
     SessionCommitStore, SessionExecutionLeaseStore, SessionPolicy, SessionStoreCreateRequest,
     SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage, ToolState,
     facade_support::shared_parts,
@@ -34,18 +34,11 @@ fn user_message(id: &str, content: &str) -> Message {
     Message {
         id: id.to_string(),
         role: MessageRole::User,
-        parts: shared_parts(vec![Part {
-            id: format!("{id}.p0"),
-            kind: PartKind::Text,
-            content: content.to_string(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]),
+        parts: shared_parts(vec![Part::text(
+            format!("{id}.p0"),
+            content.to_string(),
+            None,
+        )]),
         origin: None,
     }
 }

@@ -576,19 +576,7 @@ mod tests {
         Message {
             id: id.to_string(),
             role,
-            parts: vec![Part {
-                id: format!("{id}.p0"),
-                kind: PartKind::Text,
-                content: content.to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: lash_core::PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]
-            .into(),
+            parts: vec![Part::text(format!("{id}.p0"), content.to_string(), None)].into(),
             origin: None,
         }
     }
@@ -597,11 +585,10 @@ mod tests {
         Message {
             id: id.to_string(),
             role,
-            parts: vec![Part {
-                id: format!("{id}.p0"),
-                kind: PartKind::Attachment,
-                content: String::new(),
-                attachment: Some(lash_core::session_model::message::PartAttachment {
+            parts: vec![Part::attachment_part(
+                format!("{id}.p0"),
+                String::new(),
+                Some(lash_core::session_model::message::PartAttachment {
                     source: lash_core::AttachmentSource::stored(lash_core::AttachmentRef {
                         id: lash_core::AttachmentId::new(format!("{id}-att")),
                         media_type: lash_core::MediaType::parse("image/png").unwrap(),
@@ -610,13 +597,7 @@ mod tests {
                         label: None,
                     }),
                 }),
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: lash_core::PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]
+            )]
             .into(),
             origin: None,
         }

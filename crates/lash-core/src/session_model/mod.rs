@@ -66,39 +66,21 @@ pub(crate) fn plugin_message_to_message(
         .map(str::to_string)
         .unwrap_or_else(|| fallback_id.to_string());
     let mut parts = if plugin_message.parts.is_empty() && !plugin_message.content.is_empty() {
-        vec![Part {
-            id: format!("{message_id}.p0"),
-            kind: PartKind::Text,
-            content: plugin_message.content.clone(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]
+        vec![Part::text(
+            format!("{message_id}.p0"),
+            plugin_message.content.clone(),
+            None,
+        )]
     } else {
         plugin_message.parts.clone()
     };
-    parts.extend(
-        plugin_message
-            .attachments
-            .iter()
-            .cloned()
-            .map(|source| Part {
-                id: String::new(),
-                kind: PartKind::Attachment,
-                content: String::new(),
-                attachment: Some(message::PartAttachment { source }),
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }),
-    );
+    parts.extend(plugin_message.attachments.iter().cloned().map(|source| {
+        Part::attachment_part(
+            String::new(),
+            String::new(),
+            Some(message::PartAttachment { source }),
+        )
+    }));
     reassign_part_ids(&message_id, &mut parts);
     Message {
         id: message_id,

@@ -17,9 +17,7 @@
 //! implementing [`ProviderNormalizer::assemble_stream`].
 
 use lash_sansio::llm::types::{LlmMessage, LlmOutputPart, LlmTerminalReason, LlmUsage};
-use lash_sansio::session_model::{
-    Message, MessageRole, Part, PartKind, PruneState, render_prompt, shared_parts,
-};
+use lash_sansio::session_model::{Message, MessageRole, Part, render_prompt, shared_parts};
 use serde_json::Value;
 
 /// The canonical scenarios every provider must normalize identically. Each
@@ -334,18 +332,11 @@ fn standard_next_request_messages(parts: &[LlmOutputPart]) -> Vec<LlmMessage> {
             LlmOutputPart::Text {
                 text,
                 response_meta,
-            } => history_parts.push(Part {
-                id: format!("{assistant_id}.p{}", history_parts.len()),
-                kind: PartKind::Prose,
-                content: text.clone(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: response_meta.clone(),
-            }),
+            } => history_parts.push(Part::prose(
+                format!("{assistant_id}.p{}", history_parts.len()),
+                text.clone(),
+                response_meta.clone(),
+            )),
             LlmOutputPart::Reasoning { text, replay } => {
                 history_parts.push(lash_sansio::reasoning_part(
                     assistant_id,
@@ -359,18 +350,13 @@ fn standard_next_request_messages(parts: &[LlmOutputPart]) -> Vec<LlmMessage> {
                 tool_name,
                 input_json,
                 replay,
-            } => history_parts.push(Part {
-                id: format!("{assistant_id}.p{}", history_parts.len()),
-                kind: PartKind::ToolCall,
-                content: input_json.clone(),
-                attachment: None,
-                tool_call_id: Some(call_id.clone()),
-                tool_name: Some(tool_name.clone()),
-                tool_replay: replay.clone(),
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }),
+            } => history_parts.push(Part::tool_call(
+                format!("{assistant_id}.p{}", history_parts.len()),
+                input_json.clone(),
+                call_id.clone(),
+                tool_name.clone(),
+                replay.clone(),
+            )),
         }
     }
     let history = vec![
@@ -383,18 +369,11 @@ fn standard_next_request_messages(parts: &[LlmOutputPart]) -> Vec<LlmMessage> {
         Message {
             id: "conformance.user".to_string(),
             role: MessageRole::User,
-            parts: shared_parts(vec![Part {
-                id: "conformance.user.p0".to_string(),
-                kind: PartKind::Text,
-                content: "continue".to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]),
+            parts: shared_parts(vec![Part::text(
+                "conformance.user.p0".to_string(),
+                "continue".to_string(),
+                None,
+            )]),
             origin: None,
         },
     ];

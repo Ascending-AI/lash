@@ -66,13 +66,15 @@ impl GoogleOAuthProvider {
             .with_header("Content-Type", "application/json")
             .with_body_for_error(request_body.clone().unwrap_or_default())
             .with_response_start_timeout_message("Cloud Code response start timed out");
+        let timeouts = self.options.llm_timeouts();
+        let stream_bounds = SseStreamBounds::new(timeouts.request_timeout, &self.options);
         let resp = self
             .transport
             .send(
                 http_request,
                 response_start_timeout(
-                    self.options.llm_timeouts().request_timeout,
-                    self.options.llm_timeouts().chunk_timeout,
+                    timeouts.request_timeout,
+                    timeouts.chunk_timeout,
                     stream_events.is_some(),
                 ),
             )
@@ -83,7 +85,7 @@ impl GoogleOAuthProvider {
             let headers = resp.headers;
             let body = read_http_body_text(
                 resp.body,
-                self.options.llm_timeouts().request_timeout,
+                timeouts.request_timeout,
                 "Cloud Code response body timed out",
             )
             .await
@@ -102,7 +104,7 @@ impl GoogleOAuthProvider {
         if stream_events.is_none() {
             let text = read_http_body_text(
                 resp.body,
-                self.options.llm_timeouts().request_timeout,
+                timeouts.request_timeout,
                 "Cloud Code response body timed out",
             )
             .await?;
@@ -154,8 +156,10 @@ impl GoogleOAuthProvider {
             .map(str::to_string);
         let stream_result = drive_sse_response(
             resp.body,
-            self.options.llm_timeouts().chunk_timeout,
+            timeouts.chunk_timeout,
+            stream_bounds,
             "Cloud Code stream chunk timed out",
+            "Cloud Code request timed out",
             &mut response_metadata,
             |raw| {
                 emit_provider_trace(provider_trace.as_ref(), "google", raw);

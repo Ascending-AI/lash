@@ -1,5 +1,5 @@
 use lash_core::facade_support::reasoning_part;
-use lash_core::session_model::{Message, MessageRole, Part, PartKind, PruneState, shared_parts};
+use lash_core::session_model::{Message, MessageRole, Part, shared_parts};
 use serde_json::Value;
 
 use super::state::RlmReasoningPart;
@@ -8,24 +8,17 @@ pub(crate) fn turn_limit_final_message(message_id: String, max_turns: usize) -> 
     Message {
         id: message_id.clone(),
         role: MessageRole::System,
-        parts: shared_parts(vec![Part {
-            id: format!("{message_id}.p0"),
-            kind: PartKind::Text,
-            content: format!(
+        parts: shared_parts(vec![Part::text(
+            format!("{message_id}.p0"),
+            format!(
                 "Turn limit reached ({max_turns}). You MUST reply in plain prose now containing:\n\
                 1. Summary of what you accomplished\n\
                 2. List of remaining tasks not yet completed\n\
                 3. Recommended next steps\n\
                 Do NOT emit a <lashlang> block, invoke module operations, or call finish/control.continue_as."
             ),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]),
+            None,
+        )]),
         origin: None,
     }
 }
@@ -58,18 +51,7 @@ fn prose_message(
         .map(|(index, part)| reasoning_part(&id, index, part.text.clone(), part.replay.clone()))
         .collect::<Vec<_>>();
     if !content.is_empty() {
-        parts.push(Part {
-            id: format!("{id}.p{}", parts.len()),
-            kind: PartKind::Prose,
-            content,
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        });
+        parts.push(Part::prose(format!("{id}.p{}", parts.len()), content, None));
     }
     Message {
         id,
@@ -88,18 +70,11 @@ pub(super) fn finish_required_reminder_message(id: String, requires_schema: bool
     Message {
         id: id.clone(),
         role: MessageRole::System,
-        parts: shared_parts(vec![Part {
-            id: format!("{id}.p0"),
-            kind: PartKind::Text,
-            content: content.to_string(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]),
+        parts: shared_parts(vec![Part::text(
+            format!("{id}.p0"),
+            content.to_string(),
+            None,
+        )]),
         origin: Some(lash_core::MessageOrigin::Plugin {
             plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
@@ -111,18 +86,11 @@ pub(super) fn finish_schema_mismatch_message(id: String) -> Message {
     Message {
         id: id.clone(),
         role: MessageRole::System,
-        parts: shared_parts(vec![Part {
-            id: format!("{id}.p0"),
-            kind: PartKind::Text,
-            content: "The `finish` value didn't match the required output schema. Fix the value described in the failed-step observation and call `finish <corrected>` from another paired `<lashlang>...</lashlang>` block.".to_string(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]),
+        parts: shared_parts(vec![Part::text(
+            format!("{id}.p0"),
+            "The `finish` value didn't match the required output schema. Fix the value described in the failed-step observation and call `finish <corrected>` from another paired `<lashlang>...</lashlang>` block.".to_string(),
+            None,
+        )]),
         origin: Some(lash_core::MessageOrigin::Plugin {
             plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
@@ -134,20 +102,13 @@ pub(super) fn invalid_lashlang_cell_message(id: String, error_text: &str) -> Mes
     Message {
         id: id.clone(),
         role: MessageRole::System,
-        parts: shared_parts(vec![Part {
-            id: format!("{id}.p0"),
-            kind: PartKind::Text,
-            content: format!(
+        parts: shared_parts(vec![Part::text(
+            format!("{id}.p0"),
+            format!(
                 "{error_text}\n\nReply again using exactly one paired `<lashlang>...</lashlang>` block, with no text after `</lashlang>`."
             ),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]),
+            None,
+        )]),
         origin: Some(lash_core::MessageOrigin::Plugin {
             plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
@@ -162,20 +123,13 @@ pub(super) fn output_limit_retry_message(id: String, output_token_cap: Option<us
     Message {
         id: id.clone(),
         role: MessageRole::System,
-        parts: shared_parts(vec![Part {
-            id: format!("{id}.p0"),
-            kind: PartKind::Text,
-            content: format!(
+        parts: shared_parts(vec![Part::text(
+            format!("{id}.p0"),
+            format!(
                 "Your answer was cut off by the output limit{cap} — retry with a shorter answer. Do less per cell and continue in a later step."
             ),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]),
+            None,
+        )]),
         origin: Some(lash_core::MessageOrigin::Plugin {
             plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,

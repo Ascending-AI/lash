@@ -282,18 +282,10 @@ impl ProtocolDriverPlugin for MinimalProtocolDriver {
                 Arc::new(|message_id, max_turns| lash_core::Message {
                     id: message_id,
                     role: lash_core::MessageRole::System,
-                    parts: shared_parts(vec![lash_core::Part {
-                        id: "turn-limit".to_string(),
-                        kind: lash_core::PartKind::Error,
-                        content: format!("turn limit {max_turns}"),
-                        attachment: None,
-                        tool_call_id: None,
-                        tool_name: None,
-                        tool_replay: None,
-                        prune_state: lash_core::PruneState::Intact,
-                        reasoning_meta: None,
-                        response_meta: None,
-                    }]),
+                    parts: shared_parts(vec![lash_core::Part::error(
+                        "turn-limit".to_string(),
+                        format!("turn limit {max_turns}"),
+                    )]),
                     origin: None,
                 }),
             ),

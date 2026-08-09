@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use lash_core::{
-    Message, MessageRole, ModelSpec, Part, PartKind, PruneState, RuntimeCommit, RuntimePersistence,
-    RuntimeSessionState, SessionCommitStore, SessionPolicy, TokenUsage,
-    facade_support::LashRuntime,
+    Message, MessageRole, ModelSpec, Part, RuntimeCommit, RuntimePersistence, RuntimeSessionState,
+    SessionCommitStore, SessionPolicy, TokenUsage, facade_support::LashRuntime,
 };
 use lash_sqlite_store::Store;
 
@@ -18,19 +17,7 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
     Message {
         id: id.to_string(),
         role,
-        parts: vec![Part {
-            id: format!("{id}.p0"),
-            kind: PartKind::Text,
-            content: content.to_string(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]
-        .into(),
+        parts: vec![Part::text(format!("{id}.p0"), content.to_string(), None)].into(),
         origin: None,
     }
 }

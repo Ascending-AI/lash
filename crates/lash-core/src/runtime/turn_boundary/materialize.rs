@@ -2,8 +2,7 @@ use crate::facade_support::AgentFrameReasonFacadeOps;
 use std::collections::BTreeSet;
 
 use crate::{
-    Message, MessageRole, Part, PartKind, PruneState, ToolCallRecord, TurnFinish, TurnOutcome,
-    shared_parts,
+    Message, MessageRole, Part, PartKind, ToolCallRecord, TurnFinish, TurnOutcome, shared_parts,
 };
 
 use super::RuntimeSessionState;
@@ -60,18 +59,7 @@ pub(super) fn materialize_terminal_output(
         &[Message {
             id: id.clone(),
             role: MessageRole::Assistant,
-            parts: shared_parts(vec![Part {
-                id: format!("{id}.p0"),
-                kind: PartKind::Prose,
-                content: text.clone(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]),
+            parts: shared_parts(vec![Part::prose(format!("{id}.p0"), text.clone(), None)]),
             origin: None,
         }],
         clock,

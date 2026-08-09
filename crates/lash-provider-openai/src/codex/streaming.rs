@@ -19,7 +19,7 @@ use tokio_tungstenite::tungstenite::protocol::Message as WsMessage;
 use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind};
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, LlmTerminalReason, LlmUsage};
 use lash_core::provider::{Provider, ProviderOptions, StreamTermination};
-use lash_llm_transport::streaming::{drive_sse_response, emit_stream_progress};
+use lash_llm_transport::streaming::{SseStreamBounds, drive_sse_response, emit_stream_progress};
 use lash_llm_transport::timeouts::response_start_timeout;
 use lash_llm_transport::util::{emit_provider_request_trace, emit_provider_trace};
 use lash_llm_transport::{
@@ -683,6 +683,7 @@ impl Provider for CodexProvider {
             body_for_error: request_body.clone(),
             response_start_timeout_message: Some("Codex response start timed out".to_string()),
         };
+        let stream_bounds = SseStreamBounds::new(timeouts.request_timeout, &self.options);
         let resp = self
             .http_transport
             .send(
@@ -834,7 +835,9 @@ impl Provider for CodexProvider {
         let stream_result = drive_sse_response(
             body,
             timeouts.chunk_timeout,
+            stream_bounds,
             "Codex stream chunk timed out",
+            "Codex request timed out",
             &mut response_metadata,
             |raw| {
                 emit_provider_trace(provider_trace.as_ref(), "codex", raw);

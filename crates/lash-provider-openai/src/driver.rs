@@ -139,6 +139,7 @@ pub(crate) async fn complete(
         body_for_error: Some(request_body_for_error.clone()),
         response_start_timeout_message: Some(endpoint.response_start_timeout_error().to_string()),
     };
+    let stream_bounds = SseStreamBounds::new(timeouts.request_timeout, &provider.options);
     let resp = provider
         .transport
         .send(
@@ -185,6 +186,7 @@ pub(crate) async fn complete(
             endpoint,
             resp.body,
             timeouts.chunk_timeout,
+            stream_bounds,
             response_context,
             &mut capture,
         )
@@ -465,15 +467,32 @@ async fn drive_streaming_response(
     endpoint: CompletionEndpoint,
     body: LlmHttpBody,
     chunk_timeout: std::time::Duration,
+    stream_bounds: SseStreamBounds,
     context: ResponseContext,
     capture: &mut ResponseMetadataCapture,
 ) -> Result<LlmResponse, LlmTransportError> {
     match endpoint {
         CompletionEndpoint::Responses => {
-            drive_streaming_responses(provider, body, chunk_timeout, context, capture).await
+            drive_streaming_responses(
+                provider,
+                body,
+                chunk_timeout,
+                stream_bounds,
+                context,
+                capture,
+            )
+            .await
         }
         CompletionEndpoint::ChatCompletions => {
-            drive_streaming_chat(provider, body, chunk_timeout, context, capture).await
+            drive_streaming_chat(
+                provider,
+                body,
+                chunk_timeout,
+                stream_bounds,
+                context,
+                capture,
+            )
+            .await
         }
     }
 }
@@ -482,6 +501,7 @@ async fn drive_streaming_responses(
     provider: &OpenAiCompatibleProvider,
     body: LlmHttpBody,
     chunk_timeout: std::time::Duration,
+    stream_bounds: SseStreamBounds,
     context: ResponseContext,
     capture: &mut ResponseMetadataCapture,
 ) -> Result<LlmResponse, LlmTransportError> {
@@ -497,7 +517,9 @@ async fn drive_streaming_responses(
     let stream_result = drive_sse_response(
         body,
         chunk_timeout,
+        stream_bounds,
         CompletionEndpoint::Responses.stream_chunk_timeout_error(),
+        "OpenAI-compatible request timed out",
         capture,
         |raw| {
             emit_provider_trace(provider_trace.as_ref(), "openai_compatible", raw);
@@ -597,6 +619,7 @@ async fn drive_streaming_chat(
     provider: &OpenAiCompatibleProvider,
     body: LlmHttpBody,
     chunk_timeout: std::time::Duration,
+    stream_bounds: SseStreamBounds,
     context: ResponseContext,
     capture: &mut ResponseMetadataCapture,
 ) -> Result<LlmResponse, LlmTransportError> {
@@ -611,7 +634,9 @@ async fn drive_streaming_chat(
     let stream_result = drive_sse_response(
         body,
         chunk_timeout,
+        stream_bounds,
         CompletionEndpoint::ChatCompletions.stream_chunk_timeout_error(),
+        "OpenAI-compatible request timed out",
         capture,
         |raw| {
             emit_provider_trace(provider_trace.as_ref(), "openai_compatible", raw);

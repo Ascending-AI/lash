@@ -74,9 +74,8 @@ use crate::plugin::{
 };
 use crate::sansio::{LlmCallError, Response};
 use crate::session_model::{
-    Message, MessageRole, Part, PartKind, PruneState, RuntimeSessionPolicy, SessionPolicy,
-    SessionStreamEvent, TokenUsage, make_error_event, reassign_part_ids, shared_parts,
-    transport_stream_events,
+    Message, MessageRole, Part, RuntimeSessionPolicy, SessionPolicy, SessionStreamEvent,
+    TokenUsage, make_error_event, reassign_part_ids, shared_parts, transport_stream_events,
 };
 use crate::{
     CheckpointKind, PersistentRuntimeServices, PluginOperationInvokeError, PromptHookContext,

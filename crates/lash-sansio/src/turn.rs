@@ -206,18 +206,10 @@ mod tests {
         crate::Message {
             id: message_id.clone(),
             role: crate::MessageRole::System,
-            parts: crate::shared_parts(vec![crate::Part {
-                id: format!("{message_id}.p0"),
-                kind: crate::PartKind::Error,
-                content: format!("Turn limit reached ({max_turns}) before a final test response."),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: crate::PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]),
+            parts: crate::shared_parts(vec![crate::Part::error(
+                format!("{message_id}.p0"),
+                format!("Turn limit reached ({max_turns}) before a final test response."),
+            )]),
             origin: None,
         }
     }

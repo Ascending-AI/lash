@@ -1,23 +1,16 @@
 use super::*;
 use crate::facade_support::AgentFrameReasonFacadeOps;
-use crate::{Part, PartKind, PruneState, shared_parts};
+use crate::{Part, shared_parts};
 
 fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
     Message {
         id: id.to_string(),
         role,
-        parts: shared_parts(vec![Part {
-            id: format!("{id}.p0"),
-            kind: PartKind::Text,
-            content: content.to_string(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]),
+        parts: shared_parts(vec![Part::text(
+            format!("{id}.p0"),
+            content.to_string(),
+            None,
+        )]),
         origin: None,
     }
 }

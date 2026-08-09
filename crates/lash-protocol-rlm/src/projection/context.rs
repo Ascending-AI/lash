@@ -430,18 +430,11 @@ mod tests {
         Message {
             id: id.to_string(),
             role,
-            parts: lash_core::facade_support::shared_parts(vec![lash_core::Part {
-                id: format!("{id}.p0"),
-                kind: PartKind::Text,
-                content: text.to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: lash_core::PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]),
+            parts: lash_core::facade_support::shared_parts(vec![lash_core::Part::text(
+                format!("{id}.p0"),
+                text.to_string(),
+                None,
+            )]),
             origin: None,
         }
     }
