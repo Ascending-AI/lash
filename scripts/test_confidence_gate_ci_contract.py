@@ -588,7 +588,14 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             self.assertIn(command, release)
 
         for workflow_with_postgres in (perf, release):
-            self.assertIn("image: postgres:16-alpine", workflow_with_postgres)
+            # The image is either the tag itself or, in secret-bearing
+            # workflows, a digest pin that records the tag in a comment
+            # (FIG-1163). Both forms must resolve to postgres:16-alpine.
+            self.assertRegex(
+                workflow_with_postgres,
+                r"image: postgres(?::16-alpine"
+                r"|@sha256:[0-9a-f]{64} # postgres:16-alpine)",
+            )
             self.assertIn("LASH_POSTGRES_DATABASE_URL:", workflow_with_postgres)
 
     def test_all_confidence_fast_shards_use_blacksmith(self) -> None:
