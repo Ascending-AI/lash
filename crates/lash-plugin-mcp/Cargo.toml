@@ -33,6 +33,7 @@ http = "1"
 jsonschema = { workspace = true, default-features = false }
 rmcp = { workspace = true, features = [
     "client",
+    "elicitation",
     "transport-child-process",
     "transport-streamable-http-client-reqwest",
     "client-side-sse",

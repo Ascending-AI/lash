@@ -8,6 +8,7 @@
 
 pub mod channel;
 pub mod ledger;
+pub mod mcp_client;
 pub mod runtime;
 pub mod slack_api;
 pub mod threads;

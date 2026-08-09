@@ -81,12 +81,26 @@ the same catalog as `list_channels` and `channel_history`:
 - `mcp__slack_clone__workspace_stats` returns aggregate channel and active-member
   counts. The explicit `active_members` field excludes deleted users; channel
   summaries expose the platform's workspace-wide `num_members` value instead.
+- `mcp__slack_clone__sample_summary` sends `sampling/createMessage` back to the
+  bot, whose host-owned handler runs its configured provider through
+  `DirectLlmClient` and returns the sampled summary to the still-open tool call.
+- `mcp__slack_clone__elicit_confirmation` sends a typed form elicitation; this
+  example's host UI policy auto-answers `{ "answer": "yes" }`.
+- `mcp__slack_clone__list_host_roots` sends `roots/list` and returns the static
+  workspace root supplied by the bot host.
 
 The server uses the official `rmcp` server-side SDK. Its results are not fixtures:
 both tools call the platform's Slack-compatible HTTP API with the bot token. A
 mention asking for one of these summaries therefore traverses the standard model
 tool loop, `lash-plugin-mcp`, stdio JSON-RPC, the separate server process, and the
 platform HTTP API before the result reaches the transcript.
+
+The three server-to-client features follow the same ownership rule: Lash routes
+the MCP request but supplies no model, answer, or root. The bot wires all three
+handlers explicitly with `McpPluginFactory::builder`; removing one handler also
+removes its capability from the initialize handshake. Sampling uses a direct
+provider call inside the outer MCP tool attempt. It does not open a nested Lash
+turn or emit another durable command.
 
 `lash-plugin-mcp` prefixes imported tools as `mcp__<server>__<tool>`. Ordinary
 native names therefore do not collide. If a host deliberately registers the exact
