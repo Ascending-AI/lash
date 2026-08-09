@@ -200,6 +200,7 @@ impl LashRuntime {
                 .store(false, Ordering::Release);
             return Ok(());
         }
+        // Defend refreshes against third-party stores that return an unvalidated resident graph.
         read.graph
             .validate_resident_integrity()
             .map_err(|source| SessionError::Store {

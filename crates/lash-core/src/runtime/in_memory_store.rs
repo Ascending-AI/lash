@@ -113,6 +113,8 @@ pub struct InMemorySessionStore {
     pub(crate) session_head_meta: Mutex<Option<crate::SessionHeadMeta>>,
     pub(crate) session_meta: Mutex<Option<crate::SessionMeta>>,
     pub(crate) session_graph: Mutex<crate::SessionGraph>,
+    /// Shared leafless node catalog; never treated as a resident graph without a real leaf grafted
+    /// first.
     global_session_graph: Arc<Mutex<crate::SessionGraph>>,
     global_node_owners: Arc<Mutex<HashMap<String, String>>>,
     global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
@@ -750,7 +752,14 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         let global_graph = self.global_session_graph.lock_recover().clone();
         let mut graph = global_graph;
         graph.set_leaf_node_id(meta.leaf_node_id.clone());
-        let mut graph = graph.trim_to_active_path();
+        let map_graph_corruption =
+            |error: crate::StoreError| crate::StoreError::StoredDataCorrupt {
+                record_kind: "SessionGraph",
+                message: error.to_string(),
+            };
+        let mut graph = graph
+            .try_trim_to_active_path()
+            .map_err(map_graph_corruption)?;
         if !tombstoned.is_empty() {
             let leaf_node_id = graph
                 .leaf_node_id
@@ -764,8 +773,12 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     .cloned()
                     .collect(),
                 leaf_node_id,
-            );
+            )
+            .map_err(map_graph_corruption)?;
         }
+        graph
+            .validate_resident_integrity()
+            .map_err(map_graph_corruption)?;
         Ok(Some(crate::store::PersistedSessionRead {
             session_id: meta.session_id,
             head_revision: meta.head_revision,

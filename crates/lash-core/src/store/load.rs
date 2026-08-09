@@ -24,6 +24,7 @@ pub async fn load_persisted_session_state(
     let Some(read) = read else {
         return Ok(None);
     };
+    // Defend against third-party stores that do not use SessionGraph::from_nodes after reading.
     read.graph.validate_resident_integrity()?;
     store.load_session_meta().await?.ok_or_else(|| {
         StoreError::Backend(format!(

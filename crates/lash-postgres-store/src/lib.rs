@@ -772,6 +772,8 @@ fn schema_open_options(config: &PostgresStoreConfig) -> SchemaOpenOptions {
 }
 
 #[cfg(test)]
+mod graph_integrity_tests;
+#[cfg(test)]
 #[path = "../tests/support/mod.rs"]
 mod postgres_test_support;
 

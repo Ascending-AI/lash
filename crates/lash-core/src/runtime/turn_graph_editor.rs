@@ -281,7 +281,9 @@ impl TurnGraphEditor {
                     Vec::with_capacity(base_graph.nodes.len() + self.appended_nodes.len());
                 nodes.extend(base_graph.nodes.iter().cloned());
                 nodes.extend(self.appended_nodes);
-                SessionGraph::from_nodes(nodes, leaf_node_id)
+                // The base graph was validated on construction and the append builder enforces
+                // unique ids plus a continuous parent chain, so this merge preserves integrity.
+                SessionGraph::from_validated_nodes(nodes, leaf_node_id)
             }
         }
     }

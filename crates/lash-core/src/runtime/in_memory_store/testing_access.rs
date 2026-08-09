@@ -4,6 +4,97 @@ use super::InMemorySessionStore;
 use lash_sansio::sync::MutexExt;
 
 impl InMemorySessionStore {
+    #[cfg(test)]
+    pub(crate) fn inject_graph_corruption_for_testing(
+        &self,
+        target: &crate::testing::conformance::GraphIntegrityTarget,
+    ) {
+        use crate::testing::conformance::{GraphIntegrityCorruption, GraphIntegrityRead};
+
+        if target.corruption == GraphIntegrityCorruption::DanglingLeafId {
+            self.session_head_meta
+                .lock()
+                .expect("lock session head")
+                .as_mut()
+                .expect("graph-integrity fixture has a session head")
+                .leaf_node_id = Some(target.missing_node_id.clone());
+            return;
+        }
+        let mut graph = self.global_session_graph.lock().expect("lock global graph");
+        match target.corruption {
+            GraphIntegrityCorruption::OrphanLeaf => {
+                graph
+                    .data_mut()
+                    .nodes
+                    .iter_mut()
+                    .find(|node| node.node_id == target.leaf_node_id)
+                    .expect("graph-integrity fixture leaf is durable")
+                    .parent_node_id = Some(target.missing_node_id.clone());
+            }
+            GraphIntegrityCorruption::DuplicateNodeId => {
+                let duplicate = graph
+                    .nodes
+                    .iter()
+                    .find(|node| node.node_id == target.leaf_node_id)
+                    .expect("graph-integrity fixture leaf is durable")
+                    .clone();
+                graph.data_mut().nodes.push(duplicate);
+            }
+            GraphIntegrityCorruption::DanglingLeafId => unreachable!(),
+            GraphIntegrityCorruption::ParentCycle => {
+                if target.read == GraphIntegrityRead::ActivePath {
+                    graph
+                        .data_mut()
+                        .nodes
+                        .iter_mut()
+                        .find(|node| node.node_id == target.root_node_id)
+                        .expect("graph-integrity fixture root is durable")
+                        .parent_node_id = Some(target.leaf_node_id.clone());
+                } else {
+                    let template = graph
+                        .nodes
+                        .iter()
+                        .find(|node| node.node_id == target.leaf_node_id)
+                        .expect("graph-integrity fixture leaf is durable")
+                        .clone();
+                    let node_a_id = format!("{}-a", target.missing_node_id);
+                    let node_b_id = format!("{}-b", target.missing_node_id);
+                    let mut node_a = template.clone();
+                    node_a.node_id = node_a_id.clone();
+                    node_a.parent_node_id = Some(node_b_id.clone());
+                    let mut node_b = template;
+                    node_b.node_id = node_b_id;
+                    node_b.parent_node_id = Some(node_a_id);
+                    graph.data_mut().nodes.extend([node_a, node_b]);
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn load_whole_graph_for_testing(
+        &self,
+    ) -> Result<crate::SessionGraph, crate::StoreError> {
+        let leaf_node_id = self
+            .session_head_meta
+            .lock()
+            .expect("lock session head")
+            .as_ref()
+            .and_then(|meta| meta.leaf_node_id.clone());
+        crate::SessionGraph::from_nodes(
+            self.global_session_graph
+                .lock()
+                .expect("lock global graph")
+                .nodes
+                .clone(),
+            leaf_node_id,
+        )
+        .map_err(|error| crate::StoreError::StoredDataCorrupt {
+            record_kind: "SessionGraph",
+            message: error.to_string(),
+        })
+    }
+
     /// This diagnostic accessor deliberately does not take `write_transaction`.
     /// It also holds `tombstoned_node_ids` while acquiring `session_graph`;
     /// callers must not use it concurrently with writes or introduce the

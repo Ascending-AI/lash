@@ -26,7 +26,7 @@ impl Store {
                 "WITH RECURSIVE ancestry(node_id, parent_node_id) AS (
                      SELECT node_id, parent_node_id FROM graph_nodes
                      WHERE node_id = ?2 AND tombstoned = 0
-                     UNION ALL
+                     UNION
                      SELECT parent.node_id, parent.parent_node_id
                      FROM graph_nodes parent
                      JOIN ancestry ON parent.node_id = ancestry.parent_node_id
@@ -58,7 +58,8 @@ impl Store {
                 .map_err(|error| stored_data_corrupt("SessionGraph node", error))
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
-        Ok(lash_core::SessionGraph::from_nodes(nodes, leaf_node_id))
+        lash_core::SessionGraph::from_nodes(nodes, leaf_node_id)
+            .map_err(|error| stored_data_corrupt("SessionGraph", error))
     }
 
     pub(crate) fn load_active_path_session_graph_from_conn(
@@ -77,18 +78,18 @@ impl Store {
                 WHERE node_id = (
                     SELECT leaf_node_id FROM session_head WHERE session_id = ?2
                 ) AND tombstoned = 0
-              UNION ALL
+              UNION
                 SELECT parent.node_id, parent.parent_node_id
                 FROM graph_nodes parent
                 JOIN bound_path ON parent.node_id = bound_path.parent_node_id
                 WHERE parent.tombstoned = 0
             ),
-            active(node_id, node_json, parent_node_id, depth) AS (
+            active(seq, node_id, node_json, parent_node_id) AS (
                 SELECT
+                    seq,
                     node_id,
                     node_json,
-                    parent_node_id,
-                    0
+                    parent_node_id
                 FROM graph_nodes
                 WHERE node_id = ?1
                   AND tombstoned = 0
@@ -96,17 +97,17 @@ impl Store {
                       session_id = ?2
                       OR node_id IN (SELECT node_id FROM bound_path)
                   )
-              UNION ALL
+              UNION
                 SELECT
+                    g.seq,
                     g.node_id,
                     g.node_json,
-                    g.parent_node_id,
-                    active.depth + 1
+                    g.parent_node_id
                 FROM graph_nodes g
                 JOIN active ON g.node_id = active.parent_node_id
                 WHERE g.tombstoned = 0
             )
-            SELECT node_id, parent_node_id, node_json FROM active ORDER BY depth DESC",
+            SELECT node_id, parent_node_id, node_json FROM active ORDER BY seq ASC",
             )
             .map_err(sqlite_error)?;
         let rows = stmt
@@ -129,8 +130,8 @@ impl Store {
             .map_err(|error| stored_data_corrupt("SessionGraph node", error))?;
             nodes.push(node);
         }
-        let retained_leaf = (!nodes.is_empty()).then_some(leaf_node_id);
-        Ok(lash_core::SessionGraph::from_nodes(nodes, retained_leaf))
+        lash_core::SessionGraph::from_nodes(nodes, Some(leaf_node_id))
+            .map_err(|error| stored_data_corrupt("SessionGraph", error))
     }
 
     pub(crate) async fn maybe_auto_gc(&self) {
@@ -147,7 +148,15 @@ impl Store {
         let session_id = self.selected_session_id()?;
         self.conn
             .call(move |conn| {
-                Self::load_session_graph_from_conn(conn, &session_id, None)
+                let leaf_node_id = conn
+                    .query_row(
+                        "SELECT leaf_node_id FROM session_head WHERE session_id = ?1",
+                        params![session_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .optional()?
+                    .flatten();
+                Self::load_session_graph_from_conn(conn, &session_id, leaf_node_id)
                     .map_err(sqlite_conversion_error)
             })
             .await
@@ -284,5 +293,52 @@ impl Store {
             retained_blob_count: retained.len(),
             deleted_blob_count,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn healthy_non_empty_whole_graph_validates_without_resident_leaf() {
+        let store = Store::memory()
+            .await
+            .expect("open healthy whole-graph store");
+        let session_id = "healthy-leafless-whole-graph";
+        let mut state = lash_core::RuntimeSessionState {
+            session_id: session_id.to_string(),
+            ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+            ))
+        };
+        state.ensure_agent_frame_initialized();
+        state
+            .session_graph
+            .append_plugin("healthy-whole-graph", serde_json::json!({"second": true}));
+        store
+            .admit_and_bind_session(&lash_core::SessionBinding::root(session_id, &state.policy))
+            .await
+            .expect("bind healthy whole-graph session");
+        store
+            .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
+                &state,
+                &[],
+            ))
+            .await
+            .expect("seed healthy whole-graph session");
+
+        let session_id = session_id.to_string();
+        let graph = store
+            .conn
+            .call(move |conn| {
+                Store::load_session_graph_from_conn(conn, &session_id, None)
+                    .map_err(sqlite_conversion_error)
+            })
+            .await
+            .map_err(sqlite_error)
+            .expect("healthy leafless whole graph loads");
+        assert!(graph.nodes.len() >= 2);
+        assert!(graph.leaf_node_id.is_none());
     }
 }

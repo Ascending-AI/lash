@@ -791,12 +791,12 @@ mod tests {
                 }
                 node
             }));
-            state.session_graph = SessionGraph::from_nodes(nodes, graph.leaf_node_id.clone());
+            state.session_graph = SessionGraph::from_nodes(nodes, graph.leaf_node_id.clone())
+                .expect("turn-boundary fixture graph is valid");
             state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
         }
         state
     }
-
     async fn leased_boundary(
         store: &RecordingStore,
         state: RuntimeSessionState,
@@ -904,9 +904,9 @@ mod tests {
         *protocol_turn_options =
             crate::ProtocolTurnOptions::from_payload(serde_json::json!({ "mode": "test" }));
         state.protocol_turn_options = protocol_turn_options.clone();
-        state.session_graph = SessionGraph::from_nodes(nodes, leaf_node_id);
+        state.session_graph = SessionGraph::from_nodes(nodes, leaf_node_id)
+            .expect("frame-compaction fixture graph is valid");
         state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
-
         let frame_id = "frame-compaction".to_string();
         let seed_node = crate::SessionAppendNode::message(
             crate::PluginMessage::text(MessageRole::Assistant, "Compaction summary:\nold work")
