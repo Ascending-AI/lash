@@ -1,6 +1,7 @@
 //! JSON serialization for `Value`. Bidirectional bridge between the
 //! lashlang value tree and `serde_json::Value`. Tuples serialize as arrays in
-//! runtime/public JSON and use a snapshot-only marker when preserving state.
+//! runtime/public JSON; persisted snapshots use the separate canonical typed
+//! MessagePack codec in `runtime::state`.
 //! Image attachments encode
 //! as `{"type": "image", "id": ..., "mime": ..., "label": ..., "size": ...,
 //! "width": ..., "height": ...}` and round-trip via `image_to_json` /
@@ -100,8 +101,6 @@ pub(crate) fn to_json_direct(value: &Value) -> serde_json::Value {
 
 pub(crate) struct RuntimeJson<'a>(pub(crate) &'a Value);
 pub(crate) struct DirectJson<'a>(pub(crate) &'a Value);
-pub(crate) struct SnapshotJson<'a>(pub(crate) &'a Value);
-struct SnapshotTupleItems<'a>(&'a super::ListValue);
 
 impl Serialize for RuntimeJson<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -126,33 +125,10 @@ impl Serialize for DirectJson<'_> {
     }
 }
 
-impl Serialize for SnapshotJson<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serialize_value(self.0, serializer, ProjectedMode::Snapshot)
-    }
-}
-
-impl Serialize for SnapshotTupleItems<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
-        for value in self.0.iter() {
-            sequence.serialize_element(&SnapshotJson(value))?;
-        }
-        sequence.end()
-    }
-}
-
 #[derive(Clone, Copy)]
 enum ProjectedMode {
     Runtime,
     Direct,
-    Snapshot,
 }
 
 fn serialize_value<S>(
@@ -173,19 +149,12 @@ where
         Value::String(value) => serializer.serialize_str(value),
         Value::Image(image) => serialize_image(image, serializer),
         Value::Resource(handle) => serialize_resource(handle, serializer),
-        Value::Tuple(values) if matches!(projected_mode, ProjectedMode::Snapshot) => {
-            let mut map = serializer.serialize_map(Some(2))?;
-            map.serialize_entry("__lashlang_snapshot_tuple__", &true)?;
-            map.serialize_entry("items", &SnapshotTupleItems(values))?;
-            map.end()
-        }
         Value::Tuple(values) | Value::List(values) => {
             let mut sequence = serializer.serialize_seq(Some(values.len()))?;
             for value in values.iter() {
                 match projected_mode {
                     ProjectedMode::Runtime => sequence.serialize_element(&RuntimeJson(value))?,
                     ProjectedMode::Direct => sequence.serialize_element(&DirectJson(value))?,
-                    ProjectedMode::Snapshot => sequence.serialize_element(&SnapshotJson(value))?,
                 }
             }
             sequence.end()
@@ -198,7 +167,6 @@ where
                 match projected_mode {
                     ProjectedMode::Runtime => map.serialize_entry(key, &RuntimeJson(value))?,
                     ProjectedMode::Direct => map.serialize_entry(key, &DirectJson(value))?,
-                    ProjectedMode::Snapshot => map.serialize_entry(key, &SnapshotJson(value))?,
                 }
             }
             map.end()
@@ -206,22 +174,7 @@ where
         Value::Projected(projected) => match projected_mode {
             ProjectedMode::Runtime => RuntimeJson(&projected.materialize()).serialize(serializer),
             ProjectedMode::Direct => {
-                unreachable!("projected values require runtime or snapshot json conversion")
-            }
-            ProjectedMode::Snapshot => {
-                let field_count = if projected.projection_ref().is_some() {
-                    4
-                } else {
-                    3
-                };
-                let mut map = serializer.serialize_map(Some(field_count))?;
-                map.serialize_entry("__lashlang_snapshot_projected__", &true)?;
-                map.serialize_entry("name", projected.name())?;
-                map.serialize_entry("type_name", projected.value_type_name())?;
-                if let Some(projection_ref) = projected.projection_ref() {
-                    map.serialize_entry("projection_ref", projection_ref)?;
-                }
-                map.end()
+                unreachable!("projected values require runtime json conversion")
             }
         },
     }

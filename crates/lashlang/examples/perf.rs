@@ -7,7 +7,7 @@ use bench_support::{
 use lashlang::{
     CompiledProcessCache, CompiledProgramCache, ExecutionEnvironment, ExecutionOutcome,
     ExecutionScratch, InMemoryLashlangArtifactStore, LashlangArtifactStore, LinkedModule,
-    LinkedProgramCache, ProjectedBindings, State, compile_linked, execute, prewarm,
+    LinkedProgramCache, ProjectedBindings, Snapshot, State, compile_linked, execute, prewarm,
 };
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::env;
@@ -195,8 +195,8 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
             for _ in 0..iterations {
                 let mut state = seeded_state_for(scenario);
                 let snapshot = state.snapshot();
-                let encoded = serde_json::to_vec(&snapshot).expect("snapshot encode");
-                let decoded = serde_json::from_slice(&encoded).expect("snapshot decode");
+                let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
+                let decoded = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
                 state = State::from_snapshot(decoded);
                 let outcome =
                     execute_benchmark(rt, &compiled, &mut state, &host, &mut scratch, &projected);

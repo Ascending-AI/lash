@@ -524,7 +524,7 @@ async fn print_projected_leaves_projection_to_host_and_finish_materializes() {
 }
 
 #[test]
-fn snapshot_serialization_marks_projected_values_without_materializing() {
+fn canonical_snapshot_encodes_projected_values_without_materializing() {
     let projected = Arc::new(SnapshotGuardProjectedValue::default());
     let mut state = State::new();
     state.globals.insert(
@@ -532,34 +532,36 @@ fn snapshot_serialization_marks_projected_values_without_materializing() {
         Value::Projected(ProjectedValue::custom("matches[0].text", projected.clone())),
     );
 
-    let encoded = serde_json::to_vec(&state.snapshot()).expect("snapshot encode");
-    let wire: serde_json::Value = serde_json::from_slice(&encoded).expect("snapshot json");
+    let encoded = state
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("snapshot encode");
+    let restored = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
 
     assert_eq!(projected.render_count.load(Ordering::SeqCst), 0);
     assert_eq!(projected.materialize_count.load(Ordering::SeqCst), 0);
-    assert_eq!(
-        wire["globals"]["match_text"]["__lashlang_snapshot_projected__"],
-        serde_json::Value::Bool(true)
-    );
-    assert_eq!(wire["globals"]["match_text"]["name"], "matches[0].text");
-    assert_eq!(wire["globals"]["match_text"]["type_name"], "string");
-    let encoded_text = String::from_utf8(encoded).expect("utf8 snapshot");
+    let Some(Value::Projected(projected)) = restored.globals.get("match_text") else {
+        panic!("expected projected placeholder");
+    };
+    assert_eq!(projected.name(), "matches[0].text");
+    assert_eq!(projected.value_type_name(), "string");
+    let encoded_text = String::from_utf8_lossy(&encoded);
     assert!(!encoded_text.contains("rendered full text"));
     assert!(!encoded_text.contains("materialized full text"));
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn snapshot_restore_projected_marker_becomes_unavailable_placeholder() {
-    let snapshot: Snapshot = serde_json::from_value(serde_json::json!({
-        "globals": {
-            "match_text": {
-                "__lashlang_snapshot_projected__": true,
-                "name": "matches[0].text",
-                "type_name": "string"
-            }
-        }
-    }))
-    .expect("snapshot decode");
+async fn canonical_snapshot_restore_makes_projected_value_unavailable() {
+    let snapshot = Snapshot {
+        globals: [("match_text".to_string(), Value::Projected(ProjectedValue::custom(
+            "matches[0].text",
+            Arc::new(SnapshotGuardProjectedValue::default()),
+        )))]
+        .into_iter()
+        .collect(),
+    };
+    let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
+    let snapshot = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
 
     let Some(Value::Projected(projected)) = snapshot.globals.get("match_text") else {
         panic!("expected projected placeholder");
@@ -616,9 +618,15 @@ async fn flat_search_match_projected_text_separates_slice_snapshot_and_stringify
         stored_match.get("text"),
         Some(Value::Projected(_))
     ));
-    let encoded = serde_json::to_string(&snapshot).expect("snapshot encode");
-    assert!(encoded.contains("__lashlang_snapshot_projected__"));
-    assert!(encoded.contains("search.matches[0].text"));
+    let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
+    let encoded_snapshot = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
+    let Some(Value::Record(encoded_match)) = encoded_snapshot.globals.get("m") else {
+        panic!("encoded match should stay a flat record");
+    };
+    let Some(Value::Projected(encoded_text)) = encoded_match.get("text") else {
+        panic!("encoded text should stay projected");
+    };
+    assert_eq!(encoded_text.name(), "search.matches[0].text");
     assert_eq!(text.render_count.load(Ordering::SeqCst), 0);
     assert_eq!(text.materialize_count.load(Ordering::SeqCst), 0);
 

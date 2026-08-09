@@ -72,11 +72,15 @@ pub use runtime::{
     ProjectedBindingError, ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor,
     ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record, ResourceHandle,
     ResourceOperation, ResourceOperationBatch, ResourceOperationBatchResult,
-    ResourceOperationResult, RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot, State,
-    Value, ValueProjectionContext, ValueProjector, Vm, VmContinuation, VmIteratorContinuation,
-    VmIteratorCursor, VmProfileContinuation, VmRunOutcome, compile, compile_linked,
-    compile_linked_process, compile_module_artifact_process, compile_process, execute, from_json,
-    prewarm, unwrap_type_value,
+    ResourceOperationResult, RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot,
+    SnapshotDecodeError, State, Value, ValueProjectionContext, ValueProjector, Vm, VmContinuation,
+    VmIteratorContinuation, VmIteratorCursor, VmProfileContinuation, VmRunOutcome, compile,
+    compile_linked, compile_linked_process, compile_module_artifact_process, compile_process,
+    execute, from_json, prewarm, unwrap_type_value,
+};
+#[doc(hidden)]
+pub use runtime::{
+    CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, validate_canonical_messagepack_structure,
 };
 
 /// Version of the compiled bytecode contract used for durable continuations.

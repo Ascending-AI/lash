@@ -58,7 +58,7 @@
           <h3 id="projection-serialization">Snapshots &amp; serialization</h3>
           <dl class="def-list">
             <dt>Snapshots</dt>
-            <dd>Lashlang snapshot JSON records projected globals as markers, optionally including <code>projection_ref</code>. Restore creates unresolved projected placeholders; RLM resolves ref-backed placeholders through its resolver before the next paired <code>&lt;lashlang&gt;</code> block runs.</dd>
+            <dd>Canonical typed MessagePack snapshots record projected globals with an optional <code>projection_ref</code>. Restore creates unresolved projected placeholders; RLM resolves ref-backed placeholders through its resolver before the next paired <code>&lt;lashlang&gt;</code> block runs. Snapshot JSON markers and compatibility decoders do not exist.</dd>
             <dt>Operation arguments</dt>
             <dd>RLM serializes projected values with an internal <code>{"__projected__": ...}</code> marker, then normalizes operation arguments through the tool manifest's <code>ToolArgumentProjectionPolicy</code>. Tool implementations should parse the normalized arguments as plain JSON. The default policy materializes projected values. <code>continue_as</code> and <code>spawn_agent</code> declare a seed-preserving policy, so only root <code>seed:</code> entries remain projected; ref-backed values carry <code>{"__projection_ref__": ...}</code> so AgentFrames and child sessions re-resolve the same lazy source, while value-backed projections serialize as JSON.</dd>
           </dl>

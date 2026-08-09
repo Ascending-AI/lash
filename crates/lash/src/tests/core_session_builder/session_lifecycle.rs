@@ -1032,6 +1032,70 @@ async fn rlm_projection_errors_surface_from_protocol_extensions() -> Result<()> 
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
+#[tokio::test]
+async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy() -> Result<()> {
+    // Named-field MessagePack for a v5 RLM envelope. The embedded vars payload
+    // is deliberately empty: version rejection must happen before Lashlang
+    // decode, just as it did for snapshots persisted by the old build.
+    let old_version_snapshot = [
+        &[0x85][..],
+        &[0xa7][..],
+        b"version",
+        &[0x05][..],
+        &[0xa6][..],
+        b"engine",
+        &[0xa8][..],
+        b"lashlang",
+        &[0xa4][..],
+        b"vars",
+        &[0xc4, 0x00][..],
+        &[0xa5][..],
+        b"files",
+        &[0x80][..],
+        &[0xb4][..],
+        b"deferred_resolutions",
+        &[0x81, 0xab][..],
+        b"resolutions",
+        &[0x80][..],
+    ]
+    .concat();
+    let session_id = "rlm-v5-cold-open";
+    let policy = lash_core::SessionPolicy {
+        provider_id: mock_provider().kind().to_string(),
+        model: mock_model_spec(),
+        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+    };
+    let mut state = RuntimeSessionState {
+        session_id: session_id.to_string(),
+        policy,
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    state.execution_state_snapshot = Some(old_version_snapshot);
+    let store: Arc<dyn lash_core::RuntimePersistence> =
+        Arc::new(SnapshotStore::with_state(state));
+    let core = explicit_ephemeral_facets(rlm_core_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::new(ReusableStoreFactory { store }))
+        .build()?;
+
+    let error = match core.session(session_id).open().await {
+        Ok(_) => panic!("cold open must reject the persisted v5 execution snapshot"),
+        Err(error) => error,
+    };
+    let EmbedError::Session(SessionError::Protocol(message)) = &error else {
+        panic!("expected typed protocol rejection at the host boundary, got {error}");
+    };
+
+    assert!(message.contains("RLM snapshot version 5 is incompatible with version 6"));
+    assert!(message.contains("drain in-flight sessions on the old build"));
+    assert!(message.contains("recreate development/test stores"));
+    Ok(())
+}
+
 #[tokio::test]
 async fn store_factory_reopens_persisted_session_state() -> Result<()> {
     let mut state = RuntimeSessionState {

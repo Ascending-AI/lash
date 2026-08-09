@@ -29,6 +29,7 @@ futures-executor = "0.3"
 lash-core = { workspace = true }
 lash-sansio = { workspace = true }
 rustc-hash = "2"
+rmp-serde = { workspace = true }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 sha2 = { workspace = true }

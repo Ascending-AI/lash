@@ -1,13 +1,13 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::Path;
 
-pub(super) fn collect_files(root: &Path) -> std::io::Result<HashMap<String, String>> {
-    let mut files = HashMap::new();
+pub(super) fn collect_files(root: &Path) -> std::io::Result<BTreeMap<String, String>> {
+    let mut files = BTreeMap::new();
     walk_dir(root, root, &mut files)?;
     Ok(files)
 }
 
-fn walk_dir(root: &Path, dir: &Path, files: &mut HashMap<String, String>) -> std::io::Result<()> {
+fn walk_dir(root: &Path, dir: &Path, files: &mut BTreeMap<String, String>) -> std::io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -26,7 +26,7 @@ fn walk_dir(root: &Path, dir: &Path, files: &mut HashMap<String, String>) -> std
     Ok(())
 }
 
-pub(super) fn restore_files(root: &Path, files: &HashMap<String, String>) -> std::io::Result<()> {
+pub(super) fn restore_files(root: &Path, files: &BTreeMap<String, String>) -> std::io::Result<()> {
     for (rel, contents) in files {
         let path = root.join(rel);
         if let Some(parent) = path.parent() {

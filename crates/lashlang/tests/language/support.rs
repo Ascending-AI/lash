@@ -183,8 +183,8 @@ async fn snapshot_round_trip_preserves_type_values() {
         panic!("expected finish");
     };
     let snapshot = state.snapshot();
-    let serialized = serde_json::to_string(&snapshot).expect("serialize");
-    let restored: lashlang::Snapshot = serde_json::from_str(&serialized).expect("deserialize");
+    let serialized = snapshot.to_canonical_bytes().expect("serialize");
+    let restored = lashlang::Snapshot::from_canonical_bytes(&serialized).expect("deserialize");
     let restored_state = State::from_snapshot(restored);
     // Re-execute a program that references Books — the ref should still resolve.
     let program2 = parse("finish Books").expect("parse");

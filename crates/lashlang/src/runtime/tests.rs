@@ -667,61 +667,6 @@ finish result"#;
     assert!(!message.contains("--> line 1"), "{message}");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn golden_serialized_state_snapshot_contract_is_exact() {
-    let program = crate::parse(
-        r#"
-counter = 7
-Payload = Type { title: str, count: int }
-finish Payload
-"#,
-    )
-    .expect("program should parse");
-    let mut state = State::new();
-    let outcome = execute_program(&program, &mut state, &Host)
-        .await
-        .expect("program should execute");
-    assert!(matches!(outcome, ExecutionOutcome::Finished(_)));
-    state.globals.insert_str(
-        "cover",
-        Value::Image(Box::new(ImageValue::new(
-            "img_1",
-            crate::MediaType::parse("image/png").unwrap(),
-            "cover",
-            42,
-            Some(640),
-            Some(480),
-        ))),
-    );
-    state.globals.insert_str(
-        "projected",
-        Value::Projected(ProjectedValue::custom(
-            "matches[0].text",
-            Arc::new(SnapshotGuardProjectedValue::default()),
-        )),
-    );
-
-    let serialized =
-        serde_json::to_string_pretty(&state.snapshot()).expect("snapshot should serialize");
-    insta::assert_snapshot!("lashlang_serialized_state_snapshot_contract", serialized);
-
-    let restored = State::from_snapshot(
-        serde_json::from_str(&serialized).expect("snapshot should deserialize"),
-    );
-    assert_eq!(
-        restored.globals().get("cover"),
-        Some(&Value::Image(Box::new(ImageValue::new(
-            "img_1",
-            crate::MediaType::parse("image/png").unwrap(),
-            "cover",
-            42,
-            Some(640),
-            Some(480),
-        )))),
-        "snapshot restoration must preserve image type and MIME metadata"
-    );
-}
-
 fn format_parse_diagnostic(source: &str) -> String {
     let err = crate::parse(source).expect_err("parse should fail");
     crate::format_parse_diagnostic(source, &err)

@@ -569,9 +569,11 @@ async fn tuple_snapshot_round_trip_preserves_tuple_identity() {
         .expect("tuple assignment should run");
     assert!(matches!(outcome, ExecutionOutcome::Continued));
 
-    let encoded = serde_json::to_string(&state.snapshot()).expect("snapshot encode");
-    assert!(encoded.contains("__lashlang_snapshot_tuple__"), "{encoded}");
-    let snapshot: lashlang::Snapshot = serde_json::from_str(&encoded).expect("snapshot decode");
+    let encoded = state
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("snapshot encode");
+    let snapshot = lashlang::Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
     let restored = State::from_snapshot(snapshot);
     assert!(matches!(restored.globals()["pair"], Value::Tuple(_)));
 }
@@ -2883,8 +2885,11 @@ async fn snapshot_round_trip_preserves_repl_like_state() {
     );
 
     let snapshot = state.snapshot();
-    let encoded = serde_json::to_vec(&snapshot).expect("snapshot should serialize");
-    let decoded = serde_json::from_slice(&encoded).expect("snapshot should deserialize");
+    let encoded = snapshot
+        .to_canonical_bytes()
+        .expect("snapshot should serialize");
+    let decoded =
+        lashlang::Snapshot::from_canonical_bytes(&encoded).expect("snapshot should deserialize");
     let mut restored = State::from_snapshot(decoded);
 
     let value = finished(

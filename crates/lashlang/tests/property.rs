@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Arc;
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, Record,
-    Snapshot, State, Value, canonical_program_ir, canonical_program_source, parse,
+    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, ImageValue,
+    ProjectedHostDescriptor, ProjectedValue, Record, ResourceHandle, Snapshot, State, Value,
+    canonical_program_ir, canonical_program_source, parse,
 };
 use proptest::prelude::*;
 
@@ -228,6 +230,127 @@ fn encode_string(value: &str) -> String {
 
 fn globals_strategy() -> impl Strategy<Value = HashMap<String, GenValue>> {
     prop::collection::hash_map(ident_strategy(), gen_value_strategy(), 0..6)
+}
+
+#[derive(Debug)]
+struct SnapshotProjectedDescriptor;
+
+impl ProjectedHostDescriptor for SnapshotProjectedDescriptor {
+    fn type_name(&self) -> &str {
+        "snapshot_property"
+    }
+}
+
+fn snapshot_string_strategy() -> impl Strategy<Value = String> {
+    prop::collection::vec(
+        prop_oneof![
+            any::<char>(),
+            Just('\0'),
+            Just('\u{7f}'),
+            Just('\u{80}'),
+            Just('\u{fffd}'),
+            Just('\u{10ffff}'),
+        ],
+        0..24,
+    )
+    .prop_map(|characters| characters.into_iter().collect())
+}
+
+fn canonical_snapshot_variant_corpus_strategy() -> impl Strategy<Value = Vec<Value>> {
+    (
+        any::<u64>(),
+        any::<bool>(),
+        snapshot_string_strategy(),
+        0_u64..1_000_000,
+        any::<Option<u32>>(),
+        any::<Option<u32>>(),
+        snapshot_string_strategy(),
+    )
+        .prop_map(
+            |(number_bits, boolean, text, image_size, width, height, projection_text)| {
+                let projection_ref = serde_json::json!({
+                    "z-last": [projection_text, 7, true, null],
+                    "a-first": {"nul": "\0", "edge": "\u{fffd}"},
+                });
+                let projected = Value::Projected(ProjectedValue::custom_with_projection_ref(
+                    "session.items[3]",
+                    Arc::new(SnapshotProjectedDescriptor),
+                    projection_ref,
+                ));
+                let tuple =
+                    Value::Tuple(vec![Value::String(text.clone().into()), Value::Null].into());
+                let list = Value::List(vec![Value::Bool(boolean), tuple.clone()].into());
+                let record = Value::Record(Arc::new(
+                    [
+                        ("z-last".to_string(), list.clone()),
+                        ("a-first".to_string(), projected.clone()),
+                    ]
+                    .into_iter()
+                    .collect(),
+                ));
+
+                vec![
+                    Value::Null,
+                    Value::Bool(boolean),
+                    Value::Number(f64::from_bits(number_bits)),
+                    Value::Number(f64::INFINITY),
+                    Value::Number(f64::NEG_INFINITY),
+                    Value::String(text.into()),
+                    Value::Image(Box::new(ImageValue::new(
+                        "image-id",
+                        lashlang::MediaType::parse("image/png").expect("valid media type"),
+                        "label\0\u{fffd}",
+                        image_size,
+                        width,
+                        height,
+                    ))),
+                    Value::Resource(ResourceHandle::new("files", "workspace\0\u{fffd}")),
+                    tuple,
+                    list,
+                    record,
+                    projected,
+                ]
+            },
+        )
+}
+
+fn assert_canonical_value_round_trip(expected: &Value, actual: &Value) {
+    match (expected, actual) {
+        (Value::Null, Value::Null) => {}
+        (Value::Bool(expected), Value::Bool(actual)) => assert_eq!(actual, expected),
+        (Value::Number(expected), Value::Number(actual)) if expected.is_nan() => {
+            assert!(actual.is_nan());
+            assert_eq!(actual.to_bits(), 0x7ff8_0000_0000_0000);
+        }
+        (Value::Number(expected), Value::Number(actual)) => {
+            assert_eq!(actual.to_bits(), expected.to_bits());
+        }
+        (Value::String(expected), Value::String(actual)) => assert_eq!(actual, expected),
+        (Value::Image(expected), Value::Image(actual)) => assert_eq!(actual, expected),
+        (Value::Resource(expected), Value::Resource(actual)) => assert_eq!(actual, expected),
+        (Value::Tuple(expected), Value::Tuple(actual))
+        | (Value::List(expected), Value::List(actual)) => {
+            assert_eq!(actual.len(), expected.len());
+            for (expected, actual) in expected.iter().zip(actual.iter()) {
+                assert_canonical_value_round_trip(expected, actual);
+            }
+        }
+        (Value::Record(expected), Value::Record(actual)) => {
+            assert_eq!(actual.len(), expected.len());
+            for (name, expected) in expected.iter() {
+                assert_canonical_value_round_trip(
+                    expected,
+                    actual.get(name).expect("round-tripped record field"),
+                );
+            }
+        }
+        (Value::Projected(expected), Value::Projected(actual)) => {
+            assert_eq!(actual.name(), expected.name());
+            assert_eq!(actual.type_name(), expected.type_name());
+            assert_eq!(actual.projection_ref(), expected.projection_ref());
+        }
+        (expected, actual) => panic!("snapshot value changed variant: {expected:?} -> {actual:?}"),
+    }
 }
 
 fn generated_workflow_corpus(ident: &str, value: &str) -> Vec<(&'static str, String)> {
@@ -768,11 +891,39 @@ proptest! {
                 .collect(),
         });
 
-        let encoded = serde_json::to_vec(&state.snapshot()).expect("snapshot encode");
-        let decoded: Snapshot = serde_json::from_slice(&encoded).expect("snapshot decode");
+        let encoded = state.snapshot().to_canonical_bytes().expect("snapshot encode");
+        let decoded = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
         let restored = State::from_snapshot(decoded);
 
         prop_assert_eq!(restored.globals(), state.globals());
+    }
+
+    #[test]
+    fn canonical_snapshot_round_trip_covers_every_value_variant(
+        values in canonical_snapshot_variant_corpus_strategy()
+    ) {
+        let globals: Record = values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| (format!("variant_{index}"), value.clone()))
+            .collect();
+        let snapshot = Snapshot { globals };
+
+        let encoded = snapshot.to_canonical_bytes().expect("canonical snapshot encode");
+        let decoded = Snapshot::from_canonical_bytes(&encoded)
+            .expect("canonical snapshot decode");
+        let reencoded = decoded
+            .to_canonical_bytes()
+            .expect("canonical snapshot re-encode");
+
+        prop_assert_eq!(&reencoded, &encoded);
+        for (index, expected) in values.iter().enumerate() {
+            let actual = decoded
+                .globals
+                .get(&format!("variant_{index}"))
+                .expect("round-tripped global");
+            assert_canonical_value_round_trip(expected, actual);
+        }
     }
 
     #[test]
@@ -793,8 +944,11 @@ proptest! {
         let mut restored = State::from_snapshot(Snapshot {
             globals: base_globals,
         });
-        let blob = serde_json::to_vec(&restored.snapshot()).expect("snapshot encode");
-        let snapshot: Snapshot = serde_json::from_slice(&blob).expect("snapshot decode");
+        let blob = restored
+            .snapshot()
+            .to_canonical_bytes()
+            .expect("snapshot encode");
+        let snapshot = Snapshot::from_canonical_bytes(&blob).expect("snapshot decode");
         restored = State::from_snapshot(snapshot);
 
         let fresh_value = finished(run_execute(&source, &mut fresh, &host).expect("fresh execution"));
