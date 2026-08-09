@@ -46,6 +46,36 @@ pub(crate) fn emit_trace_at(
     }
 }
 
+/// Emit evidence only for store failures whose typed class means persisted
+/// state is corrupt or a monotonic durable identity cannot advance.
+pub(crate) fn emit_store_error(
+    sink: &Option<Arc<dyn TraceSink>>,
+    base_context: &TraceContext,
+    context: TraceContext,
+    operation: &str,
+    error: &crate::StoreError,
+    clock: &dyn crate::Clock,
+) {
+    if !matches!(
+        error,
+        crate::StoreError::StoredDataCorrupt { .. }
+            | crate::StoreError::MonotonicCounterOverflow { .. }
+    ) {
+        return;
+    }
+    emit_trace(
+        sink,
+        base_context,
+        context,
+        TraceEvent::StoreErrorObserved {
+            operation: operation.to_string(),
+            error_class: error.variant_name().to_string(),
+            message: error.to_string(),
+        },
+        clock,
+    );
+}
+
 fn merge_context(base: &mut TraceContext, overlay: TraceContext) {
     if overlay.run_id.is_some() {
         base.run_id = overlay.run_id;
@@ -141,7 +171,15 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
         | TraceEvent::RollingHistoryPromptPruned { .. }
         | TraceEvent::EffectEnvelopeDiff { .. }
         | TraceEvent::ProtocolStep { .. }
-        | TraceEvent::TokenUsage { .. } => set_span(context, None, turn_node),
+        | TraceEvent::TokenUsage { .. }
+        | TraceEvent::JournaledEffectStarted { .. }
+        | TraceEvent::JournaledEffectSettled { .. }
+        | TraceEvent::DurableWaitParked { .. }
+        | TraceEvent::DurableWaitResolved { .. }
+        | TraceEvent::DurableTimerStarted { .. }
+        | TraceEvent::DurableTimerResolved { .. }
+        | TraceEvent::DurableSegmentBoundary { .. }
+        | TraceEvent::StoreErrorObserved { .. } => set_span(context, None, turn_node),
         TraceEvent::RollingHistoryCompactionStarted { .. }
         | TraceEvent::RollingHistoryCompactionCompleted { .. } => {
             set_span(context, None, turn_node.or(session_node));
@@ -622,5 +660,67 @@ mod span_identity_tests {
             context.parent_graph_node_id.as_deref(),
             Some("session:compact-session")
         );
+    }
+
+    #[test]
+    fn store_integrity_classes_emit_at_the_runtime_boundary_only() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = directory.path().join("store.trace.jsonl");
+        let sink: Arc<dyn TraceSink> = Arc::new(lash_trace::JsonlTraceSink::new(&path));
+        let sink = Some(sink);
+        let clock = crate::facade_support::SystemClock;
+        let context = TraceContext::default().for_session("corrupt-session");
+
+        emit_store_error(
+            &sink,
+            &TraceContext::default(),
+            context.clone(),
+            "session_restore",
+            &crate::StoreError::StoredDataCorrupt {
+                record_kind: "SessionHeadMeta",
+                message: "invalid json".to_string(),
+            },
+            &clock,
+        );
+        emit_store_error(
+            &sink,
+            &TraceContext::default(),
+            context.clone(),
+            "turn_commit",
+            &crate::StoreError::MonotonicCounterOverflow {
+                counter: "head_revision",
+                current: i64::MAX as u64,
+            },
+            &clock,
+        );
+        emit_store_error(
+            &sink,
+            &TraceContext::default(),
+            context,
+            "turn_commit",
+            &crate::StoreError::Backend("transient".to_string()),
+            &clock,
+        );
+
+        let lines = std::fs::read_to_string(path).expect("trace file");
+        let records = lines
+            .lines()
+            .map(|line| serde_json::from_str::<TraceRecord>(line).expect("trace record"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            records.len(),
+            2,
+            "ordinary backend failures stay out of this evidence class"
+        );
+        assert!(matches!(
+            &records[0].event,
+            TraceEvent::StoreErrorObserved { error_class, .. }
+                if error_class == "StoredDataCorrupt"
+        ));
+        assert!(matches!(
+            &records[1].event,
+            TraceEvent::StoreErrorObserved { error_class, .. }
+                if error_class == "MonotonicCounterOverflow"
+        ));
     }
 }

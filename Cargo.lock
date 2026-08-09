@@ -2307,6 +2307,7 @@ dependencies = [
  "lash-runtime",
  "lash-sansio",
  "lash-sqlite-store",
+ "lash-trace",
  "lashlang",
  "restate-sdk",
  "rusqlite",

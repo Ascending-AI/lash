@@ -49,6 +49,66 @@ pub(super) fn interpret_typed(event: &TraceEvent, raw: &Value) -> (String, Strin
             );
             (name.clone(), summary, !ok)
         }
+        TraceEvent::JournaledEffectStarted {
+            effect_name,
+            effect_kind,
+        } => (
+            effect_name.clone(),
+            format!("journaled {effect_kind} effect started"),
+            false,
+        ),
+        TraceEvent::JournaledEffectSettled {
+            effect_name,
+            effect_kind,
+            status,
+        } => (
+            effect_name.clone(),
+            format!("journaled {effect_kind} effect {status}"),
+            status == "failed",
+        ),
+        TraceEvent::DurableWaitParked { wait_kind } => {
+            ("durable wait parked".to_string(), wait_kind.clone(), false)
+        }
+        TraceEvent::DurableWaitResolved {
+            wait_kind,
+            resolution,
+        } => (
+            "durable wait resolved".to_string(),
+            format!("{wait_kind}: {resolution}"),
+            resolution == "failed",
+        ),
+        TraceEvent::DurableTimerStarted { duration_ms } => (
+            "durable timer started".to_string(),
+            format!("{duration_ms} ms"),
+            false,
+        ),
+        TraceEvent::DurableTimerResolved {
+            duration_ms,
+            status,
+        } => (
+            "durable timer resolved".to_string(),
+            format!("{duration_ms} ms: {status}"),
+            status == "failed",
+        ),
+        TraceEvent::DurableSegmentBoundary {
+            reason,
+            effects_executed,
+            journaled_bytes_estimate,
+        } => (
+            "durable segment boundary".to_string(),
+            match journaled_bytes_estimate {
+                Some(bytes) => {
+                    format!("{reason}: {effects_executed} effects, ~{bytes} journal bytes")
+                }
+                None => format!("{reason}: {effects_executed} effects"),
+            },
+            false,
+        ),
+        TraceEvent::StoreErrorObserved {
+            operation,
+            error_class,
+            message,
+        } => (error_class.clone(), format!("{operation}\n{message}"), true),
         TraceEvent::ProviderStreamEvent { event } => (
             format!("{}: {}", event.provider, event.event_name),
             format!(

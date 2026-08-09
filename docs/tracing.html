@@ -286,6 +286,7 @@ impl TraceSink for FanoutTraceSink {
           <div class="section-header">
             <h2>The JSONL Schema</h2>
             <p>One line of UTF-8 JSON per record. <code>TRACE_SCHEMA_VERSION = 3</code>. Reject or warn on higher unrecognized versions. When to bump it — and when an additive change (a new variant, an optional field, a reshaped <code>Custom</code> / <code>ProtocolStep</code> payload) does not — is the <a href="./reporting.html#schema-evolution">schema-evolution policy</a>.</p>
+            <p>Restate-hosted turns can attach the same sink to <code>RestateRuntimeEffectController::with_trace_sink</code>. The viewer then shows journaled-effect start/settle, durable-wait park/resolve, durable timers, and segment boundaries alongside the ordinary session-manager turn, LLM, and tool records. The controller retains only a weak sink reference: an absent or dropped sink is a no-op. These records are live observations, may be emitted again during handler redrive, and never issue a Restate command or replace the durable journal.</p>
           </div>
           <pre data-lang="json"><code>{
   "schema_version": 3,

@@ -69090,3 +69090,227 @@ aliases = ["lash::prelude::SessionSpec::turn_budget"]
 area = "sessions-turns"
 disposition = "used-unasserted"
 usage = "examples/docs-snippets/src/embedding_advanced.rs:183#SessionSpec::inherit().turn_budget(lash::TurnBudget::bounded(8))"
+[[api]]
+symbol = "lash::tracing::TraceEvent::DurableSegmentBoundary"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::DurableSegmentBoundary"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::DurableSegmentBoundary::effects_executed"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::DurableSegmentBoundary::effects_executed"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::DurableSegmentBoundary::journaled_bytes_estimate"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::DurableSegmentBoundary::journaled_bytes_estimate"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::DurableSegmentBoundary::reason"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::DurableSegmentBoundary::reason"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::DurableTimerResolved"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::DurableTimerResolved"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::DurableTimerResolved::duration_ms"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::DurableTimerResolved::duration_ms"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::DurableTimerResolved::status"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::DurableTimerResolved::status"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::DurableTimerStarted"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::DurableTimerStarted"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::DurableTimerStarted::duration_ms"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::DurableTimerStarted::duration_ms"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::DurableWaitParked"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::DurableWaitParked"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::DurableWaitParked::wait_kind"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::DurableWaitParked::wait_kind"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::DurableWaitResolved"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::DurableWaitResolved"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::DurableWaitResolved::resolution"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::DurableWaitResolved::resolution"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::DurableWaitResolved::wait_kind"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::DurableWaitResolved::wait_kind"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::JournaledEffectSettled"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::JournaledEffectSettled"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::JournaledEffectSettled::effect_kind"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::JournaledEffectSettled::effect_kind"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::JournaledEffectSettled::effect_name"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::JournaledEffectSettled::effect_name"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::JournaledEffectSettled::status"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::JournaledEffectSettled::status"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::JournaledEffectStarted"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::JournaledEffectStarted"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::JournaledEffectStarted::effect_kind"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::JournaledEffectStarted::effect_kind"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::JournaledEffectStarted::effect_name"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::JournaledEffectStarted::effect_name"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured durable-runtime trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::StoreErrorObserved"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::StoreErrorObserved"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured store-integrity trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::StoreErrorObserved::error_class"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::StoreErrorObserved::error_class"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured store-integrity trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::StoreErrorObserved::message"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::StoreErrorObserved::message"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured store-integrity trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::tracing::TraceEvent::StoreErrorObserved::operation"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::StoreErrorObserved::operation"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured store-integrity trace events rather than bundled sinks."

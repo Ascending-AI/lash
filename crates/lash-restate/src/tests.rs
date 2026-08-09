@@ -1337,12 +1337,21 @@ async fn fig811_effectful_post_terminal_redrive_replays_the_complete_prefix() {
         )
         .await
         .expect("persist effectful ordinal-one handover");
+    let trace_sink = Arc::new(RecordingTraceSink::default());
+    let trace_sink_dyn: Arc<dyn lash_trace::TraceSink> = trace_sink.clone();
     let endpoint = Endpoint::builder()
         .bind(
             LashProcessWorkflowImpl::new_for_test(
                 Arc::new(Fig811EffectfulOrdinalOneTerminalRunner),
                 Arc::clone(&registry),
                 Arc::clone(&continuations),
+            )
+            .with_trace_sink(
+                trace_sink_dyn,
+                lash_trace::TraceContext {
+                    run_id: Some("fig811-workflow-trace".to_string()),
+                    ..lash_trace::TraceContext::default()
+                },
             )
             .serve(),
         )
@@ -1365,6 +1374,11 @@ async fn fig811_effectful_post_terminal_redrive_replays_the_complete_prefix() {
             RESTATE_SUSPENSION_MESSAGE_TYPE
         ]
     );
+    assert!(trace_sink.records.lock_recover().iter().any(|record| {
+        record.event.kind() == "durable_timer_started"
+            && record.context.run_id.as_deref() == Some("fig811-workflow-trace")
+            && record.context.session_id.as_deref() == Some("session")
+    }));
 
     let completed_effect =
         encode_completed_captured_sleep_replay(process_id, &input, &effect_suspension)
@@ -3084,6 +3098,113 @@ async fn restate_handler_controller_satisfies_concurrent_replay_conformance() {
 }
 
 #[tokio::test]
+async fn durable_trace_reemits_on_redrive_without_adding_a_journal_command() {
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let sink = Arc::new(RecordingTraceSink::default());
+    let sink_dyn: Arc<dyn lash_trace::TraceSink> = sink.clone();
+    let controller = RestateRuntimeEffectController::with_options(
+        Arc::clone(&context),
+        RestateEffectControllerOptions::default().segment_effect_budget(1),
+    )
+    .with_trace_sink_and_context(
+        sink_dyn,
+        lash_trace::TraceContext {
+            run_id: Some("restate-host-run".to_string()),
+            ..lash_trace::TraceContext::default()
+        },
+    );
+    let envelope = RuntimeEffectEnvelope::new(
+        RuntimeInvocation::effect(
+            RuntimeScope::new("trace-replay-session"),
+            "trace-replay-tool",
+            RuntimeEffectKind::ToolAttempt,
+            "trace-replay-tool",
+        ),
+        RuntimeEffectCommand::ToolAttempt {
+            call: prepared_tool_call_with("trace-replay-call", "trace_replay_tool"),
+            execution_grant: None,
+            attempt: 1,
+            max_attempts: 1,
+        },
+    );
+    let local_calls = Arc::new(AtomicUsize::new(0));
+
+    let first_calls = Arc::clone(&local_calls);
+    controller
+        .execute_effect(
+            envelope.clone(),
+            RuntimeEffectLocalExecutor::testing(move |_| async move {
+                first_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(restate_segment_tool_attempt_outcome(0))
+            }),
+        )
+        .await
+        .expect("live journaled effect");
+    context.start_replay();
+    let replay_calls = Arc::clone(&local_calls);
+    controller
+        .execute_effect(
+            envelope,
+            RuntimeEffectLocalExecutor::testing(move |_| async move {
+                replay_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(restate_segment_tool_attempt_outcome(0))
+            }),
+        )
+        .await
+        .expect("replayed journaled effect");
+    assert_eq!(
+        RuntimeEffectController::wants_segment_boundary(
+            &controller,
+            &lash_core::SegmentProgress {
+                effects_executed: 1,
+                journaled_bytes_estimate: Some(128),
+            },
+        ),
+        Some(lash_core::BoundaryReason::JournalBudget)
+    );
+
+    assert_eq!(
+        local_calls.load(Ordering::SeqCst),
+        1,
+        "redrive reuses the journaled outcome"
+    );
+    assert_eq!(
+        context.runs().len(),
+        2,
+        "each handler pass issues only the effect's ctx.run; trace append adds no command"
+    );
+    let events = sink
+        .records
+        .lock_recover()
+        .iter()
+        .map(|record| record.event.kind())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        events,
+        vec![
+            "journaled_effect_started",
+            "journaled_effect_settled",
+            "journaled_effect_started",
+            "journaled_effect_settled",
+            "durable_segment_boundary",
+        ],
+        "redrive repetition is the benign live-observation class"
+    );
+    let records = sink.records.lock_recover();
+    assert!(records.iter().all(|record| {
+        record.context.run_id.as_deref() == Some("restate-host-run")
+            && record.context.session_id.as_deref() == Some("trace-replay-session")
+    }));
+    assert_eq!(
+        records
+            .last()
+            .and_then(|record| record.context.effect_id.as_deref()),
+        Some("trace-replay-tool"),
+        "segment boundaries retain the scope of the effect that crossed the budget"
+    );
+}
+
+#[tokio::test]
 async fn restate_handler_controller_journals_typed_trigger_execution() {
     let context = Arc::new(RecordingContext::default());
     let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
@@ -3934,6 +4055,18 @@ struct RecordingContext {
     durable_event_notifies: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
     session_waits: Mutex<HashMap<String, Vec<RestateDurableWaitAddress>>>,
     revoked_sessions: Mutex<HashSet<String>>,
+}
+
+#[derive(Default)]
+struct RecordingTraceSink {
+    records: Mutex<Vec<lash_trace::TraceRecord>>,
+}
+
+impl lash_trace::TraceSink for RecordingTraceSink {
+    fn append(&self, record: &lash_trace::TraceRecord) -> Result<(), lash_trace::TraceSinkError> {
+        self.records.lock_recover().push(record.clone());
+        Ok(())
+    }
 }
 
 impl RecordingContext {
@@ -6589,7 +6722,9 @@ async fn restate_controller_lists_and_transfers_observers_through_process_effect
 #[tokio::test]
 async fn restate_controller_awaits_and_signals_through_process_effects() {
     let context = Arc::new(RecordingContext::default());
-    let host = RestateRuntimeEffectController::new(context.clone());
+    let sink = Arc::new(RecordingTraceSink::default());
+    let sink_dyn: Arc<dyn lash_trace::TraceSink> = sink.clone();
+    let host = RestateRuntimeEffectController::new(context.clone()).with_trace_sink(sink_dyn);
     let registry = process_registry();
     registry
         .register_process(external_registration("task-await-signal"))
@@ -6645,6 +6780,15 @@ async fn restate_controller_awaits_and_signals_through_process_effects() {
             value: serde_json::json!({ "done": true }),
             control: None,
         }
+    );
+    assert_eq!(
+        sink.records
+            .lock_recover()
+            .iter()
+            .map(|record| record.event.kind())
+            .collect::<Vec<_>>(),
+        vec!["durable_wait_parked", "durable_wait_resolved"],
+        "process awaits expose the same durable wait evidence as await-event"
     );
 
     let outcome = host

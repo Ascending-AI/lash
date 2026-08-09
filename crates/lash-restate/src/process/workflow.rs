@@ -68,6 +68,8 @@ pub struct LashProcessWorkflowImpl<R> {
     segment_duration_cap: Option<Duration>,
     segment_effect_budget: Arc<dyn Fn(&ProcessRegistration) -> u64 + Send + Sync>,
     cancel_ingress: Option<RestateIngressClient>,
+    trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
+    trace_context: lash_trace::TraceContext,
     #[cfg(test)]
     cancel_read_failures: std::sync::atomic::AtomicUsize,
 }
@@ -106,6 +108,8 @@ impl<R> LashProcessWorkflowImpl<R> {
             segment_duration_cap: None,
             segment_effect_budget: Arc::new(|_| 10_000),
             cancel_ingress,
+            trace_sink: None,
+            trace_context: lash_trace::TraceContext::default(),
             #[cfg(test)]
             cancel_read_failures: std::sync::atomic::AtomicUsize::new(0),
         }
@@ -113,6 +117,18 @@ impl<R> LashProcessWorkflowImpl<R> {
 
     pub fn with_segment_duration_cap(mut self, cap: Duration) -> Self {
         self.segment_duration_cap = Some(cap);
+        self
+    }
+
+    /// Attach the host's live trace observer to every process-segment
+    /// controller created by this workflow.
+    pub fn with_trace_sink(
+        mut self,
+        sink: Arc<dyn lash_trace::TraceSink>,
+        context: lash_trace::TraceContext,
+    ) -> Self {
+        self.trace_sink = Some(sink);
+        self.trace_context = context;
         self
     }
 
@@ -541,6 +557,11 @@ where
             options = options.segment_duration_cap(cap);
         }
         let controller = RestateRuntimeEffectController::with_options(ctx, options);
+        let controller = if let Some(sink) = self.trace_sink.as_ref() {
+            controller.with_trace_sink_and_context(Arc::clone(sink), self.trace_context.clone())
+        } else {
+            controller
+        };
         let outcome = loop {
             let scoped_effect_controller = controller
                 .scoped_effect_controller(ExecutionScope::process(process_id.clone()))

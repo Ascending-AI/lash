@@ -81,6 +81,27 @@ async fn bind_state_to_store(
     Ok(())
 }
 
+async fn bind_state_to_store_with_trace(
+    policy: &SessionPolicy,
+    host: &crate::RuntimeHostConfig,
+    store: &(dyn crate::store::RuntimePersistence + '_),
+    state: &mut RuntimeSessionState,
+    relation: crate::SessionRelation,
+) -> Result<(), SessionError> {
+    let result = bind_state_to_store(policy, store, state, relation).await;
+    if let Err(SessionError::Store { source, .. }) = &result {
+        crate::trace::emit_store_error(
+            &host.tracing.trace_sink,
+            &host.tracing.trace_context,
+            lash_trace::TraceContext::default().for_session(state.session_id.clone()),
+            "session_store_bind",
+            source,
+            host.clock.as_ref(),
+        );
+    }
+    result
+}
+
 pub(in crate::runtime) struct RuntimePersistenceBindings {
     runtime_store: Option<Arc<dyn crate::store::RuntimePersistence>>,
     attachment_manifest_store: Option<Arc<dyn crate::store::RuntimePersistence>>,
@@ -283,8 +304,9 @@ impl LashRuntime {
         services: PersistentRuntimeServices,
         mut state: RuntimeSessionState,
     ) -> Result<Self, SessionError> {
-        bind_state_to_store(
+        bind_state_to_store_with_trace(
             &policy,
+            &host.core,
             services.store().as_ref(),
             &mut state,
             crate::SessionRelation::Root,
@@ -300,8 +322,9 @@ impl LashRuntime {
         services: PersistentRuntimeServices,
         mut state: RuntimeSessionState,
     ) -> Result<Self, SessionError> {
-        bind_state_to_store(
+        bind_state_to_store_with_trace(
             &policy,
+            &host.embedded.core,
             services.store().as_ref(),
             &mut state,
             crate::SessionRelation::Root,
@@ -331,8 +354,17 @@ impl LashRuntime {
             runtime_store: store,
             attachment_manifest_store,
         } = persistence;
-        if let Some(store) = store.as_deref() {
-            bind_state_to_store(&policy, store, &mut state, relation).await?;
+        if let Some(store) = store.as_deref()
+            && let Err(error) = bind_state_to_store_with_trace(
+                &policy,
+                &embedded_host.core,
+                store,
+                &mut state,
+                relation,
+            )
+            .await
+        {
+            return Err(error);
         }
         let runtime = match (store, process_registry) {
             (Some(store), Some(registry)) => {

@@ -571,3 +571,51 @@ fn jsonl_round_trip_preserves_records() {
     assert_eq!(tool_call["duration_ms"], 5);
     assert_eq!(tool_call["status"], "success");
 }
+
+#[test]
+fn durable_step_events_are_additive_at_schema_version_three() {
+    let events = vec![
+        TraceEvent::JournaledEffectStarted {
+            effect_name: "lash:turn:llm:1".to_string(),
+            effect_kind: "llm_call".to_string(),
+        },
+        TraceEvent::JournaledEffectSettled {
+            effect_name: "lash:turn:llm:1".to_string(),
+            effect_kind: "llm_call".to_string(),
+            status: "completed".to_string(),
+        },
+        TraceEvent::DurableWaitParked {
+            wait_kind: "await_event".to_string(),
+        },
+        TraceEvent::DurableWaitResolved {
+            wait_kind: "await_event".to_string(),
+            resolution: "ok".to_string(),
+        },
+        TraceEvent::DurableTimerStarted { duration_ms: 250 },
+        TraceEvent::DurableTimerResolved {
+            duration_ms: 250,
+            status: "resolved".to_string(),
+        },
+        TraceEvent::DurableSegmentBoundary {
+            reason: "journal_budget".to_string(),
+            effects_executed: 10_000,
+            journaled_bytes_estimate: None,
+        },
+        TraceEvent::StoreErrorObserved {
+            operation: "session_restore".to_string(),
+            error_class: "StoredDataCorrupt".to_string(),
+            message: "stored SessionHeadMeta data is corrupt".to_string(),
+        },
+    ];
+
+    for event in events {
+        let expected_kind = event.kind();
+        let record = TraceRecord::new(TraceContext::default().for_session("s1"), event);
+        let json = serde_json::to_value(&record).expect("serialize durable trace event");
+        assert_eq!(json["schema_version"], lash_trace::TRACE_SCHEMA_VERSION);
+        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 3);
+        assert_eq!(json["type"], expected_kind);
+        let decoded: TraceRecord = serde_json::from_value(json).expect("round trip event");
+        assert_eq!(decoded.event.kind(), expected_kind);
+    }
+}

@@ -252,6 +252,48 @@ pub enum TraceEvent {
         output: TraceToolCallOutput,
         duration_ms: u64,
     },
+    /// A Restate `ctx.run` effect is about to cross its journal command boundary.
+    JournaledEffectStarted {
+        effect_name: String,
+        effect_kind: String,
+    },
+    /// A Restate `ctx.run` effect returned its recorded or newly executed outcome.
+    JournaledEffectSettled {
+        effect_name: String,
+        effect_kind: String,
+        status: String,
+    },
+    /// A Restate durable wait has issued its park command.
+    DurableWaitParked {
+        wait_kind: String,
+    },
+    /// A Restate durable wait resumed with a terminal resolution.
+    DurableWaitResolved {
+        wait_kind: String,
+        resolution: String,
+    },
+    /// A Restate durable timer has been issued.
+    DurableTimerStarted {
+        duration_ms: u64,
+    },
+    /// A Restate durable timer resumed or was cancelled.
+    DurableTimerResolved {
+        duration_ms: u64,
+        status: String,
+    },
+    /// The durable controller requested a quiescent handler-segment handover.
+    DurableSegmentBoundary {
+        reason: String,
+        effects_executed: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        journaled_bytes_estimate: Option<u64>,
+    },
+    /// The runtime received a typed, non-retryable store integrity failure.
+    StoreErrorObserved {
+        operation: String,
+        error_class: String,
+        message: String,
+    },
     ProtocolStep {
         plugin_id: String,
         payload: Value,
@@ -302,6 +344,14 @@ impl TraceEvent {
             Self::RuntimeStreamEvent { .. } => "runtime_stream_event",
             Self::ToolCallStarted { .. } => "tool_call_started",
             Self::ToolCallCompleted { .. } => "tool_call_completed",
+            Self::JournaledEffectStarted { .. } => "journaled_effect_started",
+            Self::JournaledEffectSettled { .. } => "journaled_effect_settled",
+            Self::DurableWaitParked { .. } => "durable_wait_parked",
+            Self::DurableWaitResolved { .. } => "durable_wait_resolved",
+            Self::DurableTimerStarted { .. } => "durable_timer_started",
+            Self::DurableTimerResolved { .. } => "durable_timer_resolved",
+            Self::DurableSegmentBoundary { .. } => "durable_segment_boundary",
+            Self::StoreErrorObserved { .. } => "store_error_observed",
             Self::ProtocolStep { .. } => "protocol_step",
             Self::TokenUsage { .. } => "token_usage",
             Self::LashlangExecution { .. } => "lashlang_execution",

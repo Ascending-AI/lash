@@ -531,12 +531,19 @@ impl RestateProcessDeployment {
         &self,
         worker: DurableProcessWorker,
     ) -> LashProcessWorkflowImpl<RestateCoreProcessRunner> {
-        LashProcessWorkflowImpl::new(
+        let trace_sink = worker.config().runtime_host.tracing.trace_sink.clone();
+        let trace_context = worker.config().runtime_host.tracing.trace_context.clone();
+        let workflow = LashProcessWorkflowImpl::new(
             Arc::new(RestateCoreProcessRunner::new(worker)),
             self.driver.process_registry(),
             Arc::clone(&self.continuations),
             self.ingress.clone(),
-        )
+        );
+        if let Some(sink) = trace_sink {
+            workflow.with_trace_sink(sink, trace_context)
+        } else {
+            workflow
+        }
     }
 }
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
