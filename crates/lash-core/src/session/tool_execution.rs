@@ -510,13 +510,13 @@ impl RuntimeExecutionContext<'_> {
         )
         .await;
         let outcome = match coordinated.launch {
-            ToolCallLaunch::Done(outcome) => outcome,
+            ToolCallLaunch::Done(outcome) => *outcome,
             ToolCallLaunch::Pending(pending) => {
                 self.await_pending_tool_dispatch_outcome_with_suffix(
                     &call_id,
                     Some(parent_invocation),
                     format!("{}:await", child.replay_suffix),
-                    pending,
+                    *pending,
                     self.cancellation_token.clone(),
                 )
                 .await
@@ -630,6 +630,7 @@ impl RuntimeExecutionContext<'_> {
         outcome: ToolDispatchOutcome,
         tool_correlation_id: TurnActivityId,
     ) -> CompletedProtocolToolCall {
+        let attempts = outcome.attempts.clone();
         let output = outcome.record.output.clone();
         let projection_output = output.clone();
         let projection_tool_name = outcome.record.tool.clone();
@@ -662,7 +663,7 @@ impl RuntimeExecutionContext<'_> {
             output: output.clone(),
             duration_ms: outcome.record.duration_ms,
         };
-        self.emit_tool_call_completed_trace(&record);
+        self.emit_tool_call_completed_trace(&record, &attempts);
         self.emit_turn_activity(
             tool_correlation_id,
             TurnEvent::ToolCallCompleted {
@@ -696,6 +697,7 @@ impl RuntimeExecutionContext<'_> {
         args: serde_json::Value,
         resolution: crate::Resolution,
         duration_ms: u64,
+        attempts: Vec<lash_trace::TraceRetryAttempt>,
     ) -> ToolDispatchOutcome {
         let output = crate::tool_result::tool_output_from_completion_resolution(resolution);
         let result = finalize_tool_result_with_execution_context(
@@ -713,15 +715,24 @@ impl RuntimeExecutionContext<'_> {
                 "pending tool result reached a completed-output projection path",
             ))
         });
-        ToolDispatchOutcome {
-            record: ToolCallRecord {
-                call_id: None,
-                tool: tool_name,
-                args,
-                output,
-                duration_ms,
-            },
-        }
+        let record = ToolCallRecord {
+            call_id: None,
+            tool: tool_name,
+            args,
+            output,
+            duration_ms,
+        };
+        let mut attempts = attempts;
+        attempts.push(crate::trace::trace_tool_attempt(
+            attempts
+                .len()
+                .saturating_add(1)
+                .try_into()
+                .unwrap_or(u32::MAX),
+            &record,
+            None,
+        ));
+        ToolDispatchOutcome { record, attempts }
     }
 
     async fn await_pending_tool_dispatch_outcome(
@@ -799,19 +810,28 @@ impl RuntimeExecutionContext<'_> {
         let resolution = match outcome.and_then(crate::RuntimeEffectOutcome::into_await_event) {
             Ok(resolution) => resolution,
             Err(err) => {
-                return ToolDispatchOutcome {
-                    record: ToolCallRecord {
-                        call_id: None,
-                        tool: pending.tool_name,
-                        args: pending.args,
-                        output: ToolCallOutput::failure(ToolFailure::runtime(
-                            ToolFailureClass::Internal,
-                            "pending_tool_completion_failed",
-                            err.to_string(),
-                        )),
-                        duration_ms: pending.duration_ms,
-                    },
+                let record = ToolCallRecord {
+                    call_id: None,
+                    tool: pending.tool_name,
+                    args: pending.args,
+                    output: ToolCallOutput::failure(ToolFailure::runtime(
+                        ToolFailureClass::Internal,
+                        "pending_tool_completion_failed",
+                        err.to_string(),
+                    )),
+                    duration_ms: pending.duration_ms,
                 };
+                let mut attempts = pending.attempts;
+                attempts.push(crate::trace::trace_tool_attempt(
+                    attempts
+                        .len()
+                        .saturating_add(1)
+                        .try_into()
+                        .unwrap_or(u32::MAX),
+                    &record,
+                    None,
+                ));
+                return ToolDispatchOutcome { record, attempts };
             }
         };
         self.pending_completion_dispatch_outcome(
@@ -819,6 +839,7 @@ impl RuntimeExecutionContext<'_> {
             pending.args,
             resolution,
             pending.duration_ms,
+            pending.attempts,
         )
         .await
     }
@@ -907,6 +928,7 @@ impl RuntimeExecutionContext<'_> {
                             )),
                             duration_ms: 0,
                         },
+                        attempts: Vec::new(),
                     };
                     let completed = self
                         .complete_tool_call(
@@ -1044,6 +1066,7 @@ impl RuntimeExecutionContext<'_> {
                                         key: *key,
                                         pending,
                                         duration_ms,
+                                        attempts: Vec::new(),
                                     },
                                     self.cancellation_token.clone(),
                                 )
@@ -1201,15 +1224,15 @@ impl RuntimeExecutionContext<'_> {
                     self.restore_tool_trigger_outcomes(coordinated.triggers);
                     coordinated.launch
                 }
-                ToolPreparationOutcome::Completed(outcome) => ToolCallLaunch::Done(*outcome),
+                ToolPreparationOutcome::Completed(outcome) => ToolCallLaunch::Done(outcome),
             };
         let mut outcome = match launch {
-            ToolCallLaunch::Done(outcome) => outcome,
+            ToolCallLaunch::Done(outcome) => *outcome,
             ToolCallLaunch::Pending(pending) => {
                 self.await_pending_tool_dispatch_outcome(
                     &call_id,
                     parent_invocation.clone(),
-                    pending,
+                    *pending,
                     self.cancellation_token.clone(),
                 )
                 .await
@@ -1250,6 +1273,7 @@ impl RuntimeExecutionContext<'_> {
                     )),
                     duration_ms: 0,
                 },
+                attempts: Vec::new(),
             };
             let activity_id = TurnActivityId::new(format!("tool:{call_id}"));
             return self
@@ -1394,15 +1418,15 @@ impl RuntimeExecutionContext<'_> {
                 self.restore_tool_trigger_outcomes(coordinated.triggers);
                 coordinated.launch
             }
-            ToolPreparationOutcome::Completed(outcome) => ToolCallLaunch::Done(*outcome),
+            ToolPreparationOutcome::Completed(outcome) => ToolCallLaunch::Done(outcome),
         };
         let mut outcome = match launch {
-            ToolCallLaunch::Done(outcome) => outcome,
+            ToolCallLaunch::Done(outcome) => *outcome,
             ToolCallLaunch::Pending(pending) => {
                 self.await_pending_tool_dispatch_outcome(
                     &call_id,
                     parent_invocation.clone(),
-                    pending,
+                    *pending,
                     self.cancellation_token.clone(),
                 )
                 .await

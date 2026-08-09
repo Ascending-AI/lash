@@ -247,6 +247,7 @@ impl DirectLlmClient {
                 if let Err(message) =
                     validate_direct_output(&output_for_validation, &result.response)
                 {
+                    let attempts = crate::trace::trace_llm_attempts(Some(&result.llm_call));
                     let error = DirectLlmError::InvalidResponse {
                         message,
                         result: Box::new(result),
@@ -267,6 +268,7 @@ impl DirectLlmClient {
                                     raw: None,
                                 },
                                 stream_summary: None,
+                                attempts,
                             },
                             self.clock.as_ref(),
                         );
@@ -289,6 +291,7 @@ impl DirectLlmClient {
                             usage: Some(crate::trace::trace_usage_from_llm(&result.usage)),
                             provider_usage: result.provider_usage.clone(),
                             stream_summary: None,
+                            attempts: crate::trace::trace_llm_attempts(Some(&result.llm_call)),
                         },
                         self.clock.as_ref(),
                     );
@@ -310,6 +313,7 @@ impl DirectLlmClient {
                                 raw: error.raw.as_deref().cloned(),
                             },
                             stream_summary: None,
+                            attempts: crate::trace::trace_llm_attempts(Some(&error.call_record)),
                         },
                         self.clock.as_ref(),
                     );

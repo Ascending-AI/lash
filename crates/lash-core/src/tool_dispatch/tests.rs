@@ -197,6 +197,7 @@ struct ParallelProbeTools {
 enum PendingProbeMode {
     MissingKey,
     PendingWithKey,
+    FailureThenPending,
     Done,
 }
 
@@ -218,10 +219,20 @@ impl ToolProvider for PendingProbeTools {
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
-        self.attempts.fetch_add(1, Ordering::SeqCst);
+        let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
         match self.mode {
             PendingProbeMode::MissingKey => ToolResult::pending(crate::PendingCompletion::new()),
             PendingProbeMode::PendingWithKey => {
+                call.context.completion_key().await.expect("completion key");
+                ToolResult::pending(crate::PendingCompletion::new())
+            }
+            PendingProbeMode::FailureThenPending if attempt == 1 => ToolResult::retryable_failure(
+                crate::ToolFailureClass::External,
+                "transient",
+                "transient before pending",
+                Some(0),
+            ),
+            PendingProbeMode::FailureThenPending => {
                 call.context.completion_key().await.expect("completion key");
                 ToolResult::pending(crate::PendingCompletion::new())
             }
@@ -1040,6 +1051,58 @@ async fn retry_policy_stops_after_pending_launch() {
 }
 
 #[tokio::test]
+async fn retry_ladder_survives_a_later_pending_completion() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let context = pending_dispatch_context(
+        PendingProbeMode::FailureThenPending,
+        Arc::clone(&attempts),
+        None,
+        ToolRetryPolicy::safe(3, 0, 0),
+    );
+    let prepared = pending_prepared_call();
+    let tool_context = tool_context_for_prepared(&context, &prepared);
+
+    let launch = coordinate_prepared_tool_call_launch_with_execution_context(
+        &context,
+        prepared,
+        None,
+        tool_context,
+    )
+    .await;
+
+    let ToolCallLaunch::Pending(pending) = launch else {
+        panic!("second attempt should park pending");
+    };
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    assert_eq!(pending.attempts.len(), 1);
+    assert_eq!(pending.attempts[0].ordinal, 1);
+    assert_eq!(pending.attempts[0].outcome, "failed");
+
+    let attachment_store = Arc::clone(&context.attachment_store);
+    let execution = crate::RuntimeExecutionContext::new(
+        "session".to_string(),
+        Arc::new(context),
+        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+        attachment_store,
+        Arc::new(crate::ChronologicalProjection::default()),
+        None,
+        crate::TurnContext::default(),
+    );
+    let completed = execution
+        .pending_completion_dispatch_outcome(
+            pending.tool_name,
+            pending.args,
+            crate::Resolution::Ok(serde_json::json!({ "done": true })),
+            pending.duration_ms,
+            pending.attempts,
+        )
+        .await;
+    assert_eq!(completed.attempts.len(), 2);
+    assert_eq!(completed.attempts[1].ordinal, 2);
+    assert_eq!(completed.attempts[1].outcome, "completed");
+}
+
+#[tokio::test]
 async fn after_tool_hook_runs_only_for_completed_tool_results() {
     let after_calls = Arc::new(AtomicUsize::new(0));
     let pending_attempts = Arc::new(AtomicUsize::new(0));
@@ -1299,6 +1362,43 @@ async fn safe_retry_policy_retries_safe_failure_and_stops_on_success() {
 
     assert!(outcome.record.output.is_success());
     assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    assert_eq!(outcome.attempts.len(), 2);
+    assert_eq!(outcome.attempts[0].ordinal, 1);
+    assert_eq!(outcome.attempts[0].outcome, "failed");
+    assert!(
+        outcome.attempts[0]
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("transient"))
+    );
+    assert_eq!(outcome.attempts[0].delay_ms, Some(0));
+    assert_eq!(outcome.attempts[1].ordinal, 2);
+    assert_eq!(outcome.attempts[1].outcome, "completed");
+    assert_eq!(outcome.attempts[1].delay_ms, None);
+    let directory = tempfile::tempdir().expect("trace tempdir");
+    let path = directory.path().join("tool-retry.trace.jsonl");
+    let sink: Arc<dyn lash_trace::TraceSink> = Arc::new(lash_trace::JsonlTraceSink::new(&path));
+    let tracing = crate::RuntimeExecutionTracing::new(
+        sink,
+        lash_trace::TraceLevel::Standard,
+        lash_trace::TraceContext::default(),
+        lash_trace::TraceContext::default().for_session("tool-retry-session"),
+    );
+    tracing.emit_tool_call_completed(
+        &outcome.record,
+        &outcome.attempts,
+        &crate::facade_support::SystemClock,
+    );
+    let emitted: lash_trace::TraceRecord = serde_json::from_str(
+        std::fs::read_to_string(path)
+            .expect("read tool trace")
+            .trim(),
+    )
+    .expect("parse emitted tool trace");
+    let lash_trace::TraceEvent::ToolCallCompleted { attempts, .. } = emitted.event else {
+        panic!("expected emitted tool completion");
+    };
+    assert_eq!(attempts.expect("emitted attempt ladder").len(), 2);
     assert_eq!(
         observed
             .lock_recover()

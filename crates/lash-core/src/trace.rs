@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEvent, TraceLlmMessage, TraceLlmRequest,
-    TraceLlmResponse, TraceRecord, TraceSink, TraceTokenUsage, TraceToolSpec, sha256_hex,
+    TraceLlmResponse, TraceRecord, TraceRetryAttempt, TraceSink, TraceTokenUsage, TraceToolSpec,
+    sha256_hex,
 };
 
 use crate::llm::types::{
@@ -491,6 +492,91 @@ pub(crate) fn trace_usage_from_session(usage: &TokenUsage) -> TraceTokenUsage {
     }
 }
 
+pub(crate) fn trace_llm_attempts(
+    record: Option<&crate::LlmCallRecord>,
+) -> Option<Vec<TraceRetryAttempt>> {
+    let record = record?;
+    Some(
+        record
+            .attempts
+            .iter()
+            .map(|attempt| TraceRetryAttempt {
+                ordinal: attempt.ordinal,
+                outcome: match attempt.outcome {
+                    crate::AttemptOutcome::Completed => "completed",
+                    crate::AttemptOutcome::Failed => "failed",
+                    crate::AttemptOutcome::Aborted => "aborted",
+                    crate::AttemptOutcome::Interrupted => "interrupted",
+                }
+                .to_string(),
+                duration_ms: attempt.duration.as_millis().try_into().unwrap_or(u64::MAX),
+                reason: trace_llm_attempt_reason(attempt),
+                delay_ms: attempt
+                    .retry_decision
+                    .as_ref()
+                    .and_then(|decision| decision.delay)
+                    .map(|delay| delay.as_millis().try_into().unwrap_or(u64::MAX)),
+            })
+            .collect(),
+    )
+}
+
+pub(crate) fn trace_tool_attempt(
+    ordinal: u32,
+    record: &crate::ToolCallRecord,
+    delay_ms: Option<u64>,
+) -> TraceRetryAttempt {
+    let (outcome, reason) = match &record.output.outcome {
+        crate::ToolCallOutcome::Success(_) => ("completed", None),
+        crate::ToolCallOutcome::Failure(failure) => (
+            "failed",
+            Some(format!("{}: {}", failure.code, failure.message)),
+        ),
+        crate::ToolCallOutcome::Cancelled(cancellation) => {
+            ("cancelled", Some(cancellation.message.clone()))
+        }
+    };
+    TraceRetryAttempt {
+        ordinal,
+        outcome: outcome.to_string(),
+        duration_ms: record.duration_ms,
+        reason,
+        delay_ms,
+    }
+}
+
+fn trace_llm_attempt_reason(attempt: &crate::AttemptRecord) -> Option<String> {
+    let mut reason = attempt.error.as_ref().map(|error| {
+        let mut reason = error.class.clone();
+        let mut qualifiers = Vec::new();
+        if let Some(status) = error.http_status {
+            qualifiers.push(format!("http {status}"));
+        }
+        if let Some(code) = error.provider_code.as_deref() {
+            qualifiers.push(format!("code {code}"));
+        }
+        if !qualifiers.is_empty() {
+            reason.push_str(&format!(" ({})", qualifiers.join(", ")));
+        }
+        reason
+    });
+    if let Some(retry_reason) = attempt
+        .retry_decision
+        .as_ref()
+        .and_then(|decision| decision.reason.as_deref())
+    {
+        match reason.as_mut() {
+            Some(reason) if reason != retry_reason => {
+                reason.push_str("; retry: ");
+                reason.push_str(retry_reason);
+            }
+            None => reason = Some(retry_reason.to_string()),
+            Some(_) => {}
+        }
+    }
+    reason
+}
+
 pub(crate) fn trace_output_parts(parts: &[LlmOutputPart]) -> Option<serde_json::Value> {
     let parts = parts
         .iter()
@@ -660,6 +746,100 @@ mod span_identity_tests {
             context.parent_graph_node_id.as_deref(),
             Some("session:compact-session")
         );
+    }
+
+    #[test]
+    fn multi_attempt_llm_record_projects_the_trace_retry_ladder() {
+        let record = crate::LlmCallRecord {
+            call_id: crate::LlmCallId("llm-ladder".to_string()),
+            label: None,
+            attempts: vec![
+                crate::AttemptRecord {
+                    ordinal: 1,
+                    started_at: 1_000,
+                    duration: std::time::Duration::from_millis(12),
+                    outcome: crate::AttemptOutcome::Failed,
+                    protocol_position: crate::ProtocolPosition::ResponseObserved,
+                    retry_budget_consumed: true,
+                    retry_decision: Some(crate::RetryDecision {
+                        scheduled: true,
+                        delay: Some(std::time::Duration::from_millis(250)),
+                        reason: Some("provider_retry_after".to_string()),
+                    }),
+                    error: Some(crate::NormalizedError {
+                        class: "rate_limited".to_string(),
+                        provider_code: Some("rate_limit_exceeded".to_string()),
+                        http_status: Some(429),
+                        provider_request_id: None,
+                        retry_after: Some(std::time::Duration::from_millis(250)),
+                        diagnostic: None,
+                    }),
+                    evidence: None,
+                    generation_disposition: None,
+                    usage: None,
+                },
+                crate::AttemptRecord {
+                    ordinal: 2,
+                    started_at: 1_262,
+                    duration: std::time::Duration::from_millis(20),
+                    outcome: crate::AttemptOutcome::Completed,
+                    protocol_position: crate::ProtocolPosition::TerminalObserved,
+                    retry_budget_consumed: true,
+                    retry_decision: None,
+                    error: None,
+                    evidence: None,
+                    generation_disposition: None,
+                    usage: None,
+                },
+            ],
+        };
+
+        let directory = tempfile::tempdir().expect("trace tempdir");
+        let path = directory.path().join("llm-retry.trace.jsonl");
+        let sink: Arc<dyn TraceSink> = Arc::new(lash_trace::JsonlTraceSink::new(&path));
+        let sink = Some(sink);
+        let error = crate::LlmCallError {
+            message: "provider attempts exhausted".to_string(),
+            retryable: true,
+            kind: crate::ProviderFailureKind::Http,
+            raw: None,
+            code: Some("rate_limit_exceeded".to_string()),
+            terminal_reason: crate::LlmTerminalReason::ProviderError,
+            request_body: None,
+            partial_response: None,
+        };
+        crate::runtime::effect::emit_llm_trace_failed(
+            &sink,
+            &TraceContext::default(),
+            TraceContext::default().for_session("llm-retry-session"),
+            crate::runtime::effect::LlmTraceFailure::from(&error),
+            None,
+            Some(&record),
+            &crate::facade_support::SystemClock,
+        );
+        let emitted: TraceRecord = serde_json::from_str(
+            std::fs::read_to_string(path)
+                .expect("read LLM trace")
+                .trim(),
+        )
+        .expect("parse emitted LLM trace");
+        let TraceEvent::LlmCallFailed { attempts, .. } = emitted.event else {
+            panic!("expected emitted LLM failure");
+        };
+        let ladder = attempts.expect("emitted attempt ladder");
+        assert_eq!(ladder.len(), 2);
+        assert_eq!(ladder[0].ordinal, 1);
+        assert_eq!(ladder[0].outcome, "failed");
+        assert!(ladder[0].reason.as_deref().is_some_and(|reason| {
+            reason.contains("rate_limited")
+                && reason.contains("http 429")
+                && reason.contains("rate_limit_exceeded")
+                && reason.contains("provider_retry_after")
+        }));
+        assert_eq!(ladder[0].delay_ms, Some(250));
+        assert_eq!(ladder[1].ordinal, 2);
+        assert_eq!(ladder[1].outcome, "completed");
+        assert_eq!(ladder[1].delay_ms, None);
     }
 
     #[test]

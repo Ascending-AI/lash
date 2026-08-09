@@ -2117,13 +2117,15 @@ async fn postgres_session_graph_state_machine_properties_when_configured() {
         return;
     };
     let storage = Arc::new(storage);
-    lash_core::testing::conformance::session_graph_state_machine("postgres", move |_| {
-        let storage = Arc::clone(&storage);
-        async move {
-            reset(&storage).await;
-            Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
-        }
-    })
+    Box::pin(
+        lash_core::testing::conformance::session_graph_state_machine("postgres", move |_| {
+            let storage = Arc::clone(&storage);
+            async move {
+                reset(&storage).await;
+                Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
+            }
+        }),
+    )
     .await;
 }
 

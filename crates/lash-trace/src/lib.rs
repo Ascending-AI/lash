@@ -222,11 +222,15 @@ pub enum TraceEvent {
         provider_usage: Option<Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stream_summary: Option<Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attempts: Option<Vec<TraceRetryAttempt>>,
     },
     LlmCallFailed {
         error: TraceError,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stream_summary: Option<Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attempts: Option<Vec<TraceRetryAttempt>>,
     },
     ProviderRequest {
         event: TraceProviderRequestEvent,
@@ -251,6 +255,8 @@ pub enum TraceEvent {
         args: Value,
         output: TraceToolCallOutput,
         duration_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attempts: Option<Vec<TraceRetryAttempt>>,
     },
     /// A Restate `ctx.run` effect is about to cross its journal command boundary.
     JournaledEffectStarted {
@@ -316,6 +322,19 @@ pub enum TraceEvent {
         name: String,
         payload: Value,
     },
+}
+
+/// One provider or tool retry attempt projected from the retry owner's sealed
+/// record. The trace does not own retry bookkeeping; it only renders it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceRetryAttempt {
+    pub ordinal: u32,
+    pub outcome: String,
+    pub duration_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delay_ms: Option<u64>,
 }
 
 impl TraceEvent {
@@ -1081,6 +1100,7 @@ mod tests {
                     control: None,
                 },
                 duration_ms: 3,
+                attempts: None,
             },
         );
 

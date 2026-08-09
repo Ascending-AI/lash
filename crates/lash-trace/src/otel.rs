@@ -522,6 +522,7 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             usage,
             provider_usage,
             stream_summary,
+            attempts,
         } => {
             attrs.push(KeyValue::new(
                 "lash.llm.duration_ms",
@@ -547,10 +548,12 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 stream_summary,
             );
             push_payload_json(&mut attrs, options, "lash.llm.response_json", response);
+            push_payload_json(&mut attrs, options, "lash.retry.attempts_json", attempts);
         }
         TraceEvent::LlmCallFailed {
             error,
             stream_summary,
+            attempts,
         } => {
             attrs.push(KeyValue::new(
                 "error.type",
@@ -565,6 +568,7 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 stream_summary,
             );
             push_payload_json(&mut attrs, options, "lash.error.raw", &error.raw);
+            push_payload_json(&mut attrs, options, "lash.retry.attempts_json", attempts);
         }
         TraceEvent::ProviderRequest { event } => {
             attrs.push(KeyValue::new("lash.provider.name", event.provider.clone()));
@@ -689,6 +693,7 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             args,
             output,
             duration_ms,
+            attempts,
         } => {
             push_opt(&mut attrs, "lash.tool.call_id", call_id);
             attrs.push(KeyValue::new("lash.tool.name", name.clone()));
@@ -705,6 +710,7 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 "lash.tool.result_json",
                 &output.value_for_projection(),
             );
+            push_payload_json(&mut attrs, options, "lash.retry.attempts_json", attempts);
         }
         TraceEvent::JournaledEffectStarted {
             effect_name,
@@ -1315,6 +1321,7 @@ mod tests {
                     raw: None,
                 },
                 stream_summary: None,
+                attempts: None,
             },
         ))
         .unwrap();

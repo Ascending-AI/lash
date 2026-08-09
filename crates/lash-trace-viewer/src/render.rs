@@ -11,7 +11,10 @@ pub(super) fn interpret_typed(event: &TraceEvent, raw: &Value) -> (String, Strin
             false,
         ),
         TraceEvent::LlmCallCompleted {
-            response, usage, ..
+            response,
+            usage,
+            attempts,
+            ..
         } => {
             let usage_line = match usage {
                 Some(usage) => usage_text(usage, None),
@@ -19,13 +22,20 @@ pub(super) fn interpret_typed(event: &TraceEvent, raw: &Value) -> (String, Strin
             };
             (
                 format!("completed in {} ms", response.duration_ms),
-                format!("{usage_line}\n{}", response.text),
+                with_retry_ladder(
+                    format!("{usage_line}\n{}", response.text),
+                    attempts.as_deref(),
+                ),
                 false,
             )
         }
-        TraceEvent::LlmCallFailed { error, .. } => {
-            (error.message.clone(), failure_detail(error), true)
-        }
+        TraceEvent::LlmCallFailed {
+            error, attempts, ..
+        } => (
+            error.message.clone(),
+            with_retry_ladder(failure_detail(error), attempts.as_deref()),
+            true,
+        ),
         TraceEvent::ProviderRequest { event } => (
             format!("{}: {}", event.provider, event.endpoint),
             format!(
@@ -39,13 +49,17 @@ pub(super) fn interpret_typed(event: &TraceEvent, raw: &Value) -> (String, Strin
             name,
             output,
             duration_ms,
+            attempts,
             ..
         } => {
             let ok = output.is_success();
-            let summary = format!(
-                "{} in {duration_ms} ms\n{}",
-                if ok { "ok" } else { "error" },
-                json_compact(&output.value_for_projection())
+            let summary = with_retry_ladder(
+                format!(
+                    "{} in {duration_ms} ms\n{}",
+                    if ok { "ok" } else { "error" },
+                    json_compact(&output.value_for_projection())
+                ),
+                attempts.as_deref(),
             );
             (name.clone(), summary, !ok)
         }
@@ -219,4 +233,29 @@ pub(super) fn interpret_typed(event: &TraceEvent, raw: &Value) -> (String, Strin
             (kind_title(event.kind()), default_summary(raw), false)
         }
     }
+}
+
+fn with_retry_ladder(
+    summary: String,
+    attempts: Option<&[lash_trace::TraceRetryAttempt]>,
+) -> String {
+    let Some(attempts) = attempts else {
+        return summary;
+    };
+    let mut lines = Vec::with_capacity(attempts.len() + 1);
+    lines.push(format!("attempts: {}", attempts.len()));
+    lines.extend(attempts.iter().map(|attempt| {
+        let mut line = format!(
+            "#{} {} ({} ms)",
+            attempt.ordinal, attempt.outcome, attempt.duration_ms
+        );
+        if let Some(reason) = &attempt.reason {
+            line.push_str(&format!(": {reason}"));
+        }
+        if let Some(delay_ms) = attempt.delay_ms {
+            line.push_str(&format!("; retry after {delay_ms} ms"));
+        }
+        line
+    }));
+    format!("{summary}\n{}", lines.join("\n"))
 }

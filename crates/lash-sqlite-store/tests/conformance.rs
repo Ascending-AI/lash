@@ -680,16 +680,18 @@ async fn sqlite_runtime_persistence_state_machine_properties() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_session_graph_state_machine_properties() {
     let dirs = Arc::new(Mutex::new(Vec::new()));
-    lash_core::testing::conformance::session_graph_state_machine("sqlite", move |_| {
-        let dirs = Arc::clone(&dirs);
-        async move {
-            let dir = tempfile::tempdir().expect("session-graph property tempdir");
-            let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()))
-                as Arc<dyn SessionStoreFactory>;
-            dirs.lock_recover().push(dir);
-            factory
-        }
-    })
+    Box::pin(
+        lash_core::testing::conformance::session_graph_state_machine("sqlite", move |_| {
+            let dirs = Arc::clone(&dirs);
+            async move {
+                let dir = tempfile::tempdir().expect("session-graph property tempdir");
+                let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()))
+                    as Arc<dyn SessionStoreFactory>;
+                dirs.lock_recover().push(dir);
+                factory
+            }
+        }),
+    )
     .await;
 }
 

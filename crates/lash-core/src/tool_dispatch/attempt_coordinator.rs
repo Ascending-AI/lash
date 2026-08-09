@@ -152,6 +152,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
     let started_at = context.clock.now();
     let max_attempts = retry_policy.max_attempts().max(1);
     let mut triggers = Vec::new();
+    let mut attempts = Vec::new();
 
     for attempt in 1..=max_attempts {
         let invocation = identity.attempt_invocation(context, &call, attempt);
@@ -176,12 +177,13 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
             Ok(outcome) => outcome,
             Err(err) => {
                 return CoordinatedToolInvocation {
-                    launch: ToolCallLaunch::Done(runtime_failure_outcome(
+                    launch: ToolCallLaunch::Done(Box::new(runtime_failure_outcome(
                         &call,
                         "tool_attempt_failed",
                         err.to_string(),
                         identity.duration_ms(context, started_at, 0),
-                    )),
+                        attempts,
+                    ))),
                     triggers,
                 };
             }
@@ -201,27 +203,36 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
             } => {
                 let duration_ms = identity.duration_ms(context, started_at, duration_ms);
                 return CoordinatedToolInvocation {
-                    launch: ToolCallLaunch::Pending(PendingToolDispatchOutcome {
+                    launch: ToolCallLaunch::Pending(Box::new(PendingToolDispatchOutcome {
                         tool_name: call.tool_name,
                         args: call.args,
                         key: *key,
                         pending,
                         duration_ms,
-                    }),
+                        attempts,
+                    })),
                     triggers,
                 };
             }
             crate::ToolAttemptLaunch::Done { mut record } => {
                 record.call_id = Some(call.call_id.clone());
-                record.duration_ms = identity.duration_ms(context, started_at, record.duration_ms);
                 let retry_after = retry_after_ms(
                     &ToolResult::from_output(record.output.clone()),
                     retry_policy,
                     attempt - 1,
                 );
+                attempts.push(crate::trace::trace_tool_attempt(
+                    attempt,
+                    record.as_ref(),
+                    (attempt < max_attempts).then_some(retry_after).flatten(),
+                ));
+                record.duration_ms = identity.duration_ms(context, started_at, record.duration_ms);
                 let Some(retry_after) = retry_after else {
                     return CoordinatedToolInvocation {
-                        launch: ToolCallLaunch::Done(ToolDispatchOutcome { record: *record }),
+                        launch: ToolCallLaunch::Done(Box::new(ToolDispatchOutcome {
+                            record: *record,
+                            attempts,
+                        })),
                         triggers,
                     };
                 };
@@ -236,7 +247,10 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                         ))
                     });
                     return CoordinatedToolInvocation {
-                        launch: ToolCallLaunch::Done(ToolDispatchOutcome { record: *record }),
+                        launch: ToolCallLaunch::Done(Box::new(ToolDispatchOutcome {
+                            record: *record,
+                            attempts,
+                        })),
                         triggers,
                     };
                 }
@@ -250,7 +264,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                     .await
                 {
                     return CoordinatedToolInvocation {
-                        launch: ToolCallLaunch::Done(runtime_failure_outcome(
+                        launch: ToolCallLaunch::Done(Box::new(runtime_failure_outcome(
                             &call,
                             "tool_retry_sleep_failed",
                             format!(
@@ -258,7 +272,8 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                                 call.tool_name
                             ),
                             identity.duration_ms(context, started_at, 0),
-                        )),
+                            attempts,
+                        ))),
                         triggers,
                     };
                 }
@@ -267,12 +282,13 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
     }
 
     CoordinatedToolInvocation {
-        launch: ToolCallLaunch::Done(runtime_failure_outcome(
+        launch: ToolCallLaunch::Done(Box::new(runtime_failure_outcome(
             &call,
             "tool_retry_loop_failed",
             "tool retry loop exited without a terminal result",
             identity.duration_ms(context, started_at, 0),
-        )),
+            attempts,
+        ))),
         triggers,
     }
 }
@@ -282,6 +298,7 @@ fn runtime_failure_outcome(
     code: impl Into<String>,
     message: impl Into<String>,
     duration_ms: u64,
+    attempts: Vec<lash_trace::TraceRetryAttempt>,
 ) -> ToolDispatchOutcome {
     ToolDispatchOutcome {
         record: ToolCallRecord {
@@ -295,6 +312,7 @@ fn runtime_failure_outcome(
             )),
             duration_ms,
         },
+        attempts,
     }
 }
 

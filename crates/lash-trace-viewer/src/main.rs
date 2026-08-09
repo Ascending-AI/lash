@@ -1177,6 +1177,22 @@ mod tests {
                 usage: Some(usage()),
                 provider_usage: None,
                 stream_summary: None,
+                attempts: Some(vec![
+                    lash_trace::TraceRetryAttempt {
+                        ordinal: 1,
+                        outcome: "failed".to_string(),
+                        duration_ms: 12,
+                        reason: Some("http_429".to_string()),
+                        delay_ms: Some(250),
+                    },
+                    lash_trace::TraceRetryAttempt {
+                        ordinal: 2,
+                        outcome: "completed".to_string(),
+                        duration_ms: 8,
+                        reason: None,
+                        delay_ms: None,
+                    },
+                ]),
             },
             TraceEvent::LlmCallFailed {
                 error: TraceError {
@@ -1187,6 +1203,7 @@ mod tests {
                     raw: None,
                 },
                 stream_summary: None,
+                attempts: None,
             },
             TraceEvent::ProviderRequest {
                 event: TraceProviderRequestEvent {
@@ -1242,6 +1259,22 @@ mod tests {
                     control: None,
                 },
                 duration_ms: 4,
+                attempts: Some(vec![
+                    lash_trace::TraceRetryAttempt {
+                        ordinal: 1,
+                        outcome: "failed".to_string(),
+                        duration_ms: 1,
+                        reason: Some("busy".to_string()),
+                        delay_ms: Some(10),
+                    },
+                    lash_trace::TraceRetryAttempt {
+                        ordinal: 2,
+                        outcome: "completed".to_string(),
+                        duration_ms: 3,
+                        reason: None,
+                        delay_ms: None,
+                    },
+                ]),
             },
             TraceEvent::JournaledEffectStarted {
                 effect_name: "lash:turn:llm:1".to_string(),
@@ -1438,6 +1471,30 @@ mod tests {
     }
 
     #[test]
+    fn llm_and_tool_retry_ladders_render_attempt_count_reason_and_delay() {
+        let trace = loaded_trace(
+            every_variant()
+                .into_iter()
+                .filter(|event| {
+                    matches!(
+                        event,
+                        TraceEvent::LlmCallCompleted { .. } | TraceEvent::ToolCallCompleted { .. }
+                    )
+                })
+                .map(|event| TraceRecord::new(TraceContext::default(), event))
+                .collect(),
+        );
+        let model = build_model(&trace);
+        assert_eq!(model.events.len(), 2);
+        for event in model.events {
+            assert!(event.summary.contains("attempts: 2"));
+            assert!(event.summary.contains("#1 failed"));
+            assert!(event.summary.contains("retry after"));
+            assert!(event.summary.contains("#2 completed"));
+        }
+    }
+
+    #[test]
     fn tool_failure_is_flagged_and_badged() {
         let record = TraceRecord::new(
             TraceContext::default(),
@@ -1450,6 +1507,7 @@ mod tests {
                     control: None,
                 },
                 duration_ms: 2,
+                attempts: None,
             },
         );
         let entry = TraceEntry {

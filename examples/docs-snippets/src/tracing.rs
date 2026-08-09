@@ -320,6 +320,7 @@ mod asserted_examples {
             args,
             output,
             duration_ms,
+            ..
         } = &completed_event
         else {
             panic!("the wire event must retain its tool-completion shape");
@@ -366,6 +367,7 @@ mod asserted_examples {
                 usage: Some(TraceTokenUsage::default()),
                 provider_usage: Some(serde_json::json!({ "cached_tokens": 64 })),
                 stream_summary: None,
+                attempts: None,
             },
             TraceEvent::RollingHistoryCompactionNeeded {
                 context_budget_tokens: 30_000,

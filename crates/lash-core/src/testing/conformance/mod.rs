@@ -463,10 +463,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn in_memory_session_graph_state_machine_properties() {
-        session_graph_state_machine("in-memory", |_| async {
+        Box::pin(session_graph_state_machine("in-memory", |_| async {
             Arc::new(crate::InMemorySessionStoreFactory::new())
                 as Arc<dyn crate::SessionStoreFactory>
-        })
+        }))
         .await;
     }
 
