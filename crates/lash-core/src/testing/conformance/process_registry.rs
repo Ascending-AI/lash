@@ -9,9 +9,9 @@ use super::process_references::{
 use super::*;
 use crate::{ProcessRecord, TestProcessRegistryWriteExt};
 
-// The shared registry fixture performs 32 successful registrations and one
-// prune; the cold refold fixture below adds the 33rd registration.
-const REOPEN_BASELINE_SPAWNS: usize = 33;
+// The shared registry fixture performs 44 successful registrations and one
+// prune; the cold refold fixture below adds the 45th registration.
+const REOPEN_BASELINE_SPAWNS: usize = 45;
 const REOPEN_BASELINE_PRUNED: usize = 1;
 
 /// Run the process-registry contract against a fresh backend.
@@ -379,6 +379,7 @@ async fn process_registry_conformance(registry: Arc<dyn ProcessRegistry>) {
     lifecycle_status_and_outcome_fold(Arc::clone(&registry)).await;
     producer_terminal_status_must_match_materialized_outcome(Arc::clone(&registry)).await;
     list_filters_match_extracted_and_json_fields(Arc::clone(&registry)).await;
+    process_registry_pagination(Arc::clone(&registry)).await;
     waiting_processes_remain_in_the_recovery_worklist(Arc::clone(&registry)).await;
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     list_processes_filters_by_enriched_fields(Arc::clone(&registry)).await;
@@ -393,6 +394,227 @@ async fn process_registry_conformance(registry: Arc<dyn ProcessRegistry>) {
     .await;
     process_attempt_budget_is_typed(Arc::clone(&registry)).await;
     tombstones_make_pruned_processes_distinguishable(registry).await;
+}
+
+/// Prove bounded keyset pagination and its page-boundary completion contract.
+#[doc(hidden)]
+pub async fn process_registry_pagination(registry: Arc<dyn ProcessRegistry>) {
+    let process_ids = (0..7)
+        .map(|index| format!("000-paged-worklist-{index:02}"))
+        .collect::<Vec<_>>();
+    for process_id in &process_ids {
+        registry
+            .register_process(registration(process_id))
+            .await
+            .expect("register paged worklist process");
+    }
+
+    let limit = std::num::NonZeroUsize::new(2).expect("non-zero test page size");
+    let first = registry
+        .list_non_terminal_page(limit, None)
+        .await
+        .expect("read first recovery worklist page");
+    assert_eq!(
+        first.records.len(),
+        2,
+        "the first page must honor its bound"
+    );
+    let boundary_id = first
+        .records
+        .last()
+        .expect("the first page is non-empty")
+        .id
+        .clone();
+    registry
+        .complete_process(
+            &boundary_id,
+            ProcessAwaitOutput::Success {
+                value: serde_json::json!({"completed_between_pages": true}),
+                control: None,
+            },
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete page-boundary process");
+
+    let mut page_count = 1;
+    let mut returned_ids = first
+        .records
+        .into_iter()
+        .map(|record| record.id)
+        .collect::<Vec<_>>();
+    let mut continuation = first.continuation;
+    while let Some(cursor) = continuation {
+        let page = registry
+            .list_non_terminal_page(limit, Some(cursor))
+            .await
+            .expect("read recovery worklist continuation");
+        page_count += 1;
+        returned_ids.extend(page.records.into_iter().map(|record| record.id));
+        continuation = page.continuation;
+    }
+
+    assert!(
+        page_count >= 3,
+        "the fixture must span at least three pages"
+    );
+    for process_id in &process_ids {
+        assert_eq!(
+            returned_ids.iter().filter(|id| *id == process_id).count(),
+            1,
+            "each scan-start row must be returned exactly once"
+        );
+    }
+    assert_eq!(
+        returned_ids.iter().filter(|id| *id == &boundary_id).count(),
+        1,
+        "a process completed after its page must not be dispatched again"
+    );
+    worklist_excludes_rows_terminalized_before_a_later_page(Arc::clone(&registry)).await;
+    worklist_next_scan_recovers_insert_behind_cursor(Arc::clone(&registry)).await;
+    worklist_captured_boundary_defers_beyond_bound_insert(registry).await;
+}
+
+async fn collect_worklist_ids(registry: &dyn ProcessRegistry) -> Vec<String> {
+    let limit = std::num::NonZeroUsize::new(128).expect("non-zero test page size");
+    let mut continuation = None;
+    let mut ids = Vec::new();
+    loop {
+        let page = registry
+            .list_non_terminal_page(limit, continuation)
+            .await
+            .expect("scan complete recovery worklist");
+        ids.extend(page.records.into_iter().map(|record| record.id));
+        let Some(next) = page.continuation else {
+            return ids;
+        };
+        continuation = Some(next);
+    }
+}
+
+/// A row that terminalizes before its not-yet-read page is no longer recovery work.
+#[doc(hidden)]
+pub async fn worklist_excludes_rows_terminalized_before_a_later_page(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    let first_id = "!!!worklist-terminal-later-a";
+    let terminalized_id = "!!!worklist-terminal-later-b";
+    let last_id = "!!!worklist-terminal-later-c";
+    for process_id in [first_id, terminalized_id, last_id] {
+        registry
+            .register_process(registration(process_id))
+            .await
+            .expect("register later-page terminalization fixture");
+    }
+    let limit = std::num::NonZeroUsize::new(1).expect("non-zero test page size");
+    let first = registry
+        .list_non_terminal_page(limit, None)
+        .await
+        .expect("read first later-page terminalization page");
+    assert_eq!(first.records[0].id, first_id);
+    registry
+        .complete_process(
+            terminalized_id,
+            ProcessAwaitOutput::Success {
+                value: serde_json::json!({"terminalized_before_page": true}),
+                control: None,
+            },
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("terminalize row before its page");
+
+    let mut ids = Vec::new();
+    let mut continuation = first.continuation;
+    while let Some(cursor) = continuation {
+        let page = registry
+            .list_non_terminal_page(limit, Some(cursor))
+            .await
+            .expect("read later-page terminalization continuation");
+        ids.extend(page.records.into_iter().map(|record| record.id));
+        continuation = page.continuation;
+    }
+    assert!(!ids.iter().any(|id| id == terminalized_id));
+    assert!(ids.iter().any(|id| id == last_id));
+}
+
+/// An in-range insert behind the keyset cursor is guaranteed on the next scan.
+#[doc(hidden)]
+pub async fn worklist_next_scan_recovers_insert_behind_cursor(registry: Arc<dyn ProcessRegistry>) {
+    let first_id = "!!worklist-behind-cursor-a";
+    let bound_id = "!!worklist-behind-cursor-z";
+    let inserted_id = "!!!!worklist-behind-cursor-insert";
+    for process_id in [first_id, bound_id] {
+        registry
+            .register_process(registration(process_id))
+            .await
+            .expect("register behind-cursor fixture");
+    }
+    let first = registry
+        .list_non_terminal_page(
+            std::num::NonZeroUsize::new(1).expect("non-zero test page size"),
+            None,
+        )
+        .await
+        .expect("capture behind-cursor scan");
+    let cursor_id = &first.records[0].id;
+    assert!(
+        inserted_id < cursor_id.as_str(),
+        "the concurrent insert fixture must sort behind the captured cursor"
+    );
+    registry
+        .register_process(registration(inserted_id))
+        .await
+        .expect("insert in-range row behind cursor");
+
+    let next_scan = collect_worklist_ids(registry.as_ref()).await;
+    assert!(
+        next_scan.iter().any(|id| id == inserted_id),
+        "the next scan must recover an insert behind the prior cursor"
+    );
+}
+
+/// An insert beyond the captured upper bound waits for the next scan.
+#[doc(hidden)]
+pub async fn worklist_captured_boundary_defers_beyond_bound_insert(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    let limit = std::num::NonZeroUsize::new(1).expect("non-zero test page size");
+    let first = registry
+        .list_non_terminal_page(limit, None)
+        .await
+        .expect("capture bounded worklist scan");
+    let inserted_id = "~~~~~worklist-after-captured-bound";
+    registry
+        .register_process(registration(inserted_id))
+        .await
+        .expect("insert beyond captured bound");
+
+    let mut current_scan_ids = first
+        .records
+        .into_iter()
+        .map(|record| record.id)
+        .collect::<Vec<_>>();
+    let mut continuation = first.continuation;
+    while let Some(cursor) = continuation {
+        let page = registry
+            .list_non_terminal_page(limit, Some(cursor))
+            .await
+            .expect("read captured-bound continuation");
+        current_scan_ids.extend(page.records.into_iter().map(|record| record.id));
+        continuation = page.continuation;
+    }
+    assert!(
+        !current_scan_ids.iter().any(|id| id == inserted_id),
+        "an insert beyond the captured bound must not leak into the current scan"
+    );
+    assert!(
+        collect_worklist_ids(registry.as_ref())
+            .await
+            .iter()
+            .any(|id| id == inserted_id),
+        "the next scan must include the beyond-bound insert"
+    );
 }
 
 async fn canonical_process_event_payload_replay(registry: Arc<dyn ProcessRegistry>) {
@@ -818,9 +1040,13 @@ async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn Pro
         .expect("park process");
 
     let non_terminal = registry
-        .list_non_terminal()
+        .list_non_terminal_page(
+            std::num::NonZeroUsize::new(128).expect("non-zero test page size"),
+            None,
+        )
         .await
-        .expect("list recovery work");
+        .expect("list recovery work")
+        .records;
     assert!(
         non_terminal.iter().any(|record| record.id == process_id),
         "a waiting process must remain claimable by crash recovery"

@@ -25566,15 +25566,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
 
 [[api]]
-symbol = "lash::process::ProcessRegistry::list_non_terminal"
+symbol = "lash::process::ProcessRegistry::list_non_terminal_page"
 kind = "function"
 availability = "default+all-features"
-aliases = ["lash_core::ProcessRegistry::list_non_terminal"]
+aliases = ["lash_core::ProcessRegistry::list_non_terminal_page"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:763#.list_non_terminal()"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:516#assert!(registry"
-reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:761; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:760 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `registry .list_non_terminal() .await .expect(\"list recovery work\") .is_empty()` holds."
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:766#.list_non_terminal_page("
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:772#assert!(worklist_page.records.is_empty());"
+reason = "Exercised by the agent-workbench example; the assertion observes that the completed process is absent from the bounded recovery page."
 
 [[api]]
 symbol = "lash::process::ProcessRegistry::list_observed_by"
@@ -27079,6 +27079,83 @@ availability = "default+all-features"
 area = "processes"
 disposition = "unused-add"
 reason = "Add lash::process::ProcessWorkSnapshot::visible_process_ids to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::process::ProcessWorklistCursor"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessWorklistCursor"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:762#let worklist_cursor = ProcessWorklistCursor::new(\"invoice-a\", \"invoice-z\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:763#assert_eq!(worklist_cursor.after_process_id(), \"invoice-a\");"
+reason = "The agent-workbench registry example constructs the typed worklist continuation and asserts its exclusive boundary."
+
+[[api]]
+symbol = "lash::process::ProcessWorklistCursor::after_process_id"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessWorklistCursor::after_process_id"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:763#assert_eq!(worklist_cursor.after_process_id(), \"invoice-a\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:763#assert_eq!(worklist_cursor.after_process_id(), \"invoice-a\");"
+reason = "The example asserts the cursor's exclusive keyset boundary."
+
+[[api]]
+symbol = "lash::process::ProcessWorklistCursor::new"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessWorklistCursor::new"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:762#let worklist_cursor = ProcessWorklistCursor::new(\"invoice-a\", \"invoice-z\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:764#assert_eq!(worklist_cursor.through_process_id(), \"invoice-z\");"
+reason = "The example constructs a cursor and asserts both stored keyset boundaries."
+
+[[api]]
+symbol = "lash::process::ProcessWorklistCursor::through_process_id"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessWorklistCursor::through_process_id"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:764#assert_eq!(worklist_cursor.through_process_id(), \"invoice-z\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:764#assert_eq!(worklist_cursor.through_process_id(), \"invoice-z\");"
+reason = "The example asserts the cursor's inclusive scan boundary."
+
+[[api]]
+symbol = "lash::process::ProcessWorklistPage"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessWorklistPage"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:765#let worklist_page = registry"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:772#assert!(worklist_page.records.is_empty());"
+reason = "The example reads a bounded worklist page and asserts the terminal row is absent."
+
+[[api]]
+symbol = "lash::process::ProcessWorklistPage::continuation"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessWorklistPage::continuation"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:773#assert!(worklist_page.continuation.is_none());"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:773#assert!(worklist_page.continuation.is_none());"
+reason = "The example asserts that the exhausted bounded scan has no continuation."
+
+[[api]]
+symbol = "lash::process::ProcessWorklistPage::records"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessWorklistPage::records"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:772#assert!(worklist_page.records.is_empty());"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:772#assert!(worklist_page.records.is_empty());"
+reason = "The example asserts the bounded page's returned records are empty after completion."
 
 [[api]]
 symbol = "lash::process::Processes"

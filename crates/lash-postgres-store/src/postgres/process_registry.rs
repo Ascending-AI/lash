@@ -3,6 +3,8 @@ use lash_core::facade_support;
 mod prune;
 mod retention;
 mod wake_delivery;
+#[path = "process_registry/worklist.rs"]
+mod worklist;
 
 use prune::prune_process_rows_tx;
 use retention::{filter_tombstoned_process_ids, filter_unregistered_process_ids};
@@ -986,7 +988,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         .fetch_all(&self.pool)
         .await
         .map_err(plugin_sqlx_error)?;
-        let mut records = Vec::new();
+        let mut records: Vec<ProcessRecord> = Vec::new();
         for row in rows {
             if let Some(record) = decode_matching_process(row, filter)? {
                 records.push(record);
@@ -1209,21 +1211,12 @@ impl ProcessRegistry for PostgresProcessRegistry {
         Ok(lash_core::WakeDeliveryClaimOutcome::Applied)
     }
 
-    async fn list_non_terminal(&self) -> Result<Vec<ProcessRecord>, PluginError> {
-        let rows = sqlx::query(
-            "SELECT record_json FROM lash_processes
-             WHERE status IN ('running', 'waiting')
-             ORDER BY process_id ASC",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        let mut records = Vec::new();
-        for row in rows {
-            let json: String = row.get(0);
-            records.push(serde_json::from_str(&json).map_err(process_decode_error)?);
-        }
-        Ok(records)
+    async fn list_non_terminal_page(
+        &self,
+        limit: std::num::NonZeroUsize,
+        continuation: Option<lash_core::ProcessWorklistCursor>,
+    ) -> Result<lash_core::ProcessWorklistPage, PluginError> {
+        worklist::list_non_terminal_page(self, limit, continuation).await
     }
 
     async fn filter_unregistered_process_ids(
@@ -1243,7 +1236,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
     async fn live_reference_summary(
         &self,
     ) -> Result<Vec<ProcessLiveReferenceSummary>, PluginError> {
-        let records = self.list_non_terminal().await?;
+        let records = worklist::collect_non_terminal_records(self).await?;
         Ok(ProcessLiveReferenceSummary::from_records(records.iter()))
     }
 

@@ -367,8 +367,8 @@ mod process_work_tests {
             ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleSummary, ProcessIdentity, ProcessInput,
             ProcessLeaseClaimOutcome, ProcessListFilter, ProcessListMode, ProcessObserverBy,
             ProcessOriginator, ProcessProvenance, ProcessRegistration, ProcessRegistry,
-            ProcessStarted, ProcessStatus, ProcessStatusFilter, ProjectionWatermark,
-            RecoveryDisposition, SessionScope,
+            ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessWorklistCursor,
+            ProjectionWatermark, RecoveryDisposition, SessionScope,
         };
         let registry = lash::testing::TestLocalProcessRegistry::default();
         let process_id = "invoice-export";
@@ -759,11 +759,19 @@ mod process_work_tests {
         assert_eq!(cancel_summary.process_id, process_id);
         assert_eq!(cancel_summary.status, ProcessStatus::Completed);
 
-        assert!(registry
-            .list_non_terminal()
+        let worklist_cursor = ProcessWorklistCursor::new("example", "invoice-a", "invoice-z");
+        assert_eq!(worklist_cursor.backend(), "example");
+        assert_eq!(worklist_cursor.after_process_id(), "invoice-a");
+        assert_eq!(worklist_cursor.through_process_id(), "invoice-z");
+        let worklist_page = registry
+            .list_non_terminal_page(
+                std::num::NonZeroUsize::new(16).expect("non-zero test page size"),
+                None,
+            )
             .await
-            .expect("list recovery work")
-            .is_empty());
+            .expect("list recovery work");
+        assert!(worklist_page.records.is_empty());
+        assert!(worklist_page.continuation.is_none());
         assert_eq!(
             registry
                 .list_processes(&ProcessListFilter {

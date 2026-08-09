@@ -110,4 +110,8 @@ pub enum PluginError {
     ReservedProcessEvent { event_type: String },
     #[error("process wake delivery carries an invalid wake identity `{wake_id}`")]
     InvalidProcessWakeIdentity { wake_id: String },
+    /// A worklist continuation was passed to a registry backend other than the
+    /// backend that issued it.
+    #[error("process worklist cursor belongs to backend `{actual}`, not `{expected}`")]
+    ProcessWorklistCursorBackendMismatch { expected: String, actual: String },
 }

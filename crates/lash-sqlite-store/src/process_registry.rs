@@ -3,6 +3,7 @@ use lash_core::facade_support;
 mod segment_handover;
 mod support;
 mod wake_delivery;
+mod worklist;
 
 pub(crate) use support::tx_outcome;
 use support::{process_status_label, wake_allocation_floor_for_testing};
@@ -1136,32 +1137,12 @@ impl ProcessRegistry for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
-    async fn list_non_terminal(&self) -> Result<Vec<ProcessRecord>, lash_core::PluginError> {
-        self.conn
-            .call(move |conn| {
-                Ok((|| {
-                    let mut stmt = conn
-                        .prepare(
-                            "SELECT record_json FROM processes
-                             WHERE status IN ('running', 'waiting')
-                             ORDER BY process_id ASC",
-                        )
-                        .map_err(process_sqlite_error)?;
-                    let rows = stmt
-                        .query_map([], |row| row.get::<_, String>(0))
-                        .map_err(process_sqlite_error)?;
-                    let mut records = Vec::new();
-                    for row in rows {
-                        let record: ProcessRecord =
-                            serde_json::from_str(&row.map_err(process_sqlite_error)?)
-                                .map_err(process_decode_error)?;
-                        records.push(record);
-                    }
-                    Ok(records)
-                })())
-            })
-            .await
-            .map_err(process_sqlite_error)?
+    async fn list_non_terminal_page(
+        &self,
+        limit: std::num::NonZeroUsize,
+        continuation: Option<lash_core::ProcessWorklistCursor>,
+    ) -> Result<lash_core::ProcessWorklistPage, lash_core::PluginError> {
+        worklist::list_non_terminal_page(self, limit, continuation).await
     }
 
     async fn filter_unregistered_process_ids(
@@ -1241,7 +1222,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
     async fn live_reference_summary(
         &self,
     ) -> Result<Vec<ProcessLiveReferenceSummary>, lash_core::PluginError> {
-        let records = self.list_non_terminal().await?;
+        let records = worklist::collect_non_terminal_records(self).await?;
         Ok(ProcessLiveReferenceSummary::from_records(records.iter()))
     }
 

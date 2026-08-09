@@ -1,4 +1,5 @@
 use crate::plugin::PluginError;
+use std::num::NonZeroUsize;
 
 use super::ProcessCompletionOutcome;
 use super::engine::PersistedSegmentHandover;
@@ -33,6 +34,54 @@ pub struct ProcessPruneReport {
 pub enum ProjectionWatermark {
     UpTo(ProcessChangeCursor),
     NoProjector,
+}
+
+/// Opaque continuation for a bounded scan of the recovery worklist.
+///
+/// The cursor belongs to the registry that issued it. Hosts should pass it
+/// unchanged to [`ProcessRegistry::list_non_terminal_page`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessWorklistCursor {
+    backend: String,
+    after_process_id: String,
+    through_process_id: String,
+}
+
+impl ProcessWorklistCursor {
+    /// Construct a backend-tagged cursor when implementing a [`ProcessRegistry`].
+    pub fn new(
+        backend: impl Into<String>,
+        after_process_id: impl Into<String>,
+        through_process_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            backend: backend.into(),
+            after_process_id: after_process_id.into(),
+            through_process_id: through_process_id.into(),
+        }
+    }
+
+    /// Backend identity used to reject cross-backend cursor reuse.
+    pub fn backend(&self) -> &str {
+        &self.backend
+    }
+
+    /// Exclusive keyset boundary for the next page.
+    pub fn after_process_id(&self) -> &str {
+        &self.after_process_id
+    }
+
+    /// Inclusive upper key captured when the scan began.
+    pub fn through_process_id(&self) -> &str {
+        &self.through_process_id
+    }
+}
+
+/// One bounded page from the registry recovery worklist.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProcessWorklistPage {
+    pub records: Vec<ProcessRecord>,
+    pub continuation: Option<ProcessWorklistCursor>,
 }
 
 pub const DEFAULT_WAKE_DELIVERY_EXPIRY_MS: u64 = 7 * 24 * 60 * 60 * 1_000;
@@ -741,14 +790,34 @@ pub trait ProcessRegistry: Send + Sync {
         next_attempt_at_ms: u64,
     ) -> Result<WakeDeliveryClaimOutcome, PluginError>;
 
-    /// All non-terminal process records, in stable `process_id` order.
+    /// Return one bounded page of non-terminal records in stable `process_id`
+    /// order.
     ///
     /// This is the recovery sweep's worklist: every process that was started
     /// but has not reached a terminal event is a candidate for re-execution by
     /// a [`DurableProcessWorker`](crate::DurableProcessWorker) after a crash.
-    /// Terminal processes are excluded — they are already done and idempotent by
-    /// `process_id`, so re-running them would be wasted work.
-    async fn list_non_terminal(&self) -> Result<Vec<ProcessRecord>, PluginError>;
+    /// Terminal processes are excluded — they are already done and idempotent
+    /// by `process_id`, so re-running them would be wasted work.
+    ///
+    /// A first call (`continuation = None`) captures the greatest non-terminal
+    /// `process_id` as an inclusive upper bound. Continuations use keyset
+    /// pagination strictly after the last returned id and retain that bound.
+    /// Consequently, every row that is non-terminal when the scan starts is
+    /// returned exactly once unless it becomes terminal before its page is
+    /// read; a row completed between pages is never returned again. Concurrent
+    /// inserts cannot move the boundary or cause a scan-start row to be skipped
+    /// or duplicated. An insert whose id falls inside the captured range may be
+    /// returned if it sorts after the cursor. Process ids are not time ordered:
+    /// inserts at or below the cursor, as well as inserts beyond the captured
+    /// upper bound, wait for the next scan.
+    ///
+    /// Cursors are opaque outside the issuing registry and are invalid after
+    /// switching backends. `limit` is non-zero by construction.
+    async fn list_non_terminal_page(
+        &self,
+        limit: NonZeroUsize,
+        continuation: Option<ProcessWorklistCursor>,
+    ) -> Result<ProcessWorklistPage, PluginError>;
 
     /// Return the candidate ids that were never registered, preserving input
     /// order. A terminal process retained only as a tombstone is registered
@@ -794,6 +863,9 @@ pub trait ProcessRegistry: Send + Sync {
 
     /// Count non-terminal process rows by their captured definition and
     /// execution-environment references.
+    ///
+    /// This is intentionally a full-scan aggregate. Implementations must read
+    /// one consistent snapshot; worklist pagination is not part of this API.
     async fn live_reference_summary(&self)
     -> Result<Vec<ProcessLiveReferenceSummary>, PluginError>;
 
@@ -999,7 +1071,7 @@ async fn apply_pruned_trigger_delivery_reconciliation(
     // replacement row from being swept into this stale decision. If the process
     // is re-registered after this revalidation, deleting the observed delivery
     // is still safe: the new live row is itself recovery evidence through
-    // `list_non_terminal`, so recovery cannot lose the re-registered process.
+    // `list_non_terminal_page`, so recovery cannot lose the re-registered process.
     let process_ids = plan
         .candidates
         .iter()

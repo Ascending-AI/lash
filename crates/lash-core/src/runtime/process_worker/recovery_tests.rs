@@ -13,6 +13,7 @@ use crate::{
 };
 
 mod attachment_owner_tests;
+mod pagination_tests;
 #[path = "recovery_disposition_tests.rs"]
 mod recovery_disposition_tests;
 
@@ -47,7 +48,13 @@ async fn dispatcher_unwind_clears_running_latch_and_notifies() {
     let scheduler = Arc::new(ProcessExecutionScheduler::new(
         ProcessExecutionConcurrency::new(1).expect("valid test concurrency"),
     ));
-    scheduler.state.lock_recover().dispatcher_running = true;
+    let continuation =
+        crate::ProcessWorklistCursor::new("test", "after-panic-boundary", "through-panic-boundary");
+    {
+        let mut state = scheduler.state.lock_recover();
+        state.dispatcher_running = true;
+        state.worklist_scan = ProcessWorklistScan::Fetching(Some(continuation.clone()));
+    }
     let task_scheduler = Arc::clone(&scheduler);
     let task = crate::task::spawn(async move {
         let _guard = ProcessExecutionDispatcherGuard::new(task_scheduler);
@@ -61,6 +68,14 @@ async fn dispatcher_unwind_clears_running_latch_and_notifies() {
     assert!(
         !scheduler.state.lock_recover().dispatcher_running,
         "a later drive pass must be able to start a replacement dispatcher"
+    );
+    let state = scheduler.state.lock_recover();
+    assert!(
+        matches!(
+            &state.worklist_scan,
+            ProcessWorklistScan::Ready(Some(restored)) if restored == &continuation
+        ),
+        "a later dispatcher must retry the cursor whose fetch panicked"
     );
 }
 

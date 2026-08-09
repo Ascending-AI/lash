@@ -423,20 +423,33 @@ impl RestateProcessIngressRunner {
 #[async_trait::async_trait]
 impl ProcessRunHandle for RestateProcessIngressRunner {
     async fn claim_and_run_pending(&self) -> Result<(), PluginError> {
-        for record in self.registry.list_non_terminal().await? {
-            // ExternallyOwned rows are never submitted to ingress (ADR 0019):
-            // Lash does not execute them at the Restate tier either. A pending
-            // Abandon Request on such a row is reconciled into an Abandoned
-            // terminal here, mirroring the core sweep's
-            // `reconcile_externally_owned_abandon`; rows without a request are
-            // left untouched for their external owner to complete.
-            if record.disposition == RecoveryDisposition::ExternallyOwned {
-                if record.abandon_request.is_some() {
-                    self.reconcile_externally_owned_abandon(&record.id).await?;
+        let limit = std::num::NonZeroUsize::MIN.saturating_add(255);
+        let mut continuation = None;
+        loop {
+            let page = self
+                .registry
+                .list_non_terminal_page(limit, continuation)
+                .await?;
+            let next = page.continuation;
+            for record in page.records {
+                // ExternallyOwned rows are never submitted to ingress (ADR 0019):
+                // Lash does not execute them at the Restate tier either. A pending
+                // Abandon Request on such a row is reconciled into an Abandoned
+                // terminal here, mirroring the core sweep's
+                // `reconcile_externally_owned_abandon`; rows without a request are
+                // left untouched for their external owner to complete.
+                if record.disposition == RecoveryDisposition::ExternallyOwned {
+                    if record.abandon_request.is_some() {
+                        self.reconcile_externally_owned_abandon(&record.id).await?;
+                    }
+                    continue;
                 }
-                continue;
+                self.submit_record(record).await?;
             }
-            self.submit_record(record).await?;
+            let Some(next) = next else {
+                break;
+            };
+            continuation = Some(next);
         }
         Ok(())
     }

@@ -188,7 +188,7 @@ pub trait ProcessRunHandle: Send + Sync {
 /// Inline run handle: drives the worker's own lease-protected sweep in-process.
 ///
 /// Delegates to [`DurableProcessWorker::drive_pending_processes`], the existing
-/// `list_non_terminal -> claim lease -> run -> complete -> release` loop, so the
+/// `list_non_terminal_page -> claim lease -> run -> complete -> release` loop, so the
 /// inline execution reuses the same coordination point as controller-owned execution.
 pub struct InlineProcessRunHandle {
     worker: DurableProcessWorker,

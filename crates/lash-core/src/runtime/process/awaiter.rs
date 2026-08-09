@@ -16,7 +16,9 @@ use super::model::{
 use super::registry::{ProcessPruneReport, ProcessRegistry, ProjectionWatermark};
 use crate::PluginError;
 
+mod attach;
 mod change_hub;
+pub use attach::ProcessAttach;
 pub use change_hub::ProcessChangeHub;
 
 const AWAIT_BACKOFF_MIN: Duration = Duration::from_millis(25);
@@ -361,14 +363,6 @@ impl ProcessAwaiter {
 
 fn next_backoff(current: Duration) -> Duration {
     current.saturating_mul(2).min(AWAIT_BACKOFF_MAX)
-}
-
-/// Backend-specific terminal attachment. [`PluginError::ProcessAttachCeilingElapsed`]
-/// means only the connection aged out; the durable wait remains live, so the
-/// host must re-attach with the same process id instead of reporting failure.
-#[async_trait::async_trait]
-pub trait ProcessAttach: Send + Sync {
-    async fn await_terminal(&self, process_id: &str) -> Result<ProcessAwaitOutput, PluginError>;
 }
 
 #[async_trait::async_trait]
@@ -736,8 +730,12 @@ impl ProcessRegistry for WatchedProcessRegistry {
             .await
     }
 
-    async fn list_non_terminal(&self) -> Result<Vec<ProcessRecord>, PluginError> {
-        self.inner.list_non_terminal().await
+    async fn list_non_terminal_page(
+        &self,
+        limit: std::num::NonZeroUsize,
+        continuation: Option<super::ProcessWorklistCursor>,
+    ) -> Result<super::ProcessWorklistPage, PluginError> {
+        self.inner.list_non_terminal_page(limit, continuation).await
     }
 
     async fn live_reference_summary(

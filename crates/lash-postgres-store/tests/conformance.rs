@@ -1499,7 +1499,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 40, "Postgres component schema pin");
+    assert_eq!(current_version, 41, "Postgres component schema pin");
     let payload_hash_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
          WHERE table_schema = 'public'
@@ -2139,6 +2139,19 @@ async fn postgres_process_registry_satisfies_conformance_when_configured() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_process_registry_pagination_satisfies_conformance_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres pagination conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    lash_core::testing::conformance::process_registry_pagination(registry).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_process_prune_batch_tombstones_are_ordered_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres process prune batch conformance: database URL is not set");
@@ -2364,9 +2377,13 @@ async fn assert_waiting_process_is_live_not_prunable(
     assert!(!waiting.is_terminal(), "a waiting process is not terminal");
 
     let live = registry
-        .list_non_terminal()
+        .list_non_terminal_page(
+            std::num::NonZeroUsize::new(16).expect("non-zero test page size"),
+            None,
+        )
         .await
-        .expect("list non-terminal processes");
+        .expect("list non-terminal processes")
+        .records;
     assert!(
         live.iter().any(|record| record.id == process_id),
         "a waiting process must be listed as live"
@@ -2436,8 +2453,8 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
         }
     }
     assert_eq!(
-        total, 2,
-        "expected exactly two status-list literal sites in the PostgreSQL backend; \
+        total, 1,
+        "expected exactly one status-list literal site in the PostgreSQL backend; \
          update this count when adding one"
     );
 }

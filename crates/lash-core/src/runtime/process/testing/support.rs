@@ -41,12 +41,37 @@ impl Default for TestLocalProcessRegistry {
             wake_delivery_config: super::super::WakeDeliveryConfig::default(),
             wake_deliveries: Arc::new(Mutex::new(HashMap::new())),
             wake_allocation_floors: Arc::new(Mutex::new(HashMap::new())),
+            worklist_page_reads: Arc::new(Mutex::new(Vec::new())),
+            worklist_page_error_plan: Arc::new(Mutex::new(None)),
+            worklist_page_pause: Arc::new(std::sync::Mutex::new(None)),
             clock: Arc::new(crate::SystemClock),
         }
     }
 }
 
 impl TestLocalProcessRegistry {
+    /// Inject worklist page-read errors after the given successful reads.
+    #[doc(hidden)]
+    pub async fn set_worklist_page_errors_for_testing(
+        &self,
+        successful_reads: usize,
+        errors: Vec<PluginError>,
+    ) {
+        *self.worklist_page_error_plan.lock().await = Some((successful_reads, errors.into()));
+    }
+
+    /// Pause the next worklist read before its injected result is returned.
+    #[doc(hidden)]
+    pub fn pause_next_worklist_page_for_testing(&self) -> ExecutionWritePauseHandle {
+        let pause = ExecutionWritePause::new();
+        *self.worklist_page_pause.lock_recover() = Some(pause.clone());
+        pause.handle()
+    }
+
+    pub(super) async fn pause_worklist_page(&self) {
+        Self::wait_for_pause(&self.worklist_page_pause, "worklist page pause lock").await;
+    }
+
     /// Updates process read error state for store and process-engine implementors while persisting
     /// and coordinating durable process execution.
     pub async fn set_process_read_error(&self, error: Option<PluginError>) {

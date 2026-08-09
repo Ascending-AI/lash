@@ -322,6 +322,8 @@ CREATE TABLE IF NOT EXISTS processes (
 
 CREATE INDEX IF NOT EXISTS idx_processes_status
     ON processes(status);
+CREATE INDEX IF NOT EXISTS idx_processes_live_worklist
+    ON processes(process_id) WHERE status IN ('running', 'waiting');
 
 CREATE INDEX IF NOT EXISTS idx_processes_change_seq
     ON processes(change_seq);
@@ -462,7 +464,8 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
 // payloads structurally instead of retaining a payload-hash column.
 // Version 22 stores v3 process-environment refs whose content-addressed policy
 // payload includes the required per-turn budget.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 22;
+// Version 23 indexes the bounded non-terminal recovery worklist by process id.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 23;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
