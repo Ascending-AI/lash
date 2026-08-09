@@ -52,6 +52,8 @@ const RETRY_INTERVAL: Duration = Duration::from_secs(2);
 /// whose owner died just after a renewal, with margin, and finite so a genuinely
 /// stuck row is reported instead of retried forever.
 pub const DEFERRED_RETRY_DEADLINE: Duration = Duration::from_secs(120);
+const THREAD_ROOT_NOT_PROCESSED: &str = "thread_root_not_processed";
+const THREAD_ROOT_NOT_AVAILABLE: &str = "thread_root_not_available";
 
 /// The app's own identity in the workspace, from `auth.test`.
 #[derive(Clone, Debug)]
@@ -114,6 +116,15 @@ pub enum Disposition {
         channel: String,
         reason: &'static str,
     },
+    /// A bounded wait could not find the thread root's durable route. The user
+    /// was notified in-thread, while the event stays at the FIG-1008 non-terminal
+    /// stage so the bot's own retry loop or a later boot can recover it.
+    RecoverableFailure {
+        event_id: String,
+        channel: String,
+        notified: bool,
+        reason: &'static str,
+    },
     /// A turn ran but produced no text to post.
     Silent {
         event_id: String,
@@ -132,9 +143,10 @@ pub enum Disposition {
 pub struct RecoveryReport {
     /// Events this pass finished, for logging.
     pub settled: Vec<Disposition>,
-    /// Events whose admission is still claimed under a lease generation this boot
-    /// cannot take. Their ledger rows remain resumable; hand these to
-    /// [`ChannelBot::retry_deferred`].
+    /// Events worth retrying in-process after this pass. This includes admissions
+    /// fenced by a live lease and thread roots that exist but have not finished.
+    /// A `thread_root_not_available` row is deliberately excluded: recovery has
+    /// already given it one cheap probe this boot.
     pub deferred: Vec<String>,
 }
 
@@ -153,6 +165,10 @@ pub struct ChannelBot {
     /// `U…` to display name, so `<@U…>` renders as something a model can reason
     /// about. Filled from `users.list` and refreshed on a miss.
     directory: Arc<RwLock<HashMap<String, String>>>,
+    #[cfg(test)]
+    missing_root_observed: Arc<tokio::sync::Notify>,
+    #[cfg(test)]
+    thread_root_wait_budget: Arc<Mutex<Duration>>,
 }
 
 impl ChannelBot {
@@ -174,6 +190,10 @@ impl ChannelBot {
             session_owner,
             session_locks: Arc::new(Mutex::new(HashMap::new())),
             directory: Arc::new(RwLock::new(HashMap::new())),
+            #[cfg(test)]
+            missing_root_observed: Arc::new(tokio::sync::Notify::new()),
+            #[cfg(test)]
+            thread_root_wait_budget: Arc::new(Mutex::new(threads::ROOT_ADMISSION_WAIT_BUDGET)),
         }
     }
 
@@ -195,6 +215,32 @@ impl ChannelBot {
     #[cfg(test)]
     pub fn session_lock_count(&self) -> usize {
         self.session_locks.lock_recover().len()
+    }
+
+    #[cfg(test)]
+    pub async fn wait_for_missing_thread_root(&self) {
+        self.missing_root_observed.notified().await;
+    }
+
+    #[cfg(test)]
+    pub fn set_thread_root_wait_budget(&self, budget: Duration) {
+        *self.thread_root_wait_budget.lock_recover() = budget;
+    }
+
+    fn thread_root_wait_budget(&self) -> Duration {
+        #[cfg(test)]
+        {
+            *self.thread_root_wait_budget.lock_recover()
+        }
+        #[cfg(not(test))]
+        {
+            threads::ROOT_ADMISSION_WAIT_BUDGET
+        }
+    }
+
+    /// Remaining background budget after a foreground thread-root wait.
+    pub fn recoverable_retry_deadline(&self) -> Duration {
+        DEFERRED_RETRY_DEADLINE.saturating_sub(self.thread_root_wait_budget())
     }
 
     /// Whether an envelope's `token` is the one this bot expects.
@@ -255,7 +301,19 @@ impl ChannelBot {
                 // Accepted and then abandoned. The work is genuinely unfinished,
                 // and every step of it is idempotent, so re-run it rather than
                 // writing it off.
-                _ => self.drive_accepted(&record, true).await?,
+                _ => {
+                    // Boot recovery probes thread routes once without parking the
+                    // serial pass behind a 45s wait. A root that exists but is
+                    // still processing is handed to the background retry loop;
+                    // an unavailable root stays recoverable but cheap next boot.
+                    let root_wait_budget = if record.thread_ts.is_some() {
+                        Duration::ZERO
+                    } else {
+                        self.thread_root_wait_budget()
+                    };
+                    self.drive_accepted_with_root_budget(&record, true, root_wait_budget)
+                        .await?
+                }
             };
             eprintln!(
                 "slack-clone-bot recovered event {} ({}, {}): {outcome:?}",
@@ -263,8 +321,14 @@ impl ChannelBot {
                 record.kind,
                 record.stage.as_str()
             );
-            if let Disposition::Deferred { event_id, .. } = &outcome {
-                report.deferred.push(event_id.clone());
+            match &outcome {
+                Disposition::Deferred { event_id, .. }
+                | Disposition::RecoverableFailure {
+                    event_id,
+                    reason: THREAD_ROOT_NOT_PROCESSED,
+                    ..
+                } => report.deferred.push(event_id.clone()),
+                _ => {}
             }
             report.settled.push(outcome);
         }
@@ -273,21 +337,19 @@ impl ChannelBot {
 
     /// Re-attempt a deferred event until it settles or `deadline` passes.
     ///
-    /// The blocker is always the same: a previous boot's session-execution lease
-    /// is still live, so this boot cannot acquire it and the interrupted turn's
-    /// admission stays fenced to that lease's generation. Only when the lease
-    /// *lapses* does an acquisition bump the generation, which is what makes the
-    /// stale claim stealable — so the wait is bounded by the lease TTL
-    /// ([`lash::persistence::LeaseTimings`], 30s by default) and nothing shorter
-    /// will do.
+    /// Retryable events are either fenced behind a previous boot's live
+    /// session-execution lease, or waiting for a thread root that has not yet
+    /// published its admission boundary. Both conditions are observed through
+    /// durable state on every attempt.
     ///
     /// Each iteration is a real, idempotent attempt whose *result* is the state
     /// test — this polls typed runtime state, it does not sleep for a duration and
     /// then assume. [`RETRY_INTERVAL`] only keeps the loop from spinning.
     ///
-    /// On deadline exhaustion the row is still left resumable rather than
-    /// terminalized: a later boot's recovery pass is a better outcome than a
-    /// silently dropped mention.
+    /// `deadline` covers every root wait entered by this loop, rather than
+    /// restarting the 45s budget on each attempt. On exhaustion the row is still
+    /// left resumable rather than terminalized: a later boot's recovery pass is
+    /// a better outcome than a silently dropped mention.
     pub async fn retry_deferred(
         &self,
         event_id: String,
@@ -313,7 +375,17 @@ impl ChannelBot {
                 let _held = guard.lock().await;
                 match record.stage {
                     Stage::ReplyPending => self.settle_reply_debt(&record).await,
-                    _ => self.drive_accepted(&record, true).await,
+                    _ => {
+                        let remaining = deadline.saturating_sub(started.elapsed());
+                        let root_wait_budget =
+                            if record.detail.as_deref() == Some(THREAD_ROOT_NOT_AVAILABLE) {
+                                Duration::ZERO
+                            } else {
+                                self.thread_root_wait_budget().min(remaining)
+                            };
+                        self.drive_accepted_with_root_budget(&record, true, root_wait_budget)
+                            .await
+                    }
                 }
             };
             // A transient failure (an unreachable platform, a network blip on
@@ -337,7 +409,10 @@ impl ChannelBot {
                     }
                 }
             };
-            if !matches!(outcome, Disposition::Deferred { .. }) {
+            if !matches!(
+                outcome,
+                Disposition::Deferred { .. } | Disposition::RecoverableFailure { .. }
+            ) {
                 eprintln!("slack-clone-bot settled deferred event {event_id}: {outcome:?}");
                 return Ok(outcome);
             }
@@ -442,6 +517,16 @@ impl ChannelBot {
     /// before the crash. A first delivery skips it: there cannot be a prior reply
     /// to an event nobody has seen.
     async fn drive_accepted(&self, record: &EventRecord, resuming: bool) -> Result<Disposition> {
+        self.drive_accepted_with_root_budget(record, resuming, self.thread_root_wait_budget())
+            .await
+    }
+
+    async fn drive_accepted_with_root_budget(
+        &self,
+        record: &EventRecord,
+        resuming: bool,
+        thread_root_wait_budget: Duration,
+    ) -> Result<Disposition> {
         let Some(text) = record.input_text.clone() else {
             // Only reachable for a row written before `input_text` existed. The
             // admission text is unrecoverable, so say so instead of guessing.
@@ -473,23 +558,42 @@ impl ChannelBot {
         }
 
         let session = if record.thread_ts.is_some() {
-            let Some(session) =
-                threads::open_thread_session(&self.core, &self.ledger, &self.session_owner, record)
-                    .await?
-            else {
-                self.settle(
-                    record,
-                    Stage::Ignored,
-                    None,
-                    Some("thread_session_retired".to_string()),
-                )
-                .await?;
-                return Ok(Disposition::Ignored {
-                    event_id: record.event_id.clone(),
-                    reason: "thread_session_retired",
-                });
-            };
-            session
+            match threads::open_thread_session(
+                &self.core,
+                &self.ledger,
+                &self.session_owner,
+                record,
+                #[cfg(test)]
+                &self.missing_root_observed,
+                thread_root_wait_budget,
+            )
+            .await?
+            {
+                threads::ThreadSessionOpen::Ready(session) => session,
+                threads::ThreadSessionOpen::Retired => {
+                    self.settle(
+                        record,
+                        Stage::Ignored,
+                        None,
+                        Some("thread_session_retired".to_string()),
+                    )
+                    .await?;
+                    return Ok(Disposition::Ignored {
+                        event_id: record.event_id.clone(),
+                        reason: "thread_session_retired",
+                    });
+                }
+                threads::ThreadSessionOpen::RootNotProcessed => {
+                    return self
+                        .fail_missing_thread_root(record, is_mention, THREAD_ROOT_NOT_PROCESSED)
+                        .await;
+                }
+                threads::ThreadSessionOpen::RootNotAvailable => {
+                    return self
+                        .fail_missing_thread_root(record, is_mention, THREAD_ROOT_NOT_AVAILABLE)
+                        .await;
+                }
+            }
         } else {
             self.open_session(&record.channel_id).await?
         };
@@ -515,6 +619,15 @@ impl ChannelBot {
             .context("record Lash admission identity")?;
 
         if !is_mention {
+            if record.thread_ts.is_none() {
+                threads::retain_admission_boundary(
+                    &self.core,
+                    &self.ledger,
+                    &session,
+                    &record.event_id,
+                )
+                .await?;
+            }
             self.settle(record, Stage::Folded, None, None).await?;
             return Ok(Disposition::Folded {
                 event_id: record.event_id.clone(),
@@ -524,6 +637,79 @@ impl ChannelBot {
         }
         self.run_mention_turn(&session, record, &receipt.input_id)
             .await
+    }
+
+    /// Notify a mention without terminalizing it, so authoritative root arrival
+    /// plus an ordinary redelivery can run the exact same accepted row again.
+    async fn fail_missing_thread_root(
+        &self,
+        record: &EventRecord,
+        notify_user: bool,
+        detail: &'static str,
+    ) -> Result<Disposition> {
+        let copy: &str = if detail == THREAD_ROOT_NOT_AVAILABLE {
+            "I can’t find the message this thread started from, so I can’t answer right \
+             now. If it reaches me later, I’ll follow up here."
+        } else {
+            "I can’t answer this thread yet — I haven’t caught up with its \
+             original message. I’ll follow up here once I have."
+        };
+
+        if !self
+            .ledger
+            .advance(
+                record.event_id.clone(),
+                record.stage,
+                record.stage,
+                None,
+                Some(detail.to_string()),
+            )
+            .await?
+        {
+            return self.observed_elsewhere(record).await;
+        }
+
+        let notified = if notify_user {
+            let notification_id = format!("{}:thread-root-not-processed", record.event_id);
+            if find_posted_reply(
+                &self.api,
+                &self.identity.bot_id,
+                &record.channel_id,
+                &record.message_ts,
+                &notification_id,
+                record.thread_ts.as_deref(),
+            )
+            .await
+            .context("scan for missing-root notification")?
+            .is_some()
+            {
+                false
+            } else {
+                let thread_ts = record
+                    .thread_ts
+                    .as_deref()
+                    .context("missing-root failure has no thread route")?;
+                let request = ChatPostMessageRequest::thread_reply(
+                    &record.channel_id,
+                    copy,
+                    &notification_id,
+                    thread_ts,
+                );
+                self.api
+                    .chat_post_message(&request)
+                    .await
+                    .context("post missing-root notification")?;
+                true
+            }
+        } else {
+            false
+        };
+        Ok(Disposition::RecoverableFailure {
+            event_id: record.event_id.clone(),
+            channel: record.channel_id.clone(),
+            notified,
+            reason: detail,
+        })
     }
 
     /// Drain every queued input for the channel into one turn and post the reply.

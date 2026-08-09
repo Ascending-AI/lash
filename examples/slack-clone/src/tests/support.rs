@@ -150,6 +150,10 @@ impl Script {
                             .cloned()
                             .unwrap_or(Step::Text("ok".to_string()))
                     };
+                    // A gated call models one in-flight turn; it must not hold
+                    // the script queue lock, because a different routed session
+                    // is allowed to enter the provider concurrently.
+                    drop(queue);
                     let step = match step {
                         Step::Gated(text) => {
                             // The turn is now live: the input is claimed and the

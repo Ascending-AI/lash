@@ -98,6 +98,19 @@ async fn events(State(bot): State<Arc<ChannelBot>>, headers: HeaderMap, body: St
                             );
                         }
                     }
+                    Ok(Disposition::RecoverableFailure { event_id, .. }) => {
+                        // The foreground path already spent its bounded root wait.
+                        // Keep retrying under the remainder of the shared 120s
+                        // budget so a long-running root can land without another
+                        // Slack delivery or a process restart.
+                        let deadline = bot.recoverable_retry_deadline();
+                        println!(
+                            "slack-clone-bot waiting on the root for {event_id}; retrying in the background"
+                        );
+                        if let Err(error) = bot.retry_deferred(event_id.clone(), deadline).await {
+                            eprintln!("slack-clone-bot root retry of {event_id} failed: {error:#}");
+                        }
+                    }
                     Ok(disposition) => {
                         println!("slack-clone-bot handled {event_id}: {disposition:?}");
                     }

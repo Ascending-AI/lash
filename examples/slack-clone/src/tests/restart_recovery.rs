@@ -958,6 +958,195 @@ async fn a_thread_mention_interrupted_mid_turn_uses_the_same_deferral_recovery()
 }
 
 #[tokio::test]
+async fn webhook_retry_answers_after_the_root_outlives_the_initial_wait_without_restart() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let bot_dir = bot_dir(scratch.path());
+    let script = Script::new([
+        Step::Gated("Root admission completed.".to_string()),
+        Step::Text("Caught up with the root.".to_string()),
+    ]);
+    let bot = start_bot(&platform, &bot_dir, &script).await;
+    // Deterministically model the production 45s exhaustion without sleeping.
+    bot.set_thread_root_wait_budget(std::time::Duration::ZERO);
+    let (request_url, _server) = serve_bot(Arc::clone(&bot)).await;
+    let channel = platform.channel("root-outlives-initial-wait").await;
+    let ada = platform.identify("ada").await;
+    let grace = platform.identify("grace").await;
+
+    let root = platform
+        .say(
+            &channel,
+            &ada,
+            &format!("{} late durable root", platform.mention()),
+        )
+        .await;
+    let root_mention = only_event(&platform.drain_envelopes().await, "app_mention");
+    let root_turn = tokio::spawn({
+        let bot = Arc::clone(&bot);
+        async move { bot.ingest(root_mention, None).await }
+    });
+    script.wait_gated().await;
+
+    platform
+        .say_thread(
+            &channel,
+            &grace,
+            root,
+            &format!("{} answer after catching up", platform.mention()),
+        )
+        .await;
+    let reply = only_event(&platform.drain_envelopes().await, "app_mention");
+
+    let response = reqwest::Client::new()
+        .post(&request_url)
+        .json(&crate::wire::events::EventRequest::EventCallback(Box::new(
+            reply.clone(),
+        )))
+        .send()
+        .await
+        .expect("deliver reply through the production webhook");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    bot.wait_for_missing_thread_root().await;
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let detail = bot
+                .ledger()
+                .get(reply.event_id.clone())
+                .await
+                .expect("read waiting reply")
+                .and_then(|record| record.detail);
+            if detail.as_deref() == Some("thread_root_not_processed") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("reply must exhaust while the root turn is still running");
+
+    script.release_gate();
+    let root_disposition = root_turn
+        .await
+        .expect("join long-running root turn")
+        .expect("root admission lands after the initial wait");
+    assert!(matches!(root_disposition, Disposition::Replied { .. }));
+
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let record = bot
+                .ledger()
+                .get(reply.event_id.clone())
+                .await
+                .expect("read reply ledger")
+                .expect("reply row");
+            if record.stage == Stage::Replied {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("background retry must settle the original mention");
+
+    assert_eq!(script.calls(), 2);
+    assert!(script.saw("late durable root"));
+    let replies = platform.thread_messages(&channel, root).await;
+    assert_eq!(
+        replies
+            .iter()
+            .filter(|message| message.bot_id.is_some())
+            .count(),
+        2,
+        "one honest wait notice and one eventual answer"
+    );
+    assert_eq!(
+        replies
+            .iter()
+            .filter(|message| message.text == "Caught up with the root.")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn recovery_folds_a_late_root_before_re_driving_its_unavailable_reply() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let bot_dir = bot_dir(scratch.path());
+    let script = Script::prose("Recovered through the boot entry.");
+    let bot = start_bot(&platform, &bot_dir, &script).await;
+    bot.set_thread_root_wait_budget(std::time::Duration::ZERO);
+    let channel = platform.channel("root-before-reply-recovery").await;
+    let ada = platform.identify("ada").await;
+
+    let root = platform
+        .say(&channel, &ada, "root staged for recovery")
+        .await;
+    let root_event = only_event(&platform.drain_envelopes().await, "message");
+    platform
+        .say_thread(
+            &channel,
+            &ada,
+            root,
+            &format!("{} recover this", platform.mention()),
+        )
+        .await;
+    let reply = only_event(&platform.drain_envelopes().await, "app_mention");
+    let initial = bot
+        .ingest(reply.clone(), None)
+        .await
+        .expect("record unavailable reply");
+    assert!(matches!(
+        initial,
+        Disposition::RecoverableFailure {
+            reason: "thread_root_not_available",
+            ..
+        }
+    ));
+
+    let claimed = bot
+        .ledger()
+        .claim(
+            root_event.event_id,
+            channel.clone(),
+            root_event.event.ts().to_string(),
+            KIND_MESSAGE.to_string(),
+            Some("ada: root staged for recovery".to_string()),
+            None,
+        )
+        .await
+        .expect("stage root accepted as if the process stopped before admission");
+    assert_eq!(claimed.record().stage, Stage::Accepted);
+
+    let report = tokio::time::timeout(std::time::Duration::from_secs(2), bot.recover())
+        .await
+        .expect("boot recovery must not spend a fresh root wait")
+        .expect("production recovery pass");
+    assert!(report.deferred.is_empty(), "{report:?}");
+    assert!(matches!(
+        report.settled.first(),
+        Some(Disposition::Folded { .. })
+    ));
+    assert!(matches!(
+        report.settled.get(1),
+        Some(Disposition::Replied {
+            source: ReplySource::Turn,
+            ..
+        })
+    ));
+    assert_eq!(script.calls(), 1);
+    assert!(script.saw("root staged for recovery"));
+    let record = bot
+        .ledger()
+        .get(reply.event_id)
+        .await
+        .expect("read recovered reply")
+        .expect("reply row");
+    assert_eq!(record.stage, Stage::Replied);
+}
+
+#[tokio::test]
 async fn reply_lost_still_reports_a_committed_turn_that_produced_no_text() {
     // `ReplyLost` must remain reachable for the one state it honestly describes:
     // an input a committed turn provably consumed, with no assistant text anywhere.
