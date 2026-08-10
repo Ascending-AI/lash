@@ -36,9 +36,16 @@ async fn unsupported_root_enumeration_aborts_sweep_and_preserves_blob() {
         .await
         .expect("put attachment");
 
-    let error = reclaim_unreferenced_attachments(&UnsupportedAttachmentRoots, &backend, 0)
-        .await
-        .expect_err("unsupported root enumeration must abort the sweep");
+    let error = reclaim_unreferenced_attachments(
+        &UnsupportedAttachmentRoots,
+        &backend,
+        AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: EmptyRootSetPolicy::Refuse,
+        },
+    )
+    .await
+    .expect_err("unsupported root enumeration must abort the sweep");
 
     assert!(matches!(
         error,

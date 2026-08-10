@@ -311,9 +311,16 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
         .iter()
         .map(|entry| entry.attachment_id.clone())
         .collect::<Vec<_>>();
-    let report = crate::reclaim_unreferenced_attachments(&*factory, &*attachment_backend, 0)
-        .await
-        .expect("GC with recovered process row");
+    let report = crate::reclaim_unreferenced_attachments(
+        &*factory,
+        &*attachment_backend,
+        crate::AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: crate::EmptyRootSetPolicy::Refuse,
+        },
+    )
+    .await
+    .expect("GC with recovered process row");
     assert_eq!(report.reclaimed_count, 0);
     for attachment_id in attachment_ids {
         attachment_backend

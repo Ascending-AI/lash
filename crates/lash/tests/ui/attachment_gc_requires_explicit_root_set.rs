@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use lash::persistence::{
-    InMemoryAttachmentStore, InMemorySessionStoreFactory, RuntimePersistence,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError, reclaim_unreferenced_attachments,
+    AttachmentReclamationPolicy, EmptyRootSetPolicy, InMemoryAttachmentStore,
+    InMemorySessionStoreFactory, RuntimePersistence, SessionStoreCreateRequest,
+    SessionStoreFactory, StoreError, reclaim_unreferenced_attachments,
 };
 
 struct DelegatingFactory {
@@ -32,7 +33,14 @@ impl SessionStoreFactory for DelegatingFactory {
 
 async fn try_gc(factory: &DelegatingFactory) {
     let backend = InMemoryAttachmentStore::new();
-    let _ = reclaim_unreferenced_attachments(factory, &backend, 0);
+    let _ = reclaim_unreferenced_attachments(
+        factory,
+        &backend,
+        AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: EmptyRootSetPolicy::Refuse,
+        },
+    );
 }
 
 fn main() {}

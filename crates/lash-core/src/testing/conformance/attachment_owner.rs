@@ -106,7 +106,10 @@ pub async fn attachment_owner_cold_replay(mut backend: AttachmentOwnerColdReplay
     let pre_recovery = crate::reclaim_unreferenced_attachments(
         &*backend.session_store_factory,
         &*backend.attachment_store,
-        0,
+        crate::AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: crate::EmptyRootSetPolicy::Refuse,
+        },
     )
     .await
     .expect("pre-recovery GC");
@@ -167,7 +170,10 @@ pub async fn attachment_owner_cold_replay(mut backend: AttachmentOwnerColdReplay
     let post_commit = crate::reclaim_unreferenced_attachments(
         &*backend.session_store_factory,
         &*backend.attachment_store,
-        0,
+        crate::AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: crate::EmptyRootSetPolicy::Refuse,
+        },
     )
     .await
     .expect("post-commit GC");
@@ -351,7 +357,10 @@ async fn superseded_turn_leg(backend: &AttachmentOwnerColdReplayBackend) {
     let report = crate::reclaim_unreferenced_attachments(
         &*backend.session_store_factory,
         &*backend.attachment_store,
-        0,
+        crate::AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: crate::EmptyRootSetPolicy::AuthorizeDeleteAll,
+        },
     )
     .await
     .expect("superseded turn GC");
@@ -399,7 +408,10 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
     let live_report = crate::reclaim_unreferenced_attachments(
         &*backend.session_store_factory,
         &*backend.attachment_store,
-        0,
+        crate::AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: crate::EmptyRootSetPolicy::Refuse,
+        },
     )
     .await
     .expect("live process GC");
@@ -435,7 +447,10 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
     let pruned_report = crate::reclaim_unreferenced_attachments(
         &*backend.session_store_factory,
         &*backend.attachment_store,
-        0,
+        crate::AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: crate::EmptyRootSetPolicy::AuthorizeDeleteAll,
+        },
     )
     .await
     .expect("pruned process GC");

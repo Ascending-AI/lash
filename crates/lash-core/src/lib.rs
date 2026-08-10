@@ -77,9 +77,11 @@ pub mod facade_support {
     }
 
     pub use crate::attachments::AttachmentProducer;
+    pub use crate::attachments::AttachmentReclamationPolicy;
     pub use crate::attachments::AttachmentReclamationReport;
     pub use crate::attachments::AttachmentSourcePolicy;
     pub use crate::attachments::AttachmentSourcePolicyError;
+    pub use crate::attachments::EmptyRootSetPolicy;
     pub use crate::attachments::FileAttachmentStore;
     pub use crate::attachments::InMemoryAttachmentStore;
     pub use crate::attachments::OpenAttachmentSourcePolicy;
@@ -413,8 +415,8 @@ pub enum EffectReplayOwnership {
 
 // Re-exports
 pub use attachments::{
-    AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStorePersistence,
-    StoredAttachment, StoredBlobRef,
+    AttachmentReclamationPolicy, AttachmentRootSet, AttachmentStore, AttachmentStoreError,
+    AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
 };
 pub use lash_sansio::llm::types::{
     AttachmentSource, AttemptOutcome, AttemptRecord, ExecutionEvidence, GenerationDisposition,
