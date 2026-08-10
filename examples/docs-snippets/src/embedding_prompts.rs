@@ -53,7 +53,7 @@ impl lashlang::ProjectedHostDescriptor for MyDocsProjection {
     }
 }
 
-async fn lazy_projection() -> anyhow::Result<()> {
+async fn lazy_projection(provider: ProviderHandle, model: lash::ModelSpec) -> anyhow::Result<()> {
     let my_docs_projection = MyDocsProjection;
     // docs:start:lazy-projection
     use std::sync::Arc;
@@ -71,9 +71,16 @@ async fn lazy_projection() -> anyhow::Result<()> {
     )
     .with_projection_resolver(registry.clone());
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .provider(provider)
+        .model(model)
         .plugins(runtime_plugin_stack())
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .build()?;
 
     // `my_docs_projection` implements `lashlang::ProjectedHostDescriptor`.
@@ -115,6 +122,11 @@ async fn prompt_template(provider: ProviderHandle) -> anyhow::Result<()> {
         )
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .prompt_template(template)
         .prompt_contribution(PromptContribution::guidance(
             "App",
@@ -313,6 +325,11 @@ async fn tone_session(
         .attachment_store(std::sync::Arc::new(
             lash::persistence::InMemoryAttachmentStore::new(),
         ))
+        .process_env_store(std::sync::Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .build()?;
 
     let session = core
@@ -553,5 +570,33 @@ mod asserted_examples {
 
         let default_template = default_prompt_template();
         assert_eq!(default_template.sections.len(), 4);
+    }
+}
+
+#[cfg(test)]
+mod builder_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn documented_prompt_builders_resolve() {
+        lazy_projection(
+            crate::test_support::provider(),
+            crate::test_support::model(),
+        )
+        .await
+        .expect("lazy-projection snippet must build");
+
+        crate::test_support::assert_builder_resolved(
+            prompt_template(crate::test_support::provider()).await,
+        );
+        crate::test_support::assert_builder_resolved(
+            tone_session(
+                crate::test_support::provider(),
+                "docs-snippet-test".to_string(),
+                "docs-snippet-session",
+                lash::runtime::NoopTurnActivitySink,
+            )
+            .await,
+        );
     }
 }

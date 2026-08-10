@@ -26,6 +26,11 @@ async fn rlm_core(provider: ProviderHandle, model_id: &str) -> anyhow::Result<()
         )
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .build()?;
 
     let session = core.session("task-42").open().await?;
@@ -37,4 +42,15 @@ async fn rlm_core(provider: ProviderHandle, model_id: &str) -> anyhow::Result<()
         .await?;
     // docs:end:rlm-core
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn documented_rlm_builder_resolves() {
+        let result = rlm_core(crate::test_support::provider(), "docs-snippet-test").await;
+        crate::test_support::assert_builder_resolved(result);
+    }
 }

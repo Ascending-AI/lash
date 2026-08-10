@@ -44,8 +44,25 @@ async fn plugin_install(provider: ProviderHandle) -> anyhow::Result<()> {
         )
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .plugin(Arc::new(UpdatePlanPluginFactory) as Arc<dyn PluginFactory>)
         .build()?;
     // docs:end:plugin-install
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn documented_runtime_plugin_builder_resolves() {
+        plugin_install(crate::test_support::provider())
+            .await
+            .expect("runtime-plugin snippet must build");
+    }
 }

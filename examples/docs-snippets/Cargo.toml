@@ -4,7 +4,7 @@ version.workspace = true
 edition = "2024"
 license.workspace = true
 publish = false
-description = "Compiled sources for the Rust code blocks in docs/*.html. cargo check fails when a doc snippet stops compiling; scripts/lint_docs.py fails when the HTML drifts from these files."
+description = "Executable sources for the Rust code blocks in docs/*.html. cargo test runs every core-building snippet; scripts/lint_docs.py fails when the HTML drifts from these files."
 
 [features]
 default = []
@@ -30,3 +30,6 @@ schemars = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

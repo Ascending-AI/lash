@@ -4,7 +4,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash::durability::{InlineEffectHost, LeaseTimings};
-use lash::persistence::{LeaseOwnerIdentity, SessionLeaseRenewal, SessionStoreFactory};
+use lash::persistence::{
+    AttachmentStore, LeaseOwnerIdentity, ProcessExecutionEnvStore, SessionLeaseRenewal,
+    SessionStoreFactory,
+};
 use lash::provider::ProviderHandle;
 use lash::{LashCore, LashSession, TurnInput, TurnOutput};
 
@@ -12,6 +15,8 @@ fn configure_lease_timings(
     factory: lash::rlm::RlmProtocolPluginFactory,
     provider: ProviderHandle,
     store_factory: Arc<dyn SessionStoreFactory>,
+    attachment_store: Arc<dyn AttachmentStore>,
+    process_env_store: Arc<dyn ProcessExecutionEnvStore>,
 ) -> lash::Result<LashCore> {
     // docs:start:lease-timings
     // One timing decision governs the three durable lease lanes:
@@ -35,6 +40,10 @@ fn configure_lease_timings(
         )
         .store_factory(store_factory)
         .effect_host(Arc::new(InlineEffectHost::default()))
+        .attachment_store(attachment_store)
+        .process_env_store(process_env_store)
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .lease_timings(lease_timings) // omit to keep the 30s ttl / 10s renew default
         .build()?;
     // docs:end:lease-timings
@@ -202,4 +211,29 @@ fn record_turn_metrics(output: &TurnOutput, session: &LashSession) {
     let usage = session.usage_report();
     let _ = (usage.entry_count, usage.usage);
     // docs:end:monitoring
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn documented_lease_timing_builder_resolves() {
+        let factory = lash::rlm::RlmProtocolPluginFactory::new(
+            lash::rlm::RlmProtocolPluginConfig::new(
+                lash::rlm::ExecutionBound::instructions(1_000_000),
+                lash::rlm::ExecutionBound::secs(30),
+            ),
+            Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
+        );
+
+        configure_lease_timings(
+            factory,
+            crate::test_support::provider(),
+            Arc::new(lash::persistence::InMemorySessionStoreFactory::new()),
+            Arc::new(lash::persistence::InMemoryAttachmentStore::new()),
+            Arc::new(lash::persistence::InMemoryProcessExecutionEnvStore::new()),
+        )
+        .expect("lease-timing snippet must build");
+    }
 }

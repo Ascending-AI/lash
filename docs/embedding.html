@@ -125,7 +125,6 @@
 
 use lash::{TurnEvent, TurnInput, plugins::runtime_plugin_stack, tools::*};
 
-let data_dir = std::path::PathBuf::from(".lash-data");
 let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
     data_dir.join("sessions"),
 ));
@@ -137,7 +136,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::ExecutionBound::instructions(1_000_000),
         lash::rlm::ExecutionBound::secs(30),
     ),
-    artifact_store,
+    artifact_store.clone(),
 );
 let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .provider(provider)
@@ -154,6 +153,9 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
         data_dir.join("attachments"),
     )))
+    .process_env_store(artifact_store)
+    // Start bounded; tune both limits for your backend's latency envelope.
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .build()?;
 
 let session = core.session("chat-123").open().await?;
@@ -222,6 +224,11 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .session_spec(root_spec)
     .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
     .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+    .process_env_store(Arc::new(
+        lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+    ))
+    // Start bounded; tune both limits for your backend's latency envelope.
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .configure_plugins(|plugins| {
         plugins.push(Arc::new(AppPluginFactory) as Arc&lt;dyn PluginFactory&gt;);
     })
@@ -248,6 +255,11 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .plugins(plugins)
     .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
     .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+    .process_env_store(Arc::new(
+        lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+    ))
+    // Start bounded; tune both limits for your backend's latency envelope.
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .build()?;</code></pre>
             </article>
           </div>

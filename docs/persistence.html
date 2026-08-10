@@ -79,7 +79,6 @@
 
 use lash_sqlite_store::{SqliteSessionStoreFactory, Store};
 
-let data_dir = std::path::PathBuf::from("./.lash-data");
 let store_factory = Arc::new(SqliteSessionStoreFactory::new(data_dir.join("sessions")));
 let artifact_store = Arc::new(Store::open(&amp;data_dir.join("artifacts.db")).await?);
 
@@ -88,7 +87,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::ExecutionBound::instructions(1_000_000),
         lash::rlm::ExecutionBound::secs(30),
     ),
-    artifact_store,
+    artifact_store.clone(),
 );
 let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .provider(provider)
@@ -103,6 +102,9 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
         data_dir.join("attachments"),
     )))
+    .process_env_store(artifact_store)
+    // Start bounded; tune both limits for your backend's latency envelope.
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .build()?;</code></pre>
     </div>
 
@@ -147,13 +149,45 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     ),
     Arc::new(storage.lashlang_artifact_store()),
 );
-let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-    .store_factory(Arc::new(storage.session_store_factory()))
-    .process_registry(Arc::new(storage.process_registry()))
-    .trigger_store(Arc::new(storage.trigger_store()))
-    .attachment_store(Arc::new(attachments))
-    // provider, model, effect host...
-    .build()?;</code></pre>
+let core = build_persistent_core(
+    factory,
+    provider,
+    model,
+    Arc::new(storage.session_store_factory()),
+    Arc::new(storage.process_registry()),
+    Arc::new(storage.trigger_store()),
+    Arc::new(storage.effect_host()),
+    Arc::new(attachments),
+    Arc::new(storage.process_env_store()),
+)?;
+Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_persistent_core(
+factory: lash::rlm::RlmProtocolPluginFactory,
+provider: ProviderHandle,
+model: lash::ModelSpec,
+store_factory: Arc&lt;dyn lash::persistence::SessionStoreFactory&gt;,
+process_registry: Arc&lt;dyn lash::process::ProcessRegistry&gt;,
+trigger_store: Arc&lt;dyn lash::triggers::TriggerStore&gt;,
+effect_host: Arc&lt;dyn lash::durability::EffectHost&gt;,
+attachment_store: Arc&lt;dyn lash::persistence::AttachmentStore&gt;,
+process_env_store: Arc&lt;dyn lash::persistence::ProcessExecutionEnvStore&gt;,
+) -&gt; lash::Result&lt;LashCore&gt; {
+lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    .provider(provider)
+    .model(model)
+    .store_factory(store_factory)
+    .process_registry(process_registry)
+    .trigger_store(trigger_store)
+    .effect_host(effect_host)
+    .attachment_store(attachment_store)
+    .process_env_store(process_env_store)
+    // Start bounded; tune both limits for your backend's latency envelope.
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .build()
+}</code></pre>
       <p><code>PostgresStorage::connect</code> creates the exact supported schema on an empty database and rejects mismatched component versions. Runtime checkpoints, pending turn inputs, queued work, process rows, triggers, attachment manifests, and Lashlang artifacts live in Postgres. Attachment bytes live in S3-compatible object storage under content-addressed keys; MinIO uses the same implementation with an endpoint URL and path-style mode.</p>
       <p><code>PostgresStoreConfig</code> applies connection-level backstops by default: a 10 second <code>lock_timeout</code> and a 30 second <code>statement_timeout</code>. Mutating session work first claims the advisory session execution lease; session commits perform the head-revision CAS and any claim-ownership checks in one transaction. Postgres serialization failures, deadlocks, and lock-acquisition timeouts on the backstop write surface as retryable conflicts so hosts can reload and retry instead of treating ordinary write contention as an opaque backend failure.</p>
       <p>The distributed integration harness is <code>just restate-postgres-workers-e2e</code>. It starts Postgres, MinIO, Restate, a deterministic OpenAI-compatible mock provider, two worker processes behind a Caddy h2c proxy, and a runner. The workers build a normal downstream-style <code>LashCore</code> with <code>PostgresStorage</code>, <code>S3AttachmentStore</code>, <code>PostgresLashlangArtifactStore</code>, <code>PostgresTriggerStore</code>, <code>PostgresProcessRegistry</code>, <code>RestateRuntimeEffectController</code>, <code>RestateProcessDeployment</code>, and JSONL trace sinks.</p>
@@ -378,7 +412,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::ExecutionBound::instructions(1_000_000),
         lash::rlm::ExecutionBound::secs(30),
     ),
-    artifact_store,
+    artifact_store.clone(),
 );
 let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .provider(provider)
@@ -397,6 +431,9 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
         data_dir.join("attachments"),
     )))
+    .process_env_store(artifact_store)
+    // Start bounded; tune both limits for your backend's latency envelope.
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .build()?;
 
 // Per request: open a session keyed by the app's chat id.

@@ -55,6 +55,11 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .model(model)
     .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
     .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+    .process_env_store(Arc::new(
+        lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+    ))
+    // Start bounded; tune both limits for your backend's latency envelope.
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .build()?;</code></pre>
           <pre data-lang="rust" data-snippet="embedding_advanced#sqlite-core"><code>use std::sync::Arc;
 
@@ -69,7 +74,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::ExecutionBound::instructions(1_000_000),
         lash::rlm::ExecutionBound::secs(30),
     ),
-    artifact_store,
+    artifact_store.clone(),
 );
 let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .provider(provider)
@@ -79,6 +84,9 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .attachment_store(Arc::new(FileAttachmentStore::new(
         data_dir.join("attachments"),
     )))
+    .process_env_store(artifact_store)
+    // Start bounded; tune both limits for your backend's latency envelope.
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .build()?;</code></pre>
         </div>
 
@@ -130,6 +138,9 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .process_registry(process_registry)
     .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
     .attachment_store(attachment_store)
+    .process_env_store(process_env_store)
+    // Start bounded; tune both limits for your backend's latency envelope.
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .build()?;</code></pre>
           <aside class="gotcha">
             <strong>Gotcha</strong>
@@ -246,6 +257,11 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     )
     .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
     .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+    .process_env_store(Arc::new(
+        lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+    ))
+    // Start bounded; tune both limits for your backend's latency envelope.
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .plugin(Arc::new(subagents) as Arc&lt;dyn PluginFactory&gt;)
     .build()?;</code></pre>
           <p>Capabilities return <code>SessionSpec</code> overlays. <code>StaticCapability</code> pins exact child authority; <code>TierCapability</code> backs the built-in <code>explore</code> and <code>peer</code> tiers. Do not construct <code>SessionPolicy</code> directly; it's the resolved runtime artifact.</p>
@@ -298,6 +314,15 @@ let mcp = McpPluginFactory::builder(servers)
     .build()
     .await?;
 
+let core = configured_mcp_core(provider, model, mcp)?;
+Ok(())
+}
+
+fn configured_mcp_core(
+provider: ProviderHandle,
+model: String,
+mcp: McpPluginFactory,
+) -&gt; lash::Result&lt;LashCore&gt; {
 let factory = lash::rlm::RlmProtocolPluginFactory::new(
     lash::rlm::RlmProtocolPluginConfig::new(
         lash::rlm::ExecutionBound::instructions(1_000_000),
@@ -305,7 +330,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     ),
     std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 );
-let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .provider(provider)
     .model(
         lash::ModelSpec::builder(model.clone())
@@ -319,8 +344,14 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .attachment_store(std::sync::Arc::new(
         lash::persistence::InMemoryAttachmentStore::new(),
     ))
+    .process_env_store(std::sync::Arc::new(
+        lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+    ))
+    // Start bounded; tune both limits for your backend's latency envelope.
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .plugin(std::sync::Arc::new(mcp))
-    .build()?;</code></pre>
+    .build()
+}</code></pre>
           <p>Tools appear as <code>mcp__&lt;server&gt;__&lt;tool&gt;</code> with original schemas preserved. <code>attach_server</code> / <code>detach_server</code> mutate the live pool without rebuilding the core.</p>
           <h3>Server-to-client requests: host owns policy</h3>
           <p>MCP <code>2025-11-25</code> sampling, elicitation, and roots are available through three dyn-compatible host seams: <code>McpSamplingHandler</code>, <code>McpElicitationHandler</code>, and <code>McpRootsProvider</code>. Each callback receives one request struct whose sealed context identifies the server and exposes a cancellation token; interactive UI and model work must stop when that token fires. Lash validates accepted form content against the server's requested schema before writing it to the wire. Decline and cancel carry no content. URL-capable elicitation handlers also receive the matching <code>notifications/elicitation/complete</code> id.</p>
@@ -352,12 +383,14 @@ mcp.notify_roots_changed().await?;</code></pre>
             <h2>Advanced Runtime</h2>
             <p><code>.advanced()</code> is reserved for low-level overrides: a custom <code>PluginHost</code> or a replaceable <code>RuntimeHostConfig</code>. Durable embedding concerns such as effect hosts, process registries, process work drivers, residency policy, and termination policy live on the normal <code>LashCoreBuilder</code>. The registry trait itself lives under <code>lash::process::ProcessRegistry</code> and stores state only; process waits live on the work driver. RLM/Lashlang turns that generic process plane into authored process/lifecycle abilities when the Lashlang runtime pieces are installed.</p>
           </div>
-          <pre data-lang="rust" data-snippet="embedding_advanced#durable-stores-core"><code>let factory = lash::rlm::RlmProtocolPluginFactory::new(
+          <pre data-lang="rust" data-snippet="embedding_advanced#durable-stores-core"><code>let artifact_store =
+    std::sync::Arc::new(lash_sqlite_store::Store::open(&amp;data_dir.join("artifacts.db")).await?);
+let factory = lash::rlm::RlmProtocolPluginFactory::new(
     lash::rlm::RlmProtocolPluginConfig::new(
         lash::rlm::ExecutionBound::instructions(1_000_000),
         lash::rlm::ExecutionBound::secs(30),
     ),
-    std::sync::Arc::new(lash_sqlite_store::Store::open(&amp;data_dir.join("artifacts.db")).await?),
+    artifact_store.clone(),
 );
 let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .provider(provider)
@@ -374,6 +407,9 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .attachment_store(std::sync::Arc::new(
         lash::persistence::FileAttachmentStore::new(data_dir.join("attachments")),
     ))
+    .process_env_store(artifact_store)
+    // Start bounded; tune both limits for your backend's latency envelope.
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .turn_budget(lash::TurnBudget::bounded(50))
     .build()?;</code></pre>
           <p>Streaming is semantic: <code>TurnBuilder::stream</code> emits <code>TurnActivity</code> and resolves to a <code>TurnResult</code>. Raw runtime telemetry belongs in tracing, not the app surface.</p>

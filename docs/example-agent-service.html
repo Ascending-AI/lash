@@ -105,12 +105,13 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .effect_host(std::sync::Arc::new(
         lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
     ))
-    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-    .process_env_store(process_env_store)
-    .trigger_store(trigger_store)
     .attachment_store(std::sync::Arc::new(
         lash::persistence::FileAttachmentStore::new(data_dir.join("attachments")),
     ))
+    .process_env_store(process_env_store)
+    // Start bounded; tune both limits for your backend's latency envelope.
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .trigger_store(trigger_store)
     .trace_sink(trace_sink)
     .trace_level(TraceLevel::Extended)
     .build()?;</code></pre>

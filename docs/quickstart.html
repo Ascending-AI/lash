@@ -103,14 +103,7 @@ async fn main() -&gt; anyhow::Result&lt;()&gt; {
         })
         .build()?;
 
-    // one LashCore per app, cloned freely.
-    let core = LashCore::standard_builder(lash::TurnBudget::bounded(50))
-        .provider(provider)
-        .model(model)
-        .instructions("Answer in one short sentence. Skip preamble.")
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-        .build()?;
+    let core = hello_lash_core(provider, model)?;
 
     // one session per chat / task.
     let session = core.session("hello-1").open().await?;
@@ -124,6 +117,22 @@ async fn main() -&gt; anyhow::Result&lt;()&gt; {
     let prose = result.assistant_message().unwrap_or_default();
     println!("{prose}");
     Ok(())
+}
+
+// one LashCore per app, cloned freely.
+fn hello_lash_core(provider: ProviderHandle, model: ModelSpec) -&gt; lash::Result&lt;LashCore&gt; {
+    LashCore::standard_builder(lash::TurnBudget::bounded(50))
+        .provider(provider)
+        .model(model)
+        .instructions("Answer in one short sentence. Skip preamble.")
+        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .build()
 }</code></pre>
   </div>
 
