@@ -50,11 +50,11 @@ where
             .map_err(|error| error.to_string())?
             .acquired()
             .ok_or_else(|| "successor lease busy".to_string())?;
-        let state = RuntimeSessionState {
+        let mut state = RuntimeSessionState {
             session_id: SESSION_ID.to_string(),
-            tool_state_snapshot: Some(ToolState::default().with_generation(61)),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
+        state.set_tool_state_snapshot(Some(ToolState::default().with_generation(61)));
         let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[])
             .releasing_session_execution_lease(stale_lease.completion());
         if carrying_claim {
@@ -161,11 +161,11 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("successor did not reclaim queued work"))?;
-    let successor_state = RuntimeSessionState {
+    let mut successor_state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
-        tool_state_snapshot: Some(ToolState::default().with_generation(32)),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
+    successor_state.set_tool_state_snapshot(Some(ToolState::default().with_generation(32)));
     let successor_result = store
         .commit_runtime_state(
             RuntimeCommit::persisted_state_for_test(&successor_state, &[])
@@ -178,11 +178,11 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
     let before_predecessor = session_snapshot(store.as_ref())
         .await
         .map_err(TestCaseError::fail)?;
-    let predecessor_state = RuntimeSessionState {
+    let mut predecessor_state = RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
-        tool_state_snapshot: Some(ToolState::default().with_generation(33)),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
+    predecessor_state.set_tool_state_snapshot(Some(ToolState::default().with_generation(33)));
     let predecessor_result = store
         .commit_runtime_state(
             RuntimeCommit::persisted_state_for_test(&predecessor_state, &[])

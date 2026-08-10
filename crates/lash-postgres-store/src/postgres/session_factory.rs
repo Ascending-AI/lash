@@ -90,7 +90,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
              ON CONFLICT (session_id) DO NOTHING",
         )
         .bind(&request.session_id)
-        .bind(encode_json(&meta))
+        .bind(encode_json(&meta)?)
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -448,7 +448,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
              VALUES ($1, 0, $2, $3, $4)",
         )
         .bind(&request.session_id)
-        .bind(encode_json(&head.payload()))
+        .bind(encode_json(&head.payload())?)
         .bind(&checkpoint_ref)
         .bind(&request.node_id)
         .execute(&mut *tx)
@@ -482,7 +482,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         };
         sqlx::query("INSERT INTO lash_session_meta (session_id, meta_json) VALUES ($1, $2)")
             .bind(&request.session_id)
-            .bind(encode_json(&meta))
+            .bind(encode_json(&meta)?)
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;

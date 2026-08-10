@@ -211,9 +211,9 @@ finish result"#,
         root         outcome   turn.final_value        value={"ok":true}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=1 input=11 output=7 cache_read=3 cache_write=2 reasoning=4 total=23
-        root                     turn_state            stored logical=436B
-        root                     tool_state            stored logical=3.6KB
-        root                     plugin_snapshot       stored logical=433B
+        root                     turn_state            stored logical=370B
+        root                     tool_state            stored logical=3.3KB
+        root                     plugin_snapshot       stored logical=346B
         root                     execution_state       stored logical=unknown
         process-001  outcome   process.completed       label="lookup" kind="lashlang" terminal=true
         "#);
@@ -362,18 +362,18 @@ finish result"#,
         root         outcome   turn.final_value        value={"len":2}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        root                     turn_state            stored logical=284B
-        root                     tool_state            stored logical=6.3KB
-        root                     plugin_snapshot       stored logical=429B
+        root                     turn_state            stored logical=240B
+        root                     tool_state            stored logical=5.9KB
+        root                     plugin_snapshot       stored logical=342B
         root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        session-001              turn_state            stored logical=414B
-        session-001              tool_state            stored logical=7.1KB
-        session-001              plugin_snapshot       stored logical=429B
+        session-001              turn_state            stored logical=341B
+        session-001              tool_state            stored logical=6.6KB
+        session-001              plugin_snapshot       stored logical=342B
         session-001  commit    checkpoint.commit       rev=1->2
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        session-001              turn_state            stored logical=414B
+        session-001              turn_state            stored logical=341B
         session-001              tool_state            ref (unchanged)
         session-001              plugin_snapshot       ref (unchanged)
         session-001              execution_state       stored logical=unknown
@@ -423,9 +423,9 @@ finish result"#,
         root         outcome   turn.final_value        value={"parent":"done"}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        root                     turn_state            stored logical=284B
-        root                     tool_state            stored logical=3.3KB
-        root                     plugin_snapshot       stored logical=333B
+        root                     turn_state            stored logical=240B
+        root                     tool_state            stored logical=3.1KB
+        root                     plugin_snapshot       stored logical=267B
         root                     execution_state       stored logical=unknown
         process-001  outcome   process.completed       label="child" kind="lashlang" terminal=true
         process-002  outcome   process.completed       label="parent" kind="lashlang" terminal=true
@@ -487,18 +487,18 @@ finish result"#,
         root         exec      cell.failed             calls=0 error="unknown name `task` --> line 1, column 7 await task.fail({ reason: "pare…"
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        root                     turn_state            stored logical=284B
-        root                     tool_state            stored logical=6.3KB
-        root                     plugin_snapshot       stored logical=429B
+        root                     turn_state            stored logical=240B
+        root                     tool_state            stored logical=5.9KB
+        root                     plugin_snapshot       stored logical=342B
         root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        session-001              turn_state            stored logical=419B
-        session-001              tool_state            stored logical=7.1KB
-        session-001              plugin_snapshot       stored logical=429B
+        session-001              turn_state            stored logical=346B
+        session-001              tool_state            stored logical=6.6KB
+        session-001              plugin_snapshot       stored logical=342B
         session-001  commit    checkpoint.commit       rev=1->2
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        session-001              turn_state            stored logical=419B
+        session-001              turn_state            stored logical=346B
         session-001              tool_state            ref (unchanged)
         session-001              plugin_snapshot       ref (unchanged)
         session-001              execution_state       stored logical=unknown
@@ -568,9 +568,9 @@ finish { joined: [left_value, right_value] }"#,
         root         outcome   turn.final_value        value={"joined":["left","right"]}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        root                     turn_state            stored logical=284B
-        root                     tool_state            stored logical=3.3KB
-        root                     plugin_snapshot       stored logical=333B
+        root                     turn_state            stored logical=240B
+        root                     tool_state            stored logical=3.1KB
+        root                     plugin_snapshot       stored logical=267B
         root                     execution_state       stored logical=unknown
         process-001  outcome   process.completed       label="child" kind="lashlang" terminal=true
         process-002  outcome   process.completed       label="child" kind="lashlang" terminal=true

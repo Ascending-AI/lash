@@ -108,6 +108,15 @@ pub(super) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> 
             RuntimeErrorCode::StoreCommitByteBudgetExceeded,
             err.to_string(),
         ),
+        err @ crate::store::StoreError::CheckpointComponentEncodingVersionMismatch { .. } => {
+            RuntimeError::new(
+                RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch,
+                err.to_string(),
+            )
+        }
+        err @ crate::store::StoreError::RecordEncodingFailed { .. } => {
+            RuntimeError::new(RuntimeErrorCode::RecordEncodingFailed, err.to_string())
+        }
         crate::store::StoreError::SessionExecutionLeaseExpired { session_id } => RuntimeError::new(
             RuntimeErrorCode::SessionExecutionLeaseLost,
             format!("session execution lease for session `{session_id}` was lost before commit"),
@@ -129,7 +138,11 @@ pub(super) fn session_commit_error(
         | crate::store::StoreError::AppendOperationIdentityConflict { .. }
         | crate::store::StoreError::AppendReceiptRequestedNodeCountCorrupt { .. }
         | crate::store::StoreError::CommitNodeBudgetExceeded { .. }
-        | crate::store::StoreError::CommitByteBudgetExceeded { .. }) => SessionError::Store {
+        | crate::store::StoreError::CommitByteBudgetExceeded { .. }
+        | crate::store::StoreError::CheckpointComponentEncodingVersionMismatch {
+            ..
+        }
+        | crate::store::StoreError::RecordEncodingFailed { .. }) => SessionError::Store {
             context: context.to_string(),
             source,
         },
@@ -176,6 +189,60 @@ mod store_commit_error_tests {
                 .message
                 .contains("1048576-byte transaction budget")
         );
+    }
+
+    #[test]
+    fn deterministic_checkpoint_commit_errors_are_typed_and_terminal() {
+        let mismatch = runtime_error_from_store_commit(
+            StoreError::CheckpointComponentEncodingVersionMismatch {
+                key: "execution_state".to_string(),
+                actual: 2,
+                expected: 1,
+            },
+        );
+        assert_eq!(
+            mismatch.code,
+            RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch
+        );
+        assert!(mismatch.code.is_terminal());
+        assert!(!mismatch.code.is_retryable());
+        assert!(mismatch.message.contains("execution_state"));
+
+        let encoding = runtime_error_from_store_commit(StoreError::RecordEncodingFailed {
+            record_kind: "checkpoint root".to_string(),
+            message: "deterministic fixture failure".to_string(),
+        });
+        assert_eq!(encoding.code, RuntimeErrorCode::RecordEncodingFailed);
+        assert!(encoding.code.is_terminal());
+        assert!(!encoding.code.is_retryable());
+        assert!(encoding.message.contains("checkpoint root"));
+    }
+
+    #[test]
+    fn public_append_and_park_preserve_deterministic_store_errors() {
+        for error in [
+            StoreError::CheckpointComponentEncodingVersionMismatch {
+                key: "execution_state".to_string(),
+                actual: 2,
+                expected: 1,
+            },
+            StoreError::RecordEncodingFailed {
+                record_kind: "checkpoint root".to_string(),
+                message: "deterministic fixture failure".to_string(),
+            },
+        ] {
+            let expected_variant = error.variant_name();
+            let session_error =
+                super::session_commit_error("public append and park persistence boundary", error);
+            assert!(
+                matches!(
+                    session_error,
+                    crate::SessionError::Store { ref source, .. }
+                        if source.variant_name() == expected_variant
+                ),
+                "{expected_variant} lost its typed store identity: {session_error}"
+            );
+        }
     }
 }
 
@@ -284,7 +351,7 @@ pub use queued_work_driver::{
 };
 pub use scenario_contracts::{RUNTIME_SCENARIO_CONTRACTS, ScenarioContractSpec};
 pub use session_manager::DirectCompletionClient;
-pub use state::RuntimeSessionState;
+pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
 use state::{
     append_session_nodes_to_state_with_clock, apply_session_checkpoint, apply_session_head,
     open_agent_frame_in_state_with_clock,

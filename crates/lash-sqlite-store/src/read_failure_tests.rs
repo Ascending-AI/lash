@@ -149,11 +149,17 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     );
     raw.execute(
         "INSERT INTO blobs (hash, content) VALUES ('corrupt-compressed', ?1)",
-        params![encode_msgpack(&StoredBlobEnvelope {
-            descriptor: BlobArtifactDescriptor::checkpoint_manifest(),
-            compression: BlobCompression::Zlib,
-            content: vec![0xFF, 0x00],
-        })],
+        params![
+            encode_msgpack(
+                &StoredBlobEnvelope {
+                    descriptor: BlobArtifactDescriptor::checkpoint_manifest(),
+                    compression: BlobCompression::Zlib,
+                    content: vec![0xFF, 0x00],
+                },
+                "corrupt compressed test envelope",
+            )
+            .expect("encode corrupt compressed test envelope")
+        ],
     )
     .expect("insert malformed compressed blob");
     assert_corrupt(
@@ -215,18 +221,21 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         "UPDATE session_head
          SET head_json = ?1, checkpoint_ref = 'missing-checkpoint-manifest'
          WHERE session_id = 'corrupt'",
-        params![encode_json(&SessionHeadPayload {
-            session_id: "corrupt".to_string(),
-            ..Default::default()
-        })],
+        params![
+            encode_json(&SessionHeadPayload {
+                session_id: "corrupt".to_string(),
+                ..Default::default()
+            })
+            .expect("encode session head")
+        ],
     )
     .expect("install dangling checkpoint reference");
     assert!(matches!(
         SessionCommitStore::load_session(&store).await,
         Err(StoreError::CheckpointComponentMissing {
-            component: "manifest",
+            key,
             blob_ref,
-        }) if blob_ref.as_str() == "missing-checkpoint-manifest"
+        }) if key == "manifest" && blob_ref.as_str() == "missing-checkpoint-manifest"
     ));
 }
 

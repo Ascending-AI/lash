@@ -148,23 +148,24 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
     let store = Store::memory().await.expect("store");
     let orphan = store
         .put_artifact_blob(
-            lash_sqlite_store::BlobArtifactDescriptor::plugin_session_snapshot(),
+            lash_sqlite_store::BlobArtifactDescriptor::checkpoint_component(),
             b"orphan-blob",
         )
-        .await;
+        .await
+        .expect("store orphan blob");
 
-    let state = RuntimeSessionState {
+    let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
-        tool_state_snapshot: Some(persisted_tool_state_at_generation(3)),
-        plugin_snapshot: Some(PluginSessionSnapshot {
-            plugins: Default::default(),
-        }),
         plugin_snapshot_revision: Some(5),
-        execution_state_snapshot: Some(vec![0xDE, 0xAD, 0xBE, 0xEF]),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
     };
+    state.set_tool_state_snapshot(Some(persisted_tool_state_at_generation(3)));
+    state.set_plugin_snapshot(Some(PluginSessionSnapshot {
+        plugins: Default::default(),
+    }));
+    state.set_execution_state_snapshot(Some(vec![0xDE, 0xAD, 0xBE, 0xEF]));
     store
         .admit_and_bind_session(&lash_core::SessionBinding::root(
             state.session_id.clone(),
@@ -215,14 +216,10 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
         .await
         .expect("read checkpoint")
         .expect("checkpoint manifest");
-    for blob_ref in [
-        manifest.tool_state_ref.as_ref(),
-        manifest.plugin_snapshot_ref.as_ref(),
-        manifest.execution_state_ref.as_ref(),
-    ]
-    .into_iter()
-    .flatten()
-    {
+    for component in manifest.components.values() {
+        let blob_ref = component
+            .blob_ref()
+            .expect("hydrated component carries ref");
         assert!(
             store
                 .get_blob(blob_ref)
@@ -479,8 +476,8 @@ async fn unsupported_schema_error_reports_real_versions() {
         "error must report the found version 99: {message}"
     );
     assert!(
-        message.contains("schema version 28"),
-        "error must report the real expected version 28: {message}"
+        message.contains("schema version 29"),
+        "error must report the real expected version 29: {message}"
     );
     assert!(
         !message.contains("version 1 only"),
@@ -516,7 +513,7 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
     let user_version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
-    assert_eq!(user_version, 28);
+    assert_eq!(user_version, 29);
     let payload_hash_not_null: i32 = conn
         .query_row(
             "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')

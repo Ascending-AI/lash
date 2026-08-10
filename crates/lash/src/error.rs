@@ -141,7 +141,9 @@ impl EmbedError {
     ///   tombstones — session ids are permanently single-use;
     /// - direct or session-wrapped commit byte or node budget rejections, which
     ///   require the host to raise the configured limit or submit a smaller
-    ///   commit.
+    ///   commit;
+    /// - session-wrapped checkpoint codec mismatches and record-encoding
+    ///   failures, which are deterministic for the same store and build.
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::MissingProtocolPlugin
@@ -180,7 +182,9 @@ impl EmbedError {
                     | SessionError::Store {
                         source: lash_core::StoreError::SessionDeleted { .. }
                             | lash_core::StoreError::CommitNodeBudgetExceeded { .. }
-                            | lash_core::StoreError::CommitByteBudgetExceeded { .. },
+                            | lash_core::StoreError::CommitByteBudgetExceeded { .. }
+                            | lash_core::StoreError::CheckpointComponentEncodingVersionMismatch { .. }
+                            | lash_core::StoreError::RecordEncodingFailed { .. },
                         ..
                     }
             ),
@@ -307,6 +311,37 @@ mod tests {
         ] {
             assert!(err.is_terminal(), "{err}");
             assert!(!err.is_retryable(), "{err}");
+        }
+    }
+
+    #[test]
+    fn deterministic_checkpoint_commit_errors_are_terminal_on_every_host_shape() {
+        let runtime_errors = [
+            RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch,
+            RuntimeErrorCode::RecordEncodingFailed,
+        ]
+        .map(runtime_error);
+        let session_errors = [
+            StoreError::CheckpointComponentEncodingVersionMismatch {
+                key: "execution_state".to_string(),
+                actual: 2,
+                expected: 1,
+            },
+            StoreError::RecordEncodingFailed {
+                record_kind: "checkpoint root".to_string(),
+                message: "deterministic fixture failure".to_string(),
+            },
+        ]
+        .map(|source| {
+            EmbedError::Session(SessionError::Store {
+                context: "public append or park".to_string(),
+                source,
+            })
+        });
+
+        for error in runtime_errors.into_iter().chain(session_errors) {
+            assert!(error.is_terminal(), "{error}");
+            assert!(!error.is_retryable(), "{error}");
         }
     }
 

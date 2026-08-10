@@ -339,11 +339,10 @@ where
 async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     store: Arc<dyn RuntimePersistence>,
 ) {
-    let mut state = RuntimeSessionState {
-        session_id: "execution-state-replace-then-clear".to_string(),
-        execution_state_snapshot: Some(b"initial-execution-state".to_vec()),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
+    let mut state =
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    state.session_id = "execution-state-replace-then-clear".to_string();
+    state.set_execution_state_snapshot(Some(b"initial-execution-state".to_vec()));
 
     let initial = commit_runtime_state_for_test(
         &store,
@@ -362,7 +361,12 @@ async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     )
     .await
     .expect("replace execution state");
-    assert!(replacement.manifest.execution_state_ref.is_some());
+    assert!(
+        replacement
+            .manifest
+            .component_ref(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
+            .is_some()
+    );
     state.apply_persisted_commit_result(replacement);
 
     state.set_execution_state_snapshot(None);
@@ -373,7 +377,12 @@ async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     )
     .await
     .expect("clear replacement execution state");
-    assert!(cleared.manifest.execution_state_ref.is_none());
+    assert!(
+        cleared
+            .manifest
+            .component_ref(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
+            .is_none()
+    );
 
     let durable = store
         .load_session()
@@ -383,8 +392,11 @@ async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     let checkpoint = durable
         .checkpoint
         .expect("replace-then-clear session has a checkpoint");
-    assert!(checkpoint.execution_state_ref.is_none());
-    assert!(checkpoint.execution_state.is_none());
+    assert!(
+        checkpoint
+            .component_ref(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
+            .is_none()
+    );
 }
 
 async fn commit_rejects_carried_nondefault_node_budget(store: Arc<dyn RuntimePersistence>) {
@@ -429,7 +441,10 @@ async fn commit_rejects_carried_nondefault_byte_budget(store: Arc<dyn RuntimePer
         crate::CommitBudgetLimit::Unbounded,
     );
     let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
-    commit.checkpoint.execution_state = Some(vec![0; CONFIGURED_BYTE_LIMIT * 2]);
+    commit.checkpoint.components.insert(
+        crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
+        crate::HydratedCheckpointComponent::changed(vec![0; CONFIGURED_BYTE_LIMIT * 2]),
+    );
 
     let error = store
         .commit_runtime_state(commit)
@@ -1421,7 +1436,7 @@ async fn fresh_append_receipt_enforces_ancestor_precondition(store: Arc<dyn Runt
 /// independently constructed handle, drop that writer, then construct a third
 /// handle and hydrate. The helper owns construction order so a caller cannot
 /// prebuild nominally cold handles before the writes they verify.
-pub async fn checkpoint_component_refs_survive_cold_reopens<F>(make: F)
+pub async fn complete_runtime_checkpoint_component_set_survives_cold_reopens<F>(make: F)
 where
     F: Fn() -> Arc<dyn RuntimePersistence>,
 {
@@ -1430,37 +1445,35 @@ where
     bind_conformance_session(&open, "checkpoint-component-refs").await;
     let mut state = RuntimeSessionState {
         session_id: "checkpoint-component-refs".to_string(),
-        tool_state_snapshot: Some(ToolState::default().with_generation(91)),
-        plugin_snapshot_revision: Some(37),
-        plugin_snapshot: Some(PluginSessionSnapshot::default()),
-        execution_state_snapshot: Some(b"opaque-execution-state-before-clean-commit".to_vec()),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
+    state.set_execution_state_snapshot(Some(b"known-execution-state".to_vec()));
+    let mut first_commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    first_commit.checkpoint.components.extend([
+        (
+            "arbitrary/unchanged".to_string(),
+            crate::HydratedCheckpointComponent::changed(b"stable-body".to_vec()),
+        ),
+        (
+            "arbitrary/deleted".to_string(),
+            crate::HydratedCheckpointComponent::changed(b"delete-me".to_vec()),
+        ),
+        (
+            "arbitrary/changed".to_string(),
+            crate::HydratedCheckpointComponent::changed(b"before".to_vec()),
+        ),
+    ]);
+    let first =
+        commit_runtime_state_for_test(&open, first_commit, "checkpoint-component-refs-first")
+            .await
+            .expect("commit checkpoint component bodies");
+    let unchanged_descriptor = first.manifest.components["arbitrary/unchanged"].clone();
+    let changed_before = first.manifest.components["arbitrary/changed"].clone();
+    assert_eq!(
+        unchanged_descriptor.blob_ref.as_str(),
+        crate::stable_hash::sha256_hex(b"stable-body")
+    );
 
-    let first = commit_runtime_state_for_test(
-        &open,
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
-        "checkpoint-component-refs-first",
-    )
-    .await
-    .expect("commit checkpoint component bodies");
-    assert!(
-        first.manifest.tool_state_ref.is_some(),
-        "a stored tool-state body must return its content ref"
-    );
-    assert!(
-        first.manifest.plugin_snapshot_ref.is_some(),
-        "a stored plugin-snapshot body must return its content ref"
-    );
-    assert!(
-        first.manifest.execution_state_ref.is_some(),
-        "a stored execution-state body must return its content ref"
-    );
-
-    state.apply_persisted_commit_result(first);
-    assert!(state.tool_state_snapshot.is_none());
-    assert!(state.plugin_snapshot.is_none());
-    assert!(state.execution_state_snapshot.is_none());
     drop(open);
 
     let reopen = make();
@@ -1471,14 +1484,88 @@ where
     let reopen_identity = Arc::downgrade(&reopen);
     bind_conformance_session(&reopen, "checkpoint-component-refs").await;
 
-    let second = commit_runtime_state_for_test(
-        &reopen,
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
-        "checkpoint-component-refs-second",
+    // Exercise the production hydration and ordinary commit boundary. No test
+    // code re-inserts arbitrary keys: the runtime-owned complete set must carry
+    // them as unchanged refs.
+    state = crate::store::load_persisted_session_state(reopen.as_ref())
+        .await
+        .expect("hydrate resident checkpoint component set")
+        .expect("seeded checkpoint state");
+    let mut ordinary_turn_projection = state.to_snapshot();
+    ordinary_turn_projection.turn_index += 1;
+    state.apply_snapshot(&ordinary_turn_projection);
+    let second_commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    let carried = second_commit
+        .checkpoint
+        .components
+        .get("arbitrary/unchanged")
+        .expect("ordinary commit carries unknown key");
+    assert_eq!(carried.body(), None, "unknown component must ride ref-only");
+    assert_eq!(carried.blob_ref(), Some(&unchanged_descriptor.blob_ref));
+    let measured = second_commit
+        .measure_budget()
+        .expect("measure ordinary complete-set commit");
+    let root_bytes = rmp_serde::to_vec_named(
+        &second_commit
+            .checkpoint
+            .manifest()
+            .expect("project ordinary checkpoint root"),
     )
-    .await
-    .expect("commit unchanged checkpoint component refs");
-    state.apply_persisted_commit_result(second);
+    .expect("encode ordinary checkpoint root")
+    .len();
+    assert_eq!(
+        measured.checkpoint_bytes, root_bytes,
+        "unchanged carried refs must add no component-body bytes to the budget"
+    );
+    let second =
+        commit_runtime_state_for_test(&reopen, second_commit, "checkpoint-component-refs-second")
+            .await
+            .expect("commit unchanged checkpoint component refs");
+    assert_eq!(
+        second.manifest.components["arbitrary/unchanged"], unchanged_descriptor,
+        "an unchanged arbitrary component must commit ref-only and reuse its descriptor"
+    );
+    assert!(
+        second.manifest.components.contains_key("arbitrary/deleted"),
+        "ordinary commits must retain every unknown component"
+    );
+    state = crate::store::load_persisted_session_state(reopen.as_ref())
+        .await
+        .expect("hydrate state after ordinary complete-set commit")
+        .expect("ordinary complete-set checkpoint state");
+
+    // Explicit owner mutation still uses absence from the complete listing as
+    // deletion. The arbitrary store-law mutations remain direct because the
+    // runtime intentionally has no typed owner for those keys.
+    state.set_execution_state_snapshot(None);
+    let mut third_commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    third_commit
+        .checkpoint
+        .components
+        .remove("arbitrary/deleted");
+    third_commit.checkpoint.components.insert(
+        "arbitrary/changed".to_string(),
+        crate::HydratedCheckpointComponent::changed(b"after".to_vec()),
+    );
+    let third =
+        commit_runtime_state_for_test(&reopen, third_commit, "checkpoint-component-refs-third")
+            .await
+            .expect("commit explicit known and arbitrary component mutations");
+    assert_ne!(
+        third.manifest.components["arbitrary/changed"].blob_ref, changed_before.blob_ref,
+        "a changed arbitrary component must mint a new content ref"
+    );
+    assert!(
+        !third.manifest.components.contains_key("arbitrary/deleted"),
+        "absence from the complete key listing is deletion"
+    );
+    assert!(
+        !third
+            .manifest
+            .components
+            .contains_key(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT),
+        "explicit deletion of a known component must remove it"
+    );
     drop(reopen);
 
     let cold_reopen = make();
@@ -1495,19 +1582,85 @@ where
         .expect("refs-only checkpoint session");
     let checkpoint = read.checkpoint.expect("hydrated refs-only checkpoint");
     assert_eq!(
-        checkpoint.tool_state.as_ref().map(ToolState::generation),
-        Some(91)
+        checkpoint.component_body("arbitrary/unchanged"),
+        Some(&b"stable-body"[..]),
+        "hydrate -> ordinary commit -> hydrate must preserve unknown bytes exactly"
     );
-    assert!(
-        checkpoint.plugin_snapshot.is_some(),
-        "refs-only commit must preserve the plugin snapshot body"
-    );
-    assert_eq!(checkpoint.plugin_snapshot_revision, Some(37));
     assert_eq!(
-        checkpoint.execution_state.as_deref(),
-        Some(&b"opaque-execution-state-before-clean-commit"[..]),
-        "refs-only commit must preserve execution state across a cold load"
+        checkpoint.components["arbitrary/unchanged"].blob_ref(),
+        Some(&unchanged_descriptor.blob_ref),
+        "round-trip must preserve the unknown component's content hash"
     );
+    assert_eq!(
+        checkpoint.component_body("arbitrary/changed"),
+        Some(&b"after"[..])
+    );
+    assert!(!checkpoint.components.contains_key("arbitrary/deleted"));
+    assert!(
+        !checkpoint
+            .components
+            .contains_key(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT),
+        "known component deletion must survive cold hydration"
+    );
+
+    state = crate::store::load_persisted_session_state(cold_reopen.as_ref())
+        .await
+        .expect("reload current state before rejection laws")
+        .expect("current checkpoint state before rejection laws");
+    let mut unknown = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    unknown.checkpoint.components.insert(
+        "arbitrary/unknown-ref".to_string(),
+        crate::HydratedCheckpointComponent::Unchanged {
+            descriptor: crate::CheckpointComponentDescriptor {
+                blob_ref: crate::BlobRef("never-stored".to_string()),
+                encoding_version: crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
+            },
+        },
+    );
+    let rejection_lease = claim_session_execution_lease_for_test(
+        &cold_reopen,
+        "checkpoint-component-refs",
+        "checkpoint-component-rejections",
+    )
+    .await;
+    let unknown_error = cold_reopen
+        .commit_runtime_state(
+            unknown.releasing_session_execution_lease(rejection_lease.completion()),
+        )
+        .await
+        .expect_err("arbitrary unknown ref must fail");
+    assert!(matches!(
+        unknown_error,
+        StoreError::CheckpointComponentMissing { ref key, .. }
+            if key == "arbitrary/unknown-ref"
+    ));
+
+    let mut mismatch = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    mismatch.checkpoint.components.insert(
+        "arbitrary/versioned".to_string(),
+        crate::HydratedCheckpointComponent::Changed {
+            encoding_version: crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION + 1,
+            body: b"unsupported".to_vec(),
+        },
+    );
+    let mismatch_error = cold_reopen
+        .commit_runtime_state(
+            mismatch.releasing_session_execution_lease(rejection_lease.completion()),
+        )
+        .await
+        .expect_err("arbitrary encoding-version mismatch must fail");
+    assert!(matches!(
+        &mismatch_error,
+        StoreError::CheckpointComponentEncodingVersionMismatch { key, .. }
+            if key == "arbitrary/versioned"
+    ));
+    assert!(
+        mismatch_error
+            .to_string()
+            .contains("remedy: drain affected sessions and recreate the store"),
+        "typed mismatch must name the operator remedy: {mismatch_error}"
+    );
+    release_session_execution_lease_for_test(&cold_reopen, &rejection_lease).await;
 }
 
 /// A ref-only checkpoint commit is valid only when every referenced component
@@ -1515,19 +1668,22 @@ where
 pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: "checkpoint-unknown-ref".to_string(),
-        execution_state_ref: Some(crate::BlobRef(
-            "checkpoint-component-that-was-never-stored".to_string(),
-        )),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    commit.checkpoint.components.insert(
+        "arbitrary/unknown-ref".to_string(),
+        crate::HydratedCheckpointComponent::Unchanged {
+            descriptor: crate::CheckpointComponentDescriptor {
+                blob_ref: crate::BlobRef("checkpoint-component-that-was-never-stored".to_string()),
+                encoding_version: crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
+            },
+        },
+    );
 
-    let error = commit_runtime_state_for_test(
-        &store,
-        RuntimeCommit::persisted_state_for_test(&state, &[]),
-        "checkpoint-unknown-ref",
-    )
-    .await
-    .expect_err("a checkpoint must reject a ref whose body is absent");
+    let error = commit_runtime_state_for_test(&store, commit, "checkpoint-unknown-ref")
+        .await
+        .expect_err("a checkpoint must reject a ref whose body is absent");
     assert!(
         error
             .to_string()
@@ -2105,9 +2261,9 @@ async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn Runt
         .expect("current frame");
     assert_eq!(current.reason, custom_reason);
     assert_eq!(
-        read.checkpoint
-            .as_ref()
-            .and_then(|checkpoint| checkpoint.execution_state.as_deref()),
+        read.checkpoint.as_ref().and_then(|checkpoint| {
+            checkpoint.component_body(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
+        }),
         Some(&b"frame-vm"[..])
     );
 }
@@ -2222,15 +2378,15 @@ async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimePersistence
 }
 
 async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePersistence>) {
-    let state = RuntimeSessionState {
+    let mut state = RuntimeSessionState {
         session_id: "hydrated".to_string(),
-        tool_state_snapshot: Some(ToolState::default().with_generation(9)),
         plugin_snapshot_revision: Some(12),
-        plugin_snapshot: Some(PluginSessionSnapshot {
-            plugins: Default::default(),
-        }),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
+    state.set_tool_state_snapshot(Some(ToolState::default().with_generation(9)));
+    state.set_plugin_snapshot(Some(PluginSessionSnapshot {
+        plugins: Default::default(),
+    }));
     let usage = TokenLedgerEntry {
         source: "turn".to_string(),
         model: "mock-model".to_string(),
@@ -2256,7 +2412,8 @@ async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePersistence>) 
     assert_eq!(read.session_id, "hydrated");
     assert_eq!(
         checkpoint
-            .tool_state
+            .decode_component::<ToolState>(crate::store::TOOL_STATE_CHECKPOINT_COMPONENT)
+            .expect("decode dynamic snapshot")
             .expect("dynamic snapshot")
             .generation(),
         9
@@ -4360,13 +4517,8 @@ fn persisted_session_read_snapshot(
     loaded.map_or(serde_json::Value::Null, |loaded| {
         let checkpoint = loaded.checkpoint.map(|checkpoint| {
             serde_json::json!({
-                "tool_state_ref": checkpoint.tool_state_ref,
-                "tool_state": checkpoint.tool_state,
-                "plugin_snapshot_ref": checkpoint.plugin_snapshot_ref,
-                "plugin_snapshot": checkpoint.plugin_snapshot,
+                "components": checkpoint.components,
                 "plugin_snapshot_revision": checkpoint.plugin_snapshot_revision,
-                "execution_state_ref": checkpoint.execution_state_ref,
-                "execution_state": checkpoint.execution_state,
             })
         });
         serde_json::json!({
@@ -6386,11 +6538,11 @@ async fn gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(
     store: Arc<dyn RuntimePersistence>,
 ) {
     // First commit writes a live checkpoint blob.
-    let v1 = RuntimeSessionState {
+    let mut v1 = RuntimeSessionState {
         session_id: "gc-blobs".to_string(),
-        tool_state_snapshot: Some(ToolState::default().with_generation(1)),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
+    v1.set_tool_state_snapshot(Some(ToolState::default().with_generation(1)));
     let v1_result = commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state_for_test(&v1, &[]),
@@ -6400,12 +6552,12 @@ async fn gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(
     .expect("commit v1");
     // Second commit supersedes it with different content, so the v1 checkpoint
     // blob is now unreachable from every session head.
-    let v2 = RuntimeSessionState {
+    let mut v2 = RuntimeSessionState {
         session_id: "gc-blobs".to_string(),
-        tool_state_snapshot: Some(ToolState::default().with_generation(2)),
         head_revision: v1_result.head_revision,
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
+    v2.set_tool_state_snapshot(Some(ToolState::default().with_generation(2)));
     commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state_for_test(&v2, &[]),
@@ -6439,7 +6591,11 @@ async fn gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(
         .expect("session after gc");
     assert_eq!(
         read.checkpoint
-            .and_then(|checkpoint| checkpoint.tool_state)
+            .and_then(|checkpoint| {
+                checkpoint
+                    .decode_component::<ToolState>(crate::store::TOOL_STATE_CHECKPOINT_COMPONENT)
+                    .expect("decode reachable tool state")
+            })
             .map(|tool_state| tool_state.generation()),
         Some(2),
         "gc must preserve the reachable checkpoint's snapshots"
@@ -6597,9 +6753,9 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
         .expect("save meta");
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
-        tool_state_snapshot: Some(ToolState::default().with_generation(77)),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
+    state.set_tool_state_snapshot(Some(ToolState::default().with_generation(77)));
     let initial_commit = commit_runtime_state_for_test(
         &factory.open,
         RuntimeCommit::persisted_state_for_test(&state, &[]),
@@ -6699,7 +6855,11 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
         reopened
             .checkpoint
             .as_ref()
-            .and_then(|checkpoint| checkpoint.tool_state.as_ref())
+            .and_then(|checkpoint| {
+                checkpoint
+                    .decode_component::<ToolState>(crate::store::TOOL_STATE_CHECKPOINT_COMPONENT)
+                    .expect("decode reopened tool state")
+            })
             .map(|tool_state| tool_state.generation()),
         Some(77)
     );
@@ -6908,7 +7068,7 @@ async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     };
     state.ensure_agent_frame_initialized();
     state.session_graph.data_mut().nodes[0].timestamp = "2026-07-26T10:00:00Z".to_string();
-    state.execution_state_snapshot = Some(vec![7; 1_024]);
+    state.set_execution_state_snapshot(Some(vec![7; 1_024]));
     let operation = crate::OperationId::turn("root", "provider-turn", "final");
     let (stamped_commit, _) = RuntimeCommit::persisted_state_for_test(&state, &[])
         .with_operation(operation.clone())

@@ -34,13 +34,105 @@ impl std::fmt::Debug for DurableNode {
 pub(super) struct CheckpointObservation {
     pub(super) checkpoint_ref: Option<BlobRef>,
     pub(super) turn_state: serde_json::Value,
-    pub(super) tool_state_ref: Option<BlobRef>,
-    pub(super) tool_state: Option<serde_json::Value>,
-    pub(super) plugin_snapshot_ref: Option<BlobRef>,
-    pub(super) plugin_snapshot: Option<serde_json::Value>,
+    /// Complete keyed projection: descriptor identity and exact logical bytes
+    /// are compared for every component, including keys unknown to Lash core.
+    pub(super) components: BTreeMap<String, (lash_core::CheckpointComponentDescriptor, Vec<u8>)>,
     pub(super) plugin_snapshot_revision: Option<u64>,
-    pub(super) execution_state_ref: Option<BlobRef>,
-    pub(super) execution_state: Option<Vec<u8>>,
+}
+
+pub(super) fn checkpoint_observation(
+    checkpoint_ref: Option<BlobRef>,
+    checkpoint: HydratedSessionCheckpoint,
+) -> CheckpointObservation {
+    let manifest = checkpoint
+        .manifest()
+        .expect("project checkpoint manifest for raw comparison");
+    let components = manifest
+        .components
+        .into_iter()
+        .map(|(key, descriptor)| {
+            let component = checkpoint
+                .component(&key)
+                .unwrap_or_else(|| panic!("checkpoint manifest lost component `{key}`"));
+            lash_core::store::ensure_checkpoint_component_encoding_version(
+                &key,
+                component.encoding_version(),
+            )
+            .expect("validate raw checkpoint component");
+            let body = component
+                .body()
+                .unwrap_or_else(|| panic!("raw checkpoint component `{key}` was not hydrated"))
+                .to_vec();
+            (key, (descriptor, body))
+        })
+        .collect();
+    CheckpointObservation {
+        checkpoint_ref,
+        turn_state: serde_json::to_value(&checkpoint.turn_state)
+            .expect("encode checkpoint turn state"),
+        components,
+        plugin_snapshot_revision: checkpoint.plugin_snapshot_revision,
+    }
+}
+
+pub(super) fn read_sqlite_checkpoint_observation(
+    path: &Path,
+    raw_checkpoint_ref: Option<BlobRef>,
+) -> Option<CheckpointObservation> {
+    let raw_checkpoint_ref = raw_checkpoint_ref?;
+    let checkpoint =
+        lash_sqlite_store::Store::raw_checkpoint_from_path_for_testing(path, &raw_checkpoint_ref)
+            .expect("decode SQLite checkpoint through raw durable reader")
+            .expect("checkpoint ref must address a SQLite checkpoint manifest");
+    Some(checkpoint_observation(Some(raw_checkpoint_ref), checkpoint))
+}
+
+pub(super) async fn read_postgres_checkpoint_observation(
+    pool: &PgPool,
+    raw_checkpoint_ref: Option<BlobRef>,
+) -> Option<CheckpointObservation> {
+    let raw_checkpoint_ref = raw_checkpoint_ref?;
+    let manifest_bytes: Vec<u8> =
+        sqlx::query_scalar("SELECT content FROM lash_blobs WHERE hash = $1")
+            .bind(raw_checkpoint_ref.as_str())
+            .fetch_one(pool)
+            .await
+            .expect("read PostgreSQL checkpoint manifest blob");
+    let manifest: lash_core::store::SessionCheckpoint =
+        rmp_serde::from_slice(&manifest_bytes).expect("decode PostgreSQL checkpoint manifest");
+    assert_eq!(
+        manifest.schema_version,
+        lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
+        "PostgreSQL checkpoint manifest schema version"
+    );
+    manifest
+        .validate_component_encoding_versions()
+        .expect("validate PostgreSQL checkpoint component versions");
+    let mut components = std::collections::BTreeMap::new();
+    for (key, descriptor) in &manifest.components {
+        let bytes: Vec<u8> = sqlx::query_scalar("SELECT content FROM lash_blobs WHERE hash = $1")
+            .bind(descriptor.blob_ref.as_str())
+            .fetch_one(pool)
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "read PostgreSQL {key} blob `{}`: {error}",
+                    descriptor.blob_ref
+                )
+            });
+        components.insert(
+            key.clone(),
+            lash_core::HydratedCheckpointComponent::hydrated(descriptor.clone(), bytes),
+        );
+    }
+    Some(checkpoint_observation(
+        Some(raw_checkpoint_ref),
+        HydratedSessionCheckpoint {
+            turn_state: manifest.turn_state,
+            components,
+            plugin_snapshot_revision: manifest.plugin_snapshot_revision,
+        },
+    ))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

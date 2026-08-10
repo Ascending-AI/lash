@@ -244,7 +244,7 @@ async fn enqueue_queued_work_with_outcome_tx(
     .bind(&batch.source_key)
     .bind(batch.delivery_policy.as_str())
     .bind(batch.slot_policy.as_str())
-    .bind(encode_json(&batch.merge_key))
+    .bind(encode_json(&batch.merge_key)?)
     .bind(sql_available_at_ms)
     .bind(now as i64)
     .execute(&mut **tx)
@@ -259,7 +259,7 @@ async fn enqueue_queued_work_with_outcome_tx(
         .bind(&batch_id)
         .bind(index as i32)
         .bind(item_id)
-        .bind(encode_json(payload))
+        .bind(encode_json(payload)?)
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -539,7 +539,7 @@ impl SessionCommitStore for PostgresSessionStore {
              ON CONFLICT (session_id) DO NOTHING",
         )
         .bind(&commit.session_id)
-        .bind(encode_json(&direct_meta))
+        .bind(encode_json(&direct_meta)?)
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -612,7 +612,7 @@ impl SessionCommitStore for PostgresSessionStore {
                  ON CONFLICT (session_id) DO NOTHING",
             )
             .bind(&commit.session_id)
-            .bind(encode_json(&placeholder.payload()))
+            .bind(encode_json(&placeholder.payload())?)
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -772,7 +772,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 )
             })?)
             .bind(&entry.identity.payload_hash)
-            .bind(encode_json(&entry.entry))
+            .bind(encode_json(&entry.entry)?)
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -817,7 +817,7 @@ impl SessionCommitStore for PostgresSessionStore {
         )
         .bind(&commit.session_id)
         .bind(sql_head_revision)
-        .bind(encode_json(&meta.payload()))
+        .bind(encode_json(&meta.payload())?)
         .bind(checkpoint_ref.as_str())
         .bind(meta.leaf_node_id.as_deref())
         .bind(plan.actual_head_revision() as i64)
@@ -901,7 +901,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 .bind(&commit.session_id)
                 .bind(input_id)
                 .bind(lash_core::TurnInputState::DeferredNextTurn.as_str())
-                .bind(encode_json(&lash_core::TurnInputIngress::NextTurn))
+                .bind(encode_json(&lash_core::TurnInputIngress::NextTurn)?)
                 .execute(&mut *tx)
                 .await
                 .map_err(store_sqlx_error)?;
@@ -948,7 +948,7 @@ impl SessionCommitStore for PostgresSessionStore {
             .bind(receipt.session_id)
             .bind(receipt.operation_key)
             .bind(receipt.turn_commit_hash)
-            .bind(encode_json(receipt.result))
+            .bind(encode_json(receipt.result)?)
             .bind(now as i64)
             .bind(receipt.request_identity_hash)
             .bind(receipt.requested_node_count.map(|count| count as i64))
@@ -994,7 +994,7 @@ impl SessionCommitStore for PostgresSessionStore {
              ON CONFLICT (session_id) DO NOTHING",
         )
         .bind(session_id)
-        .bind(encode_json(&meta))
+        .bind(encode_json(&meta)?)
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -1016,7 +1016,7 @@ impl SessionCommitStore for PostgresSessionStore {
              ON CONFLICT (session_id) DO UPDATE SET meta_json = EXCLUDED.meta_json",
         )
         .bind(&meta.session_id)
-        .bind(encode_json(&meta))
+        .bind(encode_json(&meta)?)
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -2059,8 +2059,8 @@ impl TurnInputStore for PostgresSessionStore {
             }
             lash_core::TurnInputIngress::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
         };
-        let ingress_json = encode_json(&draft.ingress);
-        let input_json = encode_json(&draft.input);
+        let ingress_json = encode_json(&draft.ingress)?;
+        let input_json = encode_json(&draft.input)?;
         let input = if let Some(source_key) = draft.source_key.as_deref() {
             let row = sqlx::query(
                 "INSERT INTO lash_pending_turn_inputs (
@@ -2515,15 +2515,11 @@ impl StoreMaintenance for PostgresSessionStore {
                 "SessionCheckpoint",
                 lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
             )?;
-            for child in [
-                manifest.tool_state_ref,
-                manifest.plugin_snapshot_ref,
-                manifest.execution_state_ref,
-            ]
-            .into_iter()
-            .flatten()
-            {
-                retained.insert(child.0);
+            // GC interprets only the root's ref graph, never component bodies.
+            // Retain refs even when a newer writer used an unknown component
+            // codec so an older binary cannot turn incompatibility into loss.
+            for descriptor in manifest.components.values() {
+                retained.insert(descriptor.blob_ref.0.clone());
             }
         }
         let all_hashes =

@@ -15,6 +15,7 @@ pub struct InMemorySessionStoreFactory {
     pub(super) global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
     pub(super) fork_plans: Arc<Mutex<HashMap<String, crate::store::ForkPlan>>>,
     pub(super) node_anchors: InMemoryNodeAnchors,
+    pub(super) checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
     pub(super) tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
     pub(super) deleted_session_ids: Arc<Mutex<HashSet<String>>>,
 }
@@ -34,6 +35,7 @@ impl InMemorySessionStoreFactory {
             global_session_heads: Arc::new(Mutex::new(HashMap::new())),
             fork_plans: Arc::new(Mutex::new(HashMap::new())),
             node_anchors: Arc::new(Mutex::new(HashMap::new())),
+            checkpoint_component_blobs: Arc::new(Mutex::new(HashMap::new())),
             tombstoned_node_ids: Arc::new(Mutex::new(HashSet::new())),
             deleted_session_ids: Arc::new(Mutex::new(HashSet::new())),
         }
@@ -95,6 +97,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                     Arc::clone(&self.global_node_owners),
                     Arc::clone(&self.global_session_heads),
                     Arc::clone(&self.node_anchors),
+                    Arc::clone(&self.checkpoint_component_blobs),
                     Arc::clone(&self.tombstoned_node_ids),
                     Arc::clone(&self.deleted_session_ids),
                 ));
@@ -429,6 +432,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             Arc::clone(&self.global_node_owners),
             Arc::clone(&self.global_session_heads),
             Arc::clone(&self.node_anchors),
+            Arc::clone(&self.checkpoint_component_blobs),
             Arc::clone(&self.tombstoned_node_ids),
             Arc::clone(&self.deleted_session_ids),
         ));

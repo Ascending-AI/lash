@@ -165,14 +165,25 @@ pub(crate) fn store_decode_json<T: serde::de::DeserializeOwned>(
         .map_err(|err| StoreError::Backend(format!("failed to decode {what}: {err}")))
 }
 
-pub(crate) fn encode_json<T: serde::Serialize>(value: &T) -> String {
-    serde_json::to_string(value).expect("persisted state should serialize")
+pub(crate) fn encode_json<T: serde::Serialize>(value: &T) -> Result<String, StoreError> {
+    serde_json::to_string(value).map_err(|error| StoreError::RecordEncodingFailed {
+        record_kind: "persisted JSON record".to_string(),
+        message: error.to_string(),
+    })
 }
 
-fn encode_msgpack<T: serde::Serialize>(value: &T) -> Vec<u8> {
+fn encode_msgpack<T: serde::Serialize>(
+    value: &T,
+    record_kind: &str,
+) -> Result<Vec<u8>, StoreError> {
     let mut buf = Vec::with_capacity(1024);
-    rmp_serde::encode::write_named(&mut buf, value).expect("value should serialize");
-    buf
+    rmp_serde::encode::write_named(&mut buf, value).map_err(|error| {
+        StoreError::RecordEncodingFailed {
+            record_kind: record_kind.to_string(),
+            message: error.to_string(),
+        }
+    })?;
+    Ok(buf)
 }
 
 pub(crate) fn decode_versioned_msgpack_record<T>(
@@ -233,80 +244,62 @@ async fn get_blob_tx(
         .map_err(store_sqlx_error)
 }
 
-async fn put_checkpoint_component_tx<T: serde::Serialize>(
+async fn get_checkpoint_component_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    component: &'static str,
-    body: Option<&T>,
-    existing_ref: Option<&BlobRef>,
-) -> Result<Option<BlobRef>, StoreError> {
-    if let Some(body) = body {
-        return put_blob_tx(tx, &encode_msgpack(body)).await.map(Some);
-    }
-    let Some(blob_ref) = existing_ref else {
-        return Ok(None);
-    };
-    if get_blob_tx(tx, blob_ref).await?.is_none() {
-        return Err(StoreError::CheckpointComponentMissing {
-            component,
-            blob_ref: blob_ref.clone(),
-        });
-    }
-    Ok(Some(blob_ref.clone()))
-}
-
-async fn get_checkpoint_component_tx<T: serde::de::DeserializeOwned>(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    component: &'static str,
-    blob_ref: Option<&BlobRef>,
-) -> Result<Option<T>, StoreError> {
-    let Some(blob_ref) = blob_ref else {
-        return Ok(None);
-    };
+    key: &str,
+    descriptor: &lash_core::CheckpointComponentDescriptor,
+) -> Result<lash_core::HydratedCheckpointComponent, StoreError> {
+    lash_core::store::ensure_checkpoint_component_encoding_version(
+        key,
+        descriptor.encoding_version,
+    )?;
+    let blob_ref = &descriptor.blob_ref;
     let bytes =
         get_blob_tx(tx, blob_ref)
             .await?
             .ok_or_else(|| StoreError::CheckpointComponentMissing {
-                component,
+                key: key.to_string(),
                 blob_ref: blob_ref.clone(),
             })?;
-    rmp_serde::from_slice(&bytes)
-        .map(Some)
-        .map_err(|err| StoreError::Backend(format!("failed to decode {component}: {err}")))
+    Ok(lash_core::HydratedCheckpointComponent::hydrated(
+        descriptor.clone(),
+        bytes,
+    ))
 }
 
+/// Persist the complete checkpoint root and every changed leaf inside the
+/// caller's commit transaction. Keeping both writes under the same transaction
+/// is the GC-safety argument: no collector can observe a git-loose-object-style
+/// leaf that is not yet reachable from its root, or a root whose leaf is absent.
 pub(crate) async fn put_checkpoint_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     checkpoint: &HydratedSessionCheckpoint,
 ) -> Result<(BlobRef, SessionCheckpoint), StoreError> {
-    let tool_state_ref = put_checkpoint_component_tx(
-        tx,
-        "tool-state",
-        checkpoint.tool_state.as_ref(),
-        checkpoint.tool_state_ref.as_ref(),
-    )
-    .await?;
-    let plugin_snapshot_ref = put_checkpoint_component_tx(
-        tx,
-        "plugin-snapshot",
-        checkpoint.plugin_snapshot.as_ref(),
-        checkpoint.plugin_snapshot_ref.as_ref(),
-    )
-    .await?;
-    let execution_state_ref = put_checkpoint_component_tx(
-        tx,
-        "execution-state",
-        checkpoint.execution_state.as_ref(),
-        checkpoint.execution_state_ref.as_ref(),
-    )
-    .await?;
-    let manifest = SessionCheckpoint::new(
-        checkpoint.turn_state.clone(),
-        tool_state_ref,
-        plugin_snapshot_ref,
-        checkpoint.plugin_snapshot_revision,
-        execution_state_ref,
-    );
-    let bytes = encode_msgpack(&manifest);
+    let manifest = checkpoint.manifest()?;
+    for (key, descriptor) in &manifest.components {
+        let component =
+            checkpoint
+                .components
+                .get(key)
+                .ok_or_else(|| StoreError::StoredDataCorrupt {
+                    record_kind: "HydratedSessionCheckpoint",
+                    message: format!("manifest projection lost component `{key}`"),
+                })?;
+        if let Some(body) = component.body() {
+            let stored_ref = put_blob_tx(tx, body).await?;
+            lash_core::store::ensure_checkpoint_component_hash_agreement(
+                key,
+                &stored_ref,
+                &descriptor.blob_ref,
+            )?;
+        } else if get_blob_tx(tx, &descriptor.blob_ref).await?.is_none() {
+            return Err(StoreError::CheckpointComponentMissing {
+                key: key.clone(),
+                blob_ref: descriptor.blob_ref.clone(),
+            });
+        }
+    }
+    let bytes = encode_msgpack(&manifest, "checkpoint root")?;
     let checkpoint_ref = put_blob_tx(tx, &bytes).await?;
     Ok((checkpoint_ref, manifest))
 }
@@ -324,23 +317,18 @@ pub(crate) async fn get_checkpoint_tx(
         "SessionCheckpoint",
         lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
     )?;
-    let tool_state =
-        get_checkpoint_component_tx(tx, "tool-state", manifest.tool_state_ref.as_ref()).await?;
-    let plugin_snapshot =
-        get_checkpoint_component_tx(tx, "plugin-snapshot", manifest.plugin_snapshot_ref.as_ref())
-            .await?;
-    let execution_state =
-        get_checkpoint_component_tx(tx, "execution-state", manifest.execution_state_ref.as_ref())
-            .await?;
+    manifest.validate_component_encoding_versions()?;
+    let mut components = std::collections::BTreeMap::new();
+    for (key, descriptor) in &manifest.components {
+        components.insert(
+            key.clone(),
+            get_checkpoint_component_tx(tx, key, descriptor).await?,
+        );
+    }
     Ok(Some(HydratedSessionCheckpoint {
         turn_state: manifest.turn_state,
-        tool_state_ref: manifest.tool_state_ref,
-        tool_state,
-        plugin_snapshot_ref: manifest.plugin_snapshot_ref,
-        plugin_snapshot,
+        components,
         plugin_snapshot_revision: manifest.plugin_snapshot_revision,
-        execution_state_ref: manifest.execution_state_ref,
-        execution_state,
     }))
 }
 

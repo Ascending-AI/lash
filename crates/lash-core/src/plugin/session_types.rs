@@ -57,14 +57,20 @@ pub struct SessionSnapshot {
     pub last_prompt_usage: Option<crate::PromptUsage>,
     #[serde(default)]
     pub protocol_turn_options: ProtocolTurnOptions,
+    /// Read-only projection of the hydrated tool-state reference. Applying a
+    /// snapshot does not write this field; the resident component set wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_state_ref: Option<crate::store::BlobRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_state_generation: Option<u64>,
+    /// Read-only projection of the hydrated plugin-snapshot reference. Applying
+    /// a snapshot does not write this field; the resident component set wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_snapshot_ref: Option<crate::store::BlobRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_snapshot_revision: Option<u64>,
+    /// Read-only projection of the hydrated execution-state reference. Applying
+    /// a snapshot does not write this field; the resident component set wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_state_ref: Option<crate::store::BlobRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

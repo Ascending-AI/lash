@@ -238,7 +238,7 @@ async fn summarize_compaction_prefix(
     snapshot.policy.turn_budget = lash_core::TurnBudget::bounded(1);
     let mut messages = prefix_messages;
     strip_all_attachments(&mut messages, COMPACTED_ATTACHMENT_PLACEHOLDER);
-    snapshot.execution_state_snapshot = None;
+    snapshot.set_execution_state_snapshot(None);
     snapshot.last_prompt_usage = None;
     let previous_summary = extract_previous_summary(&messages);
     snapshot.replace_active_read_state(&messages);

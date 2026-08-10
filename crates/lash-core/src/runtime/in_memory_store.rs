@@ -124,9 +124,7 @@ pub struct InMemorySessionStore {
     /// an id, once used and deleted in this store, must never be reused.
     deleted_session_ids: Arc<Mutex<HashSet<String>>>,
     pub(crate) checkpoint: Mutex<Option<crate::HydratedSessionCheckpoint>>,
-    tool_state_blobs: Mutex<HashMap<crate::BlobRef, crate::ToolState>>,
-    plugin_snapshot_blobs: Mutex<HashMap<crate::BlobRef, crate::PluginSessionSnapshot>>,
-    execution_state_blobs: Mutex<HashMap<crate::BlobRef, Vec<u8>>>,
+    checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
     pub(crate) usage_deltas: Mutex<Vec<crate::store::RuntimeUsageDelta>>,
     pub(crate) runtime_commit_count: Mutex<usize>,
     runtime_turn_commits: Mutex<RuntimeTurnCommitMap>,
@@ -203,6 +201,7 @@ impl InMemorySessionStore {
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashSet::new())),
             Arc::new(Mutex::new(HashSet::new())),
         )
@@ -216,6 +215,7 @@ impl InMemorySessionStore {
         global_node_owners: Arc<Mutex<HashMap<String, String>>>,
         global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
         node_anchors: InMemoryNodeAnchors,
+        checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
         tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
         deleted_session_ids: Arc<Mutex<HashSet<String>>>,
     ) -> Self {
@@ -232,9 +232,7 @@ impl InMemorySessionStore {
             tombstoned_node_ids,
             deleted_session_ids,
             checkpoint: Mutex::new(None),
-            tool_state_blobs: Mutex::new(HashMap::new()),
-            plugin_snapshot_blobs: Mutex::new(HashMap::new()),
-            execution_state_blobs: Mutex::new(HashMap::new()),
+            checkpoint_component_blobs,
             usage_deltas: Mutex::new(Vec::new()),
             runtime_commit_count: Mutex::new(0),
             runtime_turn_commits: Mutex::new(std::collections::HashMap::new()),
@@ -871,34 +869,8 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             }
             return Ok(replay.into_result());
         }
-        let (tool_state_ref, tool_state) = checkpoints::resolve_component(
-            &self.tool_state_blobs,
-            "tool-state",
-            commit.checkpoint.tool_state.as_ref(),
-            commit.checkpoint.tool_state_ref.as_ref(),
-        )?;
-        let (plugin_snapshot_ref, plugin_snapshot) = checkpoints::resolve_component(
-            &self.plugin_snapshot_blobs,
-            "plugin-snapshot",
-            commit.checkpoint.plugin_snapshot.as_ref(),
-            commit.checkpoint.plugin_snapshot_ref.as_ref(),
-        )?;
-        let (execution_state_ref, execution_state) = checkpoints::resolve_component(
-            &self.execution_state_blobs,
-            "execution-state",
-            commit.checkpoint.execution_state.as_ref(),
-            commit.checkpoint.execution_state_ref.as_ref(),
-        )?;
-        let hydrated_checkpoint = crate::HydratedSessionCheckpoint {
-            turn_state: commit.checkpoint.turn_state.clone(),
-            tool_state_ref,
-            tool_state,
-            plugin_snapshot_ref,
-            plugin_snapshot,
-            plugin_snapshot_revision: commit.checkpoint.plugin_snapshot_revision,
-            execution_state_ref,
-            execution_state,
-        };
+        let hydrated_checkpoint =
+            checkpoints::resolve_components(&self.checkpoint_component_blobs, &commit.checkpoint)?;
         let incoming_nodes = commit.graph.nodes.as_slice();
         let mut global_node_owners = self.global_node_owners.lock_recover();
         let graph = self.global_session_graph.lock_recover();
@@ -1098,17 +1070,12 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 }
             }
         }
-        let manifest = crate::store::SessionCheckpoint::new(
-            hydrated_checkpoint.turn_state.clone(),
-            hydrated_checkpoint.tool_state_ref.clone(),
-            hydrated_checkpoint.plugin_snapshot_ref.clone(),
-            hydrated_checkpoint.plugin_snapshot_revision,
-            hydrated_checkpoint.execution_state_ref.clone(),
-        );
-        let checkpoint_bytes = rmp_serde::to_vec_named(&manifest).map_err(|err| {
-            crate::store::StoreError::Backend(format!(
-                "failed to encode in-memory checkpoint manifest: {err}"
-            ))
+        let manifest = hydrated_checkpoint.manifest()?;
+        let checkpoint_bytes = rmp_serde::to_vec_named(&manifest).map_err(|error| {
+            crate::store::StoreError::RecordEncodingFailed {
+                record_kind: "in-memory checkpoint root".to_string(),
+                message: error.to_string(),
+            }
         })?;
         let checkpoint_ref = crate::BlobRef(crate::stable_hash::sha256_hex(&checkpoint_bytes));
         let (
@@ -1236,27 +1203,21 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 }
             }
         }
-        if let (Some(blob_ref), Some(body)) = (
-            hydrated_checkpoint.tool_state_ref.clone(),
-            hydrated_checkpoint.tool_state.clone(),
-        ) {
-            self.tool_state_blobs.lock_recover().insert(blob_ref, body);
-        }
-        if let (Some(blob_ref), Some(body)) = (
-            hydrated_checkpoint.plugin_snapshot_ref.clone(),
-            hydrated_checkpoint.plugin_snapshot.clone(),
-        ) {
-            self.plugin_snapshot_blobs
-                .lock_recover()
-                .insert(blob_ref, body);
-        }
-        if let (Some(blob_ref), Some(body)) = (
-            hydrated_checkpoint.execution_state_ref.clone(),
-            hydrated_checkpoint.execution_state.clone(),
-        ) {
-            self.execution_state_blobs
-                .lock_recover()
-                .insert(blob_ref, body);
+        // The write-transaction mutex still covers both this leaf publication
+        // and the checkpoint-root replacement below. That is the in-memory
+        // GC-safety equivalent of avoiding git's loose-object race: readers
+        // can observe neither unreachable new leaves nor a root with missing
+        // leaves.
+        {
+            let mut blobs = self.checkpoint_component_blobs.lock_recover();
+            for component in hydrated_checkpoint.components.values() {
+                if let (Some(blob_ref), Some(body)) = (
+                    component.blob_ref().cloned(),
+                    component.body().map(<[u8]>::to_vec),
+                ) {
+                    blobs.insert(blob_ref, body);
+                }
+            }
         }
         *self.checkpoint.lock_recover() = Some(hydrated_checkpoint);
         self.commit_attachment_refs_in_memory(

@@ -395,9 +395,7 @@ fn block_on_store<T>(future: impl std::future::Future<Output = T>) -> T {
 pub enum PersistedArtifactKind {
     GenericBlob,
     CheckpointManifest,
-    ToolState,
-    PluginSessionSnapshot,
-    ExecutionStateSnapshot,
+    CheckpointComponent,
     LashlangModule,
     ProcessExecutionEnv,
 }
@@ -437,23 +435,9 @@ impl BlobArtifactDescriptor {
         )
     }
 
-    pub fn tool_state_snapshot() -> Self {
+    pub fn checkpoint_component() -> Self {
         Self::new(
-            PersistedArtifactKind::ToolState,
-            vec![BlobStorageHint::Compressible, BlobStorageHint::LargePayload],
-        )
-    }
-
-    pub fn plugin_session_snapshot() -> Self {
-        Self::new(
-            PersistedArtifactKind::PluginSessionSnapshot,
-            vec![BlobStorageHint::Compressible, BlobStorageHint::LargePayload],
-        )
-    }
-
-    pub fn execution_state_snapshot() -> Self {
-        Self::new(
-            PersistedArtifactKind::ExecutionStateSnapshot,
+            PersistedArtifactKind::CheckpointComponent,
             vec![BlobStorageHint::Compressible, BlobStorageHint::LargePayload],
         )
     }
@@ -502,6 +486,7 @@ pub struct StoreOptions {
 struct StoredBlobEnvelope {
     descriptor: BlobArtifactDescriptor,
     compression: BlobCompression,
+    #[serde(with = "serde_bytes")]
     content: Vec<u8>,
 }
 
@@ -638,7 +623,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                 .and_then(|path| path.to_str().map(str::to_string)),
             relation: request.relation.clone(),
         };
-        let relation_json = encode_json(&meta.relation);
+        let relation_json = encode_json(&meta.relation)?;
         store
             .conn
             .write_flow(move |tx| {
@@ -1043,30 +1028,21 @@ async fn delete_wake_allocation_floors_from_process_registry(
 }
 
 fn retained_artifact_refs(checkpoint: &SessionCheckpoint) -> Vec<RetainedArtifactRef> {
-    let mut refs = Vec::new();
-    if let Some(blob_ref) = &checkpoint.tool_state_ref {
-        refs.push(RetainedArtifactRef {
-            blob_ref: blob_ref.clone(),
-            kind: PersistedArtifactKind::ToolState,
-        });
-    }
-    if let Some(blob_ref) = &checkpoint.plugin_snapshot_ref {
-        refs.push(RetainedArtifactRef {
-            blob_ref: blob_ref.clone(),
-            kind: PersistedArtifactKind::PluginSessionSnapshot,
-        });
-    }
-    if let Some(blob_ref) = &checkpoint.execution_state_ref {
-        refs.push(RetainedArtifactRef {
-            blob_ref: blob_ref.clone(),
-            kind: PersistedArtifactKind::ExecutionStateSnapshot,
-        });
-    }
-    refs
+    checkpoint
+        .components
+        .values()
+        .map(|descriptor| RetainedArtifactRef {
+            blob_ref: descriptor.blob_ref.clone(),
+            kind: PersistedArtifactKind::CheckpointComponent,
+        })
+        .collect()
 }
 
-fn encode_json<T: serde::Serialize>(value: &T) -> String {
-    serde_json::to_string(value).expect("persisted state should serialize")
+fn encode_json<T: serde::Serialize>(value: &T) -> Result<String, StoreError> {
+    serde_json::to_string(value).map_err(|error| StoreError::RecordEncodingFailed {
+        record_kind: "persisted JSON record".to_string(),
+        message: error.to_string(),
+    })
 }
 
 fn should_compress_blob(
@@ -1084,10 +1060,20 @@ fn should_compress_blob(
     }
 }
 
-fn compress_blob(content: &[u8]) -> Vec<u8> {
+fn compress_blob(content: &[u8]) -> Result<Vec<u8>, StoreError> {
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-    std::io::Write::write_all(&mut encoder, content).expect("compress blob");
-    encoder.finish().expect("submit blob compression")
+    std::io::Write::write_all(&mut encoder, content).map_err(|error| {
+        StoreError::RecordEncodingFailed {
+            record_kind: "compressed artifact blob".to_string(),
+            message: error.to_string(),
+        }
+    })?;
+    encoder
+        .finish()
+        .map_err(|error| StoreError::RecordEncodingFailed {
+            record_kind: "compressed artifact blob".to_string(),
+            message: error.to_string(),
+        })
 }
 
 fn decompress_blob(content: &[u8]) -> Result<Vec<u8>, StoreError> {
@@ -1102,18 +1088,21 @@ fn encode_artifact_blob(
     descriptor: &BlobArtifactDescriptor,
     profile: BuiltinBlobProfile,
     content: &[u8],
-) -> Vec<u8> {
+) -> Result<Vec<u8>, StoreError> {
     let (compression, stored_content) = if should_compress_blob(profile, descriptor, content.len())
     {
-        (BlobCompression::Zlib, compress_blob(content))
+        (BlobCompression::Zlib, compress_blob(content)?)
     } else {
         (BlobCompression::None, content.to_vec())
     };
-    encode_msgpack(&StoredBlobEnvelope {
-        descriptor: descriptor.clone(),
-        compression,
-        content: stored_content,
-    })
+    encode_msgpack(
+        &StoredBlobEnvelope {
+            descriptor: descriptor.clone(),
+            compression,
+            content: stored_content,
+        },
+        "SQLite stored blob envelope",
+    )
 }
 
 fn decode_artifact_blob(bytes: &[u8]) -> Result<Option<Vec<u8>>, StoreError> {
@@ -1223,12 +1212,20 @@ fn decode_checkpoint(bytes: &[u8]) -> Result<SessionCheckpoint, StoreError> {
     rmp_serde::from_slice(bytes).map_err(|err| stored_data_corrupt("SessionCheckpoint", err))
 }
 
-fn encode_msgpack<T: serde::Serialize>(value: &T) -> Vec<u8> {
+fn encode_msgpack<T: serde::Serialize>(
+    value: &T,
+    record_kind: &str,
+) -> Result<Vec<u8>, StoreError> {
     // Pre-size the buffer so the per-byte writes inside rmp_serde don't
     // walk the Vec through 0→4→8→16→32… reallocations on every call.
     let mut buf = Vec::with_capacity(1024);
-    rmp_serde::encode::write_named(&mut buf, value).expect("value should serialize");
-    buf
+    rmp_serde::encode::write_named(&mut buf, value).map_err(|error| {
+        StoreError::RecordEncodingFailed {
+            record_kind: record_kind.to_string(),
+            message: error.to_string(),
+        }
+    })?;
+    Ok(buf)
 }
 
 fn decode_msgpack<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Option<T> {

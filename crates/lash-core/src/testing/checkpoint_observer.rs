@@ -154,6 +154,8 @@ struct CheckpointWriteCollectorState {
     events: Vec<CheckpointWriteEvent>,
     next_commit_by_session: BTreeMap<String, usize>,
     commit_budgets: BTreeMap<(String, u64), crate::testing::RuntimeCommitBudgetMeasurement>,
+    latest_components_by_session:
+        BTreeMap<String, BTreeMap<String, crate::CheckpointComponentDescriptor>>,
 }
 
 #[derive(Clone, Debug)]
@@ -244,15 +246,27 @@ impl CheckpointWriteCollector {
         {
             return;
         }
-        if commit.checkpoint.tool_state_ref.is_some() {
-            commit.checkpoint.tool_state = None;
+        let prior_components = self
+            .state
+            .lock_recover()
+            .latest_components_by_session
+            .get(&commit.session_id)
+            .cloned()
+            .unwrap_or_default();
+        for (key, component) in &mut commit.checkpoint.components {
+            if component.body().is_some()
+                && let Some(descriptor) = prior_components.get(key).cloned()
+            {
+                *component = crate::HydratedCheckpointComponent::Unchanged { descriptor };
+            }
         }
-        if commit.checkpoint.plugin_snapshot_ref.is_some() {
-            commit.checkpoint.plugin_snapshot = None;
-        }
-        if commit.checkpoint.execution_state_ref.is_some() {
-            commit.checkpoint.execution_state = None;
-        }
+    }
+
+    fn record_manifest(&self, session_id: &str, manifest: &crate::SessionCheckpoint) {
+        self.state
+            .lock_recover()
+            .latest_components_by_session
+            .insert(session_id.to_string(), manifest.components.clone());
     }
 }
 
@@ -430,6 +444,8 @@ impl SessionCommitStore for ObservedSessionStore {
         let mut event = checkpoint_write_event(&commit);
         let budget = crate::testing::measure_runtime_commit_budget(&commit)?;
         let result = self.inner.commit_runtime_state(commit).await?;
+        self.collector
+            .record_manifest(&event.session_id, &result.manifest);
         if let Some(state) = event.state.as_mut()
             && let Some(accepted) = self.inner.load_session().await?
         {
@@ -480,26 +496,24 @@ fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
     let mut components = vec![CheckpointComponentWrite {
         component: CheckpointComponent::TurnState,
         kind: CheckpointComponentWriteKind::Stored {
-            logical_bytes: logical_encoded_len(&checkpoint.turn_state).ok(),
+            logical_bytes: checkpoint_encoded_len(&checkpoint.turn_state).ok(),
         },
     }];
     record_component(
         &mut components,
         CheckpointComponent::ToolState,
-        checkpoint.tool_state_ref.as_ref(),
+        checkpoint.component_ref(crate::store::TOOL_STATE_CHECKPOINT_COMPONENT),
         checkpoint
-            .tool_state
-            .as_ref()
-            .map(|state| logical_encoded_len(state).ok()),
+            .component_body(crate::store::TOOL_STATE_CHECKPOINT_COMPONENT)
+            .map(|body| Some(body.len())),
     );
     record_component(
         &mut components,
         CheckpointComponent::PluginSnapshot,
-        checkpoint.plugin_snapshot_ref.as_ref(),
+        checkpoint.component_ref(crate::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT),
         checkpoint
-            .plugin_snapshot
-            .as_ref()
-            .map(|snapshot| logical_encoded_len(snapshot).ok()),
+            .component_body(crate::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT)
+            .map(|body| Some(body.len())),
     );
     // Execution state is an opaque `Vec<u8>` the engine owns, so it is recorded
     // as written without a size. Measuring it the way typed components are
@@ -512,8 +526,10 @@ fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
     record_component(
         &mut components,
         CheckpointComponent::ExecutionState,
-        checkpoint.execution_state_ref.as_ref(),
-        checkpoint.execution_state.as_ref().map(|_| None),
+        checkpoint.component_ref(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT),
+        checkpoint
+            .component_body(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
+            .map(|_| None),
     );
     CheckpointWriteEvent {
         schema: CHECKPOINT_WRITE_EVENT_SCHEMA.to_string(),
@@ -570,8 +586,8 @@ fn checkpoint_usage_write(commit: &RuntimeCommit) -> CheckpointUsageWrite {
     usage
 }
 
-fn logical_encoded_len(value: &impl Serialize) -> Result<usize, serde_json::Error> {
-    serde_json::to_vec(value).map(|bytes| bytes.len())
+fn checkpoint_encoded_len(value: &impl Serialize) -> Result<usize, rmp_serde::encode::Error> {
+    rmp_serde::to_vec_named(value).map(|bytes| bytes.len())
 }
 
 /// `logical_bytes` presence marks the component as written this commit; the
@@ -878,8 +894,6 @@ impl StoreMaintenance for ObservedSessionStore {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
 
     #[tokio::test]
@@ -1005,9 +1019,19 @@ mod tests {
 
     #[test]
     fn logical_size_failure_degrades_to_unknown_stored_size() {
-        let unsupported_json_key = BTreeMap::from([((1_u8, 2_u8), 3_u8)]);
-        let size = logical_encoded_len(&unsupported_json_key);
-        assert!(size.is_err(), "fixture must be invalid JSON");
+        struct AlwaysFails;
+
+        impl serde::Serialize for AlwaysFails {
+            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                Err(serde::ser::Error::custom("fixture refuses encoding"))
+            }
+        }
+
+        let size = checkpoint_encoded_len(&AlwaysFails);
+        assert!(size.is_err(), "fixture must refuse MessagePack encoding");
 
         let mut components = Vec::new();
         record_component(

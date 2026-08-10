@@ -852,10 +852,11 @@ pub use store::{TurnId, WorkClaim, WorkCompletion};
 
 pub use runtime::{
     CheckpointClaimSet, LlmRequestSpec, ProcessCommand, ProcessEffectOutcome,
-    ProcessEventSemanticsSpec, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchSummary,
-    RuntimeInvocation, RuntimeScope, RuntimeSessionState, ToolAttemptLaunch,
+    ProcessEventSemanticsSpec, RuntimeCheckpointComponents, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeEffectReplayMismatchSummary, RuntimeInvocation, RuntimeScope, RuntimeSessionState,
+    ToolAttemptLaunch,
 };
 pub(crate) use runtime::{ToolAttemptEffectOutcome, ToolBatchEffectOutcome};
 
@@ -880,8 +881,9 @@ pub use store::{
     VacuumReport,
 };
 pub use store::{
-    CommitBudget, CommitBudgetLimit, HydratedSessionCheckpoint, OperationId, RuntimeCommit,
-    RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
+    CheckpointComponentDescriptor, CommitBudget, CommitBudgetLimit, HydratedCheckpointComponent,
+    HydratedSessionCheckpoint, OperationId, RuntimeCommit, RuntimeTurnCommitStamp,
+    RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

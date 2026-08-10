@@ -158,7 +158,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // zero-copy fork-lineage accelerators. Older stores are rejected and recreated;
 // there is no backfill or compatibility read path.
 // Version 41 indexes the bounded non-terminal recovery worklist by process id.
-const SCHEMA_VERSION: i32 = 41;
+// Version 42 replaces the fixed checkpoint slots with a complete keyed
+// component descriptor set carrying per-component encoding versions. Older
+// roots are rejected under the existing drain-and-recreate policy.
+const SCHEMA_VERSION: i32 = 42;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

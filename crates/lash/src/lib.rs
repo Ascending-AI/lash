@@ -220,10 +220,10 @@ pub mod persistence {
         InMemorySessionStoreFactory, MergeKey, PendingTurnInputClaimDiagnostics,
         PendingTurnInputDraft, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
         QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkCompletion,
-        QueuedWorkCompletionData, QueuedWorkItem, QueuedWorkPayload, RuntimeSessionState,
-        SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, TurnInputCheckpointBoundary,
-        TurnInputClaim, TurnInputClaimData, TurnInputCompletion, TurnInputCompletionData,
-        TurnInputIngress, TurnInputState,
+        QueuedWorkCompletionData, QueuedWorkItem, QueuedWorkPayload, RuntimeCheckpointComponents,
+        RuntimeSessionState, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy,
+        TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputCompletion,
+        TurnInputCompletionData, TurnInputIngress, TurnInputState,
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
     pub mod queued_work {
@@ -233,7 +233,8 @@ pub mod persistence {
         };
     }
     pub use lash_core::store::{
-        GraphAppend, HydratedSessionCheckpoint, OperationId, PersistedSessionRead, RuntimeCommit,
+        CheckpointComponentDescriptor, GraphAppend, HydratedCheckpointComponent,
+        HydratedSessionCheckpoint, OperationId, PersistedSessionRead, RuntimeCommit,
         RuntimeCommitResult, RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
         SessionCheckpoint, SessionHead, SessionHeadMeta, SessionHeadPayload,
         commit_runtime_state_verified, load_persisted_session_state,

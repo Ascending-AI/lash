@@ -255,8 +255,8 @@ impl Store {
                 continue;
             }
             // A rooted checkpoint manifest is *live*. If we cannot read or
-            // decode it we must not silently drop the child blobs it points at
-            // (tool/plugin/execution snapshots) — doing so would delete blobs
+            // decode it we must not silently drop the keyed component blobs it
+            // points at — doing so would delete blobs
             // that belong to a live checkpoint. Skip a manifest that simply
             // isn't present (it may have been collected on a prior run), but
             // treat a present-yet-undecodable manifest as a hard error so GC
@@ -274,6 +274,9 @@ impl Store {
             };
             let content = decode_artifact_blob(&bytes)?.unwrap_or(bytes);
             let checkpoint = decode_checkpoint(&content)?;
+            // GC interprets only the root's ref graph, never component bodies.
+            // Retain refs even when a newer writer used an unknown component
+            // codec so an older binary cannot turn incompatibility into loss.
             stack.extend(retained_artifact_refs(&checkpoint));
         }
         let all_hashes = {

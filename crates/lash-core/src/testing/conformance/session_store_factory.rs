@@ -1214,9 +1214,9 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .expect("create fork source");
     let mut state = crate::RuntimeSessionState {
         session_id: source_request.session_id.clone(),
-        execution_state_snapshot: Some(vec![0xFA, 0xCE]),
         ..crate::RuntimeSessionState::new(source_request.policy.clone())
     };
+    state.set_execution_state_snapshot(Some(vec![0xFA, 0xCE]));
     state.ensure_agent_frame_initialized();
     let root_ids = state
         .session_graph
@@ -1403,10 +1403,9 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         Some(root_node_id.as_str())
     );
     assert_eq!(
-        branch_read
-            .checkpoint
-            .as_ref()
-            .and_then(|checkpoint| checkpoint.execution_state.as_deref()),
+        branch_read.checkpoint.as_ref().and_then(|checkpoint| {
+            checkpoint.component_body(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
+        }),
         Some(&[0xFA, 0xCE][..]),
         "fork inherits the retained continuation checkpoint"
     );

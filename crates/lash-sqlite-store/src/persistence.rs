@@ -180,7 +180,7 @@ impl SessionCommitStore for Store {
                         Some(blob_ref) => {
                             Some(Self::get_checkpoint_conn(&tx, blob_ref)?.ok_or_else(|| {
                                 StoreError::CheckpointComponentMissing {
-                                    component: "manifest",
+                                    key: "manifest".to_string(),
                                     blob_ref: blob_ref.clone(),
                                 }
                             })?)
@@ -665,10 +665,8 @@ impl SessionCommitStore for Store {
                         }
                     }
 
-                    Self::validate_checkpoint_component_refs_conn(tx, &commit.checkpoint)?;
                     let stored_checkpoint =
-                        Self::put_checkpoint_conn(tx, &commit.checkpoint, blob_profile)
-                            .map_err(sqlite_error)?;
+                        Self::put_checkpoint_conn(tx, &commit.checkpoint, blob_profile)?;
 
                     if !commit.usage_deltas.is_empty() {
                         let mut stmt = tx
@@ -746,7 +744,7 @@ impl SessionCommitStore for Store {
                          VALUES (?1, ?2, ?3, ?4, ?5)",
                         params![
                             meta.session_id,
-                            encode_json(&meta.payload()),
+                            encode_json(&meta.payload())?,
                             sql_head_revision,
                             meta.leaf_node_id,
                             meta.checkpoint_ref.as_ref().map(BlobRef::as_str),
@@ -863,7 +861,8 @@ impl SessionCommitStore for Store {
                             }
                             input_ids
                         };
-                        let next_turn_ingress = encode_json(&lash_core::TurnInputIngress::NextTurn);
+                        let next_turn_ingress =
+                            encode_json(&lash_core::TurnInputIngress::NextTurn)?;
                         let mut stmt = tx
                             .prepare(
                                 "UPDATE pending_turn_inputs
@@ -947,7 +946,7 @@ impl SessionCommitStore for Store {
                                 receipt.session_id,
                                 receipt.operation_key,
                                 receipt.turn_commit_hash,
-                                encode_json(receipt.result),
+                                encode_json(receipt.result)?,
                                 now as i64,
                                 receipt.request_identity_hash,
                                 receipt.requested_node_count.map(|count| count as i64),
@@ -2151,9 +2150,9 @@ impl TurnInputStore for Store {
                             input_id,
                             draft.session_id,
                             draft.source_key.as_deref(),
-                            encode_json(&draft.ingress),
+                            encode_json(&draft.ingress)?,
                             state.as_str(),
-                            encode_json(&draft.input),
+                            encode_json(&draft.input)?,
                             now as i64,
                         ],
                     )

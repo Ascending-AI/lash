@@ -102,6 +102,21 @@ impl SnapshotStore {
             model: state.policy.model.clone(),
             turn_budget: state.policy.turn_budget,
         };
+        let mut components = std::collections::BTreeMap::new();
+        if let Some(tool_state) = state.tool_state_snapshot() {
+            components.insert(
+                lash_core::store::TOOL_STATE_CHECKPOINT_COMPONENT.to_string(),
+                lash_core::HydratedCheckpointComponent::changed(
+                    rmp_serde::to_vec_named(tool_state).expect("encode test tool state"),
+                ),
+            );
+        }
+        if let Some(execution_state) = state.execution_state_snapshot() {
+            components.insert(
+                lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
+                lash_core::HydratedCheckpointComponent::changed(execution_state.to_vec()),
+            );
+        }
         Self {
             read: std::sync::Mutex::new(Some(lash_core::store::PersistedSessionRead {
                 session_id: state.session_id,
@@ -112,8 +127,7 @@ impl SnapshotStore {
                 checkpoint_ref: None,
                 checkpoint: Some(lash_core::store::HydratedSessionCheckpoint {
                     turn_state,
-                    tool_state: state.tool_state_snapshot,
-                    execution_state: state.execution_state_snapshot,
+                    components,
                     ..Default::default()
                 }),
                 token_ledger: Vec::new(),

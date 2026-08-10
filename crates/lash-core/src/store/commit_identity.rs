@@ -1207,20 +1207,34 @@ impl<'a> From<&'a crate::SessionNodeRecord> for SessionNodeIntent<'a> {
 #[derive(serde::Serialize)]
 struct CheckpointIntent<'a> {
     turn_state: &'a crate::PersistedTurnState,
-    tool_state_ref: &'a Option<BlobRef>,
-    plugin_snapshot_ref: &'a Option<BlobRef>,
+    components: Vec<CheckpointComponentIntent<'a>>,
     plugin_snapshot_revision: Option<u64>,
-    execution_state_ref: &'a Option<BlobRef>,
+}
+
+#[derive(serde::Serialize)]
+struct CheckpointComponentIntent<'a> {
+    key: &'a str,
+    blob_ref: Option<BlobRef>,
+    encoding_version: u32,
 }
 
 impl<'a> From<&'a HydratedSessionCheckpoint> for CheckpointIntent<'a> {
     fn from(checkpoint: &'a HydratedSessionCheckpoint) -> Self {
         Self {
             turn_state: &checkpoint.turn_state,
-            tool_state_ref: &checkpoint.tool_state_ref,
-            plugin_snapshot_ref: &checkpoint.plugin_snapshot_ref,
+            components: checkpoint
+                .components
+                .iter()
+                .map(|(key, component)| CheckpointComponentIntent {
+                    key,
+                    blob_ref: component.body().map_or_else(
+                        || component.blob_ref().cloned(),
+                        |body| Some(BlobRef(crate::stable_hash::sha256_hex(body))),
+                    ),
+                    encoding_version: component.encoding_version(),
+                })
+                .collect(),
             plugin_snapshot_revision: checkpoint.plugin_snapshot_revision,
-            execution_state_ref: &checkpoint.execution_state_ref,
         }
     }
 }

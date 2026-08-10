@@ -31,6 +31,7 @@ rmp-serde = "1"
 tokio-rusqlite = { version = "0.7", features = ["bundled"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { workspace = true, features = ["derive"] }
+serde_bytes = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }

@@ -1,5 +1,5 @@
 use super::*;
-use crate::facade_support::{RuntimeSessionStateFacadeOps, ToolStateFacadeOps};
+use crate::facade_support::RuntimeSessionStateFacadeOps;
 use lash_sansio::sync::MutexExt;
 
 impl LashRuntime {
@@ -10,16 +10,14 @@ impl LashRuntime {
     pub(super) fn stamp_live_plugin_state(&mut self) {
         if let Some(session) = self.session.as_ref() {
             let snapshot = session.plugins().tool_registry().export_state();
-            self.state.tool_state_generation = Some(snapshot.generation());
-            self.state.tool_state_snapshot = Some(snapshot);
+            self.state.set_tool_state_snapshot(Some(snapshot));
             let captured = session.plugins().snapshot();
-            crate::runtime::state::store_plugin_snapshot(&mut self.state.plugin_snapshot, captured);
+            crate::runtime::state::store_plugin_snapshot(&mut self.state, captured);
             self.state.plugin_snapshot_revision =
                 Some(session.plugins().snapshot_revision_fingerprint());
         } else {
-            self.state.tool_state_generation = None;
-            self.state.tool_state_snapshot = None;
-            self.state.plugin_snapshot = None;
+            self.state.set_tool_state_snapshot(None);
+            self.state.set_plugin_snapshot(None);
             self.state.plugin_snapshot_revision = None;
         }
     }
@@ -146,10 +144,9 @@ impl LashRuntime {
         state.protocol_turn_options = self.protocol_turn_options.clone();
         if let Some(session) = self.session.as_ref() {
             let snapshot = session.plugins().tool_registry().export_state();
-            state.tool_state_generation = Some(snapshot.generation());
-            state.tool_state_snapshot = Some(snapshot);
+            state.set_tool_state_snapshot(Some(snapshot));
             let captured = session.plugins().snapshot();
-            crate::runtime::state::store_plugin_snapshot(&mut state.plugin_snapshot, captured);
+            crate::runtime::state::store_plugin_snapshot(&mut state, captured);
             state.plugin_snapshot_revision =
                 Some(session.plugins().snapshot_revision_fingerprint());
         }

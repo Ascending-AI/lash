@@ -45,15 +45,16 @@ async fn bind_test_session(store: &Arc<dyn crate::store::RuntimePersistence>, se
 }
 
 fn generation_commit(session_id: &str, generation: u64, head_revision: u64) -> RuntimeCommit {
+    let mut state = crate::RuntimeSessionState {
+        session_id: session_id.to_string(),
+        head_revision,
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    state.set_tool_state_snapshot(Some(
+        crate::ToolState::default().with_generation(generation),
+    ));
     RuntimeCommit::persisted_state_with_operation_for_testing(
-        &crate::RuntimeSessionState {
-            session_id: session_id.to_string(),
-            tool_state_snapshot: Some(crate::ToolState::default().with_generation(generation)),
-            head_revision,
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-            ))
-        },
+        &state,
         &[],
         crate::OperationId::new(
             crate::ExecutionScope::runtime_operation(format!(
@@ -74,8 +75,7 @@ async fn published_generation(
     (
         state.head_revision,
         state
-            .tool_state_snapshot
-            .as_ref()
+            .tool_state_snapshot()
             .map(crate::ToolState::generation),
     )
 }

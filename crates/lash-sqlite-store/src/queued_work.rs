@@ -269,7 +269,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
             batch.source_key.as_deref(),
             batch.delivery_policy.as_str(),
             batch.slot_policy.as_str(),
-            encode_json(&batch.merge_key),
+            encode_json(&batch.merge_key)?,
             sql_available_at_ms,
             now as i64,
         ],
@@ -280,7 +280,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
         conn.execute(
             "INSERT INTO queued_work_items (batch_id, item_index, item_id, payload_json)
              VALUES (?1, ?2, ?3, ?4)",
-            params![batch_id, index as i64, item_id, encode_json(payload)],
+            params![batch_id, index as i64, item_id, encode_json(payload)?],
         )
         .map_err(sqlite_error)?;
     }

@@ -559,7 +559,7 @@ impl LashRuntime {
                 )
             })?;
             session.invalidate_runtime_caches();
-            if let Some(tool_state) = durable_state.tool_state_snapshot.clone() {
+            if let Some(tool_state) = durable_state.tool_state_snapshot().cloned() {
                 session
                     .plugins()
                     .tool_registry()
@@ -583,7 +583,7 @@ impl LashRuntime {
                     ),
                 )
             })?;
-            if let Some(snapshot) = durable_state.plugin_snapshot.as_ref() {
+            if let Some(snapshot) = durable_state.plugin_snapshot() {
                 session.plugins().restore(snapshot).map_err(|err| {
                     (
                         "plugin_snapshot_restore",
