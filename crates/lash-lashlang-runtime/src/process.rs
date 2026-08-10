@@ -50,13 +50,56 @@ fn trace_lifecycle_for_segment(
     )
 }
 
+const LASHLANG_SEGMENT_STATE_VERSION: u32 = 1;
+
+const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
+
+#[derive(Debug, thiserror::Error)]
+enum LashlangSegmentStateError {
+    #[error(
+        "lashlang segment handover format is incompatible: {details}; {SEGMENT_STATE_CUTOVER_REMEDY}"
+    )]
+    FormatMismatch { details: String },
+    #[error(
+        "lashlang segment handover version {found} is incompatible with version {expected}; {SEGMENT_STATE_CUTOVER_REMEDY}"
+    )]
+    VersionMismatch { expected: u32, found: u32 },
+}
+
+#[derive(serde::Deserialize)]
+struct LashlangSegmentStateVersionProbe {
+    version: Option<u32>,
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 struct LashlangSegmentState {
+    version: u32,
     vm: lashlang::VmContinuation,
     sleep_sequence: u64,
     event_sequence: u64,
     signal_send_sequence: u64,
     signal_wait_ordinals: BTreeMap<String, u64>,
+}
+
+fn decode_lashlang_segment_state(
+    data: &[u8],
+) -> Result<LashlangSegmentState, LashlangSegmentStateError> {
+    let probe: LashlangSegmentStateVersionProbe =
+        serde_json::from_slice(data).map_err(|error| {
+            LashlangSegmentStateError::FormatMismatch {
+                details: error.to_string(),
+            }
+        })?;
+    let found = probe.version.unwrap_or(0);
+    if found != LASHLANG_SEGMENT_STATE_VERSION {
+        return Err(LashlangSegmentStateError::VersionMismatch {
+            expected: LASHLANG_SEGMENT_STATE_VERSION,
+            found,
+        });
+    }
+    serde_json::from_slice(data).map_err(|error| LashlangSegmentStateError::FormatMismatch {
+        details: error.to_string(),
+    })
 }
 
 fn lashlang_program_hash(input: &LashlangProcessInput) -> String {
@@ -227,7 +270,7 @@ pub async fn run_lashlang_process(
         return Ok((*output).into());
     }
     let segment_state: Option<LashlangSegmentState> = match handover {
-        Some(handover) => match serde_json::from_slice(&handover.engine_state) {
+        Some(handover) => match decode_lashlang_segment_state(&handover.engine_state) {
             Ok(state) => Some(state),
             Err(err) => {
                 return Ok(process_lashlang_failure(
@@ -405,6 +448,7 @@ async fn execute_lashlang(
                 match vm.suspend() {
                     Ok(continuation) => {
                         let segment_state = LashlangSegmentState {
+                            version: LASHLANG_SEGMENT_STATE_VERSION,
                             vm: continuation,
                             sleep_sequence: host.sleep_sequence.load(Ordering::Relaxed),
                             event_sequence: host.event_sequence.load(Ordering::Relaxed),
@@ -1447,11 +1491,36 @@ pub fn lashlang_type_expr_schema(ty: &lashlang::TypeExpr) -> serde_json::Value {
 #[cfg(test)]
 mod segment_trace_tests {
     use super::{
-        EXECUTION_BOUND_EXHAUSTION_LOUD, SEGMENT_BOUNDARY_DECLINED_TOTAL,
+        EXECUTION_BOUND_EXHAUSTION_LOUD, LASHLANG_SEGMENT_STATE_VERSION, LashlangSegmentStateError,
+        SEGMENT_BOUNDARY_DECLINED_TOTAL, decode_lashlang_segment_state,
         process_lashlang_execution_result, record_segment_boundary_decline,
         trace_lifecycle_for_segment, validate_lashlang_program_hash,
     };
     use std::sync::atomic::Ordering;
+
+    const UNVERSIONED_SEGMENT_STATE: &[u8] =
+        include_bytes!("fixtures/lashlang_segment_state_unversioned.json");
+
+    #[test]
+    fn unversioned_prior_shape_is_typed_rejection_with_cutover_remedy() {
+        let Err(error) = decode_lashlang_segment_state(UNVERSIONED_SEGMENT_STATE) else {
+            panic!("unversioned handover must not have a compatibility decoder");
+        };
+
+        assert!(
+            matches!(
+                &error,
+                LashlangSegmentStateError::VersionMismatch {
+                    expected: LASHLANG_SEGMENT_STATE_VERSION,
+                    found: 0,
+                }
+            ),
+            "unexpected error: {error}"
+        );
+        let message = error.to_string();
+        assert!(message.contains("drain in-flight sessions on the old build"));
+        assert!(message.contains("recreate development/test stores"));
+    }
 
     #[test]
     fn multi_segment_trace_emits_one_started_and_one_finished() {
