@@ -153,32 +153,181 @@ pub enum OracleStatus {
     Failed,
 }
 
+/// Whether a verdict is grounded in an independently observed production
+/// boundary or states a property of the simulator/model itself.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OracleObservationClass {
+    RealObservation,
+    ModelProperty,
+}
+
+pub fn oracle_observation_class(oracle_id: &str) -> Option<OracleObservationClass> {
+    use OracleObservationClass::{ModelProperty, RealObservation};
+
+    match oracle_id {
+        "sim.oracle.generated-workload.v1"
+        | "sim.oracle.state-machine-semantic-invariants.v1"
+        | "sim.oracle.operational-coverage.v1"
+        | "sim.oracle.cross-session-isolation.v1"
+        | "sim.oracle.observer-convergence.v1"
+        | "sim.oracle.runtime-session-graph.v1"
+        | "sim.oracle.replay-determinism.v1"
+        | "sim.oracle.scheduler-controlled-delivery.v1"
+        | "sim.oracle.scheduler-owned-runtime-completions.v1"
+        | "sim.oracle.provider-turn-interleaving-depth.v1"
+        | "sim.oracle.sqlite-model-replay.v1"
+        | "sim.oracle.postgres-model-replay.v1" => Some(ModelProperty),
+        id if id.starts_with("sim.oracle.scenario.")
+            || id.starts_with("sim.oracle.scenario-mini.") =>
+        {
+            Some(ModelProperty)
+        }
+        "runtime.turn_contract"
+        | "sim.oracle.abandoned-requires-evidence.v1"
+        | "sim.oracle.backend-failure-observed.v1"
+        | "sim.oracle.cancellation-observed.v1"
+        | "sim.oracle.durable-effect-exactly-once.v1"
+        | "sim.oracle.exec-code-observed.v1"
+        | "sim.oracle.frame-switch-ordering.v1"
+        | "sim.oracle.frame-switch-outbox-atomicity.v1"
+        | "sim.oracle.frame-switch-seed.v1"
+        | "sim.oracle.generated-final-value-semantic-channel.v1"
+        | "sim.oracle.generated-runtime-provider-matrix.v1"
+        | "sim.oracle.generated-suspend-resume.v1"
+        | "sim.oracle.healthy-long-turn-liveness.v1"
+        | "sim.oracle.independent-checkpoint-state.v1"
+        | "sim.oracle.ingress-session-opened.v1"
+        | "sim.oracle.lease-time-monotonic.v1"
+        | "sim.oracle.live-provider-failure-coverage.v1"
+        | "sim.oracle.live-provider-failure-terminalizes.v1"
+        | "sim.oracle.logical-turn-claim-exactly-once.v1"
+        | "sim.oracle.observer-reconnect.v1"
+        | "sim.oracle.pending-tool-completion-through-turn.v1"
+        | "sim.oracle.postgres-boundary-replay.v1"
+        | "sim.oracle.postgres-checkpoint-replay.v1"
+        | "sim.oracle.process-never-double-started.v1"
+        | "sim.oracle.process-wake-at-most-once-runtime-turn.v1"
+        | "sim.oracle.process-wake-observed.v1"
+        | "sim.oracle.provider-mutation-rejected.v1"
+        | "sim.oracle.provider-transport-mutation-classified.v1"
+        | "sim.oracle.queued-ingress-observed.v1"
+        | "sim.oracle.runtime-final-value-semantic-channel.v1"
+        | "sim.oracle.runtime-graph-acyclic.v1"
+        | "sim.oracle.runtime-provider-turn.v1"
+        | "sim.oracle.runtime-single-active-agent-frame.v1"
+        | "sim.oracle.runtime-usage-conservation.v1"
+        | "sim.oracle.runtime-usage-monotonic.v1"
+        | "sim.oracle.sqlite-abort-after-begin.v1"
+        | "sim.oracle.sqlite-abort-before-commit.v1"
+        | "sim.oracle.sqlite-boundary-replay.v1"
+        | "sim.oracle.sqlite-checkpoint-replay.v1"
+        | "sim.oracle.sqlite-commit-io.v1"
+        | "sim.oracle.sqlite-fault-harness.v1"
+        | "sim.oracle.sqlite-fault-no-duplicate-effect.v1"
+        | "sim.oracle.sqlite-fault-preserves-committed-work.v1"
+        | "sim.oracle.sqlite-fault-typed-error.v1"
+        | "sim.oracle.sqlite-reopen-mid-sequence.v1"
+        | "sim.oracle.sqlite-reopen-preserves-committed-work.v1"
+        | "sim.oracle.tool-boundary-observed.v1"
+        | "sim.oracle.trigger-delivery-observed.v1"
+        | "sim.oracle.worker-failover-continues-work.v1"
+        | "sim.oracle.worker-stale-completion-rejected.v1" => Some(RealObservation),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct OracleVerdict {
     pub status: OracleStatus,
     pub oracle_id: String,
+    pub observation_class: OracleObservationClass,
     pub message: String,
 }
 
 impl OracleVerdict {
     pub fn passed(oracle_id: impl Into<String>, message: impl Into<String>) -> Self {
+        let oracle_id = oracle_id.into();
+        let observation_class = oracle_observation_class(&oracle_id)
+            .unwrap_or_else(|| panic!("oracle `{oracle_id}` has no observation-class declaration"));
         Self {
             status: OracleStatus::Passed,
-            oracle_id: oracle_id.into(),
+            observation_class,
+            oracle_id,
             message: message.into(),
         }
     }
 
     pub fn failed(oracle_id: impl Into<String>, message: impl Into<String>) -> Self {
+        let oracle_id = oracle_id.into();
+        let observation_class = oracle_observation_class(&oracle_id)
+            .unwrap_or_else(|| panic!("oracle `{oracle_id}` has no observation-class declaration"));
         Self {
             status: OracleStatus::Failed,
-            oracle_id: oracle_id.into(),
+            observation_class,
+            oracle_id,
             message: message.into(),
         }
     }
 
     pub fn is_passed(&self) -> bool {
         self.status == OracleStatus::Passed
+    }
+}
+
+#[cfg(test)]
+mod observation_class_tests {
+    use super::*;
+
+    #[test]
+    fn oracle_registration_marks_real_and_model_observations() {
+        assert_eq!(
+            oracle_observation_class("sim.oracle.backend-failure-observed.v1"),
+            Some(OracleObservationClass::RealObservation)
+        );
+        assert_eq!(
+            oracle_observation_class("sim.oracle.runtime-graph-acyclic.v1"),
+            Some(OracleObservationClass::RealObservation)
+        );
+        assert_eq!(
+            oracle_observation_class("sim.oracle.scenario.runtime-contract.v1:example"),
+            Some(OracleObservationClass::ModelProperty)
+        );
+        assert_eq!(
+            oracle_observation_class("sim.oracle.state-machine-semantic-invariants.v1"),
+            Some(OracleObservationClass::ModelProperty)
+        );
+        assert_eq!(
+            oracle_observation_class("sim.oracle.sqlite-model-replay.v1"),
+            Some(OracleObservationClass::ModelProperty)
+        );
+        assert_eq!(
+            oracle_observation_class("sim.oracle.postgres-model-replay.v1"),
+            Some(OracleObservationClass::ModelProperty)
+        );
+        assert_eq!(
+            oracle_observation_class("sim.oracle.brand-new-oracle-nobody-classified.v1"),
+            None
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "has no observation-class declaration")]
+    fn unclassified_oracle_cannot_construct_a_verdict() {
+        OracleVerdict::passed(
+            "sim.oracle.brand-new-oracle-nobody-classified.v1",
+            "must not fail open",
+        );
+    }
+
+    #[test]
+    fn observation_class_is_required_when_deserializing() {
+        let missing_class = serde_json::json!({
+            "status": "passed",
+            "oracle_id": "sim.oracle.replay-determinism.v1",
+            "message": "legacy trace"
+        });
+        assert!(serde_json::from_value::<OracleVerdict>(missing_class).is_err());
     }
 }
 

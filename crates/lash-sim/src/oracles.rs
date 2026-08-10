@@ -7,9 +7,9 @@ use lash_protocol_standard::scenario_contracts::STANDARD_PROTOCOL_SCENARIO_CONTR
 use serde_json::{Value, json};
 
 use crate::provider_mutations::is_transport_provider_mutation;
-use crate::runtime_contracts::{
-    RuntimeAgentFrameInvariantFacts, RuntimeGraphInvariantFacts, RuntimeUsageInvariantFacts,
-};
+#[cfg(test)]
+use crate::runtime_contracts::RuntimeGraphInvariantFacts;
+use crate::runtime_contracts::{RuntimeAgentFrameInvariantFacts, RuntimeUsageInvariantFacts};
 use crate::runtime_providers::MIGRATED_RUNTIME_PROVIDER_KINDS;
 use crate::scheduler::{BoundaryKind, DeliveredBoundary};
 use crate::trace::{AbstractWorldSummary, OracleVerdict};
@@ -1049,7 +1049,8 @@ pub fn runtime_session_graph_contract(summary: &AbstractWorldSummary) -> OracleV
     )
 }
 
-pub fn runtime_graph_acyclic(events: &[DeliveredBoundary]) -> OracleVerdict {
+#[cfg(test)]
+fn runtime_graph_projection_acyclic(events: &[DeliveredBoundary]) -> OracleVerdict {
     let mut checked = 0;
     for event in events
         .iter()
@@ -1092,6 +1093,118 @@ pub fn runtime_graph_acyclic(events: &[DeliveredBoundary]) -> OracleVerdict {
             "{checked} real provider turn graphs had unique nodes, valid parents, and no cycles"
         ),
     )
+}
+
+/// Validate graph integrity from accepted checkpoint raw rows. This deliberately
+/// bypasses `SessionGraph` and its read-model projection so duplicate durable
+/// rows cannot disappear before the oracle observes them.
+pub fn runtime_graph_acyclic(writes: &[crate::store::CheckpointWriteEvent]) -> OracleVerdict {
+    let mut checked = 0usize;
+    for write in writes
+        .iter()
+        .filter(|write| write.cause_boundary_id.is_none())
+    {
+        let Some(state) = &write.state else {
+            // Promoted v1/v2 fixtures predate accepted raw-row observations.
+            continue;
+        };
+        let session_id = write.attributed_session();
+        let Some(raw) = state.accepted_raw_rows.as_ref() else {
+            return OracleVerdict::failed(
+                RUNTIME_GRAPH_ACYCLIC_ORACLE,
+                format!(
+                    "session `{session_id}` commit {} exposed no accepted raw rows",
+                    write.commit_index
+                ),
+            );
+        };
+        let Some(rows) = raw.get("graph_nodes").and_then(Value::as_array) else {
+            return OracleVerdict::failed(
+                RUNTIME_GRAPH_ACYCLIC_ORACLE,
+                format!(
+                    "session `{session_id}` commit {} exposed no raw graph rows",
+                    write.commit_index
+                ),
+            );
+        };
+        if let Err(message) = validate_raw_graph_rows(
+            rows,
+            raw.get("graph_leaf_node_id").and_then(Value::as_str),
+            session_id,
+            write.commit_index,
+        ) {
+            return OracleVerdict::failed(RUNTIME_GRAPH_ACYCLIC_ORACLE, message);
+        }
+        checked += 1;
+    }
+    if checked == 0 {
+        return OracleVerdict::failed(
+            RUNTIME_GRAPH_ACYCLIC_ORACLE,
+            "no checkpoint commit exposed accepted raw graph rows",
+        );
+    }
+    OracleVerdict::passed(
+        RUNTIME_GRAPH_ACYCLIC_ORACLE,
+        format!(
+            "{checked} accepted raw graph snapshots had unique rows, valid parents, and no cycles"
+        ),
+    )
+}
+
+fn validate_raw_graph_rows(
+    rows: &[Value],
+    leaf_node_id: Option<&str>,
+    session_id: &str,
+    commit_index: usize,
+) -> Result<(), String> {
+    let context = format!("session `{session_id}` commit {commit_index}");
+    let mut seen = BTreeSet::new();
+    let mut parents = BTreeMap::<String, Option<String>>::new();
+    for row in rows {
+        let node_id = row
+            .get("node_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("{context} raw graph row has no node id"))?;
+        if !seen.insert(node_id.to_string()) {
+            return Err(format!(
+                "{context} accepted raw graph contains duplicate row `{node_id}`"
+            ));
+        }
+        parents.insert(
+            node_id.to_string(),
+            row.get("parent_node_id")
+                .and_then(Value::as_str)
+                .map(ToString::to_string),
+        );
+    }
+    for (node_id, parent) in &parents {
+        if let Some(parent) = parent
+            && !parents.contains_key(parent)
+        {
+            return Err(format!(
+                "{context} raw graph row `{node_id}` references missing parent `{parent}`"
+            ));
+        }
+    }
+    for start in parents.keys() {
+        let mut path = BTreeSet::new();
+        let mut current = Some(start.as_str());
+        while let Some(node_id) = current {
+            if !path.insert(node_id.to_string()) {
+                return Err(format!(
+                    "{context} raw graph contains a cycle through `{node_id}`"
+                ));
+            }
+            current = parents.get(node_id).and_then(Option::as_deref);
+        }
+    }
+    if leaf_node_id.is_some_and(|leaf| !parents.contains_key(leaf)) {
+        return Err(format!(
+            "{context} raw graph leaf `{}` has no row",
+            leaf_node_id.unwrap_or_default()
+        ));
+    }
+    Ok(())
 }
 
 pub fn runtime_single_active_agent_frame(events: &[DeliveredBoundary]) -> OracleVerdict {
@@ -5363,7 +5476,8 @@ fn backend_retry_terminalization_fact(
     events: &[DeliveredBoundary],
     fact: &'static str,
 ) -> Result<ScenarioContractGeneratedFact, String> {
-    let mut by_operation: BTreeMap<String, Vec<&DeliveredBoundary>> = BTreeMap::new();
+    let mut by_session_operation: BTreeMap<(String, String), Vec<&DeliveredBoundary>> =
+        BTreeMap::new();
     for event in events
         .iter()
         .filter(|event| event.kind == BoundaryKind::BackendFailure)
@@ -5375,9 +5489,18 @@ fn backend_retry_terminalization_fact(
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        by_operation.entry(operation).or_default().push(event);
+        let session = event
+            .observed
+            .get("session")
+            .and_then(Value::as_str)
+            .unwrap_or(event.actor_alias.as_str())
+            .to_string();
+        by_session_operation
+            .entry((session, operation))
+            .or_default()
+            .push(event);
     }
-    let Some(mut operation_events) = by_operation.into_values().find(|events| {
+    let Some(mut operation_events) = by_session_operation.into_values().find(|events| {
         let retryable = events.iter().any(|event| {
             event.observed.get("retryable").and_then(Value::as_bool) == Some(true)
                 && event
@@ -5385,6 +5508,11 @@ fn backend_retry_terminalization_fact(
                     .pointer("/production_store_error/retryable_class")
                     .and_then(Value::as_bool)
                     == Some(true)
+                && event
+                    .observed
+                    .pointer("/fault_injector/point")
+                    .and_then(Value::as_str)
+                    == Some("after_begin")
         });
         let terminal = events.iter().any(|event| {
             event.observed.get("retryable").and_then(Value::as_bool) == Some(false)
@@ -5393,6 +5521,11 @@ fn backend_retry_terminalization_fact(
                     .get("store_error_class")
                     .and_then(Value::as_str)
                     == Some("terminal_backend_error")
+                && event
+                    .observed
+                    .pointer("/fault_injector/point")
+                    .and_then(Value::as_str)
+                    == Some("commit_io")
         });
         retryable && terminal
     }) else {
@@ -5879,7 +6012,8 @@ fn trigger_wakeup_route_semantics(events: &[DeliveredBoundary]) -> bool {
 }
 
 fn backend_retry_terminalization_semantics(events: &[DeliveredBoundary]) -> bool {
-    let mut by_operation: BTreeMap<String, Vec<&DeliveredBoundary>> = BTreeMap::new();
+    let mut by_session_operation: BTreeMap<(String, String), Vec<&DeliveredBoundary>> =
+        BTreeMap::new();
     for event in events
         .iter()
         .filter(|event| event.kind == BoundaryKind::BackendFailure)
@@ -5891,9 +6025,18 @@ fn backend_retry_terminalization_semantics(events: &[DeliveredBoundary]) -> bool
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        by_operation.entry(operation).or_default().push(event);
+        let session = event
+            .observed
+            .get("session")
+            .and_then(Value::as_str)
+            .unwrap_or(event.actor_alias.as_str())
+            .to_string();
+        by_session_operation
+            .entry((session, operation))
+            .or_default()
+            .push(event);
     }
-    by_operation.values().any(|events| {
+    by_session_operation.values().any(|events| {
         let mut events = events.clone();
         events.sort_by_key(|event| event.sequence);
         let mut saw_retryable = false;
@@ -5908,23 +6051,28 @@ fn backend_retry_terminalization_semantics(events: &[DeliveredBoundary]) -> bool
                 return false;
             }
             last_attempt = attempt;
-            let retryable = event
-                .observed
-                .get("retryable")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let store_error_retryable = event
+            let Some(retryable) = event.observed.get("retryable").and_then(Value::as_bool) else {
+                return false;
+            };
+            let Some(store_error_retryable) = event
                 .observed
                 .pointer("/production_store_error/retryable_class")
                 .and_then(Value::as_bool)
-                .unwrap_or(retryable);
-            if retryable && store_error_retryable {
+            else {
+                return false;
+            };
+            let observed_fault_point = event
+                .observed
+                .pointer("/fault_injector/point")
+                .and_then(Value::as_str);
+            if retryable && store_error_retryable && observed_fault_point == Some("after_begin") {
                 saw_retryable = true;
                 continue;
             }
             if saw_retryable
                 && !retryable
                 && !store_error_retryable
+                && observed_fault_point == Some("commit_io")
                 && event
                     .observed
                     .get("store_error_class")
@@ -7479,6 +7627,40 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn seeded_duplicate_raw_graph_row_mutation_fails_with_projection_contrast() {
+        let workload = crate::generator::generate_workload(5, "fast-random", 24)
+            .expect("seeded generated workload");
+        let mut trace = crate::runner::run_generated_workload_for_fixture(workload, "bundle")
+            .await
+            .expect("generated trace");
+        let baseline = runtime_graph_acyclic(&trace.durable_writes);
+        assert!(
+            baseline.is_passed(),
+            "unmutated raw graph must pass: {}",
+            baseline.message
+        );
+        let rows = trace
+            .durable_writes
+            .iter_mut()
+            .filter_map(|write| write.state.as_mut())
+            .filter_map(|state| state.accepted_raw_rows.as_mut())
+            .filter_map(|raw| raw.get_mut("graph_nodes"))
+            .filter_map(Value::as_array_mut)
+            .find(|rows| !rows.is_empty())
+            .expect("seed 5 records accepted raw graph rows");
+        rows.push(rows[0].clone());
+
+        let old_projection = runtime_graph_projection_acyclic(&trace.events);
+        assert!(
+            old_projection.is_passed(),
+            "the old self-referential projection demonstrates its duplicate-row blind spot"
+        );
+        let raw_verdict = runtime_graph_acyclic(&trace.durable_writes);
+        assert!(!raw_verdict.is_passed(), "duplicate raw row must be red");
+        assert!(raw_verdict.message.contains("duplicate row"));
+    }
+
     fn process_wake_turn_event(
         sequence: usize,
         boundary_id: &str,
@@ -8900,6 +9082,7 @@ mod tests {
                         "type": "lash_core::StoreError",
                         "variant": "HeadRevisionConflict"
                     },
+                    "fault_injector": {"point": "after_begin"},
                     "retryable": true,
                     "store_error_class": "retryable_conflict"
                 }),
@@ -8922,6 +9105,7 @@ mod tests {
                         "type": "lash_core::StoreError",
                         "variant": "SessionExecutionLeaseExpired"
                     },
+                    "fault_injector": {"point": "commit_io"},
                     "retryable": false,
                     "store_error_class": "terminal_backend_error"
                 }),

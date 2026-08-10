@@ -79,8 +79,10 @@ pub fn replay_trace(
         // them: thread the recorded observation in directly instead of projecting.
         let observed = if matches!(
             event.kind,
-            BoundaryKind::Worker | BoundaryKind::ProcessLifecycle
-        ) {
+            BoundaryKind::Worker | BoundaryKind::ProcessLifecycle | BoundaryKind::BackendFailure
+        ) || event.payload.get("suspend_resume").and_then(Value::as_bool)
+            == Some(true)
+        {
             store.apply_observed_boundary(&event, &expected.observed);
             expected.observed.clone()
         } else {

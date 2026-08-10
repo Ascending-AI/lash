@@ -1,11 +1,12 @@
 use super::*;
+use crate::backend_fault::GeneratedBackendFaultHarness;
 
 pub(super) struct GeneratedRuntimeWorld {
     clock: Arc<SimClock>,
     sessions: BTreeMap<String, GeneratedRuntimeSession>,
     queued_inputs: BTreeMap<String, String>,
     lease_ticks: BTreeMap<String, Vec<u64>>,
-    backend_faults: SimBackendFaultInjector,
+    backend_faults: GeneratedBackendFaultHarness,
     provider_mutations: SimProviderMutationHarness,
     trigger_harness: SimTriggerHarness,
     store_factory: Arc<dyn SessionStoreFactory>,
@@ -104,7 +105,7 @@ impl GeneratedRuntimeWorld {
             sessions: BTreeMap::new(),
             queued_inputs: BTreeMap::new(),
             lease_ticks: BTreeMap::new(),
-            backend_faults: SimBackendFaultInjector::default(),
+            backend_faults: GeneratedBackendFaultHarness::default(),
             provider_mutations: SimProviderMutationHarness::default(),
             trigger_harness: SimTriggerHarness::default(),
             runtime_boundaries: RuntimeBoundaryHarness::new(
@@ -175,7 +176,7 @@ impl GeneratedRuntimeWorld {
             BoundaryKind::Observer => self.observe_session(event),
             BoundaryKind::Cancellation => self.cancel_queued_input(event).await,
             BoundaryKind::Trigger => self.trigger_harness.deliver(event).await,
-            BoundaryKind::BackendFailure => Ok(self.backend_faults.inject(event)),
+            BoundaryKind::BackendFailure => self.backend_faults.inject(event).await,
             BoundaryKind::ProviderMutation => self.provider_mutations.reject(event).await,
             BoundaryKind::DurableEffect
             | BoundaryKind::ProcessWake
@@ -972,7 +973,11 @@ impl GeneratedRuntimeWorld {
             ))
         })??;
         let completed_after = turn.events.tool_completed_count().await;
+        let activities = turn.events.snapshot().await;
         let assistant_message = result.assistant_message().unwrap_or_default().to_string();
+        let read_view = result.state.read_view();
+        let graph_invariant = runtime_graph_invariant_facts(&result.state.session_graph);
+        let usage_invariant = runtime_usage_invariant_facts(&result, &activities);
         let resumed_after_completion = completed_after > completed_before
             && matches!(
                 &result.outcome,
@@ -997,6 +1002,12 @@ impl GeneratedRuntimeWorld {
                 "completed_event_count_before_resolution": completed_before,
                 "completed_event_count_after_resolution": completed_after,
                 "final_assistant_message": assistant_message,
+            },
+            "graph_node_count": result.state.session_graph.nodes.len(),
+            "transcript_message_count": read_view.messages().len(),
+            "runtime_invariant_facts": {
+                "graph": graph_invariant,
+                "usage": usage_invariant,
             },
         }))
     }
@@ -1173,42 +1184,6 @@ async fn run_provider_turn_task(
         "runtime_final_value_facts": final_value_invariant,
         "runtime_contract": runtime_contract,
     }))
-}
-
-#[derive(Default)]
-struct SimBackendFaultInjector {
-    attempts_by_operation: BTreeMap<String, usize>,
-}
-
-impl SimBackendFaultInjector {
-    fn inject(&mut self, event: &BoundaryEvent) -> Value {
-        let operation = event
-            .payload
-            .get("operation")
-            .and_then(Value::as_str)
-            .unwrap_or("backend_operation")
-            .to_string();
-        let attempts = self
-            .attempts_by_operation
-            .entry(operation.clone())
-            .or_insert(0);
-        *attempts += 1;
-        let retryable = event
-            .payload
-            .get("retryable")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
-        backend_fault_observation(
-            event
-                .payload
-                .get("session")
-                .cloned()
-                .unwrap_or_else(|| json!(event.actor_alias)),
-            operation,
-            *attempts,
-            retryable,
-        )
-    }
 }
 
 #[derive(Default)]

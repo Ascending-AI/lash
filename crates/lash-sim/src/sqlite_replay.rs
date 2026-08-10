@@ -153,11 +153,17 @@ pub async fn replay_trace_to_sqlite(
     let mut replayed_boundary_families = BTreeSet::new();
     for delivered in &trace.events {
         let event = delivered.as_event();
-        let observed = if is_suspend_replay_boundary(&event) {
-            // Suspend ingress/resume boundaries are a generated-runtime mechanism;
-            // the abstract projector reproduces their observed without running the
-            // SQLite runtime world.
-            store.project_boundary_observation(&event)
+        let observed = if event.kind == BoundaryKind::BackendFailure {
+            // Generation already exercised the real SQLite fault injector and
+            // recorded its StoreError. Replaying the surrounding backend cannot
+            // recreate that separately armed transaction, so preserve the real
+            // observation instead of projecting a model failure.
+            delivered.observed.clone()
+        } else if is_suspend_replay_boundary(&event) {
+            // Suspend observations include the real committed runtime graph and
+            // usage facts captured during generation. Carry that evidence rather
+            // than replacing it with the abstract projector's smaller payload.
+            delivered.observed.clone()
         } else if is_runtime_session_boundary(event.kind) {
             world.deliver_boundary(&event, &delivered.observed).await?
         } else if is_runtime_backed_boundary(event.kind) {

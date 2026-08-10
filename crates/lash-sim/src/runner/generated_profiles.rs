@@ -166,6 +166,11 @@ struct GeneratedRunLabels {
     seed_source: SimSeedSource,
 }
 
+struct DeterminismFailure {
+    error: String,
+    rerun: SimulationTrace,
+}
+
 pub async fn run_generated_sim_profile(
     artifact_root: impl AsRef<Path>,
     profile: &str,
@@ -456,6 +461,11 @@ async fn run_generated_evidence_profile(
         .filter(|verdict| verdict.status == OracleStatus::Passed)
         .count();
     let oracle_failures = oracle_verdicts.len() - oracle_passes;
+    let real_observation_oracles = oracle_verdicts
+        .iter()
+        .filter(|verdict| verdict.observation_class == OracleObservationClass::RealObservation)
+        .count();
+    let model_property_oracles = oracle_verdicts.len() - real_observation_oracles;
     let scheduler_controlled_boundaries = event_lines
         .iter()
         .filter(|line| line.event.scheduler.scheduler_controlled)
@@ -499,7 +509,7 @@ async fn run_generated_evidence_profile(
         determinism_sample: GeneratedDeterminismSample {
             policy: "not_applicable_to_evidence_mode",
             selected_seed_indices: Vec::new(),
-            checked_seeds: 0,
+            attempted_seeds: 0,
             reproduced_identically: 0,
         },
         generator_version: GENERATOR_VERSION,
@@ -535,6 +545,8 @@ async fn run_generated_evidence_profile(
             generated_backend_regression_fixtures: generated_backend_regression_fixture_count,
             oracle_passes,
             oracle_failures,
+            real_observation_oracles,
+            model_property_oracles,
             model_store_sessions,
             interleaving_depth_max,
             interleaving_depth_min: if interleaving_depth_min == usize::MAX {
@@ -605,6 +617,11 @@ async fn run_generated_search_profile(
         .filter(|verdict| verdict.status == OracleStatus::Passed)
         .count();
     let mut oracle_failures = recorded_verdicts.len() - oracle_passes;
+    let mut real_observation_oracles = recorded_verdicts
+        .iter()
+        .filter(|verdict| verdict.observation_class == OracleObservationClass::RealObservation)
+        .count();
+    let mut model_property_oracles = recorded_verdicts.len() - real_observation_oracles;
 
     let mut provider_matrix_by_kind: BTreeMap<String, GeneratedRuntimeProviderMatrixRow> =
         BTreeMap::new();
@@ -622,6 +639,7 @@ async fn run_generated_search_profile(
         .iter()
         .filter_map(|(index, _)| (index % 20 == 0).then_some(*index))
         .collect::<Vec<_>>();
+    let determinism_attempted = selected_determinism_indices.len();
     let mut reproduced_identically = 0usize;
 
     for (seed_index, seed) in indexed_seeds.iter().copied() {
@@ -658,6 +676,10 @@ async fn run_generated_search_profile(
         interleaving_depth_min = interleaving_depth_min.min(seed_interleaving_depth);
         model_store_sessions += trace.final_summary.session_count;
         for verdict in &trace.oracles {
+            match verdict.observation_class {
+                OracleObservationClass::RealObservation => real_observation_oracles += 1,
+                OracleObservationClass::ModelProperty => model_property_oracles += 1,
+            }
             if verdict.oracle_id.starts_with("sim.oracle.scenario-mini.") {
                 scenario_contract_mini_oracles += 1;
             } else if verdict.oracle_id.starts_with("sim.oracle.scenario.") {
@@ -673,11 +695,13 @@ async fn run_generated_search_profile(
 
         // In-memory determinism replay for every search seed.
         let replay_outcome = replay_trace(&trace_path, &trace);
+        model_property_oracles += 1;
         match &replay_outcome {
             Ok(_) => oracle_passes += 1,
             Err(_) => oracle_failures += 1,
         }
         let determinism_failure = if seed_index % 20 == 0 {
+            model_property_oracles += 1;
             let rerun = run_generated_workload(
                 generate_workload(seed, profile, boundary_limit)?,
                 &fixed_manifest.script_bundle_hash,
@@ -693,7 +717,10 @@ async fn run_generated_search_profile(
                 }
                 Err(err) => {
                     oracle_failures += 1;
-                    Some(err.to_string())
+                    Some(DeterminismFailure {
+                        error: err.to_string(),
+                        rerun,
+                    })
                 }
             }
         } else {
@@ -732,7 +759,9 @@ async fn run_generated_search_profile(
                 )?;
             }
         }
-        if let Some(error) = &determinism_failure {
+        let determinism_rerun_trace_path = if let Some(failure) = &determinism_failure {
+            let rerun_trace_path = seed_dir.join("determinism-rerun-trace.json");
+            write_trace(&rerun_trace_path, &failure.rerun)?;
             let divergence = json!({
                 "schema": "lash.sim.search-determinism-divergence.v1",
                 "seed": seed,
@@ -742,13 +771,18 @@ async fn run_generated_search_profile(
                 "seed_source": labels.seed_source.source_name(),
                 "seed_salt": labels.seed_source.salt(),
                 "seed_corpus": labels.seed_source.corpus(),
-                "error": error,
+                "error": failure.error,
+                "first_trace": relative_path(artifact_root, &trace_path),
+                "rerun_trace": relative_path(artifact_root, &rerun_trace_path),
             });
             std::fs::write(
                 seed_dir.join("determinism-divergence.json"),
                 serde_json::to_vec_pretty(&divergence)?,
             )?;
-        }
+            Some(relative_path(artifact_root, &rerun_trace_path))
+        } else {
+            None
+        };
         let failing_oracles = trace
             .oracles
             .iter()
@@ -786,8 +820,8 @@ async fn run_generated_search_profile(
                 Err(err) => json!({ "error": err.to_string() }),
             }
         };
-        let failure_reason = if let Some(error) = determinism_failure {
-            error
+        let failure_reason = if let Some(failure) = &determinism_failure {
+            failure.error.clone()
         } else if trace.oracle.is_passed() {
             match &replay_outcome {
                 Err(err) => err.to_string(),
@@ -807,6 +841,7 @@ async fn run_generated_search_profile(
             "seed_salt": labels.seed_source.salt(),
             "seed_corpus": labels.seed_source.corpus(),
             "reason": failure_reason,
+            "determinism_rerun_trace": determinism_rerun_trace_path,
             "replay_command": trace.replay_command,
             "regenerate_command": format!(
                 "cargo run -p lash-sim --locked -- run --out <artifact-root> --profile {profile} --seed {seed} --max-boundaries {boundary_limit}"
@@ -846,6 +881,11 @@ async fn run_generated_search_profile(
     }
 
     write_failure_artifact_shape(artifact_root)?;
+    debug_assert_eq!(
+        real_observation_oracles + model_property_oracles,
+        oracle_passes + oracle_failures,
+        "every evaluated oracle must contribute to the observation-class census"
+    );
     let generated_runtime_provider_matrix = finish_runtime_provider_matrix(provider_matrix_by_kind);
     let summary_path = artifact_root.join(GENERATED_SIM_SUMMARY);
     let report = GeneratedSimProfileReport {
@@ -860,7 +900,7 @@ async fn run_generated_search_profile(
         determinism_sample: GeneratedDeterminismSample {
             policy: "global_seed_index_mod_20_equals_zero",
             selected_seed_indices: selected_determinism_indices,
-            checked_seeds: reproduced_identically,
+            attempted_seeds: determinism_attempted,
             reproduced_identically,
         },
         generator_version: GENERATOR_VERSION,
@@ -896,6 +936,8 @@ async fn run_generated_search_profile(
             generated_backend_regression_fixtures: 0,
             oracle_passes,
             oracle_failures,
+            real_observation_oracles,
+            model_property_oracles,
             model_store_sessions,
             interleaving_depth_max,
             interleaving_depth_min: if interleaving_depth_min == usize::MAX {
@@ -996,7 +1038,7 @@ pub(super) fn regression_corpus_seed(profile: &str, seed_index: usize) -> u64 {
     u64::from_le_bytes(bytes)
 }
 
-fn require_identical_simulation_rerun(
+pub(super) fn require_identical_simulation_rerun(
     seed_index: usize,
     first: &SimulationTrace,
     second: &SimulationTrace,
@@ -1016,8 +1058,9 @@ fn require_identical_simulation_rerun(
     Ok(())
 }
 
-fn determinism_projection(trace: &SimulationTrace) -> Result<Value, serde_json::Error> {
+pub(super) fn determinism_projection(trace: &SimulationTrace) -> Result<Value, serde_json::Error> {
     let mut value = serde_json::to_value(trace)?;
+    let mut canonicalizer = CheckpointStateCanonicalizer::default();
     if let Some(events) = value.get_mut("events").and_then(Value::as_array_mut) {
         for event in events {
             // Provider futures are harvested on the first host scheduler pass
@@ -1026,6 +1069,10 @@ fn determinism_projection(trace: &SimulationTrace) -> Result<Value, serde_json::
             if let Some(observed) = event.get_mut("observed").and_then(Value::as_object_mut) {
                 observed.remove("sim_clock");
             }
+            // Runtime-generated identities can also appear in scheduled
+            // payloads. Canonicalize identity entropy only; event timing is
+            // simulator evidence and remains byte-for-byte comparable.
+            canonicalizer.canonicalize_event_identity(event);
         }
     }
     if let Some(writes) = value
@@ -1045,17 +1092,154 @@ fn determinism_projection(trace: &SimulationTrace) -> Result<Value, serde_json::
                 // identity checked here.
                 write["session_id"] = Value::String(attributed_session);
             }
-            if let Some(write) = write.as_object_mut() {
-                // Checker state contains raw persistence identities derived from
-                // host-time frame creation. Its internal graph/transcript/usage
-                // consistency is checked independently on each run; the unseed
-                // comparison retains the stable checkpoint seam and the full
-                // delivered boundary trace, matching the pre-v3 trace surface.
-                write.remove("state");
+            if let Some(state) = write.get_mut("state") {
+                canonicalizer.canonicalize_checkpoint_state(state);
             }
         }
     }
     Ok(value)
+}
+
+#[derive(Default)]
+struct CheckpointStateCanonicalizer {
+    node_ids: BTreeMap<String, String>,
+    session_uuids: BTreeMap<String, String>,
+    embedded_uuids: BTreeMap<String, String>,
+    embedded_hashes: BTreeMap<String, String>,
+    message_ids: BTreeMap<String, String>,
+}
+
+impl CheckpointStateCanonicalizer {
+    fn canonicalize_event_identity(&mut self, value: &mut Value) {
+        self.canonicalize(value, None, false);
+    }
+
+    fn canonicalize_checkpoint_state(&mut self, value: &mut Value) {
+        self.canonicalize(value, None, true);
+    }
+
+    fn canonicalize(&mut self, value: &mut Value, key: Option<&str>, checkpoint_timestamps: bool) {
+        match value {
+            Value::Object(object) => {
+                for (key, value) in object {
+                    self.canonicalize(value, Some(key), checkpoint_timestamps);
+                }
+            }
+            Value::Array(values) => {
+                for value in values {
+                    self.canonicalize(value, key, checkpoint_timestamps);
+                }
+            }
+            Value::String(raw) if key.is_some_and(is_node_identity_field) => {
+                *raw = canonical_alias(&mut self.node_ids, raw, "node");
+            }
+            Value::String(raw) if key == Some("session_id") && looks_like_uuid(raw.as_str()) => {
+                *raw = canonical_alias(&mut self.session_uuids, raw, "session-uuid");
+            }
+            Value::String(raw)
+                if checkpoint_timestamps && key.is_some_and(is_checkpoint_timestamp_field) =>
+            {
+                *raw = "<canonical-timestamp>".to_string();
+            }
+            Value::String(raw) if raw.starts_with("m_turn_") => {
+                *raw = canonical_alias(&mut self.message_ids, raw, "message");
+            }
+            Value::String(raw) => {
+                *raw = canonicalize_embedded_hashes(&mut self.embedded_hashes, raw);
+                *raw = canonicalize_embedded_uuids(&mut self.embedded_uuids, raw);
+            }
+            Value::Number(number)
+                if checkpoint_timestamps && key.is_some_and(is_checkpoint_timestamp_field) =>
+            {
+                *number = serde_json::Number::from(0);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn canonicalize_embedded_hashes(aliases: &mut BTreeMap<String, String>, raw: &str) -> String {
+    let mut canonical = raw.to_string();
+    let mut search_from = 0usize;
+    while let Some(relative) = canonical[search_from..].find("sha256:") {
+        let hash_start = search_from + relative + "sha256:".len();
+        let hash_end = hash_start + 64;
+        let Some(hash) = canonical.get(hash_start..hash_end) else {
+            break;
+        };
+        if !hash.chars().all(|character| character.is_ascii_hexdigit()) {
+            search_from = hash_start;
+            continue;
+        }
+        let hash = hash.to_string();
+        let alias = canonical_alias(aliases, &hash, "sha256");
+        canonical.replace_range(hash_start..hash_end, &alias);
+        search_from = hash_start + alias.len();
+    }
+    canonical
+}
+
+fn canonicalize_embedded_uuids(aliases: &mut BTreeMap<String, String>, raw: &str) -> String {
+    let mut canonical = raw.to_string();
+    let mut search_from = 0usize;
+    while search_from + 36 <= canonical.len() {
+        let Some((start, uuid)) = (search_from..=canonical.len() - 36).find_map(|start| {
+            let candidate = canonical.get(start..start + 36)?;
+            looks_like_uuid(candidate).then(|| (start, candidate.to_string()))
+        }) else {
+            break;
+        };
+        let alias = canonical_alias(aliases, &uuid, "uuid");
+        canonical.replace_range(start..start + 36, &alias);
+        search_from = start + alias.len();
+    }
+    canonical
+}
+
+fn canonical_alias(aliases: &mut BTreeMap<String, String>, raw: &str, prefix: &str) -> String {
+    if let Some(alias) = aliases.get(raw) {
+        return alias.clone();
+    }
+    let alias = format!("<{prefix}-{:03}>", aliases.len() + 1);
+    aliases.insert(raw.to_string(), alias.clone());
+    alias
+}
+
+fn is_node_identity_field(key: &str) -> bool {
+    matches!(
+        key,
+        "node_id"
+            | "parent_node_id"
+            | "leaf_node_id"
+            | "graph_leaf_node_id"
+            | "current_frame_node_id"
+            | "agent_frame_id"
+            | "turn_id"
+            | "source_turn_id"
+            | "active_frame_ids"
+            | "duplicate_node_ids"
+            | "cycle_node_ids"
+            | "nodes_without_agent_frame"
+            | "node_agent_frame_ids_without_record"
+    )
+}
+
+fn is_checkpoint_timestamp_field(key: &str) -> bool {
+    // Generated v3 checkpoint graph rows are the only currently observed
+    // wall-clock timestamp entropy. Event scheduler and deferral `*_at`
+    // fields are virtual-time semantics and are deliberately not listed.
+    key == "timestamp"
+}
+
+fn looks_like_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value
+            .chars()
+            .enumerate()
+            .all(|(index, character)| match index {
+                8 | 13 | 18 | 23 => character == '-',
+                _ => character.is_ascii_hexdigit(),
+            })
 }
 
 fn first_json_difference(path: &str, first: &Value, second: &Value) -> Option<String> {
