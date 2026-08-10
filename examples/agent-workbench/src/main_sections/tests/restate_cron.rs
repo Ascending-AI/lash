@@ -1,5 +1,6 @@
 const LIVE_RESTATE_CRON_SCHEDULE_INTERVAL: Duration = Duration::from_secs(2);
 const LIVE_RESTATE_CRON_JITTER_MARGIN: Duration = Duration::from_secs(60);
+const LIVE_RESTATE_CRON_ZOMBIE_EXPR: &str = "0 0 0 1 1 *";
 
 fn live_restate_cron_tick_wait() -> Duration {
     LIVE_RESTATE_CRON_SCHEDULE_INTERVAL
@@ -7,7 +8,7 @@ fn live_restate_cron_tick_wait() -> Duration {
         .saturating_add(LIVE_RESTATE_CRON_JITTER_MARGIN)
 }
 
-fn test_cron_trigger_source() -> String {
+fn test_cron_trigger_source(expr: &str) -> String {
     format!(
         r#"
         process remember_tick(tick: cron.Tick) {{
@@ -16,15 +17,210 @@ fn test_cron_trigger_source() -> String {
         }}
 
         handle = await triggers.register({{
-          source: cron.Schedule({{ expr: "*/{} * * * * *", tz: "UTC" }}),
+          source: cron.Schedule({{ expr: "{expr}", tz: "UTC" }}),
           target: remember_tick,
           inputs: {{ tick: trigger.event }},
           name: "cron smoke"
         }})?
         finish "cron registered"
-        "#,
-        LIVE_RESTATE_CRON_SCHEDULE_INTERVAL.as_secs()
+        "#
     )
+}
+
+fn live_restate_cron_provider(expr: String) -> ProviderHandle {
+    let response_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let response_index_for_provider = Arc::clone(&response_index);
+    lash::testing::TestProvider::builder()
+        .kind("workbench-restate-cron-e2e")
+        .complete(move |_| {
+            let response_index = Arc::clone(&response_index_for_provider);
+            let expr = expr.clone();
+            async move {
+                match response_index.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
+                    0 => Ok(text_response(&format!(
+                        "<lashlang>\n{}\n</lashlang>",
+                        test_cron_trigger_source(&expr).trim()
+                    ))),
+                    other => panic!(
+                        "future-scheduled zombie-path provider must not receive cron turn call {other}"
+                    ),
+                }
+            }
+        })
+        .build()
+        .into_handle()
+}
+
+fn gated_live_restate_cron_provider(
+) -> (
+    ProviderHandle,
+    mpsc::UnboundedReceiver<usize>,
+    Arc<tokio::sync::Notify>,
+) {
+    let (entered_tx, entered_rx) = mpsc::unbounded_channel();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let release_for_provider = Arc::clone(&release);
+    let response_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let response_index_for_provider = Arc::clone(&response_index);
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-restate-cron-sync-cancel-e2e")
+        .complete(move |_| {
+            let entered_tx = entered_tx.clone();
+            let release = Arc::clone(&release_for_provider);
+            let response_index = Arc::clone(&response_index_for_provider);
+            async move {
+                let call = response_index.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if call == 1 {
+                    let _ = entered_tx.send(call);
+                    release.notified().await;
+                }
+                Ok(if call == 0 {
+                    text_response(&format!(
+                        "<lashlang>\n{}\n</lashlang>",
+                        test_cron_trigger_source(&format!(
+                            "*/{} * * * * *",
+                            LIVE_RESTATE_CRON_SCHEDULE_INTERVAL.as_secs()
+                        ))
+                        .trim()
+                    ))
+                } else {
+                    text_response("<lashlang>\nfinish \"cron tick observed\"\n</lashlang>")
+                })
+            }
+        })
+        .build()
+        .into_handle();
+    (provider, entered_rx, release)
+}
+
+struct LiveRestateCronScenario {
+    data_dir: PathBuf,
+    state: AppState,
+    trace_path: PathBuf,
+    cron_session_id: String,
+    cron_job_key: String,
+}
+
+async fn start_live_restate_cron_scenario(
+    data_dir_label: &str,
+    provider: ProviderHandle,
+) -> Option<LiveRestateCronScenario> {
+    let ingress_url = match std::env::var("RESTATE_INGRESS_URL") {
+        Ok(value) => value,
+        Err(_) => {
+            eprintln!("skipping live Restate E2E: RESTATE_INGRESS_URL is not set");
+            return None;
+        }
+    };
+    let admin_url = std::env::var("RESTATE_ADMIN_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
+    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
+        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
+        .parse()
+        .expect("valid workbench E2E endpoint bind");
+    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
+        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
+    let data_dir = std::env::temp_dir().join(format!(
+        "{data_dir_label}-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
+    let LiveWorkbenchRestateHarness {
+        state,
+        process_worker,
+        process_deployment,
+        trace_path,
+    } = live_workbench_restate_state_with_provider(
+        &data_dir,
+        ingress_url,
+        provider,
+        WorkbenchSessionIds::fresh(),
+        ActiveTurns::default(),
+    )
+    .await;
+    restate::spawn_restate_endpoint(
+        endpoint_bind,
+        state.clone(),
+        process_deployment,
+        process_worker,
+    );
+    wait_for_endpoint_socket(endpoint_bind).await;
+    register_restate_deployment(&admin_url, &endpoint_url).await;
+    let turn_invocation_id = run_workbench_turn_via_restate(
+        &state,
+        "Register the cron trigger used by this cancellation-path test.",
+    )
+    .await;
+    wait_for_workbench_message(&state, "cron registered", Duration::from_secs(60)).await;
+    wait_for_restate_invocation_success(
+        &state,
+        &turn_invocation_id,
+        Duration::from_secs(30),
+    )
+    .await;
+    wait_for_restate_cron_sync(&state, &trace_path, Duration::from_secs(30)).await;
+    let cron_session_id = rotate_cron_session_out_of_current(&state);
+    let cron_job_key = cron_job_key_for_session(&state, &cron_session_id);
+    Some(LiveRestateCronScenario {
+        data_dir,
+        state,
+        trace_path,
+        cron_session_id,
+        cron_job_key,
+    })
+}
+
+async fn disable_cron_registration_for_sync_scenario(scenario: &LiveRestateCronScenario) {
+    let records = scenario
+        .state
+        .trigger_store
+        .list_subscriptions(lash::triggers::TriggerSubscriptionFilter::for_session(
+            &scenario.cron_session_id,
+        ))
+        .await
+        .expect("list cron registration before queued-turn sync cancel");
+    let [record] = records.as_slice() else {
+        panic!("expected one cron registration before sync cancel, got {records:#?}");
+    };
+    scenario
+        .state
+        .trigger_store
+        .execute_command(
+            &format!("fig1130-sync-disable-{}", uuid::Uuid::new_v4()),
+            lash::triggers::TriggerCommand::Disable {
+                owner_scope: record.owner_scope.clone(),
+                actor: record.registrant.clone(),
+                subscription_key: record.subscription_key.clone(),
+                expected_revision: record.revision,
+            },
+        )
+        .await
+        .expect("execute cron registration disable effect")
+        .expect("disable cron registration before queued-turn sync");
+}
+
+async fn assert_queued_turn_sync_cancelled(scenario: &LiveRestateCronScenario) {
+    wait_for_cron_trace_record_count(
+        &scenario.trace_path,
+        "agent_workbench.cron.restate.sync_cancelled",
+        &scenario.cron_session_id,
+        &scenario.cron_job_key,
+        1,
+        live_restate_cron_tick_wait(),
+    )
+    .await;
+    let sync_records = cron_trace_records_for_job(
+        &scenario.trace_path,
+        "agent_workbench.cron.restate.sync_cancelled",
+        &scenario.cron_session_id,
+        &scenario.cron_job_key,
+    );
+    let sync_record = sync_records.last().expect("queued-turn sync cancel trace");
+    assert_eq!(
+        sync_record.pointer("/payload/reason").and_then(Value::as_str),
+        Some("queued_turn")
+    );
+    assert_restate_cron_job_cancelled(&scenario.state, &scenario.cron_job_key).await;
 }
 
 fn rotate_cron_session_out_of_current(state: &AppState) -> String {
@@ -221,6 +417,13 @@ async fn retire_cron_session_and_assert_zombie(
         Duration::from_secs(20),
     )
     .await;
+    lash_restate::RestateIngressClient::new(lash_restate::RestateConnection::with_client(
+        &state.restate_ingress_url,
+        state.restate_http.clone(),
+    ))
+    .call_object_empty("WorkbenchCronJob", job_key, "run")
+    .await
+    .expect("drive retired cron job run");
     wait_for_cron_trace_record_count(
         trace_path,
         "agent_workbench.cron.restate.zombie_cancelled",
@@ -268,21 +471,27 @@ async fn retire_cron_session_and_assert_zombie(
     );
 }
 
-async fn assert_two_live_ticks_then_retire(
+async fn assert_restate_cron_job_cancelled(
     state: &AppState,
-    trace_path: &std::path::Path,
-    cron_session_id: &str,
     job_key: &str,
 ) {
-    wait_for_cron_trace_record_count(
-        trace_path,
-        "agent_workbench.cron.restate.run",
-        cron_session_id,
-        job_key,
-        2,
-        live_restate_cron_tick_wait(),
-    )
-    .await;
-    assert_live_non_current_cron_trace(trace_path, cron_session_id, job_key);
-    retire_cron_session_and_assert_zombie(state, trace_path, cron_session_id, job_key).await;
+    let info_url = format!(
+        "{}/WorkbenchCronJob/{job_key}/info",
+        state.restate_ingress_url.trim_end_matches('/')
+    );
+    let info = state
+        .restate_http
+        .post(info_url)
+        .send()
+        .await
+        .expect("query cancelled cron job info")
+        .error_for_status()
+        .expect("cancelled cron job info status")
+        .json::<serde_json::Value>()
+        .await
+        .expect("decode cancelled cron job info");
+    assert!(
+        info.is_null(),
+        "cancelled cron job must clear Restate cron state, got {info}"
+    );
 }

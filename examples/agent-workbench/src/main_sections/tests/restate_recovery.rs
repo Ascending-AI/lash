@@ -1980,38 +1980,3 @@ async fn wait_for_session_lease_generation(
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
-
-async fn live_workbench_restate_state(
-    data_dir: &std::path::Path,
-    restate_ingress_url: String,
-) -> LiveWorkbenchRestateHarness {
-    let response_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let response_index_for_provider = Arc::clone(&response_index);
-    let provider = lash::testing::TestProvider::builder()
-        .kind("workbench-restate-e2e")
-        .complete(move |_| {
-            let response_index = Arc::clone(&response_index_for_provider);
-            async move {
-                if response_index.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
-                    Ok(text_response(&format!(
-                        "<lashlang>\n{}\n</lashlang>",
-                        test_cron_trigger_source().trim()
-                    )))
-                } else {
-                    Ok(text_response(
-                        "<lashlang>\nfinish \"cron tick observed\"\n</lashlang>",
-                    ))
-                }
-            }
-        })
-        .build()
-        .into_handle();
-    live_workbench_restate_state_with_provider(
-        data_dir,
-        restate_ingress_url,
-        provider,
-        WorkbenchSessionIds::fresh(),
-        ActiveTurns::default(),
-    )
-    .await
-}
