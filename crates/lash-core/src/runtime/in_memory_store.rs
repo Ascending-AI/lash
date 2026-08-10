@@ -163,6 +163,8 @@ pub struct InMemorySessionStore {
     #[cfg(test)]
     fail_next_session_execution_lease_renewal: Mutex<Option<crate::StoreError>>,
     #[cfg(test)]
+    force_next_session_execution_lease_renewal_zero_match: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
     next_session_execution_lease_renewal_response: Mutex<Option<crate::SessionExecutionLease>>,
     #[cfg(test)]
     session_execution_lease_renewal_count: std::sync::atomic::AtomicUsize,
@@ -267,6 +269,9 @@ impl InMemorySessionStore {
             fail_next_runtime_commit_after_first_mutation: Mutex::new(None),
             #[cfg(test)]
             fail_next_session_execution_lease_renewal: Mutex::new(None),
+            #[cfg(test)]
+            force_next_session_execution_lease_renewal_zero_match:
+                std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             next_session_execution_lease_renewal_response: Mutex::new(None),
             #[cfg(test)]
