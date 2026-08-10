@@ -370,10 +370,12 @@ mod restate_tests {
     }
 
     async fn live_restate_ingress_runs_agent_turn_and_process_workflow_end_to_end_async() {
-        let Some(ingress_url) = std::env::var("RESTATE_INGRESS_URL").ok() else {
-            eprintln!("skipping live Restate E2E: RESTATE_INGRESS_URL is not set");
-            return;
-        };
+        // This test is `#[ignore]`d, so it only runs when the recipe asked for
+        // it. Skipping on an absent ingress URL would report the live E2E green
+        // having exercised nothing; fail instead, as the workbench recovery
+        // scenarios do.
+        let ingress_url = std::env::var("RESTATE_INGRESS_URL")
+            .expect("RESTATE_INGRESS_URL must be set by the agent-service Restate E2E recipe");
         let admin_url = std::env::var("RESTATE_ADMIN_URL")
             .unwrap_or_else(|_| "http://127.0.0.1:9070".to_string());
         let bind_addr: SocketAddr = std::env::var("AGENT_SERVICE_E2E_ENDPOINT_BIND")

@@ -1580,14 +1580,11 @@ finish initial
     }
 
     async fn live_restate_cron_zombie_cancel_path_end_to_end_inner() {
-        let Some(scenario) = start_live_restate_cron_scenario(
+        let scenario = start_live_restate_cron_scenario(
             "agent-workbench-restate-cron-zombie-e2e",
             live_restate_cron_provider(LIVE_RESTATE_CRON_ZOMBIE_EXPR.to_string()),
         )
-        .await
-        else {
-            return;
-        };
+        .await;
 
         // FIG-1130 ruling: sync cancel is the live fast path and zombie cancel
         // is the crash-safety backstop. This future schedule leaves no queued
@@ -1617,14 +1614,11 @@ finish initial
     async fn live_restate_cron_queued_turn_sync_cancel_path_end_to_end_inner() {
         let (provider, mut queued_turn_entered, release_queued_turn) =
             gated_live_restate_cron_provider();
-        let Some(scenario) = start_live_restate_cron_scenario(
+        let scenario = start_live_restate_cron_scenario(
             "agent-workbench-restate-cron-sync-cancel-e2e",
             provider,
         )
-        .await
-        else {
-            return;
-        };
+        .await;
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(20), queued_turn_entered.recv())
                 .await
