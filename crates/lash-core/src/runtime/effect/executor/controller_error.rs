@@ -8,7 +8,7 @@ use super::RuntimeEffectKind;
 #[derive(Clone, Debug, thiserror::Error, Serialize, Deserialize)]
 #[error("{code}: {message}")]
 pub struct RuntimeEffectControllerError {
-    pub code: String,
+    pub code: RuntimeErrorCode,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<crate::runtime::effect::RuntimeEffectReplayMismatchSummary>,
@@ -17,20 +17,23 @@ pub struct RuntimeEffectControllerError {
 }
 
 impl RuntimeEffectControllerError {
-    /// Constructs a `RuntimeEffectControllerError` for effect-host implementors while executing or
-    /// replaying a runtime effect.
-    ///
-    /// This is an intentionally open extension point. Hosts should namespace
-    /// their codes and must not mint a built-in [`RuntimeErrorCode`] string;
-    /// built-in strings are canonicalized, and unknown codes cross the runtime
-    /// boundary as [`RuntimeErrorCode::ForeignCode`].
-    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+    /// Constructs a first-party `RuntimeEffectControllerError` from a classified code.
+    pub fn new(code: RuntimeErrorCode, message: impl Into<String>) -> Self {
         Self {
-            code: code.into(),
+            code,
             message: message.into(),
             summary: None,
             cause: None,
         }
+    }
+
+    /// Constructs an error minted by a foreign effect-host extension.
+    ///
+    /// Hosts must namespace these codes and must not mint a built-in
+    /// [`RuntimeErrorCode`] spelling. First-party producers use [`Self::new`],
+    /// whose typed argument makes an unclassified string a compile error.
+    pub fn foreign(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::ForeignCode(code.into()), message)
     }
 
     /// Sets the summary carried by a `RuntimeEffectControllerError` for effect-host implementors
@@ -48,7 +51,7 @@ impl RuntimeEffectControllerError {
         actual: RuntimeEffectKind,
     ) -> Self {
         Self::new(
-            "runtime_effect_wrong_outcome",
+            RuntimeErrorCode::RuntimeEffectWrongOutcome,
             format!(
                 "expected {} outcome, got {}",
                 expected.as_str(),
@@ -64,7 +67,7 @@ impl RuntimeEffectControllerError {
             summary,
             cause,
         } = self;
-        let mut runtime = RuntimeError::new(RuntimeErrorCode::from_wire_code(&code), message);
+        let mut runtime = RuntimeError::new(code, message);
         runtime.summary = summary;
         match cause {
             Some(cause) => runtime.with_cause(cause),
@@ -76,7 +79,7 @@ impl RuntimeEffectControllerError {
 impl From<RuntimeError> for RuntimeEffectControllerError {
     fn from(err: RuntimeError) -> Self {
         Self {
-            code: err.code.as_str().to_string(),
+            code: err.code,
             message: err.message,
             summary: None,
             cause: err.cause,
@@ -88,7 +91,7 @@ impl From<PluginError> for RuntimeEffectControllerError {
     fn from(err: PluginError) -> Self {
         match err {
             PluginError::RuntimeEffectController(err) => err,
-            err => Self::new("plugin", err.to_string()),
+            err => Self::new(RuntimeErrorCode::Plugin, err.to_string()),
         }
     }
 }
@@ -106,12 +109,12 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
         let code = match &err {
             crate::StoreError::StoredDataCorrupt { .. }
             | crate::StoreError::MonotonicCounterOverflow { .. } => {
-                crate::RuntimeErrorCode::RuntimeStoreCorrupt.as_str()
+                crate::RuntimeErrorCode::RuntimeStoreCorrupt
             }
-            _ => crate::RuntimeErrorCode::RuntimeStore.as_str(),
+            _ => crate::RuntimeErrorCode::RuntimeStore,
         };
         Self {
-            code: code.to_string(),
+            code,
             message: err.to_string(),
             summary: None,
             cause,
@@ -164,6 +167,22 @@ mod tests {
     }
 
     #[test]
+    fn foreign_constructor_preserves_extension_code_as_foreign() {
+        let runtime_error = RuntimeEffectControllerError::foreign(
+            "plugin_defined_abort",
+            "extension refused the effect",
+        )
+        .into_runtime_error();
+
+        assert_eq!(
+            runtime_error.code,
+            crate::RuntimeErrorCode::ForeignCode("plugin_defined_abort".to_string())
+        );
+        assert!(!runtime_error.is_retryable());
+        assert!(!runtime_error.is_terminal());
+    }
+
+    #[test]
     fn replay_mismatch_summary_survives_runtime_error_conversion() {
         let summary = crate::RuntimeEffectReplayMismatchSummary {
             divergent_path_count: 2,
@@ -173,7 +192,7 @@ mod tests {
             ],
         };
         let runtime_error = RuntimeEffectControllerError::new(
-            "sqlite_effect_replay_hash_conflict",
+            crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
             "recorded runtime effect diverged at command.duration_ms",
         )
         .with_summary(summary.clone())

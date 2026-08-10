@@ -12,7 +12,7 @@ use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
     Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeError, ScopedEffectController,
+    RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode, ScopedEffectController,
     facade_support::RuntimeAwaitEventOptions,
 };
 
@@ -373,7 +373,7 @@ impl RuntimeEffectController for RestateEffectHostController {
             return Ok(RuntimeEffectOutcome::AwaitEvent { resolution });
         }
         Err(RuntimeEffectControllerError::new(
-            "restate_effect_host_requires_handler_scope",
+            RuntimeErrorCode::RestateEffectHostRequiresHandlerScope,
             format!(
                 "effect `{}` must enter a Restate handler and use RestateRuntimeEffectController::scoped_effect_controller",
                 envelope

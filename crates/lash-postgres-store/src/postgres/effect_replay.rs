@@ -25,9 +25,7 @@ use lash_core::facade_support::effect_replay_driver::{
 
 use crate::await_event::{PostgresAwaitEventBackend, postgres_await_events};
 
-const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary {
-    code_prefix: "postgres",
-};
+const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::postgres();
 
 /// The PostgreSQL effect-replay driver: one shared state machine over
 /// [`PostgresEffectReplayPersistence`].
@@ -580,11 +578,11 @@ async fn take_over_expired_lease(
 }
 
 fn effect_store_error(err: sqlx::Error) -> RuntimeEffectControllerError {
-    RuntimeEffectControllerError::new(VOCABULARY.code("store"), err.to_string())
+    RuntimeEffectControllerError::new(VOCABULARY.store_code(), err.to_string())
 }
 
 fn effect_store_message(message: String) -> RuntimeEffectControllerError {
-    RuntimeEffectControllerError::new(VOCABULARY.code("store"), message)
+    RuntimeEffectControllerError::new(VOCABULARY.store_code(), message)
 }
 
 #[cfg(test)]
@@ -600,7 +598,10 @@ mod tests {
             }
             .to_string(),
         );
-        assert_eq!(error.code, "postgres_effect_replay_store");
-        assert!(!lash_core::RuntimeErrorCode::from_wire_code(&error.code).is_retryable());
+        assert_eq!(
+            error.code,
+            lash_core::RuntimeErrorCode::PostgresEffectReplayStore
+        );
+        assert!(!error.code.is_retryable());
     }
 }

@@ -46,7 +46,7 @@ impl RuntimeEffectController for RecordingEffectHostController {
         });
         match envelope.command {
             RuntimeEffectCommand::Sleep { .. } => Ok(RuntimeEffectOutcome::Sleep),
-            command => Err(RuntimeEffectControllerError::new(
+            command => Err(RuntimeEffectControllerError::foreign(
                 "recording_effect_host_unsupported_command",
                 format!(
                     "recording effect host cannot synthesize {} outcomes",
@@ -430,7 +430,7 @@ pub async fn effect_controller_journaled_effect_replay(
         .execute_effect(
             error.clone(),
             RuntimeEffectLocalExecutor::testing(|_| async {
-                Err(RuntimeEffectControllerError::new(
+                Err(RuntimeEffectControllerError::foreign(
                     "journaled_effect_replay_error",
                     "recorded journaled-effect error",
                 ))
@@ -438,7 +438,10 @@ pub async fn effect_controller_journaled_effect_replay(
         )
         .await
         .expect_err("first journaled-effect error");
-    assert_eq!(first_error.code, "journaled_effect_replay_error");
+    assert_eq!(
+        first_error.code,
+        crate::RuntimeErrorCode::ForeignCode("journaled_effect_replay_error".to_string())
+    );
     let first_trigger = controller
         .execute_effect(
             trigger.clone(),
@@ -497,7 +500,10 @@ pub async fn effect_controller_journaled_effect_replay(
         )
         .await
         .expect_err("replayed journaled-effect error");
-    assert_eq!(replay_error.code, "journaled_effect_replay_error");
+    assert_eq!(
+        replay_error.code,
+        crate::RuntimeErrorCode::ForeignCode("journaled_effect_replay_error".to_string())
+    );
     let replay_trigger = controller
         .execute_effect(
             trigger,
@@ -631,9 +637,9 @@ pub async fn effect_controller_replay_mismatch_diagnostics(
         .execute_effect(envelope(1), RuntimeEffectLocalExecutor::unavailable())
         .await
         .expect_err("reusing a replay key with a divergent envelope must fail");
-    assert_eq!(error.code, mismatch_code);
+    assert_eq!(error.code.as_str(), mismatch_code);
     assert!(
-        crate::RuntimeErrorCode::from_wire_code(&error.code).is_replay_mismatch(),
+        error.code.is_replay_mismatch(),
         "{mismatch_code} must retain the shared typed replay-mismatch classification"
     );
     assert_eq!(
@@ -1305,7 +1311,7 @@ async fn lease_fencing_reports_lease_lost_when_stolen(
         .expect("owner task joins")
         .expect_err("stolen lease must fail the original owner");
     assert!(
-        err.code.ends_with("_effect_replay_lease_lost"),
+        err.code.as_str().ends_with("_effect_replay_lease_lost"),
         "expected an effect-replay lease-lost error, got code `{}`: {}",
         err.code,
         err.message,
@@ -1352,7 +1358,7 @@ async fn lease_fencing_rejects_finalize_after_expiry(
         .expect("owner task joins")
         .expect_err("expired lease must not finalize");
     assert!(
-        err.code.ends_with("_effect_replay_lease_lost"),
+        err.code.as_str().ends_with("_effect_replay_lease_lost"),
         "expected an effect-replay lease-lost error, got code `{}`: {}",
         err.code,
         err.message,
@@ -1601,7 +1607,7 @@ fn replay_conformance_failing_executor(
         replay_local_calls
             .lock_recover()
             .push(envelope.invocation.effect_id().unwrap_or("").to_string());
-        Err(RuntimeEffectControllerError::new(
+        Err(RuntimeEffectControllerError::foreign(
             "conformance_replay_local_executor_called",
             "recorded replay must not invoke local effect execution",
         ))

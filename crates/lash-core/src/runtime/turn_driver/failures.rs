@@ -7,7 +7,7 @@ impl RuntimeTurnDriver<'_> {
     ) {
         machine.fail_turn(make_error_event(
             "runtime_effect_controller",
-            Some(&err.code),
+            Some(err.code.as_str()),
             err.message,
             None,
         ));

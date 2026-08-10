@@ -3464,9 +3464,12 @@ fn recorded_runtime_effect_hash_mismatch_fails_explicitly() {
     let err = validate_recorded_effect_envelope(recorded, &reconstructed, None)
         .expect_err("hash mismatch");
 
-    assert_eq!(err.code, "restate_effect_hash_mismatch");
+    assert_eq!(
+        err.code,
+        lash_core::RuntimeErrorCode::RestateEffectHashMismatch
+    );
     assert!(
-        lash_core::RuntimeErrorCode::from_wire_code(&err.code).is_replay_mismatch(),
+        err.code.is_replay_mismatch(),
         "Restate replay divergence must retain the shared typed classification"
     );
     assert_eq!(
@@ -4993,7 +4996,10 @@ async fn restate_controller_executes_atomic_effect_inside_run() {
         .await
         .expect_err("unavailable local executor should be returned from ctx.run");
 
-    assert_eq!(err.code, "runtime_effect_local_executor_unavailable");
+    assert_eq!(
+        err.code,
+        lash_core::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable
+    );
     assert_eq!(
         context.runs.lock_recover().as_slice(),
         &["lash:session:turn:1:0:tool_attempt:step".to_string()]
@@ -5129,7 +5135,10 @@ async fn restate_timer_stops_when_its_fresh_attempt_is_cancelled() {
         .await
         .expect_err("cancelled Restate timer must stop the interpreter attempt");
 
-    assert_eq!(error.code, "runtime_effect_sleep_cancelled");
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RuntimeEffectSleepCancelled
+    );
     assert_eq!(context.sleeps.lock_recover().as_slice(), &[60_000]);
 }
 
@@ -5181,7 +5190,10 @@ async fn restate_suspended_timer_is_woken_by_the_durable_turn_cancel_gate() {
         .expect("durable cancel gate must wake a suspended timer promptly")
         .expect("join suspended timer")
         .expect_err("durable turn cancellation must abort the timer effect");
-    assert_eq!(error.code, "runtime_effect_sleep_cancelled");
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RuntimeEffectSleepCancelled
+    );
     assert!(cancellation.is_cancelled());
 }
 

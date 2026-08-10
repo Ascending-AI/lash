@@ -302,19 +302,19 @@ fn validate_effect_invocation(
 ) -> Result<(), RuntimeEffectControllerError> {
     let RuntimeSubject::Effect { effect_id, kind } = &invocation.subject else {
         return Err(RuntimeEffectControllerError::new(
-            "runtime_effect_invocation_subject",
+            crate::RuntimeErrorCode::RuntimeEffectInvocationSubject,
             "runtime effect envelope subject must be an effect",
         ));
     };
     if effect_id.trim().is_empty() {
         return Err(RuntimeEffectControllerError::new(
-            "runtime_effect_invocation_subject",
+            crate::RuntimeErrorCode::RuntimeEffectInvocationSubject,
             "runtime effect envelope effect id must be non-empty",
         ));
     }
     if *kind != command_kind {
         return Err(RuntimeEffectControllerError::new(
-            "runtime_effect_invocation_kind",
+            crate::RuntimeErrorCode::RuntimeEffectInvocationKind,
             format!(
                 "runtime effect invocation kind {} does not match command kind {}",
                 kind.as_str(),
@@ -328,7 +328,7 @@ fn validate_effect_invocation(
         .is_none_or(|replay| replay.key.is_empty())
     {
         return Err(RuntimeEffectControllerError::new(
-            "runtime_effect_replay_required",
+            crate::RuntimeErrorCode::RuntimeEffectReplayRequired,
             "runtime effect envelope requires replay.key",
         ));
     }
@@ -347,13 +347,13 @@ fn validate_effect_command(
     {
         if call.call_id.trim().is_empty() {
             return Err(RuntimeEffectControllerError::new(
-                "runtime_effect_tool_attempt_call_id",
+                crate::RuntimeErrorCode::RuntimeEffectToolAttemptCallId,
                 "runtime effect tool attempt requires a non-empty call id",
             ));
         }
         if *attempt == 0 || *max_attempts == 0 || *attempt > *max_attempts {
             return Err(RuntimeEffectControllerError::new(
-                "runtime_effect_tool_attempt_index",
+                crate::RuntimeErrorCode::RuntimeEffectToolAttemptIndex,
                 format!(
                     "runtime effect tool attempt must satisfy 1 <= attempt <= max_attempts, got {attempt}/{max_attempts}"
                 ),
@@ -363,26 +363,26 @@ fn validate_effect_command(
     if let RuntimeEffectCommand::ToolBatch { batch } = command {
         if batch.batch_id.trim().is_empty() {
             return Err(RuntimeEffectControllerError::new(
-                "runtime_effect_tool_batch_id",
+                crate::RuntimeErrorCode::RuntimeEffectToolBatchId,
                 "runtime effect tool batch id must be non-empty",
             ));
         }
         if batch.calls.is_empty() {
             return Err(RuntimeEffectControllerError::new(
-                "runtime_effect_tool_batch_empty",
+                crate::RuntimeErrorCode::RuntimeEffectToolBatchEmpty,
                 "runtime effect tool batch must contain at least one prepared call",
             ));
         }
         for (index, call) in batch.calls.iter().enumerate() {
             if call.call.call_id.trim().is_empty() {
                 return Err(RuntimeEffectControllerError::new(
-                    "runtime_effect_tool_batch_call_id",
+                    crate::RuntimeErrorCode::RuntimeEffectToolBatchCallId,
                     format!("runtime effect tool batch call {index} has an empty call id"),
                 ));
             }
             if call.replay_suffix.trim().is_empty() {
                 return Err(RuntimeEffectControllerError::new(
-                    "runtime_effect_tool_batch_call_replay",
+                    crate::RuntimeErrorCode::RuntimeEffectToolBatchCallReplay,
                     format!("runtime effect tool batch call {index} has an empty replay suffix"),
                 ));
             }
@@ -829,7 +829,7 @@ async fn attachment_spec_from_attachment(
                 .await
                 .map_err(|err| {
                     RuntimeEffectControllerError::new(
-                        "runtime_effect_attachment_store",
+                        crate::RuntimeErrorCode::RuntimeEffectAttachmentStore,
                         format!(
                             "failed to store attachment before runtime effect invocation: {err}"
                         ),
@@ -921,7 +921,7 @@ impl RuntimeEffectOutcome {
         match self {
             Self::Trigger { result } => Ok(*result),
             other => Err(RuntimeEffectControllerError::new(
-                "runtime_effect_wrong_outcome",
+                crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
                 format!("expected trigger outcome, got {}", other.kind().as_str()),
             )),
         }
@@ -1078,7 +1078,7 @@ mod rejection_tests {
     ) {
         let error = RuntimeEffectEnvelope::try_new(invocation, command)
             .expect_err("invalid envelope must be rejected");
-        assert_eq!(error.code, expected_code);
+        assert_eq!(error.code.as_str(), expected_code);
     }
 
     #[test]

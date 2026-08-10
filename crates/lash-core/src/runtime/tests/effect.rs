@@ -283,7 +283,7 @@ impl RuntimeEffectController for RecordingEffectController {
                     ))
                     .await
             }
-            RuntimeEffectCommand::Process { .. } => Err(RuntimeEffectControllerError::new(
+            RuntimeEffectCommand::Process { .. } => Err(RuntimeEffectControllerError::foreign(
                 "process_unexpected",
                 "recording effect controller does not execute processes",
             )),
@@ -596,12 +596,12 @@ impl RuntimeEffectController for RejectingEffectController {
         }
         if let Some(summary) = self.mismatch_summary.clone() {
             return Err(RuntimeEffectControllerError::new(
-                "sqlite_effect_replay_hash_conflict",
+                crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
                 "recorded runtime effect diverged at command.request.model",
             )
             .with_summary(summary));
         }
-        Err(RuntimeEffectControllerError::new(
+        Err(RuntimeEffectControllerError::foreign(
             "test_controller_rejected",
             format!("rejected {}", envelope.command.kind().as_str()),
         ))
@@ -1259,7 +1259,7 @@ async fn tool_emitted_trigger_redrive_reemits_reserved_start_without_appending_s
                         ))
                         .await
                 }
-                other => Err(RuntimeEffectControllerError::new(
+                other => Err(RuntimeEffectControllerError::foreign(
                     "unexpected_effect",
                     format!("unexpected effect {}", other.kind().as_str()),
                 )),

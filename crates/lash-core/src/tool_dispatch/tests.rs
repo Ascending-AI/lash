@@ -1477,7 +1477,7 @@ impl crate::RuntimeEffectController for FailingSleepEffectController {
         local_executor: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         if matches!(&envelope.command, crate::RuntimeEffectCommand::Sleep { .. }) {
-            Err(crate::RuntimeEffectControllerError::new(
+            Err(crate::RuntimeEffectControllerError::foreign(
                 "test_sleep_rejected",
                 format!("rejected {}", envelope.command.kind().as_str()),
             ))

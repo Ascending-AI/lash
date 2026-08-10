@@ -634,7 +634,7 @@ impl RuntimeEffectController for EffectTaskController {
             })
             .map_err(|_| {
                 RuntimeEffectControllerError::new(
-                    "runtime_effect_controller_task_closed",
+                    crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
                     "effect controller task is no longer running",
                 )
             })?;
@@ -645,7 +645,7 @@ impl RuntimeEffectController for EffectTaskController {
                 response = &mut response_rx => {
                     return response.map_err(|_| {
                         RuntimeEffectControllerError::new(
-                            "runtime_effect_controller_task_closed",
+                            crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
                             "effect controller response was dropped",
                         )
                     })?;
@@ -695,7 +695,7 @@ pub(crate) async fn drive_effect_controller_task(
         let Some(active) = stack.last_mut() else {
             return root_rx.await.map_err(|_| {
                 RuntimeEffectControllerError::new(
-                    "runtime_effect_controller_task_closed",
+                    crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
                     "root effect controller response was dropped",
                 )
             })?;
@@ -705,7 +705,7 @@ pub(crate) async fn drive_effect_controller_task(
             response = &mut root_rx => {
                 return response.map_err(|_| {
                     RuntimeEffectControllerError::new(
-                        "runtime_effect_controller_task_closed",
+                        crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
                         "root effect controller response was dropped",
                     )
                 })?;

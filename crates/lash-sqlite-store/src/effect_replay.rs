@@ -32,9 +32,7 @@ use tokio_util::sync::CancellationToken;
 use super::*;
 use crate::await_event::{SqliteAwaitEventBackend, sqlite_await_events};
 
-const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary {
-    code_prefix: "sqlite",
-};
+const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::sqlite();
 
 /// The SQLite effect-replay driver: one shared state machine over
 /// [`SqliteEffectReplayPersistence`].
@@ -675,7 +673,7 @@ fn take_over_expired_lease(
 }
 
 fn effect_sqlite_error(err: rusqlite::Error) -> RuntimeEffectControllerError {
-    RuntimeEffectControllerError::new(VOCABULARY.code("store"), err.to_string())
+    RuntimeEffectControllerError::new(VOCABULARY.store_code(), err.to_string())
 }
 
 #[cfg(test)]
@@ -688,7 +686,10 @@ mod tests {
             record_kind: "RuntimeEffectReplay",
             message: "lease_expires_at_ms must be non-negative, got -1".to_string(),
         }));
-        assert_eq!(error.code, "sqlite_effect_replay_store");
-        assert!(!lash_core::RuntimeErrorCode::from_wire_code(&error.code).is_retryable());
+        assert_eq!(
+            error.code,
+            lash_core::RuntimeErrorCode::SqliteEffectReplayStore
+        );
+        assert!(!error.code.is_retryable());
     }
 }

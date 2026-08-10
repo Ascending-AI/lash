@@ -619,15 +619,15 @@ impl<'run> RuntimeExecutionContext<'run> {
         match outcome.into_await_event()? {
             crate::Resolution::Ok(value) => Ok(value),
             crate::Resolution::Err(err) => Err(crate::RuntimeEffectControllerError::new(
-                err.code,
+                crate::RuntimeErrorCode::from_wire_code(&err.code),
                 err.message,
             )),
             crate::Resolution::Timeout => Err(crate::RuntimeEffectControllerError::new(
-                "process_signal_wait_timeout",
+                crate::RuntimeErrorCode::ProcessSignalWaitTimeout,
                 "process signal wait timed out",
             )),
             crate::Resolution::Cancelled => Err(crate::RuntimeEffectControllerError::new(
-                "process_signal_wait_cancelled",
+                crate::RuntimeErrorCode::ProcessSignalWaitCancelled,
                 "process signal wait was cancelled",
             )),
         }
@@ -654,7 +654,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             .map(|context| Arc::clone(&context.registry))
             .ok_or_else(|| {
                 crate::RuntimeEffectControllerError::new(
-                    "process_registry_unavailable",
+                    crate::RuntimeErrorCode::ProcessRegistryUnavailable,
                     "process signalling is unavailable outside a durable process execution",
                 )
             })?;
@@ -742,7 +742,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                 Ok(*event)
             }
             other => Err(crate::RuntimeEffectControllerError::new(
-                "runtime_effect_wrong_outcome",
+                crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
                 format!("expected signal outcome, got {other:?}"),
             )),
         }
@@ -789,7 +789,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         match outcome {
             crate::RuntimeEffectOutcome::Sleep => Ok(()),
             other => Err(crate::RuntimeEffectControllerError::new(
-                "runtime_effect_wrong_outcome",
+                crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
                 format!("expected sleep outcome, got {}", other.kind().as_str()),
             )),
         }
@@ -810,7 +810,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     ) -> Result<crate::TriggerEffectResult, crate::RuntimeEffectControllerError> {
         let store = self.trigger_store().ok_or_else(|| {
             crate::RuntimeEffectControllerError::new(
-                "trigger_store_unavailable",
+                crate::RuntimeErrorCode::TriggerStoreUnavailable,
                 "trigger store is unavailable in this runtime",
             )
         })?;

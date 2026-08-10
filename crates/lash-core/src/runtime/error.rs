@@ -5,6 +5,8 @@
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum RuntimeErrorCode {
+    AttachmentSourcePolicyDenied,
+    EffectPanicked,
     MissingExecutionScopeId,
     ExecutionScopeTurnIdMismatch,
     SessionExecutionBusy,
@@ -69,6 +71,15 @@ pub enum RuntimeErrorCode {
     InvalidTurnCancelRequest,
     LiveReplay,
     LlmProvider,
+    Plugin,
+    PostgresEffectReplayCorruptRow,
+    PostgresEffectReplayDecode,
+    PostgresEffectReplayEncode,
+    PostgresEffectReplayHashConflict,
+    PostgresEffectReplayKeyMissing,
+    PostgresEffectReplayLeaseLost,
+    PostgresEffectReplayMissing,
+    PostgresEffectReplayStore,
     PostgresAwaitEventDecode,
     PostgresAwaitEventEncode,
     /// Process-local; repaired by restart, not by same-process retry.
@@ -77,6 +88,10 @@ pub enum RuntimeErrorCode {
     PostgresAwaitEventStore,
     PostgresEffectJournalRetirement,
     QueuedWork,
+    ProcessPanicked,
+    ProcessRegistryUnavailable,
+    ProcessSignalWaitCancelled,
+    ProcessSignalWaitTimeout,
     RestateAwaitEventAwait,
     RestateAwaitEventCancel,
     /// The local observer was cancelled while the durable promise stayed live;
@@ -88,6 +103,11 @@ pub enum RuntimeErrorCode {
     RestateAwaitEventRevoke,
     RestateAwaitEventSessionUpdate,
     RestateEffectController,
+    RestateEffectHashMismatch,
+    RestateEffectHostRequiresHandlerScope,
+    RestateProcessAwait,
+    RestateProcessAwaitAfterTurnCancel,
+    RestateProcessTurnCancelContextMissing,
     RestateProcessTerminalEncode,
     RestateSegmentProgramHashMismatch,
     RestateTurnTerminalAttach,
@@ -96,6 +116,28 @@ pub enum RuntimeErrorCode {
     RestateTurnTerminalAttachCeilingElapsed,
     RestateTurnTerminalDecode,
     RestateTurnTerminalInvalidResolution,
+    RestateTurnCancelScopeMismatch,
+    RestateTurnCancelScopeMissing,
+    RuntimeEffectAttachmentStore,
+    RuntimeEffectEnvelopeCanonicalDecode,
+    RuntimeEffectEnvelopeCanonicalHashInvariant,
+    RuntimeEffectEnvelopeHash,
+    RuntimeEffectInvocationKind,
+    RuntimeEffectInvocationSubject,
+    RuntimeEffectLocalExecutorMismatch,
+    RuntimeEffectLocalExecutorUnavailable,
+    RuntimeEffectLocalTaskClosed,
+    RuntimeEffectProcessTaskJoin,
+    RuntimeEffectReplayRequired,
+    RuntimeEffectSleepCancelled,
+    RuntimeEffectTaskJoin,
+    RuntimeEffectToolAttemptCallId,
+    RuntimeEffectToolAttemptIndex,
+    RuntimeEffectToolBatchCallId,
+    RuntimeEffectToolBatchCallReplay,
+    RuntimeEffectToolBatchEmpty,
+    RuntimeEffectToolBatchId,
+    RuntimeEffectWrongOutcome,
     /// Process-local; repaired by restart, not by same-process retry.
     RuntimeEffectControllerTaskClosed,
     RuntimePerfStartGateRetry,
@@ -118,6 +160,17 @@ pub enum RuntimeErrorCode {
     SqliteAwaitEventSign,
     SqliteAwaitEventStore,
     SqliteEffectJournalRetirement,
+    SqliteEffectReplayCorruptRow,
+    SqliteEffectReplayDecode,
+    SqliteEffectReplayEncode,
+    SqliteEffectReplayHashConflict,
+    SqliteEffectReplayKeyMissing,
+    SqliteEffectReplayLeaseLost,
+    SqliteEffectReplayMissing,
+    SqliteEffectReplayStore,
+    ToolBatchMissingResult,
+    ToolBatchResultCountMismatch,
+    ToolCatalogResolutionFailed,
     ToolCompletionKeyMissingCallId,
     ToolCompletionKeyProcessLifetime,
     TransientCancelWatch,
@@ -137,6 +190,7 @@ pub enum RuntimeErrorCode {
     TurnTerminalEncode,
     TurnTerminalInvalidResolution,
     TurnTerminalUnknownOrRevoked,
+    TriggerStoreUnavailable,
     /// A code minted by a public plugin or effect-host extension point.
     ///
     /// Built-in `RuntimeError` constructors use typed variants; open plugin and
@@ -152,6 +206,8 @@ impl RuntimeErrorCode {
     /// materializing, executing, or persisting a session turn.
     pub fn as_str(&self) -> &str {
         match self {
+            Self::AttachmentSourcePolicyDenied => "attachment_source_policy_denied",
+            Self::EffectPanicked => "effect_panicked",
             Self::MissingExecutionScopeId => "missing_execution_scope_id",
             Self::ExecutionScopeTurnIdMismatch => "execution_scope_turn_id_mismatch",
             Self::SessionExecutionBusy => "session_execution_busy",
@@ -191,6 +247,15 @@ impl RuntimeErrorCode {
             Self::InvalidTurnCancelRequest => "invalid_turn_cancel_request",
             Self::LiveReplay => "live_replay",
             Self::LlmProvider => "llm_provider",
+            Self::Plugin => "plugin",
+            Self::PostgresEffectReplayCorruptRow => "postgres_effect_replay_corrupt_row",
+            Self::PostgresEffectReplayDecode => "postgres_effect_replay_decode",
+            Self::PostgresEffectReplayEncode => "postgres_effect_replay_encode",
+            Self::PostgresEffectReplayHashConflict => "postgres_effect_replay_hash_conflict",
+            Self::PostgresEffectReplayKeyMissing => "postgres_effect_replay_key_missing",
+            Self::PostgresEffectReplayLeaseLost => "postgres_effect_replay_lease_lost",
+            Self::PostgresEffectReplayMissing => "postgres_effect_replay_missing",
+            Self::PostgresEffectReplayStore => "postgres_effect_replay_store",
             Self::PostgresAwaitEventDecode => "postgres_await_event_decode",
             Self::PostgresAwaitEventEncode => "postgres_await_event_encode",
             Self::PostgresAwaitEventNotify => "postgres_await_event_notify",
@@ -198,6 +263,10 @@ impl RuntimeErrorCode {
             Self::PostgresAwaitEventStore => "postgres_await_event_store",
             Self::PostgresEffectJournalRetirement => "postgres_effect_journal_retirement",
             Self::QueuedWork => "queued_work",
+            Self::ProcessPanicked => "process_panicked",
+            Self::ProcessRegistryUnavailable => "process_registry_unavailable",
+            Self::ProcessSignalWaitCancelled => "process_signal_wait_cancelled",
+            Self::ProcessSignalWaitTimeout => "process_signal_wait_timeout",
             Self::RestateAwaitEventAwait => "restate_await_event_await",
             Self::RestateAwaitEventCancel => "restate_await_event_cancel",
             Self::RestateAwaitEventCancelled => "restate_await_event_cancelled",
@@ -207,6 +276,15 @@ impl RuntimeErrorCode {
             Self::RestateAwaitEventRevoke => "restate_await_event_revoke",
             Self::RestateAwaitEventSessionUpdate => "restate_await_event_session_update",
             Self::RestateEffectController => "restate_effect_controller",
+            Self::RestateEffectHashMismatch => "restate_effect_hash_mismatch",
+            Self::RestateEffectHostRequiresHandlerScope => {
+                "restate_effect_host_requires_handler_scope"
+            }
+            Self::RestateProcessAwait => "restate_process_await",
+            Self::RestateProcessAwaitAfterTurnCancel => "restate_process_await_after_turn_cancel",
+            Self::RestateProcessTurnCancelContextMissing => {
+                "restate_process_turn_cancel_context_missing"
+            }
             Self::RestateProcessTerminalEncode => "restate_process_terminal_encode",
             Self::RestateSegmentProgramHashMismatch => "restate_segment_program_hash_mismatch",
             Self::RestateTurnTerminalAttach => "restate_turn_terminal_attach",
@@ -217,6 +295,34 @@ impl RuntimeErrorCode {
             Self::RestateTurnTerminalInvalidResolution => {
                 "restate_turn_terminal_invalid_resolution"
             }
+            Self::RestateTurnCancelScopeMismatch => "restate_turn_cancel_scope_mismatch",
+            Self::RestateTurnCancelScopeMissing => "restate_turn_cancel_scope_missing",
+            Self::RuntimeEffectAttachmentStore => "runtime_effect_attachment_store",
+            Self::RuntimeEffectEnvelopeCanonicalDecode => {
+                "runtime_effect_envelope_canonical_decode"
+            }
+            Self::RuntimeEffectEnvelopeCanonicalHashInvariant => {
+                "runtime_effect_envelope_canonical_hash_invariant"
+            }
+            Self::RuntimeEffectEnvelopeHash => "runtime_effect_envelope_hash",
+            Self::RuntimeEffectInvocationKind => "runtime_effect_invocation_kind",
+            Self::RuntimeEffectInvocationSubject => "runtime_effect_invocation_subject",
+            Self::RuntimeEffectLocalExecutorMismatch => "runtime_effect_local_executor_mismatch",
+            Self::RuntimeEffectLocalExecutorUnavailable => {
+                "runtime_effect_local_executor_unavailable"
+            }
+            Self::RuntimeEffectLocalTaskClosed => "runtime_effect_local_task_closed",
+            Self::RuntimeEffectProcessTaskJoin => "runtime_effect_process_task_join",
+            Self::RuntimeEffectReplayRequired => "runtime_effect_replay_required",
+            Self::RuntimeEffectSleepCancelled => "runtime_effect_sleep_cancelled",
+            Self::RuntimeEffectTaskJoin => "runtime_effect_task_join",
+            Self::RuntimeEffectToolAttemptCallId => "runtime_effect_tool_attempt_call_id",
+            Self::RuntimeEffectToolAttemptIndex => "runtime_effect_tool_attempt_index",
+            Self::RuntimeEffectToolBatchCallId => "runtime_effect_tool_batch_call_id",
+            Self::RuntimeEffectToolBatchCallReplay => "runtime_effect_tool_batch_call_replay",
+            Self::RuntimeEffectToolBatchEmpty => "runtime_effect_tool_batch_empty",
+            Self::RuntimeEffectToolBatchId => "runtime_effect_tool_batch_id",
+            Self::RuntimeEffectWrongOutcome => "runtime_effect_wrong_outcome",
             Self::RuntimeEffectControllerTaskClosed => "runtime_effect_controller_task_closed",
             Self::RuntimePerfStartGateRetry => "runtime_perf_start_gate_retry",
             Self::RuntimeStore => "runtime_store",
@@ -235,6 +341,17 @@ impl RuntimeErrorCode {
             Self::SqliteAwaitEventSign => "sqlite_await_event_sign",
             Self::SqliteAwaitEventStore => "sqlite_await_event_store",
             Self::SqliteEffectJournalRetirement => "sqlite_effect_journal_retirement",
+            Self::SqliteEffectReplayCorruptRow => "sqlite_effect_replay_corrupt_row",
+            Self::SqliteEffectReplayDecode => "sqlite_effect_replay_decode",
+            Self::SqliteEffectReplayEncode => "sqlite_effect_replay_encode",
+            Self::SqliteEffectReplayHashConflict => "sqlite_effect_replay_hash_conflict",
+            Self::SqliteEffectReplayKeyMissing => "sqlite_effect_replay_key_missing",
+            Self::SqliteEffectReplayLeaseLost => "sqlite_effect_replay_lease_lost",
+            Self::SqliteEffectReplayMissing => "sqlite_effect_replay_missing",
+            Self::SqliteEffectReplayStore => "sqlite_effect_replay_store",
+            Self::ToolBatchMissingResult => "tool_batch_missing_result",
+            Self::ToolBatchResultCountMismatch => "tool_batch_result_count_mismatch",
+            Self::ToolCatalogResolutionFailed => "tool_catalog_resolution_failed",
             Self::ToolCompletionKeyMissingCallId => "tool_completion_key_missing_call_id",
             Self::ToolCompletionKeyProcessLifetime => "tool_completion_key_process_lifetime",
             Self::TransientCancelWatch => "transient_cancel_watch",
@@ -252,6 +369,7 @@ impl RuntimeErrorCode {
             Self::TurnTerminalEncode => "turn_terminal_encode",
             Self::TurnTerminalInvalidResolution => "turn_terminal_invalid_resolution",
             Self::TurnTerminalUnknownOrRevoked => "turn_terminal_unknown_or_revoked",
+            Self::TriggerStoreUnavailable => "trigger_store_unavailable",
             Self::ForeignCode(code) => code.as_str(),
         }
     }
@@ -309,7 +427,9 @@ impl RuntimeErrorCode {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            Self::MissingExecutionScopeId
+            Self::AttachmentSourcePolicyDenied
+                | Self::EffectPanicked
+                | Self::MissingExecutionScopeId
                 | Self::ExecutionScopeTurnIdMismatch
                 | Self::StoreCommitNodeBudgetExceeded
                 | Self::StoreCommitByteBudgetExceeded
@@ -327,14 +447,54 @@ impl RuntimeErrorCode {
                 | Self::InvalidAwaitEventWaitIdentity
                 | Self::InvalidTurnCancelRequest
                 | Self::LlmProvider
+                | Self::Plugin
+                | Self::PostgresEffectReplayCorruptRow
+                | Self::PostgresEffectReplayDecode
+                | Self::PostgresEffectReplayEncode
+                | Self::PostgresEffectReplayHashConflict
+                | Self::PostgresEffectReplayKeyMissing
+                | Self::PostgresEffectReplayLeaseLost
+                | Self::PostgresEffectReplayMissing
+                | Self::PostgresEffectReplayStore
                 | Self::PostgresAwaitEventDecode
                 | Self::PostgresAwaitEventEncode
                 | Self::PostgresAwaitEventSign
                 | Self::RestateEffectController
+                | Self::ProcessPanicked
+                | Self::ProcessRegistryUnavailable
+                | Self::ProcessSignalWaitCancelled
+                | Self::ProcessSignalWaitTimeout
+                | Self::RestateEffectHashMismatch
+                | Self::RestateEffectHostRequiresHandlerScope
+                | Self::RestateProcessAwait
+                | Self::RestateProcessAwaitAfterTurnCancel
+                | Self::RestateProcessTurnCancelContextMissing
                 | Self::RestateProcessTerminalEncode
                 | Self::RestateSegmentProgramHashMismatch
                 | Self::RestateTurnTerminalDecode
                 | Self::RestateTurnTerminalInvalidResolution
+                | Self::RestateTurnCancelScopeMismatch
+                | Self::RestateTurnCancelScopeMissing
+                | Self::RuntimeEffectAttachmentStore
+                | Self::RuntimeEffectEnvelopeCanonicalDecode
+                | Self::RuntimeEffectEnvelopeCanonicalHashInvariant
+                | Self::RuntimeEffectEnvelopeHash
+                | Self::RuntimeEffectInvocationKind
+                | Self::RuntimeEffectInvocationSubject
+                | Self::RuntimeEffectLocalExecutorMismatch
+                | Self::RuntimeEffectLocalExecutorUnavailable
+                | Self::RuntimeEffectLocalTaskClosed
+                | Self::RuntimeEffectProcessTaskJoin
+                | Self::RuntimeEffectReplayRequired
+                | Self::RuntimeEffectSleepCancelled
+                | Self::RuntimeEffectTaskJoin
+                | Self::RuntimeEffectToolAttemptCallId
+                | Self::RuntimeEffectToolAttemptIndex
+                | Self::RuntimeEffectToolBatchCallId
+                | Self::RuntimeEffectToolBatchCallReplay
+                | Self::RuntimeEffectToolBatchEmpty
+                | Self::RuntimeEffectToolBatchId
+                | Self::RuntimeEffectWrongOutcome
                 | Self::RuntimeStoreCorrupt
                 | Self::SessionCommandClaim
                 | Self::SessionCommandIdempotencyKey
@@ -344,6 +504,17 @@ impl RuntimeErrorCode {
                 | Self::SqliteAwaitEventDecode
                 | Self::SqliteAwaitEventEncode
                 | Self::SqliteAwaitEventSign
+                | Self::SqliteEffectReplayCorruptRow
+                | Self::SqliteEffectReplayDecode
+                | Self::SqliteEffectReplayEncode
+                | Self::SqliteEffectReplayHashConflict
+                | Self::SqliteEffectReplayKeyMissing
+                | Self::SqliteEffectReplayLeaseLost
+                | Self::SqliteEffectReplayMissing
+                | Self::SqliteEffectReplayStore
+                | Self::ToolBatchMissingResult
+                | Self::ToolBatchResultCountMismatch
+                | Self::ToolCatalogResolutionFailed
                 | Self::ToolCompletionKeyMissingCallId
                 | Self::ToolCompletionKeyProcessLifetime
                 | Self::TurnCancelGateDecode
@@ -356,6 +527,7 @@ impl RuntimeErrorCode {
                 | Self::TurnTerminalEncode
                 | Self::TurnTerminalInvalidResolution
                 | Self::TurnTerminalUnknownOrRevoked
+                | Self::TriggerStoreUnavailable
         )
     }
 
@@ -366,6 +538,8 @@ impl RuntimeErrorCode {
     /// the supported construction path for host-defined codes.
     pub fn from_wire_code(code: &str) -> Self {
         match code {
+            "attachment_source_policy_denied" => Self::AttachmentSourcePolicyDenied,
+            "effect_panicked" => Self::EffectPanicked,
             "missing_execution_scope_id" => Self::MissingExecutionScopeId,
             "execution_scope_turn_id_mismatch" => Self::ExecutionScopeTurnIdMismatch,
             "session_execution_busy" => Self::SessionExecutionBusy,
@@ -405,6 +579,15 @@ impl RuntimeErrorCode {
             "invalid_turn_cancel_request" => Self::InvalidTurnCancelRequest,
             "live_replay" => Self::LiveReplay,
             "llm_provider" => Self::LlmProvider,
+            "plugin" => Self::Plugin,
+            "postgres_effect_replay_corrupt_row" => Self::PostgresEffectReplayCorruptRow,
+            "postgres_effect_replay_decode" => Self::PostgresEffectReplayDecode,
+            "postgres_effect_replay_encode" => Self::PostgresEffectReplayEncode,
+            "postgres_effect_replay_hash_conflict" => Self::PostgresEffectReplayHashConflict,
+            "postgres_effect_replay_key_missing" => Self::PostgresEffectReplayKeyMissing,
+            "postgres_effect_replay_lease_lost" => Self::PostgresEffectReplayLeaseLost,
+            "postgres_effect_replay_missing" => Self::PostgresEffectReplayMissing,
+            "postgres_effect_replay_store" => Self::PostgresEffectReplayStore,
             "postgres_await_event_decode" => Self::PostgresAwaitEventDecode,
             "postgres_await_event_encode" => Self::PostgresAwaitEventEncode,
             "postgres_await_event_notify" => Self::PostgresAwaitEventNotify,
@@ -412,6 +595,10 @@ impl RuntimeErrorCode {
             "postgres_await_event_store" => Self::PostgresAwaitEventStore,
             "postgres_effect_journal_retirement" => Self::PostgresEffectJournalRetirement,
             "queued_work" => Self::QueuedWork,
+            "process_panicked" => Self::ProcessPanicked,
+            "process_registry_unavailable" => Self::ProcessRegistryUnavailable,
+            "process_signal_wait_cancelled" => Self::ProcessSignalWaitCancelled,
+            "process_signal_wait_timeout" => Self::ProcessSignalWaitTimeout,
             "restate_await_event_await" => Self::RestateAwaitEventAwait,
             "restate_await_event_cancel" => Self::RestateAwaitEventCancel,
             "restate_await_event_cancelled" => Self::RestateAwaitEventCancelled,
@@ -421,6 +608,15 @@ impl RuntimeErrorCode {
             "restate_await_event_revoke" => Self::RestateAwaitEventRevoke,
             "restate_await_event_session_update" => Self::RestateAwaitEventSessionUpdate,
             "restate_effect_controller" => Self::RestateEffectController,
+            "restate_effect_hash_mismatch" => Self::RestateEffectHashMismatch,
+            "restate_effect_host_requires_handler_scope" => {
+                Self::RestateEffectHostRequiresHandlerScope
+            }
+            "restate_process_await" => Self::RestateProcessAwait,
+            "restate_process_await_after_turn_cancel" => Self::RestateProcessAwaitAfterTurnCancel,
+            "restate_process_turn_cancel_context_missing" => {
+                Self::RestateProcessTurnCancelContextMissing
+            }
             "restate_process_terminal_encode" => Self::RestateProcessTerminalEncode,
             "restate_segment_program_hash_mismatch" => Self::RestateSegmentProgramHashMismatch,
             "restate_turn_terminal_attach" => Self::RestateTurnTerminalAttach,
@@ -431,6 +627,34 @@ impl RuntimeErrorCode {
             "restate_turn_terminal_invalid_resolution" => {
                 Self::RestateTurnTerminalInvalidResolution
             }
+            "restate_turn_cancel_scope_mismatch" => Self::RestateTurnCancelScopeMismatch,
+            "restate_turn_cancel_scope_missing" => Self::RestateTurnCancelScopeMissing,
+            "runtime_effect_attachment_store" => Self::RuntimeEffectAttachmentStore,
+            "runtime_effect_envelope_canonical_decode" => {
+                Self::RuntimeEffectEnvelopeCanonicalDecode
+            }
+            "runtime_effect_envelope_canonical_hash_invariant" => {
+                Self::RuntimeEffectEnvelopeCanonicalHashInvariant
+            }
+            "runtime_effect_envelope_hash" => Self::RuntimeEffectEnvelopeHash,
+            "runtime_effect_invocation_kind" => Self::RuntimeEffectInvocationKind,
+            "runtime_effect_invocation_subject" => Self::RuntimeEffectInvocationSubject,
+            "runtime_effect_local_executor_mismatch" => Self::RuntimeEffectLocalExecutorMismatch,
+            "runtime_effect_local_executor_unavailable" => {
+                Self::RuntimeEffectLocalExecutorUnavailable
+            }
+            "runtime_effect_local_task_closed" => Self::RuntimeEffectLocalTaskClosed,
+            "runtime_effect_process_task_join" => Self::RuntimeEffectProcessTaskJoin,
+            "runtime_effect_replay_required" => Self::RuntimeEffectReplayRequired,
+            "runtime_effect_sleep_cancelled" => Self::RuntimeEffectSleepCancelled,
+            "runtime_effect_task_join" => Self::RuntimeEffectTaskJoin,
+            "runtime_effect_tool_attempt_call_id" => Self::RuntimeEffectToolAttemptCallId,
+            "runtime_effect_tool_attempt_index" => Self::RuntimeEffectToolAttemptIndex,
+            "runtime_effect_tool_batch_call_id" => Self::RuntimeEffectToolBatchCallId,
+            "runtime_effect_tool_batch_call_replay" => Self::RuntimeEffectToolBatchCallReplay,
+            "runtime_effect_tool_batch_empty" => Self::RuntimeEffectToolBatchEmpty,
+            "runtime_effect_tool_batch_id" => Self::RuntimeEffectToolBatchId,
+            "runtime_effect_wrong_outcome" => Self::RuntimeEffectWrongOutcome,
             "runtime_effect_controller_task_closed" => Self::RuntimeEffectControllerTaskClosed,
             "runtime_perf_start_gate_retry" => Self::RuntimePerfStartGateRetry,
             "runtime_store" => Self::RuntimeStore,
@@ -449,6 +673,17 @@ impl RuntimeErrorCode {
             "sqlite_await_event_sign" => Self::SqliteAwaitEventSign,
             "sqlite_await_event_store" => Self::SqliteAwaitEventStore,
             "sqlite_effect_journal_retirement" => Self::SqliteEffectJournalRetirement,
+            "sqlite_effect_replay_corrupt_row" => Self::SqliteEffectReplayCorruptRow,
+            "sqlite_effect_replay_decode" => Self::SqliteEffectReplayDecode,
+            "sqlite_effect_replay_encode" => Self::SqliteEffectReplayEncode,
+            "sqlite_effect_replay_hash_conflict" => Self::SqliteEffectReplayHashConflict,
+            "sqlite_effect_replay_key_missing" => Self::SqliteEffectReplayKeyMissing,
+            "sqlite_effect_replay_lease_lost" => Self::SqliteEffectReplayLeaseLost,
+            "sqlite_effect_replay_missing" => Self::SqliteEffectReplayMissing,
+            "sqlite_effect_replay_store" => Self::SqliteEffectReplayStore,
+            "tool_batch_missing_result" => Self::ToolBatchMissingResult,
+            "tool_batch_result_count_mismatch" => Self::ToolBatchResultCountMismatch,
+            "tool_catalog_resolution_failed" => Self::ToolCatalogResolutionFailed,
             "tool_completion_key_missing_call_id" => Self::ToolCompletionKeyMissingCallId,
             "tool_completion_key_process_lifetime" => Self::ToolCompletionKeyProcessLifetime,
             "transient_cancel_watch" => Self::TransientCancelWatch,
@@ -466,6 +701,7 @@ impl RuntimeErrorCode {
             "turn_terminal_encode" => Self::TurnTerminalEncode,
             "turn_terminal_invalid_resolution" => Self::TurnTerminalInvalidResolution,
             "turn_terminal_unknown_or_revoked" => Self::TurnTerminalUnknownOrRevoked,
+            "trigger_store_unavailable" => Self::TriggerStoreUnavailable,
             other => Self::ForeignCode(other.to_string()),
         }
     }
@@ -679,7 +915,9 @@ mod tests {
             | RuntimeErrorCode::TransientTerminalPublication
             | RuntimeErrorCode::TurnControlWaitTimeout
             | RuntimeErrorCode::TurnTerminalAwaitTimeout => ExpectedClassification::Retryable,
-            RuntimeErrorCode::MissingExecutionScopeId
+            RuntimeErrorCode::AttachmentSourcePolicyDenied
+            | RuntimeErrorCode::EffectPanicked
+            | RuntimeErrorCode::MissingExecutionScopeId
             | RuntimeErrorCode::ExecutionScopeTurnIdMismatch
             | RuntimeErrorCode::StoreCommitNodeBudgetExceeded
             | RuntimeErrorCode::StoreCommitByteBudgetExceeded
@@ -697,14 +935,54 @@ mod tests {
             | RuntimeErrorCode::InvalidAwaitEventWaitIdentity
             | RuntimeErrorCode::InvalidTurnCancelRequest
             | RuntimeErrorCode::LlmProvider
+            | RuntimeErrorCode::Plugin
+            | RuntimeErrorCode::PostgresEffectReplayCorruptRow
+            | RuntimeErrorCode::PostgresEffectReplayDecode
+            | RuntimeErrorCode::PostgresEffectReplayEncode
+            | RuntimeErrorCode::PostgresEffectReplayHashConflict
+            | RuntimeErrorCode::PostgresEffectReplayKeyMissing
+            | RuntimeErrorCode::PostgresEffectReplayLeaseLost
+            | RuntimeErrorCode::PostgresEffectReplayMissing
+            | RuntimeErrorCode::PostgresEffectReplayStore
             | RuntimeErrorCode::PostgresAwaitEventDecode
             | RuntimeErrorCode::PostgresAwaitEventEncode
             | RuntimeErrorCode::PostgresAwaitEventSign
             | RuntimeErrorCode::RestateEffectController
+            | RuntimeErrorCode::ProcessPanicked
+            | RuntimeErrorCode::ProcessRegistryUnavailable
+            | RuntimeErrorCode::ProcessSignalWaitCancelled
+            | RuntimeErrorCode::ProcessSignalWaitTimeout
+            | RuntimeErrorCode::RestateEffectHashMismatch
+            | RuntimeErrorCode::RestateEffectHostRequiresHandlerScope
+            | RuntimeErrorCode::RestateProcessAwait
+            | RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel
+            | RuntimeErrorCode::RestateProcessTurnCancelContextMissing
             | RuntimeErrorCode::RestateProcessTerminalEncode
             | RuntimeErrorCode::RestateSegmentProgramHashMismatch
             | RuntimeErrorCode::RestateTurnTerminalDecode
             | RuntimeErrorCode::RestateTurnTerminalInvalidResolution
+            | RuntimeErrorCode::RestateTurnCancelScopeMismatch
+            | RuntimeErrorCode::RestateTurnCancelScopeMissing
+            | RuntimeErrorCode::RuntimeEffectAttachmentStore
+            | RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode
+            | RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant
+            | RuntimeErrorCode::RuntimeEffectEnvelopeHash
+            | RuntimeErrorCode::RuntimeEffectInvocationKind
+            | RuntimeErrorCode::RuntimeEffectInvocationSubject
+            | RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch
+            | RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable
+            | RuntimeErrorCode::RuntimeEffectLocalTaskClosed
+            | RuntimeErrorCode::RuntimeEffectProcessTaskJoin
+            | RuntimeErrorCode::RuntimeEffectReplayRequired
+            | RuntimeErrorCode::RuntimeEffectSleepCancelled
+            | RuntimeErrorCode::RuntimeEffectTaskJoin
+            | RuntimeErrorCode::RuntimeEffectToolAttemptCallId
+            | RuntimeErrorCode::RuntimeEffectToolAttemptIndex
+            | RuntimeErrorCode::RuntimeEffectToolBatchCallId
+            | RuntimeErrorCode::RuntimeEffectToolBatchCallReplay
+            | RuntimeErrorCode::RuntimeEffectToolBatchEmpty
+            | RuntimeErrorCode::RuntimeEffectToolBatchId
+            | RuntimeErrorCode::RuntimeEffectWrongOutcome
             | RuntimeErrorCode::RuntimeStoreCorrupt
             | RuntimeErrorCode::SessionCommandClaim
             | RuntimeErrorCode::SessionCommandIdempotencyKey
@@ -714,6 +992,17 @@ mod tests {
             | RuntimeErrorCode::SqliteAwaitEventDecode
             | RuntimeErrorCode::SqliteAwaitEventEncode
             | RuntimeErrorCode::SqliteAwaitEventSign
+            | RuntimeErrorCode::SqliteEffectReplayCorruptRow
+            | RuntimeErrorCode::SqliteEffectReplayDecode
+            | RuntimeErrorCode::SqliteEffectReplayEncode
+            | RuntimeErrorCode::SqliteEffectReplayHashConflict
+            | RuntimeErrorCode::SqliteEffectReplayKeyMissing
+            | RuntimeErrorCode::SqliteEffectReplayLeaseLost
+            | RuntimeErrorCode::SqliteEffectReplayMissing
+            | RuntimeErrorCode::SqliteEffectReplayStore
+            | RuntimeErrorCode::ToolBatchMissingResult
+            | RuntimeErrorCode::ToolBatchResultCountMismatch
+            | RuntimeErrorCode::ToolCatalogResolutionFailed
             | RuntimeErrorCode::ToolCompletionKeyMissingCallId
             | RuntimeErrorCode::ToolCompletionKeyProcessLifetime
             | RuntimeErrorCode::TurnCancelGateDecode
@@ -725,7 +1014,8 @@ mod tests {
             | RuntimeErrorCode::TurnTerminalDecode
             | RuntimeErrorCode::TurnTerminalEncode
             | RuntimeErrorCode::TurnTerminalInvalidResolution
-            | RuntimeErrorCode::TurnTerminalUnknownOrRevoked => ExpectedClassification::Terminal,
+            | RuntimeErrorCode::TurnTerminalUnknownOrRevoked
+            | RuntimeErrorCode::TriggerStoreUnavailable => ExpectedClassification::Terminal,
             RuntimeErrorCode::SessionExecutionLeaseLost
             | RuntimeErrorCode::ExecutionStateCaptureFailed
             | RuntimeErrorCode::ResidentSessionReloadFailed
@@ -753,7 +1043,9 @@ mod tests {
 
     #[test]
     fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
-        let codes = [
+        let first_party_codes = [
+            RuntimeErrorCode::AttachmentSourcePolicyDenied,
+            RuntimeErrorCode::EffectPanicked,
             RuntimeErrorCode::MissingExecutionScopeId,
             RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
             RuntimeErrorCode::SessionExecutionBusy,
@@ -791,6 +1083,15 @@ mod tests {
             RuntimeErrorCode::InvalidTurnCancelRequest,
             RuntimeErrorCode::LiveReplay,
             RuntimeErrorCode::LlmProvider,
+            RuntimeErrorCode::Plugin,
+            RuntimeErrorCode::PostgresEffectReplayCorruptRow,
+            RuntimeErrorCode::PostgresEffectReplayDecode,
+            RuntimeErrorCode::PostgresEffectReplayEncode,
+            RuntimeErrorCode::PostgresEffectReplayHashConflict,
+            RuntimeErrorCode::PostgresEffectReplayKeyMissing,
+            RuntimeErrorCode::PostgresEffectReplayLeaseLost,
+            RuntimeErrorCode::PostgresEffectReplayMissing,
+            RuntimeErrorCode::PostgresEffectReplayStore,
             RuntimeErrorCode::PostgresAwaitEventDecode,
             RuntimeErrorCode::PostgresAwaitEventEncode,
             RuntimeErrorCode::PostgresAwaitEventNotify,
@@ -798,6 +1099,10 @@ mod tests {
             RuntimeErrorCode::PostgresAwaitEventStore,
             RuntimeErrorCode::PostgresEffectJournalRetirement,
             RuntimeErrorCode::QueuedWork,
+            RuntimeErrorCode::ProcessPanicked,
+            RuntimeErrorCode::ProcessRegistryUnavailable,
+            RuntimeErrorCode::ProcessSignalWaitCancelled,
+            RuntimeErrorCode::ProcessSignalWaitTimeout,
             RuntimeErrorCode::RestateAwaitEventAwait,
             RuntimeErrorCode::RestateAwaitEventCancel,
             RuntimeErrorCode::RestateAwaitEventCancelled,
@@ -807,12 +1112,39 @@ mod tests {
             RuntimeErrorCode::RestateAwaitEventRevoke,
             RuntimeErrorCode::RestateAwaitEventSessionUpdate,
             RuntimeErrorCode::RestateEffectController,
+            RuntimeErrorCode::RestateEffectHashMismatch,
+            RuntimeErrorCode::RestateEffectHostRequiresHandlerScope,
+            RuntimeErrorCode::RestateProcessAwait,
+            RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel,
+            RuntimeErrorCode::RestateProcessTurnCancelContextMissing,
             RuntimeErrorCode::RestateProcessTerminalEncode,
             RuntimeErrorCode::RestateSegmentProgramHashMismatch,
             RuntimeErrorCode::RestateTurnTerminalAttach,
             RuntimeErrorCode::RestateTurnTerminalAttachCeilingElapsed,
             RuntimeErrorCode::RestateTurnTerminalDecode,
             RuntimeErrorCode::RestateTurnTerminalInvalidResolution,
+            RuntimeErrorCode::RestateTurnCancelScopeMismatch,
+            RuntimeErrorCode::RestateTurnCancelScopeMissing,
+            RuntimeErrorCode::RuntimeEffectAttachmentStore,
+            RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode,
+            RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant,
+            RuntimeErrorCode::RuntimeEffectEnvelopeHash,
+            RuntimeErrorCode::RuntimeEffectInvocationKind,
+            RuntimeErrorCode::RuntimeEffectInvocationSubject,
+            RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+            RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
+            RuntimeErrorCode::RuntimeEffectLocalTaskClosed,
+            RuntimeErrorCode::RuntimeEffectProcessTaskJoin,
+            RuntimeErrorCode::RuntimeEffectReplayRequired,
+            RuntimeErrorCode::RuntimeEffectSleepCancelled,
+            RuntimeErrorCode::RuntimeEffectTaskJoin,
+            RuntimeErrorCode::RuntimeEffectToolAttemptCallId,
+            RuntimeErrorCode::RuntimeEffectToolAttemptIndex,
+            RuntimeErrorCode::RuntimeEffectToolBatchCallId,
+            RuntimeErrorCode::RuntimeEffectToolBatchCallReplay,
+            RuntimeErrorCode::RuntimeEffectToolBatchEmpty,
+            RuntimeErrorCode::RuntimeEffectToolBatchId,
+            RuntimeErrorCode::RuntimeEffectWrongOutcome,
             RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
             RuntimeErrorCode::RuntimePerfStartGateRetry,
             RuntimeErrorCode::RuntimeStore,
@@ -831,6 +1163,17 @@ mod tests {
             RuntimeErrorCode::SqliteAwaitEventSign,
             RuntimeErrorCode::SqliteAwaitEventStore,
             RuntimeErrorCode::SqliteEffectJournalRetirement,
+            RuntimeErrorCode::SqliteEffectReplayCorruptRow,
+            RuntimeErrorCode::SqliteEffectReplayDecode,
+            RuntimeErrorCode::SqliteEffectReplayEncode,
+            RuntimeErrorCode::SqliteEffectReplayHashConflict,
+            RuntimeErrorCode::SqliteEffectReplayKeyMissing,
+            RuntimeErrorCode::SqliteEffectReplayLeaseLost,
+            RuntimeErrorCode::SqliteEffectReplayMissing,
+            RuntimeErrorCode::SqliteEffectReplayStore,
+            RuntimeErrorCode::ToolBatchMissingResult,
+            RuntimeErrorCode::ToolBatchResultCountMismatch,
+            RuntimeErrorCode::ToolCatalogResolutionFailed,
             RuntimeErrorCode::ToolCompletionKeyMissingCallId,
             RuntimeErrorCode::ToolCompletionKeyProcessLifetime,
             RuntimeErrorCode::TransientCancelWatch,
@@ -848,10 +1191,10 @@ mod tests {
             RuntimeErrorCode::TurnTerminalEncode,
             RuntimeErrorCode::TurnTerminalInvalidResolution,
             RuntimeErrorCode::TurnTerminalUnknownOrRevoked,
-            RuntimeErrorCode::from_wire_code("plugin_defined_abort"),
+            RuntimeErrorCode::TriggerStoreUnavailable,
         ];
 
-        for code in codes {
+        for code in first_party_codes {
             let actual = match (code.is_retryable(), code.is_terminal()) {
                 (true, false) => ExpectedClassification::Retryable,
                 (false, true) => ExpectedClassification::Terminal,
@@ -863,7 +1206,30 @@ mod tests {
             let json = serde_json::to_value(&code).expect("serialize typed code");
             let decoded: RuntimeErrorCode =
                 serde_json::from_value(json).expect("deserialize typed code");
+            assert!(
+                !matches!(&decoded, RuntimeErrorCode::ForeignCode(_)),
+                "first-party code {} decoded as foreign",
+                code.as_str()
+            );
             assert_eq!(decoded, code, "typed round trip for {code}");
+        }
+
+        let foreign = RuntimeErrorCode::from_wire_code("plugin_defined_abort");
+        assert_eq!(
+            expected_classification(&foreign),
+            ExpectedClassification::Unknown
+        );
+    }
+
+    #[test]
+    fn unsafe_effect_replay_and_durable_timeout_codes_are_terminal() {
+        for code in [
+            RuntimeErrorCode::PostgresEffectReplayLeaseLost,
+            RuntimeErrorCode::SqliteEffectReplayLeaseLost,
+            RuntimeErrorCode::ProcessSignalWaitTimeout,
+        ] {
+            assert!(!code.is_retryable(), "{code} must not be retried");
+            assert!(code.is_terminal(), "{code} must settle terminally");
         }
     }
 

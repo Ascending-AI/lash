@@ -32,7 +32,7 @@ impl CanonicalRuntimeEffectEnvelope {
     ) -> Result<Self, RuntimeEffectControllerError> {
         let json = crate::stable_hash::stable_json_string(envelope).map_err(|err| {
             RuntimeEffectControllerError::new(
-                "runtime_effect_envelope_hash",
+                crate::RuntimeErrorCode::RuntimeEffectEnvelopeHash,
                 format!("failed to serialize runtime effect envelope: {err}"),
             )
         })?;
@@ -50,7 +50,7 @@ impl CanonicalRuntimeEffectEnvelope {
             return Ok(());
         }
         Err(RuntimeEffectControllerError::new(
-            "runtime_effect_envelope_canonical_hash_invariant",
+            crate::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant,
             format!(
                 "{side} envelope hash {} was not derived from its canonical serialized form (derived {actual})",
                 self.hash
@@ -122,11 +122,11 @@ impl RuntimeEffectReplayTrace {
 pub fn validate_replayed_effect_envelope(
     recorded: &CanonicalRuntimeEffectEnvelope,
     reconstructed: &CanonicalRuntimeEffectEnvelope,
-    mismatch_code: &str,
+    mismatch_code: crate::RuntimeErrorCode,
     trace: Option<&RuntimeEffectReplayTrace>,
 ) -> Result<(), RuntimeEffectControllerError> {
     debug_assert!(
-        crate::RuntimeErrorCode::from_wire_code(mismatch_code).is_replay_mismatch(),
+        mismatch_code.is_replay_mismatch(),
         "replay-validation seam requires a classified replay-mismatch code: {mismatch_code}"
     );
     recorded.verify("recorded")?;
@@ -138,20 +138,20 @@ pub fn validate_replayed_effect_envelope(
 
     if recorded.json == reconstructed.json {
         return Err(RuntimeEffectControllerError::new(
-            "runtime_effect_envelope_canonical_hash_invariant",
+            crate::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant,
             "envelope hashes differed even though their canonical serialized forms were identical",
         ));
     }
 
     let recorded_value: Value = serde_json::from_str(&recorded.json).map_err(|err| {
         RuntimeEffectControllerError::new(
-            "runtime_effect_envelope_canonical_decode",
+            crate::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode,
             format!("failed to decode recorded canonical envelope: {err}"),
         )
     })?;
     let reconstructed_value: Value = serde_json::from_str(&reconstructed.json).map_err(|err| {
         RuntimeEffectControllerError::new(
-            "runtime_effect_envelope_canonical_decode",
+            crate::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode,
             format!("failed to decode reconstructed canonical envelope: {err}"),
         )
     })?;
@@ -164,7 +164,7 @@ pub fn validate_replayed_effect_envelope(
     );
     if differences.is_empty() {
         return Err(RuntimeEffectControllerError::new(
-            "runtime_effect_envelope_canonical_hash_invariant",
+            crate::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant,
             "envelope hashes differed but their canonical forms had zero divergent structural paths",
         ));
     }
@@ -328,7 +328,7 @@ mod tests {
         let error = validate_replayed_effect_envelope(
             &canonical(recorded),
             &canonical(reconstructed),
-            "restate_effect_hash_mismatch",
+            crate::RuntimeErrorCode::RestateEffectHashMismatch,
             None,
         )
         .expect_err("mismatch");
@@ -385,7 +385,7 @@ mod tests {
                 "f0": 1, "f1": 1, "f2": 1, "f3": 1, "f4": 1,
                 "f5": 1, "f6": 1, "f7": 1, "f8": 1, "f9": 1
             })),
-            "restate_effect_hash_mismatch",
+            crate::RuntimeErrorCode::RestateEffectHashMismatch,
             None,
         )
         .expect_err("mismatch");
@@ -428,7 +428,7 @@ mod tests {
         let error = validate_replayed_effect_envelope(
             &canonical(json!({"tool_results": [{"value": "a".repeat(3_000)}]})),
             &canonical(json!({"tool_results": [{"value": "b".repeat(3_000)}]})),
-            "restate_effect_hash_mismatch",
+            crate::RuntimeErrorCode::RestateEffectHashMismatch,
             Some(&trace),
         )
         .expect_err("mismatch");
@@ -463,13 +463,13 @@ mod tests {
         let error = validate_replayed_effect_envelope(
             &recorded,
             &reconstructed,
-            "restate_effect_hash_mismatch",
+            crate::RuntimeErrorCode::RestateEffectHashMismatch,
             None,
         )
         .expect_err("canonical invariant failure");
         assert_eq!(
             error.code,
-            "runtime_effect_envelope_canonical_hash_invariant"
+            crate::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant
         );
         assert!(error.summary.is_none());
     }
@@ -488,7 +488,7 @@ mod tests {
         let error = validate_replayed_effect_envelope(
             &canonical(json!({"value": 1})),
             &canonical(json!({"value": 2})),
-            "restate_effect_hash_mismatch",
+            crate::RuntimeErrorCode::RestateEffectHashMismatch,
             Some(&trace),
         )
         .expect_err("mismatch");

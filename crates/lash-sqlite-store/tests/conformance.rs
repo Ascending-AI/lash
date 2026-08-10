@@ -713,7 +713,7 @@ fn returning_executor(marker: &'static str) -> RuntimeEffectLocalExecutor<'stati
 
 fn failing_executor() -> RuntimeEffectLocalExecutor<'static> {
     RuntimeEffectLocalExecutor::testing(|_| async move {
-        Err(RuntimeEffectControllerError::new(
+        Err(RuntimeEffectControllerError::foreign(
             "test_local_executor_called",
             "replay must not invoke the local executor",
         ))

@@ -208,7 +208,7 @@ fn attachment_put_executor(
             .put(bytes.to_vec(), attachment_meta(call_id))
             .await
             .map_err(|err| {
-                crate::RuntimeEffectControllerError::new("attachment_put", err.to_string())
+                crate::RuntimeEffectControllerError::foreign("attachment_put", err.to_string())
             })?;
         *captured_id.lock_recover() = Some(reference.id.clone());
         let output = if typed {
@@ -228,7 +228,7 @@ fn attachment_put_executor(
 fn failing_executor(calls: Arc<AtomicUsize>) -> crate::RuntimeEffectLocalExecutor<'static> {
     crate::RuntimeEffectLocalExecutor::testing(move |_| async move {
         calls.fetch_add(1, Ordering::SeqCst);
-        Err(crate::RuntimeEffectControllerError::new(
+        Err(crate::RuntimeEffectControllerError::foreign(
             "cold_replay_local_executor_called",
             "cold replay invoked the local attachment tool",
         ))

@@ -241,7 +241,7 @@ impl RuntimeTurnDriver<'_> {
                     self.fail_or_abort_runtime_effect_controller(
                         machine,
                         crate::RuntimeEffectControllerError::new(
-                            "attachment_source_policy_denied",
+                            crate::RuntimeErrorCode::AttachmentSourcePolicyDenied,
                             err.to_string(),
                         ),
                     )?;
