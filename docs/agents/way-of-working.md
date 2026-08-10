@@ -92,6 +92,7 @@ State the expected proof on the ticket. Defaults when unstated:
 - **Behavior changes:** live-validated. The relevant runbook (new or existing) passes. Merged-with-green-CI is necessary, not sufficient. Changes to turn execution in `lash-core` or its `lash-restate` adapter additionally run both durable geometries locally (`just agent-workbench-restate-e2e` and `just restate-postgres-workers-e2e`), per `CONTRIBUTING.md`.
 - **Mechanical changes** (renames, link sweeps, codegen, doc moves): merged, with the stated verification in the PR.
 - **Decisions:** the ADR is merged and the resolving ticket links it.
+- **Contract-asserting gates** (schema and drift gates, boundary gates, conformance suites and laws, simulation oracles, coverage and version gates): changes that create or modify one ship with a red-side mutation proof recorded in the PR—the mutation applied, the observed failure, and confirmation that it failed for the stated reason. Formatting and style checks are out of scope. A gate that cannot fail is indistinguishable from no gate; green is what everyone expects to see.
 
 Gate merges on the local battery (`just push-gate`, plus the confidence-gate lane the change warrants) and review; CI is the backstop, not the first signal. Deterministic failure classes (docs lint, conformance, contract drift) must be fixed, never bypassed.
 
