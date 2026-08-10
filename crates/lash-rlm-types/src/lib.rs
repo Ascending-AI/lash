@@ -127,15 +127,6 @@ impl RlmGlobalsPatchPluginBody {
     }
 }
 
-pub fn apply_globals_patch(
-    globals: &mut serde_json::Map<String, serde_json::Value>,
-    patch: &RlmGlobalsPatchPluginBody,
-) {
-    for (key, value) in &patch.set_default {
-        globals.entry(key.clone()).or_insert_with(|| value.clone());
-    }
-}
-
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum RlmProtocolEvent {
     RlmAssistantContent(RlmAssistantContent),
@@ -150,55 +141,6 @@ pub struct RlmDiagnosticEvent {
     pub phase: String,
     #[serde(default)]
     pub payload: serde_json::Value,
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct RlmProjection {
-    pub globals: serde_json::Map<String, serde_json::Value>,
-    pub trajectory: Vec<RlmTrajectoryEntry>,
-}
-
-impl RlmProjection {
-    pub fn from_events(events: impl IntoIterator<Item = RlmProtocolEvent>) -> Self {
-        let mut projection = Self::default();
-        for event in events {
-            projection.apply_event(event);
-        }
-        projection
-    }
-
-    pub fn apply_event(&mut self, event: RlmProtocolEvent) {
-        match event {
-            RlmProtocolEvent::RlmAssistantContent(_) => {}
-            RlmProtocolEvent::RlmTrajectoryEntry(entry) => {
-                self.trajectory.push(entry);
-            }
-            RlmProtocolEvent::RlmGlobalsPatch(patch) => {
-                apply_globals_patch(&mut self.globals, &patch);
-            }
-            RlmProtocolEvent::RlmSeed(seed) => {
-                apply_globals_patch(
-                    &mut self.globals,
-                    &RlmGlobalsPatchPluginBody {
-                        set_default: seed.globals,
-                    },
-                );
-            }
-            RlmProtocolEvent::RlmDiagnostic(_) => {}
-        }
-    }
-}
-
-pub fn project_globals(
-    events: impl IntoIterator<Item = RlmProtocolEvent>,
-) -> serde_json::Map<String, serde_json::Value> {
-    RlmProjection::from_events(events).globals
-}
-
-pub fn project_trajectory(
-    events: impl IntoIterator<Item = RlmProtocolEvent>,
-) -> Vec<RlmTrajectoryEntry> {
-    RlmProjection::from_events(events).trajectory
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -303,62 +245,4 @@ impl TurnProtocol for RlmTurnProtocol {
     type Event = RlmProtocolEvent;
     type Termination = RlmTermination;
     type DriverState = serde_json::Value;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn projection_applies_global_defaults_and_derives_trajectory_from_mode_events() {
-        let first = RlmGlobalsPatchPluginBody {
-            set_default: serde_json::Map::from_iter([(
-                "executor_only".to_string(),
-                serde_json::json!("kept by projection"),
-            )]),
-        };
-        let second = RlmGlobalsPatchPluginBody {
-            set_default: serde_json::Map::from_iter([
-                ("diary".to_string(), serde_json::json!(["kept"])),
-                (
-                    "executor_only".to_string(),
-                    serde_json::json!("not overwritten"),
-                ),
-            ]),
-        };
-        let entry = RlmTrajectoryEntry {
-            id: "step-1".to_string(),
-            protocol_iteration: 1,
-            code: "finish 1".to_string(),
-            ..Default::default()
-        };
-        let seed = RlmSeedPluginBody {
-            globals: serde_json::Map::from_iter([(
-                "seeded".to_string(),
-                serde_json::json!("from seed event"),
-            )]),
-            projected: RlmProjectedSeedSnapshot::default(),
-        };
-
-        let projection = RlmProjection::from_events([
-            RlmProtocolEvent::RlmGlobalsPatch(first),
-            RlmProtocolEvent::RlmSeed(seed),
-            RlmProtocolEvent::RlmTrajectoryEntry(entry.clone()),
-            RlmProtocolEvent::RlmGlobalsPatch(second),
-        ]);
-
-        assert_eq!(
-            projection.globals.get("executor_only"),
-            Some(&serde_json::json!("kept by projection"))
-        );
-        assert_eq!(
-            projection.globals.get("diary"),
-            Some(&serde_json::json!(["kept"]))
-        );
-        assert_eq!(
-            projection.globals.get("seeded"),
-            Some(&serde_json::json!("from seed event"))
-        );
-        assert_eq!(projection.trajectory, vec![entry]);
-    }
 }

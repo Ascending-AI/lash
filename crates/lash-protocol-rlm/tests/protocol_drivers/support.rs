@@ -1,10 +1,14 @@
 pub(crate) use std::sync::Arc;
 
+pub(crate) use lash_core::facade_support::PluginHost;
+pub(crate) use lash_core::plugin::{
+    AssistantStreamFinishReason, AssistantStreamTransform, PluginFactory, PluginSession,
+};
 pub(crate) use lash_core::sansio::{self, ChatContextProjector, ProtocolDriverHandle, Response};
 pub(crate) use lash_core::testing::behavior_transcript::{Actor, Entry, Kind, Transcript};
 pub(crate) use lash_core::testing::sansio_transcript::record_effects;
 pub(crate) use lash_core::{Effect, TurnMachine, TurnMachineConfig};
-pub(crate) use lash_protocol_rlm::RlmDriver;
+pub(crate) use lash_protocol_rlm::{RlmDriver, RlmProtocolPluginConfig, RlmProtocolPluginFactory};
 
 /// Actor name pinned on every RLM Protocol Scenario transcript. The harness drives
 /// one sans-io machine for one session.
@@ -368,13 +372,13 @@ pub(crate) fn rewrite_first_rlm_driver_state_owner(value: &mut serde_json::Value
 // These scenarios drive the protocol state machine through declarative LLM,
 // exec, and checkpoint steps. Direct white-box tests remain below only when
 // they intentionally corrupt turn options or checkpoint driver state.
-#[derive(Clone, Debug)]
 pub(crate) struct RlmProtocolScenario {
     pub(crate) name: &'static str,
     pub(crate) user_message: &'static str,
     pub(crate) termination: RlmTermination,
     pub(crate) protocol_turn_options: Option<lash_core::ProtocolTurnOptions>,
     pub(crate) max_turns: Option<usize>,
+    pub(crate) plugin_factories: Vec<Arc<dyn PluginFactory>>,
     pub(crate) steps: Vec<RlmProtocolStep>,
     pub(crate) expectations: RlmProtocolExpectations,
 }
@@ -387,6 +391,7 @@ impl RlmProtocolScenario {
             termination: RlmTermination::default(),
             protocol_turn_options: None,
             max_turns: None,
+            plugin_factories: Vec::new(),
             steps: Vec::new(),
             expectations: RlmProtocolExpectations::default(),
         }
@@ -412,6 +417,11 @@ impl RlmProtocolScenario {
         self
     }
 
+    pub(crate) fn plugin_factory(mut self, factory: Arc<dyn PluginFactory>) -> Self {
+        self.plugin_factories.push(factory);
+        self
+    }
+
     pub(crate) fn llm_response(mut self, parts: Vec<LlmOutputPart>) -> Self {
         self.steps.push(RlmProtocolStep::LlmResponse {
             text_streamed: false,
@@ -423,6 +433,18 @@ impl RlmProtocolScenario {
     pub(crate) fn streamed_llm_response(mut self, parts: Vec<LlmOutputPart>) -> Self {
         self.steps.push(RlmProtocolStep::LlmResponse {
             text_streamed: true,
+            parts,
+        });
+        self
+    }
+
+    pub(crate) fn plugin_streamed_llm_response(
+        mut self,
+        chunks: Vec<&'static str>,
+        parts: Vec<LlmOutputPart>,
+    ) -> Self {
+        self.steps.push(RlmProtocolStep::PluginStreamedLlmResponse {
+            chunks: chunks.into_iter().map(str::to_string).collect(),
             parts,
         });
         self
@@ -468,6 +490,17 @@ impl RlmProtocolScenario {
             config
         };
         let config = build_config();
+        let plugin_session = if self.plugin_factories.is_empty() {
+            None
+        } else {
+            Some(
+                PluginHost::new(self.plugin_factories.clone())
+                    .build_session("rlm-protocol-scenario-hooks", None)
+                    .unwrap_or_else(|err| {
+                        panic!("{} failed to register plugin hooks: {err}", self.name)
+                    }),
+            )
+        };
         let mut machine = TurnMachine::new(
             config,
             vec![user_message(self.user_message)],
@@ -495,6 +528,32 @@ impl RlmProtocolScenario {
                         id: llm_id,
                         text_streamed: *text_streamed,
                         result: Ok(rlm_response(parts.clone())),
+                    });
+                }
+                RlmProtocolStep::PluginStreamedLlmResponse { chunks, parts } => {
+                    let llm_id = *find_llm_call(&effects)
+                        .unwrap_or_else(|| panic!("{} expected pending LLM call", self.name));
+                    let plugins = plugin_session.as_ref().unwrap_or_else(|| {
+                        panic!(
+                            "{} declared a plugin-streamed response without a plugin factory",
+                            self.name
+                        )
+                    });
+                    let transformed =
+                        drive_plugin_stream(plugins, chunks, rlm_response(parts.clone()));
+                    observed
+                        .plugin_stream_visible_texts
+                        .push(transformed.visible_text);
+                    observed
+                        .plugin_spliced_response_texts
+                        .push(transformed.response.full_text.clone());
+                    observed
+                        .plugin_stream_abort_requests
+                        .push(transformed.abort_requested);
+                    machine.handle_response(Response::LlmComplete {
+                        id: llm_id,
+                        text_streamed: true,
+                        result: Ok(transformed.response),
                     });
                 }
                 RlmProtocolStep::ExecResult(result) => {
@@ -551,6 +610,10 @@ pub(crate) enum RlmProtocolStep {
         text_streamed: bool,
         parts: Vec<LlmOutputPart>,
     },
+    PluginStreamedLlmResponse {
+        chunks: Vec<String>,
+        parts: Vec<LlmOutputPart>,
+    },
     ExecResult(lash_sansio::ExecResponse),
     Checkpoint,
     CheckpointRoundTrip,
@@ -574,6 +637,9 @@ pub(crate) struct RlmProtocolExpectations {
     pub(crate) assistant_reasoning_texts: Option<Vec<&'static str>>,
     pub(crate) assistant_visible_texts: Option<Vec<&'static str>>,
     pub(crate) assistant_message_count: Option<usize>,
+    pub(crate) plugin_stream_visible_texts: Option<Vec<&'static str>>,
+    pub(crate) plugin_spliced_response_texts: Option<Vec<&'static str>>,
+    pub(crate) plugin_stream_abort_requests: Option<Vec<bool>>,
     pub(crate) llm_extraction_payload: Option<serde_json::Value>,
     pub(crate) turn_outcome: Option<lash_sansio::TurnOutcome>,
     pub(crate) agent_frame_switch: Option<(&'static str, &'static str)>,
@@ -708,6 +774,32 @@ impl RlmProtocolExpectations {
                 "{scenario_name} assistant message count changed"
             );
         }
+        if let Some(expected) = &self.plugin_stream_visible_texts {
+            assert_eq!(
+                run.plugin_stream_visible_texts,
+                expected
+                    .iter()
+                    .map(|text| (*text).to_string())
+                    .collect::<Vec<_>>(),
+                "{scenario_name} plugin-visible stream changed"
+            );
+        }
+        if let Some(expected) = &self.plugin_spliced_response_texts {
+            assert_eq!(
+                run.plugin_spliced_response_texts,
+                expected
+                    .iter()
+                    .map(|text| (*text).to_string())
+                    .collect::<Vec<_>>(),
+                "{scenario_name} plugin-spliced response changed"
+            );
+        }
+        if let Some(expected) = &self.plugin_stream_abort_requests {
+            assert_eq!(
+                run.plugin_stream_abort_requests, *expected,
+                "{scenario_name} plugin stream-abort decisions changed"
+            );
+        }
         if let Some(expected) = &self.llm_extraction_payload {
             assert_eq!(
                 single_llm_extraction_payload(machine),
@@ -809,6 +901,9 @@ pub(crate) struct RlmProtocolRun {
     pub(crate) final_message_event: bool,
     pub(crate) tool_call_event: bool,
     pub(crate) assistant_conversation_progress: bool,
+    pub(crate) plugin_stream_visible_texts: Vec<String>,
+    pub(crate) plugin_spliced_response_texts: Vec<String>,
+    pub(crate) plugin_stream_abort_requests: Vec<bool>,
 }
 
 impl RlmProtocolRun {
@@ -845,4 +940,84 @@ impl RlmProtocolRun {
             }
         }
     }
+}
+
+pub(crate) fn rlm_protocol_plugin_factory() -> Arc<dyn PluginFactory> {
+    Arc::new(
+        RlmProtocolPluginFactory::new(
+            RlmProtocolPluginConfig::new(
+                lashlang::ExecutionBound::Unbounded,
+                lashlang::ExecutionBound::Unbounded,
+            )
+            .with_redaction_roots(Vec::new()),
+            lashlang::global_in_memory_lashlang_artifact_store(),
+        )
+        .with_process_lifecycle(false),
+    )
+}
+
+struct PluginStreamRun {
+    visible_text: String,
+    response: LlmResponse,
+    abort_requested: bool,
+}
+
+fn drive_plugin_stream(
+    plugins: &PluginSession,
+    chunks: &[String],
+    response: LlmResponse,
+) -> PluginStreamRun {
+    tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("build protocol-scenario plugin-hook runtime")
+        .block_on(async {
+            let mut visible_text = String::new();
+            let mut abort_requested = false;
+            for chunk in chunks {
+                let transforms = plugins
+                    .transform_assistant_stream("rlm-protocol-scenario-hooks", chunk.clone())
+                    .await
+                    .expect("protocol-scenario stream hook succeeds");
+                let transformed = transforms
+                    .last()
+                    .map(|owned| owned.value.clone())
+                    .unwrap_or_else(|| AssistantStreamTransform {
+                        chunk: chunk.clone(),
+                        reasoning_deltas: Vec::new(),
+                        events: Vec::new(),
+                        abort_stream: false,
+                    });
+                visible_text.push_str(&transformed.chunk);
+                abort_requested |= transformed.abort_stream;
+                if abort_requested {
+                    break;
+                }
+            }
+
+            let transforms = plugins
+                .transform_assistant_response("rlm-protocol-scenario-hooks", response.clone())
+                .await
+                .expect("protocol-scenario response hook succeeds");
+            let response = transforms
+                .last()
+                .map(|owned| owned.value.response.clone())
+                .unwrap_or(response);
+            plugins
+                .finish_assistant_stream(
+                    "rlm-protocol-scenario-hooks",
+                    if abort_requested {
+                        AssistantStreamFinishReason::Aborted
+                    } else {
+                        AssistantStreamFinishReason::Complete
+                    },
+                )
+                .await
+                .expect("protocol-scenario stream-finished hook succeeds");
+
+            PluginStreamRun {
+                visible_text,
+                response,
+                abort_requested,
+            }
+        })
 }

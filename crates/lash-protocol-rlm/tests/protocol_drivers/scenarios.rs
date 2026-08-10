@@ -72,6 +72,11 @@ const STREAMED_LASHLANG_CELL_EXECUTION: RlmProtocolScenarioCoverage = rlm_protoc
     "streamed lashlang cell execution",
     "A complete streamed Lashlang cell executes and persists trajectory events."
 );
+const PLUGIN_STREAM_MASK_CHUNK_SPANNING_REEXTRACTION: RlmProtocolScenarioCoverage = rlm_protocol_coverage!(
+    rlm_protocol_scenario_plugin_stream_mask_splices_chunk_spanning_cell_for_reextraction,
+    "plugin stream mask splices a chunk-spanning cell for re-extraction",
+    "The registered RLM stream mask hides a chunk-spanning Lashlang cell, splices its exact body back into the final response, and the protocol re-extracts that body for execution."
+);
 const EMPTY_TURN_OPTIONS_DEFAULT: RlmProtocolScenarioCoverage = rlm_protocol_coverage!(
     rlm_protocol_scenario_empty_turn_options_use_natural_default,
     "empty turn options default to natural",
@@ -130,6 +135,7 @@ const RLM_PROTOCOL_SCENARIO_COVERAGE: &[RlmProtocolScenarioCoverage] = &[
     RETIRED_PERCENT_MARKER,
     LASHLANG_CELL_EXECUTION,
     STREAMED_LASHLANG_CELL_EXECUTION,
+    PLUGIN_STREAM_MASK_CHUNK_SPANNING_REEXTRACTION,
     EMPTY_TURN_OPTIONS_DEFAULT,
     EXEC_RESULT_TOOL_CALL_IDS_INTERNAL,
     EXEC_TOOL_CONTROL_FRAME_SWITCH,
@@ -143,7 +149,7 @@ const RLM_PROTOCOL_SCENARIO_COVERAGE: &[RlmProtocolScenarioCoverage] = &[
 
 #[test]
 fn rlm_protocol_scenario_coverage_metadata_is_unique_and_complete() {
-    assert_eq!(RLM_PROTOCOL_SCENARIO_COVERAGE.len(), 19);
+    assert_eq!(RLM_PROTOCOL_SCENARIO_COVERAGE.len(), 20);
     let mut names = BTreeSet::new();
     for coverage in RLM_PROTOCOL_SCENARIO_COVERAGE {
         let _declared_test = coverage.declared_test;
@@ -518,6 +524,38 @@ fn rlm_protocol_scenario_streamed_lashlang_cell_runs_exec_and_persists_trajector
                 error: None,
                 final_output: None,
             }),
+            ..RlmProtocolExpectations::default()
+        })
+        .run();
+}
+
+#[test]
+fn rlm_protocol_scenario_plugin_stream_mask_splices_chunk_spanning_cell_for_reextraction() {
+    const CODE: &str = "alpha = \"first\"\nbeta = alpha + \" second\"\nfinish beta";
+    const RESPONSE: &str = "Visible prefix.\n<lashlang>\nalpha = \"first\"\nbeta = alpha + \" second\"\nfinish beta\n</lashlang>";
+
+    RlmProtocolScenario::new(PLUGIN_STREAM_MASK_CHUNK_SPANNING_REEXTRACTION.display_name)
+        .user_message("run chunk-spanning streamed code")
+        .plugin_factory(rlm_protocol_plugin_factory())
+        .plugin_streamed_llm_response(
+            vec![
+                "Visible prefix.\n<las",
+                "hlang>\nalpha = \"fir",
+                "st\"\nbeta = alpha + ",
+                "\" second\"\nfinish be",
+                "ta\n</lash",
+                "lang>",
+            ],
+            vec![text_part(RESPONSE)],
+        )
+        .expect(RlmProtocolExpectations {
+            initial_request_tools_empty: true,
+            exec_codes: vec![CODE],
+            llm_call_count: Some(1),
+            done: Some(false),
+            plugin_stream_visible_texts: Some(vec!["Visible prefix.\n"]),
+            plugin_spliced_response_texts: Some(vec![RESPONSE]),
+            plugin_stream_abort_requests: Some(vec![true]),
             ..RlmProtocolExpectations::default()
         })
         .run();
