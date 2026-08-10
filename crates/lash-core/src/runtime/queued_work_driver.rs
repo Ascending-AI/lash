@@ -1300,6 +1300,24 @@ mod tests {
     }
 
     #[async_trait::async_trait]
+    impl crate::AttachmentRootSet for CreateOnlyFactory {
+        async fn live_attachment_refs(
+            &self,
+            cutoff: u64,
+        ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, crate::StoreError> {
+            crate::AttachmentRootSet::live_attachment_refs(&self.inner, cutoff).await
+        }
+
+        async fn has_live_attachment_ref(
+            &self,
+            id: &crate::AttachmentId,
+            cutoff: u64,
+        ) -> Result<bool, crate::StoreError> {
+            crate::AttachmentRootSet::has_live_attachment_ref(&self.inner, id, cutoff).await
+        }
+    }
+
+    #[async_trait::async_trait]
     impl crate::SessionStoreFactory for CreateOnlyFactory {
         async fn create_store(
             &self,

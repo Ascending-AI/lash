@@ -1419,7 +1419,7 @@ aliases = ["lash::prelude::LashCore::session_was_deleted"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/restate_cron.rs:66#.session_was_deleted(session_id)"
-assertion = "examples/agent-workbench/src/restate_cron_tests.rs:1061#\"decision_basis\": \"deleted_session_tombstone\","
+assertion = "examples/agent-workbench/src/restate_cron_tests.rs:1093#\"decision_basis\": \"deleted_session_tombstone\","
 
 [[api]]
 symbol = "lash::LashCore::shutdown"
@@ -16115,24 +16115,6 @@ aliases = ["lash_core::SessionStoreFactory::has_claimable_queued_work"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store implementers may override the notification fast-path query; bundled hosts use repository factories."
-
-[[api]]
-symbol = "lash::persistence::SessionStoreFactory::has_live_attachment_ref"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::SessionStoreFactory::has_live_attachment_ref"]
-area = "attachments"
-disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
-
-[[api]]
-symbol = "lash::persistence::SessionStoreFactory::live_attachment_refs"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::SessionStoreFactory::live_attachment_refs"]
-area = "attachments"
-disposition = "unused-justify"
-reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
 symbol = "lash::persistence::SessionStoreFactory::open_existing_store"

@@ -478,6 +478,26 @@ impl RuntimePerfStoreFactory {
     }
 }
 
+// RuntimePerfStore deliberately uses the no-op attachment manifest, so this
+// benchmark factory explicitly owns no attachment roots.
+#[async_trait::async_trait]
+impl lash_core::AttachmentRootSet for RuntimePerfStoreFactory {
+    async fn live_attachment_refs(
+        &self,
+        _intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<std::collections::BTreeSet<lash_core::AttachmentId>, StoreError> {
+        Ok(std::collections::BTreeSet::new())
+    }
+
+    async fn has_live_attachment_ref(
+        &self,
+        _id: &lash_core::AttachmentId,
+        _intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<bool, StoreError> {
+        Ok(false)
+    }
+}
+
 #[async_trait::async_trait]
 impl SessionStoreFactory for RuntimePerfStoreFactory {
     async fn create_store(

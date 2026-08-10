@@ -646,23 +646,11 @@ mod tests {
     use lash_sansio::sync::MutexExt;
 
     use super::*;
-    use crate::runtime::tests::helpers::RecordingStore;
+    use crate::runtime::tests::helpers::{FixedAttachmentRoots, RecordingStore};
     use crate::session_model::{ConversationRecord, MessageRole, Part};
     use crate::store::SessionExecutionLeaseStore;
     use crate::{Message, SessionGraph, TokenUsage, shared_parts};
     const UNBOUNDED: crate::TurnBudget = crate::TurnBudget::Unbounded;
-    struct FixedAttachmentRoots(std::collections::BTreeSet<crate::AttachmentId>);
-
-    #[async_trait::async_trait]
-    impl crate::AttachmentRootSet for FixedAttachmentRoots {
-        async fn live_attachment_refs(
-            &self,
-            _intent_grace_cutoff_epoch_ms: u64,
-        ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, crate::StoreError> {
-            Ok(self.0.clone())
-        }
-    }
-
     fn lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {
         crate::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
     }

@@ -16,7 +16,9 @@ mod attachment_owner_tests;
 mod pagination_tests;
 #[path = "recovery_disposition_tests.rs"]
 mod recovery_disposition_tests;
+mod session_store_factories;
 mod worker_fixtures;
+use session_store_factories::*;
 use worker_fixtures::*;
 
 const TEST_PROCESS_EXECUTION_CONCURRENCY: usize = 4;
@@ -80,22 +82,6 @@ async fn dispatcher_unwind_clears_running_latch_and_notifies() {
         ),
         "a later dispatcher must retry the cursor whose fetch panicked"
     );
-}
-
-struct TestSessionStoreFactory;
-
-#[async_trait::async_trait]
-impl SessionStoreFactory for TestSessionStoreFactory {
-    async fn create_store(
-        &self,
-        _request: &crate::SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn crate::RuntimePersistence>, crate::StoreError> {
-        Ok(Arc::new(InMemorySessionStore::default()))
-    }
-
-    async fn delete_session(&self, _session_id: &str) -> Result<(), String> {
-        Ok(())
-    }
 }
 
 #[derive(Default)]
@@ -206,22 +192,6 @@ fn inline_worker_with_trigger_store(
     lease_owner: LeaseOwnerIdentity,
     trigger_store: Arc<dyn TriggerStore>,
 ) -> DurableProcessWorker {
-    struct InlineSessionStoreFactory;
-
-    #[async_trait::async_trait]
-    impl SessionStoreFactory for InlineSessionStoreFactory {
-        async fn create_store(
-            &self,
-            _request: &crate::SessionStoreCreateRequest,
-        ) -> Result<Arc<dyn crate::RuntimePersistence>, crate::StoreError> {
-            Ok(Arc::new(InMemorySessionStore::default()))
-        }
-
-        async fn delete_session(&self, _session_id: &str) -> Result<(), String> {
-            Ok(())
-        }
-    }
-
     DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
@@ -1026,22 +996,6 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
 
 #[tokio::test]
 async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
-    struct Factory;
-
-    #[async_trait::async_trait]
-    impl SessionStoreFactory for Factory {
-        async fn create_store(
-            &self,
-            _request: &crate::SessionStoreCreateRequest,
-        ) -> Result<Arc<dyn crate::RuntimePersistence>, crate::StoreError> {
-            Ok(Arc::new(InMemorySessionStore::default()))
-        }
-
-        async fn delete_session(&self, _session_id: &str) -> Result<(), String> {
-            Ok(())
-        }
-    }
-
     let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
     let runs = Arc::new(AtomicUsize::new(0));
     let mut runtime_host =
@@ -1063,7 +1017,7 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
             runtime_host,
-            Arc::new(Factory),
+            Arc::new(SegmentBoundarySessionStoreFactory),
             Arc::clone(&registry),
         )
         .with_session_policy(policy)

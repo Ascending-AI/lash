@@ -18,8 +18,8 @@ use lash_core::runtime::{
     RuntimeSubject,
 };
 use lash_core::{
-    LeaseOwnerIdentity, PendingTurnInputDraft, PluginSessionSnapshot, QueuedWorkStore,
-    RuntimeCommit, RuntimeInvocation, RuntimeSessionState, SessionCommitStore,
+    AttachmentRootSet, LeaseOwnerIdentity, PendingTurnInputDraft, PluginSessionSnapshot,
+    QueuedWorkStore, RuntimeCommit, RuntimeInvocation, RuntimeSessionState, SessionCommitStore,
     SessionExecutionLeaseStore, SessionStoreFactory, StoreError, ToolState, TurnInput,
     TurnInputIngress, TurnInputStore,
 };

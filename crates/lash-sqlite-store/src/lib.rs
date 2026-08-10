@@ -770,7 +770,10 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     ) -> Result<lash_core::ForkSessionResult, lash_core::StoreError> {
         fork_at_in_catalog(&self.root, request).await
     }
+}
 
+#[async_trait::async_trait]
+impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
     async fn live_attachment_refs(
         &self,
         intent_grace_cutoff_epoch_ms: u64,
@@ -1314,7 +1317,7 @@ mod tests {
             .expect("commit ref");
         }
 
-        let refs = SessionStoreFactory::live_attachment_refs(&factory, 0)
+        let refs = lash_core::AttachmentRootSet::live_attachment_refs(&factory, 0)
             .await
             .expect("root discovery");
         assert!(
@@ -1333,7 +1336,7 @@ mod tests {
 
         std::fs::write(factory.catalog_path(), b"corrupt not-a-db").expect("write corrupt");
 
-        let result = SessionStoreFactory::live_attachment_refs(&factory, 0).await;
+        let result = lash_core::AttachmentRootSet::live_attachment_refs(&factory, 0).await;
         assert!(
             result.is_err(),
             "an unreadable durable-core catalog must abort discovery, got {result:?}"

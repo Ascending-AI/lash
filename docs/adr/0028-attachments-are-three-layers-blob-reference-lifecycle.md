@@ -100,11 +100,16 @@ re-inserts them, so adoption cannot resurrect a ref whose proven-dead owner was
 already reconciled. The sweep **continues
 past per-blob delete failures**, collecting failed ids into its report rather than
 aborting on the first error.
-The root set is a factory-level lever: `SessionStoreFactory::live_attachment_refs`
-(surfaced to the GC through a blanket `AttachmentRootSet` impl) answers in one
-transaction on the global manifest table for Postgres (conditionally delete
-aged, owner-dead intents, then read the survivors), and in one transaction on
-SQLite's factory-wide durable-core catalog. Process-owner death proof is an
+The root set is a factory-level lever: every `SessionStoreFactory` must explicitly
+implement `AttachmentRootSet`, so being accepted by the GC is a declaration that
+the factory owns the complete root-set answer. An empty root set asserts that the
+factory owns no attachments. A factory that cannot enumerate its roots must return
+an error from `live_attachment_refs`, which aborts the sweep before any blob is
+listed or deleted; decorators that can answer must deliberately delegate. The
+implementation answers in one transaction on the global manifest table for
+Postgres (conditionally delete aged, owner-dead intents, then read the survivors),
+and in one transaction on SQLite's factory-wide durable-core catalog.
+Process-owner death proof is an
 explicit host-supplied capability: SQLite hosts call
 `SqliteSessionStoreFactory::new_with_process_registry`, while Postgres hosts
 call `PostgresStorage::session_store_factory_with_shared_process_registry` only
