@@ -23,7 +23,10 @@ pub(crate) fn store_sqlx_error(err: sqlx::Error) -> StoreError {
     if is_contention_error(&err) {
         StoreError::Contended
     } else {
-        StoreError::Backend(err.to_string())
+        StoreError::StorageFailure {
+            backend: "postgres",
+            message: err.to_string(),
+        }
     }
 }
 
@@ -621,7 +624,8 @@ pub(crate) async fn commit_attachment_refs_tx(
 
 #[cfg(test)]
 mod contention_tests {
-    use super::is_contention_sqlstate;
+    use super::{is_contention_sqlstate, store_sqlx_error};
+    use crate::StoreError;
 
     #[test]
     fn only_retry_unchanged_sqlstates_are_contention() {
@@ -631,5 +635,18 @@ mod contention_tests {
         for code in ["23505", "57014", "08006"] {
             assert!(!is_contention_sqlstate(code), "{code}");
         }
+    }
+
+    #[test]
+    fn non_contention_sqlx_errors_are_typed_postgres_storage_failures() {
+        let error = store_sqlx_error(sqlx::Error::Protocol("broken wire frame".to_string()));
+
+        assert!(matches!(
+            error,
+            StoreError::StorageFailure {
+                backend: "postgres",
+                ref message,
+            } if message.contains("broken wire frame")
+        ));
     }
 }
