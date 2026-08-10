@@ -1398,6 +1398,55 @@ async fn park_then_resume_preserves_session_transcript() -> Result<()> {
     Ok(())
 }
 
+// FIG-882: `LashRuntime::resume` falls back to a fresh empty state when the
+// parked store reports no persisted session, which in isolation looks like it
+// would hand a caller a blank conversation under a deleted session's id. The
+// binding guard behind that fallback is what makes it safe, so the refusal is
+// pinned end to end at the facade: a deleted-while-parked resume must fail with
+// the typed tombstone, never succeed with an empty transcript.
+#[tokio::test]
+async fn resume_of_a_session_deleted_while_parked_refuses_with_a_typed_tombstone() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .build()?;
+
+    let session = core.session("deleted-while-parked").open().await?;
+    session.turn(TurnInput::text("hello")).run().await?;
+    let parked = session.park().await?;
+
+    core.delete_session(
+        "deleted-while-parked",
+        session_delete_scope(&core, "deleted-while-parked").await,
+    )
+    .await?;
+    assert!(
+        core.session_was_deleted("deleted-while-parked").await?,
+        "the delete must leave a durable tombstone for the parked id"
+    );
+
+    let error = match Box::pin(core.resume(parked)).await {
+        Ok(_) => panic!("resume must refuse a session deleted while parked"),
+        Err(error) => error,
+    };
+    assert!(
+        matches!(
+            &error,
+            EmbedError::Session(SessionError::Store {
+                source: lash_core::StoreError::SessionDeleted { session_id },
+                ..
+            }) if session_id == "deleted-while-parked"
+        ),
+        "resume must surface the typed tombstone, got {error}"
+    );
+    assert!(error.is_terminal(), "{error}");
+    assert!(!error.is_retryable(), "{error}");
+    Ok(())
+}
+
 #[tokio::test]
 async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
