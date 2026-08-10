@@ -1297,7 +1297,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::flush_trace_sink"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:117#core.flush_trace_sink()?;"
+usage = "examples/docs-snippets/src/operations.rs:126#core.flush_trace_sink()?;"
 
 [[api]]
 symbol = "lash::LashCore::fork_at"
@@ -1809,7 +1809,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCoreBuilder::turn_budget"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_advanced.rs:316#.turn_budget(lash::TurnBudget::bounded(50))"
+usage = "examples/docs-snippets/src/embedding_advanced.rs:351#.turn_budget(lash::TurnBudget::bounded(50))"
 
 [[api]]
 symbol = "lash::LashCoreBuilder::wake_turn_policy"
@@ -2742,7 +2742,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::PendingTurnInputCancelOutcome", "lash_core::PendingTurnInputCancelOutcome"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding.rs:259#PendingTurnInputCancelOutcome, PendingTurnInputCancelTarget,"
+usage = "examples/docs-snippets/src/embedding.rs:271#PendingTurnInputCancelOutcome, PendingTurnInputCancelTarget,"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelOutcome::AlreadyCancelled"
@@ -2787,7 +2787,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::PendingTurnInputCancelOutcome::AlreadyClaimed::input", "lash_core::PendingTurnInputCancelOutcome::AlreadyClaimed::input"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding.rs:298#PendingTurnInputCancelOutcome::AlreadyClaimed { input, .. }"
+usage = "examples/docs-snippets/src/embedding.rs:310#PendingTurnInputCancelOutcome::AlreadyClaimed { input, .. }"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelOutcome::AlreadyCompleted"
@@ -2886,7 +2886,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelTarget"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding.rs:259#PendingTurnInputCancelOutcome, PendingTurnInputCancelTarget,"
+usage = "examples/docs-snippets/src/embedding.rs:271#PendingTurnInputCancelOutcome, PendingTurnInputCancelTarget,"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget::InputId"
@@ -2940,7 +2940,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelTarget::source_key"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding.rs:285#.map(PendingTurnInputCancelTarget::source_key)"
+usage = "examples/docs-snippets/src/embedding.rs:297#.map(PendingTurnInputCancelTarget::source_key)"
 
 [[api]]
 symbol = "lash::PendingTurnInputSuffixCancelOutcome"
@@ -2949,7 +2949,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputSuffixCancelOutcome"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding.rs:260#PendingTurnInputSuffixCancelOutcome, TurnInput,"
+usage = "examples/docs-snippets/src/embedding.rs:272#PendingTurnInputSuffixCancelOutcome, TurnInput,"
 
 [[api]]
 symbol = "lash::PendingTurnInputSuffixCancelOutcome::AnchorNotFound"
@@ -2958,7 +2958,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding.rs:288#PendingTurnInputSuffixCancelOutcome::AnchorNotFound { .. } => {"
+usage = "examples/docs-snippets/src/embedding.rs:300#PendingTurnInputSuffixCancelOutcome::AnchorNotFound { .. } => {"
 
 [[api]]
 symbol = "lash::PendingTurnInputSuffixCancelOutcome::AnchorNotFound::anchor"
@@ -2976,7 +2976,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding.rs:291#PendingTurnInputSuffixCancelOutcome::Outcomes { outcomes, .. } => {"
+usage = "examples/docs-snippets/src/embedding.rs:303#PendingTurnInputSuffixCancelOutcome::Outcomes { outcomes, .. } => {"
 
 [[api]]
 symbol = "lash::PendingTurnInputSuffixCancelOutcome::Outcomes::anchor"
@@ -2994,7 +2994,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes::outcomes"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding.rs:291#PendingTurnInputSuffixCancelOutcome::Outcomes { outcomes, .. } => {"
+usage = "examples/docs-snippets/src/embedding.rs:303#PendingTurnInputSuffixCancelOutcome::Outcomes { outcomes, .. } => {"
 
 [[api]]
 symbol = "lash::PluginBinding"
@@ -3255,7 +3255,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::PromptLayerSink::instructions"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/index.rs:30#.instructions(\"Answer in one short sentence. Skip preamble.\")"
+usage = "examples/docs-snippets/src/index.rs:44#.instructions(\"Answer in one short sentence. Skip preamble.\")"
 
 [[api]]
 symbol = "lash::PromptLayerSink::prompt_contribution"
@@ -4311,7 +4311,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::SessionSpec::turn_budget"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_advanced.rs:184#let _configured_turn_budget = child_spec.turn_budget;"
+usage = "examples/docs-snippets/src/embedding_advanced.rs:196#let _configured_turn_budget = child_spec.turn_budget;"
 
 [[api]]
 symbol = "lash::SessionStartPoint"
@@ -4771,7 +4771,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnBudget::Unbounded", "lash_core::TurnBudget::Unbounded"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/index.rs:27#LashCore::standard_builder(lash::TurnBudget::Unbounded)"
+usage = "examples/docs-snippets/src/index.rs:41#LashCore::standard_builder(lash::TurnBudget::Unbounded)"
 
 [[api]]
 symbol = "lash::TurnBudget::bounded"
@@ -6281,7 +6281,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnResult::duration", "lash::turn::TurnResult::duration"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:198#let elapsed = output.result.duration(); // claim -> Committed Turn + Post-Commit Delivery"
+usage = "examples/docs-snippets/src/operations.rs:207#let elapsed = output.result.duration(); // claim -> Committed Turn + Post-Commit Delivery"
 
 [[api]]
 symbol = "lash::TurnResult::errors"
@@ -6344,7 +6344,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnResult::started_at", "lash::turn::TurnResult::started_at"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:197#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
+usage = "examples/docs-snippets/src/operations.rs:206#let started_at = output.result.started_at(); // SystemTime the turn was claimed"
 
 [[api]]
 symbol = "lash::TurnResult::state"
@@ -28147,8 +28147,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptBuiltin"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:92#PromptBuiltin, PromptContribution, PromptSlot, PromptTemplate, PromptTemplateEntry,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:99#PromptBuiltin, PromptContribution, PromptSlot, PromptTemplate, PromptTemplateEntry,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:89; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28158,8 +28158,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptBuiltin::CoreGuidance"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:379#builtin: PromptBuiltin::CoreGuidance,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:396#builtin: PromptBuiltin::CoreGuidance,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:369; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28169,8 +28169,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptBuiltin::ExecutionInstructions"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:368#builtin: PromptBuiltin::ExecutionInstructions,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:385#builtin: PromptBuiltin::ExecutionInstructions,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:358; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28180,8 +28180,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptBuiltin::MainAgentIntro"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:99#PromptTemplateEntry::builtin(PromptBuiltin::MainAgentIntro),"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:106#PromptTemplateEntry::builtin(PromptBuiltin::MainAgentIntro),"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:96; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28191,8 +28191,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContribution"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:394#let gated = PromptContribution::new("
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:411#let gated = PromptContribution::new("
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:384; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28202,8 +28202,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContribution::content"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:404#assert_eq!(gated.content.as_ref(), \"Use the workspace formatter.\");"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:421#assert_eq!(gated.content.as_ref(), \"Use the workspace formatter.\");"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:394; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28213,8 +28213,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContribution::environment"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:429#layer.add_contribution(PromptContribution::environment("
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:446#layer.add_contribution(PromptContribution::environment("
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:419; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28224,8 +28224,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContribution::execution"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:418#layer.add_contribution(PromptContribution::execution("
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:435#layer.add_contribution(PromptContribution::execution("
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:408; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28235,8 +28235,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContribution::gate"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:405#assert!(!gated.gate.is_empty());"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:422#assert!(!gated.gate.is_empty());"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:395; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28246,8 +28246,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContribution::guidance"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:408#PromptContribution::guidance(\"Safety\", \"Ask before publishing.\").requires_tool(\"ask\");"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:425#PromptContribution::guidance(\"Safety\", \"Ask before publishing.\").requires_tool(\"ask\");"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:398; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28257,8 +28257,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContribution::intro"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:414#layer.add_contribution(PromptContribution::intro("
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:431#layer.add_contribution(PromptContribution::intro("
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:404; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28268,8 +28268,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContribution::new"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:394#let gated = PromptContribution::new("
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:411#let gated = PromptContribution::new("
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:384; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28279,8 +28279,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContribution::priority"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:403#assert_eq!(gated.priority, -20);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:420#assert_eq!(gated.priority, -20);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:393; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28290,8 +28290,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContribution::project_instructions"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:423#layer.add_contribution(PromptContribution::project_instructions("
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:440#layer.add_contribution(PromptContribution::project_instructions("
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:413; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28301,8 +28301,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContribution::requires_any_tool"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:400#.requires_any_tool([\"read_file\", \"write_file\"]);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:417#.requires_any_tool([\"read_file\", \"write_file\"]);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:390; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28312,8 +28312,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContribution::requires_tool"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:408#PromptContribution::guidance(\"Safety\", \"Ask before publishing.\").requires_tool(\"ask\");"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:425#PromptContribution::guidance(\"Safety\", \"Ask before publishing.\").requires_tool(\"ask\");"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:398; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28323,8 +28323,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContribution::runtime_context"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:426#layer.add_contribution(PromptContribution::runtime_context("
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:443#layer.add_contribution(PromptContribution::runtime_context("
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:416; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28334,8 +28334,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContribution::slot"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:401#assert_eq!(gated.slot, PromptSlot::Guidance);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:418#assert_eq!(gated.slot, PromptSlot::Guidance);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:391; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28345,8 +28345,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContribution::title"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:402#assert_eq!(gated.title.as_deref(), Some(\"Repository policy\"));"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:419#assert_eq!(gated.title.as_deref(), Some(\"Repository policy\"));"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:392; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28356,8 +28356,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContribution::with_priority"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:399#.with_priority(-20)"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:416#.with_priority(-20)"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:389; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28367,8 +28367,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContributionGate"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:405#assert!(!gated.gate.is_empty());"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:422#assert!(!gated.gate.is_empty());"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:395; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28378,8 +28378,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContributionGate::is_empty"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:405#assert!(!gated.gate.is_empty());"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:422#assert!(!gated.gate.is_empty());"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:395; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28389,8 +28389,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptContributionGate::tools"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:406#assert_eq!(gated.gate.tools, [\"read_file\", \"write_file\"]);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:423#assert_eq!(gated.gate.tools, [\"read_file\", \"write_file\"]);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:396; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28400,8 +28400,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptLayer"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:95#use lash::{PromptLayerSink, TurnInput};"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:102#use lash::{PromptLayerSink, TurnInput};"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:92; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28411,8 +28411,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptLayer::add_contribution"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:414#layer.add_contribution(PromptContribution::intro("
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:431#layer.add_contribution(PromptContribution::intro("
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:404; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28422,8 +28422,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptLayer::clear_slot"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:441#layer.clear_slot(PromptSlot::RuntimeContext);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:458#layer.clear_slot(PromptSlot::RuntimeContext);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:431; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28433,8 +28433,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptLayer::clear_template"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:463#.clear_template()"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:480#.clear_template()"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:453; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28444,8 +28444,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptLayer::is_empty"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:353#assert!(PromptLayer::is_empty(&empty));"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:370#assert!(PromptLayer::is_empty(&empty));"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:343; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28455,8 +28455,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptLayer::new"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:352#let empty = PromptLayer::new();"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:369#let empty = PromptLayer::new();"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:342; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28466,8 +28466,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptLayer::prompt_template"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:118#.prompt_template(template)"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:130#.prompt_template(template)"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:113; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28477,8 +28477,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptLayer::replace_slot"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:434#layer.replace_slot("
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:451#layer.replace_slot("
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:424; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28488,8 +28488,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptLayer::slots"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:413#assert!(layer.slots.is_empty());"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:430#assert!(layer.slots.is_empty());"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:403; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28499,8 +28499,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptLayer::template"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:412#assert_eq!(layer.template.as_ref(), Some(&template));"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:429#assert_eq!(layer.template.as_ref(), Some(&template));"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:402; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28510,8 +28510,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptLayer::with_cleared_slot"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:452#.with_cleared_slot(PromptSlot::ProjectInstructions);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:469#.with_cleared_slot(PromptSlot::ProjectInstructions);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:442; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28521,8 +28521,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptLayer::with_contribution"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:433#layer = layer.with_contribution(single_gate);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:450#layer = layer.with_contribution(single_gate);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:423; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28532,8 +28532,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptLayer::with_replaced_slot"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:445#.with_replaced_slot("
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:462#.with_replaced_slot("
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:435; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28543,8 +28543,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptLayer::with_template"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:411#let mut layer = PromptLayer::with_template(template.clone());"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:428#let mut layer = PromptLayer::with_template(template.clone());"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:401; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28554,8 +28554,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptSlot"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:92#PromptBuiltin, PromptContribution, PromptSlot, PromptTemplate, PromptTemplateEntry,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:99#PromptBuiltin, PromptContribution, PromptSlot, PromptTemplate, PromptTemplateEntry,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:89; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28565,8 +28565,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptSlot::Environment"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:386#PromptTemplateEntry::slot(PromptSlot::Environment),"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:403#PromptTemplateEntry::slot(PromptSlot::Environment),"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:376; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28576,8 +28576,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptSlot::Execution"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:371#slot: PromptSlot::Execution,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:388#slot: PromptSlot::Execution,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:361; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28587,8 +28587,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptSlot::Guidance"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:104#vec![PromptTemplateEntry::slot(PromptSlot::Guidance)],"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:111#vec![PromptTemplateEntry::slot(PromptSlot::Guidance)],"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:101; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28598,8 +28598,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptSlot::Intro"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:100#PromptTemplateEntry::slot(PromptSlot::Intro),"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:107#PromptTemplateEntry::slot(PromptSlot::Intro),"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:97; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28609,8 +28609,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptSlot::ProjectInstructions"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:382#slot: PromptSlot::ProjectInstructions,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:399#slot: PromptSlot::ProjectInstructions,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:372; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28620,8 +28620,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptSlot::RuntimeContext"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:385#PromptTemplateEntry::slot(PromptSlot::RuntimeContext),"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:402#PromptTemplateEntry::slot(PromptSlot::RuntimeContext),"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:375; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28631,8 +28631,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplate"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:92#PromptBuiltin, PromptContribution, PromptSlot, PromptTemplate, PromptTemplateEntry,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:99#PromptBuiltin, PromptContribution, PromptSlot, PromptTemplate, PromptTemplateEntry,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:89; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28642,8 +28642,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplate::new"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:97#let template = PromptTemplate::new(vec!["
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:104#let template = PromptTemplate::new(vec!["
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:94; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28662,8 +28662,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplate::sections"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:390#assert_eq!(template.sections.len(), 3);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:407#assert_eq!(template.sections.len(), 3);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:380; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28673,8 +28673,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplateEntry"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:92#PromptBuiltin, PromptContribution, PromptSlot, PromptTemplate, PromptTemplateEntry,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:99#PromptBuiltin, PromptContribution, PromptSlot, PromptTemplate, PromptTemplateEntry,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:89; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28684,8 +28684,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplateEntry::Builtin"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:367#PromptTemplateEntry::Builtin {"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:384#PromptTemplateEntry::Builtin {"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:357; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28695,8 +28695,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplateEntry::Builtin::builtin"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:368#builtin: PromptBuiltin::ExecutionInstructions,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:385#builtin: PromptBuiltin::ExecutionInstructions,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:358; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28706,8 +28706,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplateEntry::Slot"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:370#PromptTemplateEntry::Slot {"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:387#PromptTemplateEntry::Slot {"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:360; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28717,8 +28717,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplateEntry::Slot::slot"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:401#assert_eq!(gated.slot, PromptSlot::Guidance);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:418#assert_eq!(gated.slot, PromptSlot::Guidance);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:391; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28728,8 +28728,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplateEntry::Text"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:359#PromptTemplateEntry::Text {"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:376#PromptTemplateEntry::Text {"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:349; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28739,8 +28739,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplateEntry::Text::content"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:404#assert_eq!(gated.content.as_ref(), \"Use the workspace formatter.\");"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:421#assert_eq!(gated.content.as_ref(), \"Use the workspace formatter.\");"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:394; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28750,8 +28750,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplateEntry::builtin"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:99#PromptTemplateEntry::builtin(PromptBuiltin::MainAgentIntro),"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:106#PromptTemplateEntry::builtin(PromptBuiltin::MainAgentIntro),"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:96; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28761,8 +28761,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplateEntry::slot"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:100#PromptTemplateEntry::slot(PromptSlot::Intro),"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:107#PromptTemplateEntry::slot(PromptSlot::Intro),"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:97; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28772,8 +28772,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplateEntry::text"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:362#PromptTemplateEntry::text(\"Host contract\"),"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:379#PromptTemplateEntry::text(\"Host contract\"),"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:352; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28783,8 +28783,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplateSection"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:93#PromptTemplateSection,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:100#PromptTemplateSection,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:90; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28794,8 +28794,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplateSection::entries"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:392#assert_eq!(template.sections[2].entries.len(), 5);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:409#assert_eq!(template.sections[2].entries.len(), 5);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:382; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28805,8 +28805,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplateSection::new"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:375#PromptTemplateSection::new("
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:392#PromptTemplateSection::new("
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:365; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28816,8 +28816,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplateSection::title"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:391#assert_eq!(template.sections[1].title.as_deref(), Some(\"Execution\"));"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:408#assert_eq!(template.sections[1].title.as_deref(), Some(\"Execution\"));"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:381; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28827,8 +28827,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplateSection::titled"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:102#PromptTemplateSection::titled("
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:109#PromptTemplateSection::titled("
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:99; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28838,8 +28838,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplateSection::untitled"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:98#PromptTemplateSection::untitled(vec!["
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:105#PromptTemplateSection::untitled(vec!["
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:95; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -28848,8 +28848,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:342#PromptTemplateEntry, PromptTemplateSection, default_prompt_template,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:481#assert_eq!(round_trip, layer);"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:359#PromptTemplateEntry, PromptTemplateSection, default_prompt_template,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:498#assert_eq!(round_trip, layer);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:332; the assertion at examples/docs-snippets/src/embedding_prompts.rs:471 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `round_trip` equals `layer`."
 
 [[api]]
@@ -29853,7 +29853,7 @@ availability = "default+all-features"
 aliases = ["lash_core::provider::handle::ProviderHandle::close"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/operations.rs:109#let _ = provider.close().await;"
+usage = "examples/docs-snippets/src/operations.rs:118#let _ = provider.close().await;"
 
 [[api]]
 symbol = "lash::provider::ProviderHandle::complete"
@@ -37356,8 +37356,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:345#RemotePromptBuiltin, RemotePromptContribution, RemotePromptContributionGate,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:362#RemotePromptBuiltin, RemotePromptContribution, RemotePromptContributionGate,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:335; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37366,8 +37366,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:497#builtin: RemotePromptBuiltin::CoreGuidance,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:514#builtin: RemotePromptBuiltin::CoreGuidance,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:487; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37376,8 +37376,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:494#builtin: RemotePromptBuiltin::ExecutionInstructions,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:511#builtin: RemotePromptBuiltin::ExecutionInstructions,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:484; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37386,8 +37386,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:491#builtin: RemotePromptBuiltin::MainAgentIntro,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:508#builtin: RemotePromptBuiltin::MainAgentIntro,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:481; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37396,8 +37396,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:345#RemotePromptBuiltin, RemotePromptContribution, RemotePromptContributionGate,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:362#RemotePromptBuiltin, RemotePromptContribution, RemotePromptContributionGate,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:335; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37406,8 +37406,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:404#assert_eq!(gated.content.as_ref(), \"Use the workspace formatter.\");"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:421#assert_eq!(gated.content.as_ref(), \"Use the workspace formatter.\");"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:394; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37416,8 +37416,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:405#assert!(!gated.gate.is_empty());"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:422#assert!(!gated.gate.is_empty());"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:395; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37426,8 +37426,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:403#assert_eq!(gated.priority, -20);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:420#assert_eq!(gated.priority, -20);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:393; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37436,8 +37436,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:401#assert_eq!(gated.slot, PromptSlot::Guidance);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:418#assert_eq!(gated.slot, PromptSlot::Guidance);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:391; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37446,8 +37446,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:391#assert_eq!(template.sections[1].title.as_deref(), Some(\"Execution\"));"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:408#assert_eq!(template.sections[1].title.as_deref(), Some(\"Execution\"));"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:381; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37456,8 +37456,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:345#RemotePromptBuiltin, RemotePromptContribution, RemotePromptContributionGate,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:362#RemotePromptBuiltin, RemotePromptContribution, RemotePromptContributionGate,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:335; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37466,8 +37466,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:405#assert!(!gated.gate.is_empty());"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:422#assert!(!gated.gate.is_empty());"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:395; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37476,8 +37476,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:406#assert_eq!(gated.gate.tools, [\"read_file\", \"write_file\"]);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:423#assert_eq!(gated.gate.tools, [\"read_file\", \"write_file\"]);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:396; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37486,8 +37486,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:346#RemotePromptLayer, RemotePromptSlot, RemotePromptSlotLayer, RemotePromptTemplate,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:363#RemotePromptLayer, RemotePromptSlot, RemotePromptSlotLayer, RemotePromptTemplate,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:336; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37496,8 +37496,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:469#assert!(!RemotePromptLayer::is_empty(&remote));"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:486#assert!(!RemotePromptLayer::is_empty(&remote));"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:459; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37506,8 +37506,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:552#assert_eq!(RemotePromptLayer::new(), RemotePromptLayer::default());"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:569#assert_eq!(RemotePromptLayer::new(), RemotePromptLayer::default());"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:542; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37516,8 +37516,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:413#assert!(layer.slots.is_empty());"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:430#assert!(layer.slots.is_empty());"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:403; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37526,8 +37526,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:412#assert_eq!(layer.template.as_ref(), Some(&template));"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:429#assert_eq!(layer.template.as_ref(), Some(&template));"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:402; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37536,8 +37536,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:346#RemotePromptLayer, RemotePromptSlot, RemotePromptSlotLayer, RemotePromptTemplate,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:363#RemotePromptLayer, RemotePromptSlot, RemotePromptSlotLayer, RemotePromptTemplate,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:336; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37546,8 +37546,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:470#assert!(remote.slots[&RemotePromptSlot::Environment].reset);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:487#assert!(remote.slots[&RemotePromptSlot::Environment].reset);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:460; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37556,8 +37556,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:524#RemotePromptSlot::Execution,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:541#RemotePromptSlot::Execution,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:514; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37566,8 +37566,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:500#slot: RemotePromptSlot::Guidance,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:517#slot: RemotePromptSlot::Guidance,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:490; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37576,8 +37576,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:509#RemotePromptSlot::Intro,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:526#RemotePromptSlot::Intro,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:499; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37586,8 +37586,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:528#RemotePromptSlot::ProjectInstructions,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:545#RemotePromptSlot::ProjectInstructions,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:518; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37596,8 +37596,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:476#remote.slots[&RemotePromptSlot::RuntimeContext]"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:493#remote.slots[&RemotePromptSlot::RuntimeContext]"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:466; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37606,8 +37606,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:346#RemotePromptLayer, RemotePromptSlot, RemotePromptSlotLayer, RemotePromptTemplate,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:363#RemotePromptLayer, RemotePromptSlot, RemotePromptSlotLayer, RemotePromptTemplate,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:336; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37616,8 +37616,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:458#.contributions"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:475#.contributions"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:448; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37626,8 +37626,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:454#assert!(configured.slots[&PromptSlot::Guidance].reset);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:471#assert!(configured.slots[&PromptSlot::Guidance].reset);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:444; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37636,8 +37636,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:346#RemotePromptLayer, RemotePromptSlot, RemotePromptSlotLayer, RemotePromptTemplate,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:363#RemotePromptLayer, RemotePromptSlot, RemotePromptSlotLayer, RemotePromptTemplate,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:336; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37646,8 +37646,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:390#assert_eq!(template.sections.len(), 3);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:407#assert_eq!(template.sections.len(), 3);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:380; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37656,8 +37656,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:347#RemotePromptTemplateEntry, RemotePromptTemplateSection,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:364#RemotePromptTemplateEntry, RemotePromptTemplateSection,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:337; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37666,8 +37666,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:490#RemotePromptTemplateEntry::Builtin {"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:507#RemotePromptTemplateEntry::Builtin {"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:480; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37676,8 +37676,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:368#builtin: PromptBuiltin::ExecutionInstructions,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:385#builtin: PromptBuiltin::ExecutionInstructions,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:358; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37686,8 +37686,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:499#RemotePromptTemplateEntry::Slot {"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:516#RemotePromptTemplateEntry::Slot {"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:489; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37696,8 +37696,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:401#assert_eq!(gated.slot, PromptSlot::Guidance);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:418#assert_eq!(gated.slot, PromptSlot::Guidance);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:391; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37706,8 +37706,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:487#RemotePromptTemplateEntry::Text {"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:504#RemotePromptTemplateEntry::Text {"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:477; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37716,8 +37716,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:404#assert_eq!(gated.content.as_ref(), \"Use the workspace formatter.\");"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:421#assert_eq!(gated.content.as_ref(), \"Use the workspace formatter.\");"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:394; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37726,8 +37726,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:347#RemotePromptTemplateEntry, RemotePromptTemplateSection,"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:364#RemotePromptTemplateEntry, RemotePromptTemplateSection,"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:337; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37736,8 +37736,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:392#assert_eq!(template.sections[2].entries.len(), 5);"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:409#assert_eq!(template.sections[2].entries.len(), 5);"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:382; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -37746,8 +37746,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:391#assert_eq!(template.sections[1].title.as_deref(), Some(\"Execution\"));"
-assertion = "examples/docs-snippets/src/embedding_prompts.rs:547#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
+usage = "examples/docs-snippets/src/embedding_prompts.rs:408#assert_eq!(template.sections[1].title.as_deref(), Some(\"Execution\"));"
+assertion = "examples/docs-snippets/src/embedding_prompts.rs:564#assert_eq!(wire[\"template\"][\"sections\"][0][\"title\"], \"Remote policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/embedding_prompts.rs:381; the assertion at examples/docs-snippets/src/embedding_prompts.rs:537 in `prompt_layers_preserve_host_overrides_across_the_remote_boundary` observes that `wire[\"template\"][\"sections\"][0][\"title\"]` equals `\"Remote policy\"`."
 
 [[api]]
@@ -46385,8 +46385,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError::code"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/persistence.rs:127#err.code.is_replay_mismatch()"
-assertion = "examples/docs-snippets/src/persistence.rs:140#assert!(requires_replay_mismatch_drain(&error));"
+usage = "examples/docs-snippets/src/persistence.rs:167#err.code.is_replay_mismatch()"
+assertion = "examples/docs-snippets/src/persistence.rs:180#assert!(requires_replay_mismatch_drain(&error));"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::deleted_session_id"
@@ -46432,8 +46432,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError::summary"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/persistence.rs:136#error.summary = Some(lash::runtime::RuntimeEffectReplayMismatchSummary {"
-assertion = "examples/docs-snippets/src/persistence.rs:142#assert_eq!(summary.divergent_path_count, 1);"
+usage = "examples/docs-snippets/src/persistence.rs:176#error.summary = Some(lash::runtime::RuntimeEffectReplayMismatchSummary {"
+assertion = "examples/docs-snippets/src/persistence.rs:182#assert_eq!(summary.divergent_path_count, 1);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::missing_process_execution_id"
@@ -46501,7 +46501,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/persistence.rs:158#if err.code == RuntimeErrorCode::SessionExecutionBusy =>"
+usage = "examples/docs-snippets/src/persistence.rs:198#if err.code == RuntimeErrorCode::SessionExecutionBusy =>"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::AwaitEventCancelUnsupported"
@@ -47090,7 +47090,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::SessionExecutionBusy"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/persistence.rs:158#if err.code == RuntimeErrorCode::SessionExecutionBusy =>"
+usage = "examples/docs-snippets/src/persistence.rs:198#if err.code == RuntimeErrorCode::SessionExecutionBusy =>"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::SessionExecutionLeaseLost"
@@ -47099,7 +47099,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::SessionExecutionLeaseLost"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/persistence.rs:163#if err.code == RuntimeErrorCode::SessionExecutionLeaseLost =>"
+usage = "examples/docs-snippets/src/persistence.rs:203#if err.code == RuntimeErrorCode::SessionExecutionLeaseLost =>"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::SessionHeadRefresh"
@@ -47189,7 +47189,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::StoreCommitContended"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/persistence.rs:170#if err.code == RuntimeErrorCode::StoreCommitContended =>"
+usage = "examples/docs-snippets/src/persistence.rs:210#if err.code == RuntimeErrorCode::StoreCommitContended =>"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::StoreCommitFailed"
@@ -47198,7 +47198,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::StoreCommitFailed"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/persistence.rs:175#Err(lash::EmbedError::Runtime(err)) if err.code == RuntimeErrorCode::StoreCommitFailed => {"
+usage = "examples/docs-snippets/src/persistence.rs:215#Err(lash::EmbedError::Runtime(err)) if err.code == RuntimeErrorCode::StoreCommitFailed => {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::StoreCommitNodeBudgetExceeded"
@@ -47406,8 +47406,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::is_replay_mismatch"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/persistence.rs:127#err.code.is_replay_mismatch()"
-assertion = "examples/docs-snippets/src/persistence.rs:140#assert!(requires_replay_mismatch_drain(&error));"
+usage = "examples/docs-snippets/src/persistence.rs:167#err.code.is_replay_mismatch()"
+assertion = "examples/docs-snippets/src/persistence.rs:180#assert!(requires_replay_mismatch_drain(&error));"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::is_terminal"
@@ -52670,7 +52670,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PreparedToolCall"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:254#Ok(lash::tools::PreparedToolCall::from_parts("
+usage = "examples/docs-snippets/src/embedding_prompts.rs:266#Ok(lash::tools::PreparedToolCall::from_parts("
 
 [[api]]
 symbol = "lash::tools::PreparedToolCall::args"
@@ -52697,7 +52697,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PreparedToolCall::from_parts"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_prompts.rs:254#Ok(lash::tools::PreparedToolCall::from_parts("
+usage = "examples/docs-snippets/src/embedding_prompts.rs:266#Ok(lash::tools::PreparedToolCall::from_parts("
 
 [[api]]
 symbol = "lash::tools::PreparedToolCall::identity"
@@ -55846,7 +55846,7 @@ availability = "all-features"
 aliases = ["lash_core::OtelTraceSink"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/tracing.rs:119#tracing::{OtelTraceSink, TraceLevel, TraceSink},"
+usage = "examples/docs-snippets/src/tracing.rs:134#tracing::{OtelTraceSink, TraceLevel, TraceSink},"
 
 [[api]]
 symbol = "lash::tracing::OtelTraceSink::from_global_provider"
@@ -55855,7 +55855,7 @@ availability = "all-features"
 aliases = ["lash_core::OtelTraceSink::from_global_provider"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/tracing.rs:124#let sink: Arc<dyn TraceSink> = Arc::new(OtelTraceSink::from_global_provider());"
+usage = "examples/docs-snippets/src/tracing.rs:139#let sink: Arc<dyn TraceSink> = Arc::new(OtelTraceSink::from_global_provider());"
 
 [[api]]
 symbol = "lash::tracing::OtelTraceSink::new"
@@ -56102,8 +56102,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceContentBlock::ToolCall"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:179#TraceContentBlock::ToolCall {"
-assertion = "examples/docs-snippets/src/tracing.rs:215#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
+usage = "examples/docs-snippets/src/tracing.rs:201#TraceContentBlock::ToolCall {"
+assertion = "examples/docs-snippets/src/tracing.rs:237#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:171; the assertion at examples/docs-snippets/src/tracing.rs:207 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -56113,8 +56113,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceContentBlock::ToolCall::call_id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:180#call_id: Some(\"call-7\".to_string()),"
-assertion = "examples/docs-snippets/src/tracing.rs:215#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
+usage = "examples/docs-snippets/src/tracing.rs:202#call_id: Some(\"call-7\".to_string()),"
+assertion = "examples/docs-snippets/src/tracing.rs:237#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:172; the assertion at examples/docs-snippets/src/tracing.rs:207 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -56124,8 +56124,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceContentBlock::ToolCall::has_signature"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:184#has_signature: true,"
-assertion = "examples/docs-snippets/src/tracing.rs:215#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
+usage = "examples/docs-snippets/src/tracing.rs:206#has_signature: true,"
+assertion = "examples/docs-snippets/src/tracing.rs:237#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:176; the assertion at examples/docs-snippets/src/tracing.rs:207 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -56135,8 +56135,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceContentBlock::ToolCall::input_json"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:182#input_json: serde_json::json!({ \"query\": \"release notes\" }),"
-assertion = "examples/docs-snippets/src/tracing.rs:215#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
+usage = "examples/docs-snippets/src/tracing.rs:204#input_json: serde_json::json!({ \"query\": \"release notes\" }),"
+assertion = "examples/docs-snippets/src/tracing.rs:237#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:174; the assertion at examples/docs-snippets/src/tracing.rs:207 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -56146,8 +56146,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceContentBlock::ToolCall::item_id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:183#item_id: Some(\"item-3\".to_string()),"
-assertion = "examples/docs-snippets/src/tracing.rs:215#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
+usage = "examples/docs-snippets/src/tracing.rs:205#item_id: Some(\"item-3\".to_string()),"
+assertion = "examples/docs-snippets/src/tracing.rs:237#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:175; the assertion at examples/docs-snippets/src/tracing.rs:207 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -56157,8 +56157,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceContentBlock::ToolCall::tool_name"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:181#tool_name: \"search_docs\".to_string(),"
-assertion = "examples/docs-snippets/src/tracing.rs:215#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
+usage = "examples/docs-snippets/src/tracing.rs:203#tool_name: \"search_docs\".to_string(),"
+assertion = "examples/docs-snippets/src/tracing.rs:237#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:173; the assertion at examples/docs-snippets/src/tracing.rs:207 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -56168,8 +56168,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceContentBlock::ToolResult"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:186#TraceContentBlock::ToolResult {"
-assertion = "examples/docs-snippets/src/tracing.rs:215#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
+usage = "examples/docs-snippets/src/tracing.rs:208#TraceContentBlock::ToolResult {"
+assertion = "examples/docs-snippets/src/tracing.rs:237#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:178; the assertion at examples/docs-snippets/src/tracing.rs:207 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -56179,8 +56179,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceContentBlock::ToolResult::call_id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:180#call_id: Some(\"call-7\".to_string()),"
-assertion = "examples/docs-snippets/src/tracing.rs:215#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
+usage = "examples/docs-snippets/src/tracing.rs:202#call_id: Some(\"call-7\".to_string()),"
+assertion = "examples/docs-snippets/src/tracing.rs:237#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:179; the assertion at examples/docs-snippets/src/tracing.rs:207 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -56190,8 +56190,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceContentBlock::ToolResult::content"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:189#content: r#\"{\"matches\":[\"v1.2\"]}\"#.to_string(),"
-assertion = "examples/docs-snippets/src/tracing.rs:215#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
+usage = "examples/docs-snippets/src/tracing.rs:211#content: r#\"{\"matches\":[\"v1.2\"]}\"#.to_string(),"
+assertion = "examples/docs-snippets/src/tracing.rs:237#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:181; the assertion at examples/docs-snippets/src/tracing.rs:207 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -56201,8 +56201,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceContentBlock::ToolResult::tool_name"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:188#tool_name: Some(\"search_docs\".to_string()),"
-assertion = "examples/docs-snippets/src/tracing.rs:215#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
+usage = "examples/docs-snippets/src/tracing.rs:210#tool_name: Some(\"search_docs\".to_string()),"
+assertion = "examples/docs-snippets/src/tracing.rs:237#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:180; the assertion at examples/docs-snippets/src/tracing.rs:207 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -56674,8 +56674,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::LlmCallCompleted::provider_usage"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:368#provider_usage: Some(serde_json::json!({ \"cached_tokens\": 64 })),"
-assertion = "examples/docs-snippets/src/tracing.rs:415#assert_eq!(event_wire[7][\"provider_usage\"][\"cached_tokens\"], 64);"
+usage = "examples/docs-snippets/src/tracing.rs:390#provider_usage: Some(serde_json::json!({ \"cached_tokens\": 64 })),"
+assertion = "examples/docs-snippets/src/tracing.rs:437#assert_eq!(event_wire[7][\"provider_usage\"][\"cached_tokens\"], 64);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:359; the assertion at examples/docs-snippets/src/tracing.rs:389 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[7][\"provider_usage\"][\"cached_tokens\"]` equals `64`."
 
 [[api]]
@@ -56758,8 +56758,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::PromptBuilt"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:335#TraceEvent::PromptBuilt {"
-assertion = "examples/docs-snippets/src/tracing.rs:393#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+usage = "examples/docs-snippets/src/tracing.rs:357#TraceEvent::PromptBuilt {"
+assertion = "examples/docs-snippets/src/tracing.rs:415#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:326; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -56769,8 +56769,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::PromptBuilt::components"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:338#components: vec![component],"
-assertion = "examples/docs-snippets/src/tracing.rs:393#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+usage = "examples/docs-snippets/src/tracing.rs:360#components: vec![component],"
+assertion = "examples/docs-snippets/src/tracing.rs:415#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:329; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -56780,8 +56780,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::PromptBuilt::prompt_chars"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:337#prompt_chars: 2_048,"
-assertion = "examples/docs-snippets/src/tracing.rs:393#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+usage = "examples/docs-snippets/src/tracing.rs:359#prompt_chars: 2_048,"
+assertion = "examples/docs-snippets/src/tracing.rs:415#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:328; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -56791,8 +56791,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::PromptBuilt::prompt_hash"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:336#prompt_hash: \"sha256:prompt\".to_string(),"
-assertion = "examples/docs-snippets/src/tracing.rs:393#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+usage = "examples/docs-snippets/src/tracing.rs:358#prompt_hash: \"sha256:prompt\".to_string(),"
+assertion = "examples/docs-snippets/src/tracing.rs:415#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:327; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -56820,8 +56820,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::ProtocolStep::plugin_id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:381#retained_messages: 1,"
-assertion = "examples/docs-snippets/src/tracing.rs:424#assert_eq!(event_wire[9][\"retained_messages\"], 1);"
+usage = "examples/docs-snippets/src/tracing.rs:403#retained_messages: 1,"
+assertion = "examples/docs-snippets/src/tracing.rs:446#assert_eq!(event_wire[9][\"retained_messages\"], 1);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionCompleted"
@@ -56830,8 +56830,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionCompleted"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:387#TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 },"
-assertion = "examples/docs-snippets/src/tracing.rs:428#assert!(event_wire[11][\"type\"] == \"rolling_history_compaction_completed\");"
+usage = "examples/docs-snippets/src/tracing.rs:409#TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 },"
+assertion = "examples/docs-snippets/src/tracing.rs:450#assert!(event_wire[11][\"type\"] == \"rolling_history_compaction_completed\");"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionCompleted::summary_nodes"
@@ -56840,8 +56840,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionCompleted::summary_nodes"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:387#TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 },"
-assertion = "examples/docs-snippets/src/tracing.rs:429#assert_eq!(event_wire[11][\"summary_nodes\"], 1);"
+usage = "examples/docs-snippets/src/tracing.rs:409#TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 },"
+assertion = "examples/docs-snippets/src/tracing.rs:451#assert_eq!(event_wire[11][\"summary_nodes\"], 1);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionNeeded"
@@ -56850,8 +56850,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionNeeded"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:372#TraceEvent::RollingHistoryCompactionNeeded {"
-assertion = "examples/docs-snippets/src/tracing.rs:416#assert_eq!(event_wire[8][\"type\"], \"rolling_history_compaction_needed\");"
+usage = "examples/docs-snippets/src/tracing.rs:394#TraceEvent::RollingHistoryCompactionNeeded {"
+assertion = "examples/docs-snippets/src/tracing.rs:438#assert_eq!(event_wire[8][\"type\"], \"rolling_history_compaction_needed\");"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionNeeded::context_budget_tokens"
@@ -56860,8 +56860,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionNeeded::context_budget_tokens"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:373#context_budget_tokens: 30_000,"
-assertion = "examples/docs-snippets/src/tracing.rs:417#assert_eq!(event_wire[8][\"context_budget_tokens\"], 30_000);"
+usage = "examples/docs-snippets/src/tracing.rs:395#context_budget_tokens: 30_000,"
+assertion = "examples/docs-snippets/src/tracing.rs:439#assert_eq!(event_wire[8][\"context_budget_tokens\"], 30_000);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionNeeded::max_context_tokens"
@@ -56870,8 +56870,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionNeeded::max_context_tokens"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:374#max_context_tokens: 40_000,"
-assertion = "examples/docs-snippets/src/tracing.rs:418#assert_eq!(event_wire[8][\"max_context_tokens\"], 40_000);"
+usage = "examples/docs-snippets/src/tracing.rs:396#max_context_tokens: 40_000,"
+assertion = "examples/docs-snippets/src/tracing.rs:440#assert_eq!(event_wire[8][\"max_context_tokens\"], 40_000);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionNeeded::threshold_tokens"
@@ -56880,8 +56880,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionNeeded::threshold_tokens"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:375#threshold_tokens: 20_000,"
-assertion = "examples/docs-snippets/src/tracing.rs:419#assert_eq!(event_wire[8][\"threshold_tokens\"], 20_000);"
+usage = "examples/docs-snippets/src/tracing.rs:397#threshold_tokens: 20_000,"
+assertion = "examples/docs-snippets/src/tracing.rs:441#assert_eq!(event_wire[8][\"threshold_tokens\"], 20_000);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionStarted"
@@ -56890,8 +56890,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionStarted"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:383#TraceEvent::RollingHistoryCompactionStarted {"
-assertion = "examples/docs-snippets/src/tracing.rs:425#assert_eq!(event_wire[10][\"type\"], \"rolling_history_compaction_started\");"
+usage = "examples/docs-snippets/src/tracing.rs:405#TraceEvent::RollingHistoryCompactionStarted {"
+assertion = "examples/docs-snippets/src/tracing.rs:447#assert_eq!(event_wire[10][\"type\"], \"rolling_history_compaction_started\");"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionStarted::instructions_present"
@@ -56900,8 +56900,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionStarted::instructions_present"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:385#instructions_present: true,"
-assertion = "examples/docs-snippets/src/tracing.rs:427#assert_eq!(event_wire[10][\"instructions_present\"], true);"
+usage = "examples/docs-snippets/src/tracing.rs:407#instructions_present: true,"
+assertion = "examples/docs-snippets/src/tracing.rs:449#assert_eq!(event_wire[10][\"instructions_present\"], true);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryCompactionStarted::source_messages"
@@ -56910,8 +56910,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryCompactionStarted::source_messages"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:384#source_messages: 3,"
-assertion = "examples/docs-snippets/src/tracing.rs:426#assert_eq!(event_wire[10][\"source_messages\"], 3);"
+usage = "examples/docs-snippets/src/tracing.rs:406#source_messages: 3,"
+assertion = "examples/docs-snippets/src/tracing.rs:448#assert_eq!(event_wire[10][\"source_messages\"], 3);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned"
@@ -56920,8 +56920,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:377#TraceEvent::RollingHistoryPromptPruned {"
-assertion = "examples/docs-snippets/src/tracing.rs:420#assert_eq!(event_wire[9][\"type\"], \"rolling_history_prompt_pruned\");"
+usage = "examples/docs-snippets/src/tracing.rs:399#TraceEvent::RollingHistoryPromptPruned {"
+assertion = "examples/docs-snippets/src/tracing.rs:442#assert_eq!(event_wire[9][\"type\"], \"rolling_history_prompt_pruned\");"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned::context_budget_tokens"
@@ -56930,8 +56930,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned::context_budget_tokens"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:373#context_budget_tokens: 30_000,"
-assertion = "examples/docs-snippets/src/tracing.rs:421#assert_eq!(event_wire[9][\"context_budget_tokens\"], 30_000);"
+usage = "examples/docs-snippets/src/tracing.rs:395#context_budget_tokens: 30_000,"
+assertion = "examples/docs-snippets/src/tracing.rs:443#assert_eq!(event_wire[9][\"context_budget_tokens\"], 30_000);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned::dropped_prefix_messages"
@@ -56940,8 +56940,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned::dropped_prefix_messages"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:380#dropped_prefix_messages: 2,"
-assertion = "examples/docs-snippets/src/tracing.rs:423#assert_eq!(event_wire[9][\"dropped_prefix_messages\"], 2);"
+usage = "examples/docs-snippets/src/tracing.rs:402#dropped_prefix_messages: 2,"
+assertion = "examples/docs-snippets/src/tracing.rs:445#assert_eq!(event_wire[9][\"dropped_prefix_messages\"], 2);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned::max_context_tokens"
@@ -56950,8 +56950,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned::max_context_tokens"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:374#max_context_tokens: 40_000,"
-assertion = "examples/docs-snippets/src/tracing.rs:422#assert_eq!(event_wire[9][\"max_context_tokens\"], 40_000);"
+usage = "examples/docs-snippets/src/tracing.rs:396#max_context_tokens: 40_000,"
+assertion = "examples/docs-snippets/src/tracing.rs:444#assert_eq!(event_wire[9][\"max_context_tokens\"], 40_000);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::RollingHistoryPromptPruned::retained_messages"
@@ -56960,8 +56960,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::RollingHistoryPromptPruned::retained_messages"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:356#plugin_id: \"standard\".to_string(),"
-assertion = "examples/docs-snippets/src/tracing.rs:414#assert_eq!(event_wire[6][\"plugin_id\"], \"standard\");"
+usage = "examples/docs-snippets/src/tracing.rs:378#plugin_id: \"standard\".to_string(),"
+assertion = "examples/docs-snippets/src/tracing.rs:436#assert_eq!(event_wire[6][\"plugin_id\"], \"standard\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:347; the assertion at examples/docs-snippets/src/tracing.rs:388 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[6][\"plugin_id\"]` equals `\"standard\"`."
 
 [[api]]
@@ -56971,8 +56971,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::ProviderRequest"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:340#TraceEvent::ProviderRequest {"
-assertion = "examples/docs-snippets/src/tracing.rs:396#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+usage = "examples/docs-snippets/src/tracing.rs:362#TraceEvent::ProviderRequest {"
+assertion = "examples/docs-snippets/src/tracing.rs:418#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:331; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56982,8 +56982,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::ProviderRequest::event"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:341#event: provider_request,"
-assertion = "examples/docs-snippets/src/tracing.rs:396#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+usage = "examples/docs-snippets/src/tracing.rs:363#event: provider_request,"
+assertion = "examples/docs-snippets/src/tracing.rs:418#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:332; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -56993,8 +56993,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::ProviderStreamEvent"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:343#TraceEvent::ProviderStreamEvent {"
-assertion = "examples/docs-snippets/src/tracing.rs:400#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+usage = "examples/docs-snippets/src/tracing.rs:365#TraceEvent::ProviderStreamEvent {"
+assertion = "examples/docs-snippets/src/tracing.rs:422#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:334; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -57004,8 +57004,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::ProviderStreamEvent::event"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:344#event: provider_stream,"
-assertion = "examples/docs-snippets/src/tracing.rs:400#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+usage = "examples/docs-snippets/src/tracing.rs:366#event: provider_stream,"
+assertion = "examples/docs-snippets/src/tracing.rs:422#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:335; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -57078,8 +57078,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::ToolCallCompleted"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:317#let TraceEvent::ToolCallCompleted {"
-assertion = "examples/docs-snippets/src/tracing.rs:331#assert_eq!(output.value_for_projection()[\"matches\"][0], \"v1.2\");"
+usage = "examples/docs-snippets/src/tracing.rs:339#let TraceEvent::ToolCallCompleted {"
+assertion = "examples/docs-snippets/src/tracing.rs:353#assert_eq!(output.value_for_projection()[\"matches\"][0], \"v1.2\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:309; the assertion at examples/docs-snippets/src/tracing.rs:322 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `output.value_for_projection()[\"matches\"][0]` equals `\"v1.2\"`."
 
 [[api]]
@@ -57089,8 +57089,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::ToolCallCompleted::args"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:320#args,"
-assertion = "examples/docs-snippets/src/tracing.rs:331#assert_eq!(output.value_for_projection()[\"matches\"][0], \"v1.2\");"
+usage = "examples/docs-snippets/src/tracing.rs:342#args,"
+assertion = "examples/docs-snippets/src/tracing.rs:353#assert_eq!(output.value_for_projection()[\"matches\"][0], \"v1.2\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:312; the assertion at examples/docs-snippets/src/tracing.rs:322 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `output.value_for_projection()[\"matches\"][0]` equals `\"v1.2\"`."
 
 [[api]]
@@ -57100,8 +57100,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::ToolCallCompleted::call_id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:318#call_id,"
-assertion = "examples/docs-snippets/src/tracing.rs:331#assert_eq!(output.value_for_projection()[\"matches\"][0], \"v1.2\");"
+usage = "examples/docs-snippets/src/tracing.rs:340#call_id,"
+assertion = "examples/docs-snippets/src/tracing.rs:353#assert_eq!(output.value_for_projection()[\"matches\"][0], \"v1.2\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:310; the assertion at examples/docs-snippets/src/tracing.rs:322 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `output.value_for_projection()[\"matches\"][0]` equals `\"v1.2\"`."
 
 [[api]]
@@ -57111,8 +57111,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::ToolCallCompleted::duration_ms"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:322#duration_ms,"
-assertion = "examples/docs-snippets/src/tracing.rs:331#assert_eq!(output.value_for_projection()[\"matches\"][0], \"v1.2\");"
+usage = "examples/docs-snippets/src/tracing.rs:344#duration_ms,"
+assertion = "examples/docs-snippets/src/tracing.rs:353#assert_eq!(output.value_for_projection()[\"matches\"][0], \"v1.2\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:314; the assertion at examples/docs-snippets/src/tracing.rs:322 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `output.value_for_projection()[\"matches\"][0]` equals `\"v1.2\"`."
 
 [[api]]
@@ -57122,8 +57122,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::ToolCallCompleted::name"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:319#name,"
-assertion = "examples/docs-snippets/src/tracing.rs:331#assert_eq!(output.value_for_projection()[\"matches\"][0], \"v1.2\");"
+usage = "examples/docs-snippets/src/tracing.rs:190#name,"
+assertion = "examples/docs-snippets/src/tracing.rs:353#assert_eq!(output.value_for_projection()[\"matches\"][0], \"v1.2\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:311; the assertion at examples/docs-snippets/src/tracing.rs:322 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `output.value_for_projection()[\"matches\"][0]` equals `\"v1.2\"`."
 
 [[api]]
@@ -57133,8 +57133,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::ToolCallCompleted::output"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:321#output,"
-assertion = "examples/docs-snippets/src/tracing.rs:331#assert_eq!(output.value_for_projection()[\"matches\"][0], \"v1.2\");"
+usage = "examples/docs-snippets/src/tracing.rs:343#output,"
+assertion = "examples/docs-snippets/src/tracing.rs:353#assert_eq!(output.value_for_projection()[\"matches\"][0], \"v1.2\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:313; the assertion at examples/docs-snippets/src/tracing.rs:322 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `output.value_for_projection()[\"matches\"][0]` equals `\"v1.2\"`."
 
 [[api]]
@@ -57144,8 +57144,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::ToolCallStarted"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:349#TraceEvent::ToolCallStarted {"
-assertion = "examples/docs-snippets/src/tracing.rs:404#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
+usage = "examples/docs-snippets/src/tracing.rs:371#TraceEvent::ToolCallStarted {"
+assertion = "examples/docs-snippets/src/tracing.rs:426#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:340; the assertion at examples/docs-snippets/src/tracing.rs:378 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[4][\"args\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -57155,8 +57155,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::ToolCallStarted::args"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:352#args: serde_json::json!({ \"query\": \"release notes\" }),"
-assertion = "examples/docs-snippets/src/tracing.rs:404#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
+usage = "examples/docs-snippets/src/tracing.rs:374#args: serde_json::json!({ \"query\": \"release notes\" }),"
+assertion = "examples/docs-snippets/src/tracing.rs:426#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:343; the assertion at examples/docs-snippets/src/tracing.rs:378 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[4][\"args\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -57166,8 +57166,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::ToolCallStarted::call_id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:180#call_id: Some(\"call-7\".to_string()),"
-assertion = "examples/docs-snippets/src/tracing.rs:404#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
+usage = "examples/docs-snippets/src/tracing.rs:202#call_id: Some(\"call-7\".to_string()),"
+assertion = "examples/docs-snippets/src/tracing.rs:426#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:341; the assertion at examples/docs-snippets/src/tracing.rs:378 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[4][\"args\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -57177,8 +57177,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::ToolCallStarted::name"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:157#name: \"search_docs\".to_string(),"
-assertion = "examples/docs-snippets/src/tracing.rs:404#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
+usage = "examples/docs-snippets/src/tracing.rs:179#name: \"search_docs\".to_string(),"
+assertion = "examples/docs-snippets/src/tracing.rs:426#assert_eq!(event_wire[4][\"args\"][\"query\"], \"release notes\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:342; the assertion at examples/docs-snippets/src/tracing.rs:378 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[4][\"args\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -58510,8 +58510,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceLlmRequest::tool_choice"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:199#assert_eq!(request.tool_choice, \"required\");"
-assertion = "examples/docs-snippets/src/tracing.rs:215#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
+usage = "examples/docs-snippets/src/tracing.rs:221#assert_eq!(request.tool_choice, \"required\");"
+assertion = "examples/docs-snippets/src/tracing.rs:237#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:191; the assertion at examples/docs-snippets/src/tracing.rs:207 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -58521,8 +58521,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceLlmRequest::tools"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:200#assert_eq!(request.tools[0].name, \"search_docs\");"
-assertion = "examples/docs-snippets/src/tracing.rs:215#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
+usage = "examples/docs-snippets/src/tracing.rs:222#assert_eq!(request.tools[0].name, \"search_docs\");"
+assertion = "examples/docs-snippets/src/tracing.rs:237#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:192; the assertion at examples/docs-snippets/src/tracing.rs:207 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -58586,8 +58586,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TracePromptComponent"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:145#let component = TracePromptComponent {"
-assertion = "examples/docs-snippets/src/tracing.rs:393#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+usage = "examples/docs-snippets/src/tracing.rs:167#let component = TracePromptComponent {"
+assertion = "examples/docs-snippets/src/tracing.rs:415#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:137; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -58597,8 +58597,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TracePromptComponent::chars"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:154#assert_eq!(component.chars, Some(42));"
-assertion = "examples/docs-snippets/src/tracing.rs:393#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+usage = "examples/docs-snippets/src/tracing.rs:176#assert_eq!(component.chars, Some(42));"
+assertion = "examples/docs-snippets/src/tracing.rs:415#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:146; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -58608,8 +58608,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TracePromptComponent::hash"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:153#assert_eq!(component.hash, \"sha256:prompt-policy\");"
-assertion = "examples/docs-snippets/src/tracing.rs:393#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+usage = "examples/docs-snippets/src/tracing.rs:175#assert_eq!(component.hash, \"sha256:prompt-policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:415#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:145; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -58619,8 +58619,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TracePromptComponent::id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:151#assert_eq!(component.id, \"plugin:policy\");"
-assertion = "examples/docs-snippets/src/tracing.rs:393#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+usage = "examples/docs-snippets/src/tracing.rs:173#assert_eq!(component.id, \"plugin:policy\");"
+assertion = "examples/docs-snippets/src/tracing.rs:415#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:143; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -58630,8 +58630,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TracePromptComponent::kind"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:152#assert_eq!(component.kind, \"guidance\");"
-assertion = "examples/docs-snippets/src/tracing.rs:393#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
+usage = "examples/docs-snippets/src/tracing.rs:174#assert_eq!(component.kind, \"guidance\");"
+assertion = "examples/docs-snippets/src/tracing.rs:415#assert_eq!(event_wire[0][\"components\"][0][\"id\"], \"plugin:policy\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:144; the assertion at examples/docs-snippets/src/tracing.rs:367 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[0][\"components\"][0][\"id\"]` equals `\"plugin:policy\"`."
 
 [[api]]
@@ -58641,8 +58641,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderRequestEvent"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:245#let provider_request = TraceProviderRequestEvent {"
-assertion = "examples/docs-snippets/src/tracing.rs:396#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+usage = "examples/docs-snippets/src/tracing.rs:267#let provider_request = TraceProviderRequestEvent {"
+assertion = "examples/docs-snippets/src/tracing.rs:418#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:237; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -58652,8 +58652,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderRequestEvent::body_json"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:262#provider_request.body_json.as_ref().unwrap()[\"model\"],"
-assertion = "examples/docs-snippets/src/tracing.rs:396#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+usage = "examples/docs-snippets/src/tracing.rs:284#provider_request.body_json.as_ref().unwrap()[\"model\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:418#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:254; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -58663,8 +58663,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderRequestEvent::body_json_omitted_reason"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:265#assert!(provider_request.body_json_omitted_reason.is_none());"
-assertion = "examples/docs-snippets/src/tracing.rs:396#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+usage = "examples/docs-snippets/src/tracing.rs:287#assert!(provider_request.body_json_omitted_reason.is_none());"
+assertion = "examples/docs-snippets/src/tracing.rs:418#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:257; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -58674,8 +58674,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderRequestEvent::body_len"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:259#assert_eq!(provider_request.body_len, 128);"
-assertion = "examples/docs-snippets/src/tracing.rs:396#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+usage = "examples/docs-snippets/src/tracing.rs:281#assert_eq!(provider_request.body_len, 128);"
+assertion = "examples/docs-snippets/src/tracing.rs:418#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:251; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -58685,8 +58685,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderRequestEvent::body_sha256"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:260#assert_eq!(provider_request.body_sha256, \"sha256:request\");"
-assertion = "examples/docs-snippets/src/tracing.rs:396#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+usage = "examples/docs-snippets/src/tracing.rs:282#assert_eq!(provider_request.body_sha256, \"sha256:request\");"
+assertion = "examples/docs-snippets/src/tracing.rs:418#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:252; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -58696,8 +58696,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderRequestEvent::elapsed_ms"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:257#assert_eq!(provider_request.elapsed_ms, 35);"
-assertion = "examples/docs-snippets/src/tracing.rs:396#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+usage = "examples/docs-snippets/src/tracing.rs:279#assert_eq!(provider_request.elapsed_ms, 35);"
+assertion = "examples/docs-snippets/src/tracing.rs:418#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:249; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -58707,8 +58707,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderRequestEvent::endpoint"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:258#assert_eq!(provider_request.endpoint, \"/v1/responses\");"
-assertion = "examples/docs-snippets/src/tracing.rs:396#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+usage = "examples/docs-snippets/src/tracing.rs:280#assert_eq!(provider_request.endpoint, \"/v1/responses\");"
+assertion = "examples/docs-snippets/src/tracing.rs:418#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:250; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -58718,8 +58718,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderRequestEvent::provider"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:255#assert_eq!(provider_request.provider, \"provider:test\");"
-assertion = "examples/docs-snippets/src/tracing.rs:396#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+usage = "examples/docs-snippets/src/tracing.rs:277#assert_eq!(provider_request.provider, \"provider:test\");"
+assertion = "examples/docs-snippets/src/tracing.rs:418#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:247; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -58729,8 +58729,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderRequestEvent::sequence"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:256#assert_eq!(provider_request.sequence, 4);"
-assertion = "examples/docs-snippets/src/tracing.rs:396#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
+usage = "examples/docs-snippets/src/tracing.rs:278#assert_eq!(provider_request.sequence, 4);"
+assertion = "examples/docs-snippets/src/tracing.rs:418#event_wire[1][\"event\"][\"body_json\"][\"model\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:248; the assertion at examples/docs-snippets/src/tracing.rs:370 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[1][\"event\"][\"body_json\"][\"model\"]` equals `\"reasoning-model\"`."
 
 [[api]]
@@ -58740,8 +58740,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderStreamEvent"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:267#let provider_stream = TraceProviderStreamEvent {"
-assertion = "examples/docs-snippets/src/tracing.rs:400#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+usage = "examples/docs-snippets/src/tracing.rs:289#let provider_stream = TraceProviderStreamEvent {"
+assertion = "examples/docs-snippets/src/tracing.rs:422#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:259; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -58751,8 +58751,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderStreamEvent::elapsed_ms"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:280#assert_eq!(provider_stream.elapsed_ms, 52);"
-assertion = "examples/docs-snippets/src/tracing.rs:400#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+usage = "examples/docs-snippets/src/tracing.rs:302#assert_eq!(provider_stream.elapsed_ms, 52);"
+assertion = "examples/docs-snippets/src/tracing.rs:422#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:272; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -58762,8 +58762,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderStreamEvent::event_name"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:281#assert_eq!(provider_stream.event_name, \"response.output_item.added\");"
-assertion = "examples/docs-snippets/src/tracing.rs:400#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+usage = "examples/docs-snippets/src/tracing.rs:303#assert_eq!(provider_stream.event_name, \"response.output_item.added\");"
+assertion = "examples/docs-snippets/src/tracing.rs:422#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:273; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -58773,8 +58773,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderStreamEvent::item_id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:282#assert_eq!(provider_stream.item_id.as_deref(), Some(\"item-3\"));"
-assertion = "examples/docs-snippets/src/tracing.rs:400#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+usage = "examples/docs-snippets/src/tracing.rs:304#assert_eq!(provider_stream.item_id.as_deref(), Some(\"item-3\"));"
+assertion = "examples/docs-snippets/src/tracing.rs:422#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:274; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -58784,8 +58784,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderStreamEvent::output_index"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:283#assert_eq!(provider_stream.output_index, Some(0));"
-assertion = "examples/docs-snippets/src/tracing.rs:400#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+usage = "examples/docs-snippets/src/tracing.rs:305#assert_eq!(provider_stream.output_index, Some(0));"
+assertion = "examples/docs-snippets/src/tracing.rs:422#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:275; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -58795,8 +58795,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderStreamEvent::provider"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:278#assert_eq!(provider_stream.provider, \"provider:test\");"
-assertion = "examples/docs-snippets/src/tracing.rs:400#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+usage = "examples/docs-snippets/src/tracing.rs:300#assert_eq!(provider_stream.provider, \"provider:test\");"
+assertion = "examples/docs-snippets/src/tracing.rs:422#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:270; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -58806,8 +58806,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderStreamEvent::raw_json"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:287#provider_stream.raw_json.as_ref().unwrap()[\"type\"],"
-assertion = "examples/docs-snippets/src/tracing.rs:400#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+usage = "examples/docs-snippets/src/tracing.rs:309#provider_stream.raw_json.as_ref().unwrap()[\"type\"],"
+assertion = "examples/docs-snippets/src/tracing.rs:422#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:279; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -58817,8 +58817,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderStreamEvent::raw_len"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:284#assert_eq!(provider_stream.raw_len, 96);"
-assertion = "examples/docs-snippets/src/tracing.rs:400#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+usage = "examples/docs-snippets/src/tracing.rs:306#assert_eq!(provider_stream.raw_len, 96);"
+assertion = "examples/docs-snippets/src/tracing.rs:422#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:276; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -58828,8 +58828,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderStreamEvent::raw_sha256"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:285#assert_eq!(provider_stream.raw_sha256, \"sha256:event\");"
-assertion = "examples/docs-snippets/src/tracing.rs:400#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+usage = "examples/docs-snippets/src/tracing.rs:307#assert_eq!(provider_stream.raw_sha256, \"sha256:event\");"
+assertion = "examples/docs-snippets/src/tracing.rs:422#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:277; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -58839,8 +58839,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceProviderStreamEvent::sequence"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:279#assert_eq!(provider_stream.sequence, 5);"
-assertion = "examples/docs-snippets/src/tracing.rs:400#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
+usage = "examples/docs-snippets/src/tracing.rs:301#assert_eq!(provider_stream.sequence, 5);"
+assertion = "examples/docs-snippets/src/tracing.rs:422#assert_eq!(event_wire[2][\"event\"][\"raw_json\"][\"type\"], \"tool_call\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:271; the assertion at examples/docs-snippets/src/tracing.rs:374 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `event_wire[2][\"event\"][\"raw_json\"][\"type\"]` equals `\"tool_call\"`."
 
 [[api]]
@@ -59050,8 +59050,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceRuntimeStreamEvent::tool_name"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:304#assert_eq!(runtime_stream.tool_name.as_deref(), Some(\"search_docs\"));"
-assertion = "examples/docs-snippets/src/tracing.rs:304#assert_eq!(runtime_stream.tool_name.as_deref(), Some(\"search_docs\"));"
+usage = "examples/docs-snippets/src/tracing.rs:326#assert_eq!(runtime_stream.tool_name.as_deref(), Some(\"search_docs\"));"
+assertion = "examples/docs-snippets/src/tracing.rs:326#assert_eq!(runtime_stream.tool_name.as_deref(), Some(\"search_docs\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:296; the assertion at examples/docs-snippets/src/tracing.rs:296 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `runtime_stream.tool_name.as_deref()` equals `Some(\"search_docs\")`."
 
 [[api]]
@@ -59314,8 +59314,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceToolSpec"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:156#let tool = TraceToolSpec {"
-assertion = "examples/docs-snippets/src/tracing.rs:215#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
+usage = "examples/docs-snippets/src/tracing.rs:178#let tool = TraceToolSpec {"
+assertion = "examples/docs-snippets/src/tracing.rs:237#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:148; the assertion at examples/docs-snippets/src/tracing.rs:207 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -59325,8 +59325,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceToolSpec::description"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:169#assert_eq!(tool.description, \"Search the host knowledge base.\");"
-assertion = "examples/docs-snippets/src/tracing.rs:215#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
+usage = "examples/docs-snippets/src/tracing.rs:191#assert_eq!(tool.description, \"Search the host knowledge base.\");"
+assertion = "examples/docs-snippets/src/tracing.rs:237#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:161; the assertion at examples/docs-snippets/src/tracing.rs:207 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -59336,8 +59336,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceToolSpec::input_schema"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:170#assert_eq!(tool.input_schema[\"required\"][0], \"query\");"
-assertion = "examples/docs-snippets/src/tracing.rs:215#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
+usage = "examples/docs-snippets/src/tracing.rs:192#assert_eq!(tool.input_schema[\"required\"][0], \"query\");"
+assertion = "examples/docs-snippets/src/tracing.rs:237#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:162; the assertion at examples/docs-snippets/src/tracing.rs:207 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -59347,8 +59347,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceToolSpec::name"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:168#assert_eq!(tool.name, \"search_docs\");"
-assertion = "examples/docs-snippets/src/tracing.rs:215#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
+usage = "examples/docs-snippets/src/tracing.rs:190#assert_eq!(tool.name, \"search_docs\");"
+assertion = "examples/docs-snippets/src/tracing.rs:237#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:160; the assertion at examples/docs-snippets/src/tracing.rs:207 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -59358,8 +59358,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceToolSpec::output_schema"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/tracing.rs:171#assert_eq!(tool.output_schema[\"required\"][0], \"matches\");"
-assertion = "examples/docs-snippets/src/tracing.rs:215#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
+usage = "examples/docs-snippets/src/tracing.rs:193#assert_eq!(tool.output_schema[\"required\"][0], \"matches\");"
+assertion = "examples/docs-snippets/src/tracing.rs:237#request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/tracing.rs:163; the assertion at examples/docs-snippets/src/tracing.rs:207 in `trace_events_project_tool_and_provider_activity_into_structured_audit_records` observes that `request_wire[\"messages\"][0][\"blocks\"][0][\"input_json\"][\"query\"]` equals `\"release notes\"`."
 
 [[api]]
@@ -60301,7 +60301,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerInputBinding::Event"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_advanced.rs:123#lashlang::TriggerInputBinding::Event,"
+usage = "examples/docs-snippets/src/embedding_advanced.rs:131#lashlang::TriggerInputBinding::Event,"
 
 [[api]]
 symbol = "lash::triggers::TriggerInputBinding::Fixed"
@@ -65414,8 +65414,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectReplayMismatchSummary"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/persistence.rs:136#error.summary = Some(lash::runtime::RuntimeEffectReplayMismatchSummary {"
-assertion = "examples/docs-snippets/src/persistence.rs:142#assert_eq!(summary.divergent_path_count, 1);"
+usage = "examples/docs-snippets/src/persistence.rs:176#error.summary = Some(lash::runtime::RuntimeEffectReplayMismatchSummary {"
+assertion = "examples/docs-snippets/src/persistence.rs:182#assert_eq!(summary.divergent_path_count, 1);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectReplayMismatchSummary::divergent_path_count"
@@ -65424,8 +65424,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectReplayMismatchSummary::divergent_path_count"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/persistence.rs:137#divergent_path_count: 1,"
-assertion = "examples/docs-snippets/src/persistence.rs:142#assert_eq!(summary.divergent_path_count, 1);"
+usage = "examples/docs-snippets/src/persistence.rs:177#divergent_path_count: 1,"
+assertion = "examples/docs-snippets/src/persistence.rs:182#assert_eq!(summary.divergent_path_count, 1);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectReplayMismatchSummary::first_divergent_paths"
@@ -65434,8 +65434,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectReplayMismatchSummary::first_divergent_paths"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/persistence.rs:138#first_divergent_paths: vec![\"command.duration_ms\".to_string()],"
-assertion = "examples/docs-snippets/src/persistence.rs:143#assert_eq!(summary.first_divergent_paths, [\"command.duration_ms\"]);"
+usage = "examples/docs-snippets/src/persistence.rs:178#first_divergent_paths: vec![\"command.duration_ms\".to_string()],"
+assertion = "examples/docs-snippets/src/persistence.rs:183#assert_eq!(summary.first_divergent_paths, [\"command.duration_ms\"]);"
 
 [[api]]
 symbol = "lash_core::RuntimeExecutionContext"
@@ -69506,7 +69506,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::SessionSpec::turn_budget"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_advanced.rs:183#SessionSpec::inherit().turn_budget(lash::TurnBudget::bounded(8))"
+usage = "examples/docs-snippets/src/embedding_advanced.rs:195#SessionSpec::inherit().turn_budget(lash::TurnBudget::bounded(8))"
 [[api]]
 symbol = "lash::tracing::TraceEvent::DurableSegmentBoundary"
 kind = "variant"

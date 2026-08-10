@@ -52,6 +52,11 @@ async fn plugin_core(provider: ProviderHandle, model_id: &str) -> anyhow::Result
         )
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .configure_plugins(|plugins| {
             plugins.push(Arc::new(AppPluginFactory) as Arc<dyn PluginFactory>);
         })
@@ -139,3 +144,15 @@ fn update_plan_definition() -> ToolDefinition {
     )
 }
 // docs:end:update-plan-plugin
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn documented_plugin_builder_resolves() {
+        plugin_core(crate::test_support::provider(), "docs-snippet-test")
+            .await
+            .expect("plugin snippet must build");
+    }
+}

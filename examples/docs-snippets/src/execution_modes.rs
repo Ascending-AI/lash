@@ -13,6 +13,11 @@ async fn standard_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Re
         .model(model)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .build()?;
 
     // A plain `open()` runs the session in standard mode.
@@ -36,9 +41,35 @@ async fn rlm_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Result<
         .model(model)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .build()?;
 
     let session = core.session("task-1").open().await?;
     // docs:end:rlm-core
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn documented_execution_mode_builders_resolve() {
+        standard_mode(
+            crate::test_support::provider(),
+            crate::test_support::model(),
+        )
+        .await
+        .expect("standard-mode snippet must build");
+        rlm_mode(
+            crate::test_support::provider(),
+            crate::test_support::model(),
+        )
+        .await
+        .expect("RLM snippet must build");
+    }
 }

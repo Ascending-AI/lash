@@ -26,6 +26,11 @@ async fn inmemory_core(provider: ProviderHandle, model: ModelSpec) -> anyhow::Re
         .model(model)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .build()?;
     // docs:end:inmemory-core
     Ok(())
@@ -50,7 +55,7 @@ async fn sqlite_core(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
         ),
-        artifact_store,
+        artifact_store.clone(),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
@@ -60,6 +65,9 @@ async fn sqlite_core(
         .attachment_store(Arc::new(FileAttachmentStore::new(
             data_dir.join("attachments"),
         )))
+        .process_env_store(artifact_store)
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .build()?;
     // docs:end:sqlite-core
     Ok(())
@@ -146,6 +154,7 @@ async fn process_registry_core(
     process_registry: Arc<dyn ProcessRegistry>,
     artifact_store: Arc<dyn LashlangArtifactStore>,
     attachment_store: Arc<dyn AttachmentStore>,
+    process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
 ) -> anyhow::Result<()> {
     // docs:start:process-registry-core
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
@@ -162,6 +171,9 @@ async fn process_registry_core(
         .process_registry(process_registry)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(attachment_store)
+        .process_env_store(process_env_store)
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .build()?;
     // docs:end:process-registry-core
     Ok(())
@@ -201,6 +213,11 @@ async fn subagents_core(
         )
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .plugin(Arc::new(subagents) as Arc<dyn PluginFactory>)
         .build()?;
     // docs:end:subagents-core
@@ -240,6 +257,15 @@ async fn mcp_core(
         .build()
         .await?;
 
+    let core = configured_mcp_core(provider, model, mcp)?;
+    Ok(())
+}
+
+fn configured_mcp_core(
+    provider: ProviderHandle,
+    model: String,
+    mcp: McpPluginFactory,
+) -> lash::Result<LashCore> {
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
@@ -247,7 +273,7 @@ async fn mcp_core(
         ),
         std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model.clone())
@@ -261,11 +287,15 @@ async fn mcp_core(
         .attachment_store(std::sync::Arc::new(
             lash::persistence::InMemoryAttachmentStore::new(),
         ))
+        .process_env_store(std::sync::Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .plugin(std::sync::Arc::new(mcp))
-        .build()?;
-    // docs:end:mcp-core
-    Ok(())
+        .build()
 }
+// docs:end:mcp-core
 
 async fn mcp_hot_swap(mcp: &McpPluginFactory) -> anyhow::Result<()> {
     use lash_plugin_mcp::McpServerConfig;
@@ -291,12 +321,14 @@ async fn durable_stores_core(
     store_factory: Arc<dyn SessionStoreFactory>,
 ) -> anyhow::Result<()> {
     // docs:start:durable-stores-core
+    let artifact_store =
+        std::sync::Arc::new(lash_sqlite_store::Store::open(&data_dir.join("artifacts.db")).await?);
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
         ),
-        std::sync::Arc::new(lash_sqlite_store::Store::open(&data_dir.join("artifacts.db")).await?),
+        artifact_store.clone(),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
@@ -313,8 +345,83 @@ async fn durable_stores_core(
         .attachment_store(std::sync::Arc::new(
             lash::persistence::FileAttachmentStore::new(data_dir.join("attachments")),
         ))
+        .process_env_store(artifact_store)
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .turn_budget(lash::TurnBudget::bounded(50))
         .build()?;
     // docs:end:durable-stores-core
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn documented_advanced_embedding_builders_resolve() {
+        inmemory_core(
+            crate::test_support::provider(),
+            crate::test_support::model(),
+        )
+        .await
+        .expect("in-memory core snippet must build");
+
+        let data_dir = tempfile::tempdir().expect("temporary docs-snippet directory");
+        sqlite_core(
+            crate::test_support::provider(),
+            crate::test_support::model(),
+            data_dir.path().to_path_buf(),
+        )
+        .await
+        .expect("SQLite core snippet must build");
+
+        let registry = Arc::new(
+            lash_sqlite_store::SqliteProcessRegistry::memory()
+                .await
+                .expect("in-memory process registry"),
+        );
+        process_registry_core(
+            crate::test_support::provider(),
+            crate::test_support::model(),
+            Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+                data_dir.path().join("process-sessions"),
+            )),
+            registry,
+            Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
+            Arc::new(lash::persistence::InMemoryAttachmentStore::new()),
+            Arc::new(lash::persistence::InMemoryProcessExecutionEnvStore::new()),
+        )
+        .await
+        .expect("process-registry core snippet must build");
+
+        subagents_core(
+            crate::test_support::provider(),
+            "docs-snippet-test".to_string(),
+            BTreeMap::new(),
+        )
+        .await
+        .expect("subagents core snippet must build");
+
+        let mcp = McpPluginFactory::builder(BTreeMap::new())
+            .build()
+            .await
+            .expect("empty MCP plugin factory");
+        configured_mcp_core(
+            crate::test_support::provider(),
+            "docs-snippet-test".to_string(),
+            mcp,
+        )
+        .expect("MCP core snippet must build");
+
+        durable_stores_core(
+            crate::test_support::provider(),
+            data_dir.path().to_path_buf(),
+            Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+                data_dir.path().join("durable-sessions"),
+            )),
+        )
+        .await
+        .expect("durable-stores core snippet must build");
+    }
 }

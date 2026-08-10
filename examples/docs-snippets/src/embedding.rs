@@ -63,13 +63,12 @@ impl PluginFactory for CustomBudgetPlugin {
     }
 }
 
-async fn full_core(provider: ProviderHandle) -> anyhow::Result<()> {
+async fn full_core(provider: ProviderHandle, data_dir: std::path::PathBuf) -> anyhow::Result<()> {
     // docs:start:full-core
     use std::sync::Arc;
 
     use lash::{TurnEvent, TurnInput, plugins::runtime_plugin_stack, tools::*};
 
-    let data_dir = std::path::PathBuf::from(".lash-data");
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         data_dir.join("sessions"),
     ));
@@ -81,7 +80,7 @@ async fn full_core(provider: ProviderHandle) -> anyhow::Result<()> {
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
         ),
-        artifact_store,
+        artifact_store.clone(),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
@@ -98,6 +97,9 @@ async fn full_core(provider: ProviderHandle) -> anyhow::Result<()> {
         .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
             data_dir.join("attachments"),
         )))
+        .process_env_store(artifact_store)
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .build()?;
 
     let session = core.session("chat-123").open().await?;
@@ -145,6 +147,11 @@ async fn preset_core(provider: ProviderHandle) -> anyhow::Result<()> {
         .session_spec(root_spec)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .configure_plugins(|plugins| {
             plugins.push(Arc::new(AppPluginFactory) as Arc<dyn PluginFactory>);
         })
@@ -175,6 +182,11 @@ async fn custom_stack(root_spec: SessionSpec) -> anyhow::Result<()> {
         .plugins(plugins)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .build()?;
     // docs:end:custom-stack
     let _ = core;
@@ -316,4 +328,33 @@ async fn pending_input_reconciliation(session: &LashSession) -> anyhow::Result<(
     render_pending_inputs(&session.pending_turn_inputs().await?);
     // docs:end:pending-input-reconciliation
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn documented_embedding_builders_resolve() {
+        let data_dir = tempfile::tempdir().expect("temporary docs-snippet directory");
+        crate::test_support::assert_builder_resolved(
+            full_core(
+                crate::test_support::provider(),
+                data_dir.path().to_path_buf(),
+            )
+            .await,
+        );
+
+        preset_core(crate::test_support::provider())
+            .await
+            .expect("preset-core snippet must build");
+
+        let root_spec = SessionSpec::new()
+            .turn_budget(lash::TurnBudget::Unbounded)
+            .provider_id("unconfigured")
+            .model(crate::test_support::model());
+        custom_stack(root_spec)
+            .await
+            .expect("custom-stack snippet must build");
+    }
 }

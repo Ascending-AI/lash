@@ -8,13 +8,16 @@ use lash::provider::ProviderHandle;
 use lash::{LashCore, LashSession, TurnInput, TurnOutput};
 use lash_sqlite_store::SqliteSessionStoreFactory;
 
-async fn sqlite_core(provider: ProviderHandle, model: String) -> anyhow::Result<()> {
+async fn sqlite_core(
+    provider: ProviderHandle,
+    model: String,
+    data_dir: PathBuf,
+) -> anyhow::Result<()> {
     // docs:start:sqlite-core
     use std::sync::Arc;
 
     use lash_sqlite_store::{SqliteSessionStoreFactory, Store};
 
-    let data_dir = std::path::PathBuf::from("./.lash-data");
     let store_factory = Arc::new(SqliteSessionStoreFactory::new(data_dir.join("sessions")));
     let artifact_store = Arc::new(Store::open(&data_dir.join("artifacts.db")).await?);
 
@@ -23,7 +26,7 @@ async fn sqlite_core(provider: ProviderHandle, model: String) -> anyhow::Result<
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
         ),
-        artifact_store,
+        artifact_store.clone(),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
@@ -38,6 +41,9 @@ async fn sqlite_core(provider: ProviderHandle, model: String) -> anyhow::Result<
         .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
             data_dir.join("attachments"),
         )))
+        .process_env_store(artifact_store)
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .build()?;
     // docs:end:sqlite-core
     Ok(())
@@ -58,7 +64,11 @@ async fn explicit_store(
     Ok(())
 }
 
-async fn postgres_core(database_url: String) -> anyhow::Result<()> {
+async fn postgres_core(
+    database_url: String,
+    provider: ProviderHandle,
+    model: lash::ModelSpec,
+) -> anyhow::Result<()> {
     // docs:start:postgres-core
     use std::sync::Arc;
 
@@ -81,16 +91,46 @@ async fn postgres_core(database_url: String) -> anyhow::Result<()> {
         ),
         Arc::new(storage.lashlang_artifact_store()),
     );
-    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-        .store_factory(Arc::new(storage.session_store_factory()))
-        .process_registry(Arc::new(storage.process_registry()))
-        .trigger_store(Arc::new(storage.trigger_store()))
-        .attachment_store(Arc::new(attachments))
-        // provider, model, effect host...
-        .build()?;
-    // docs:end:postgres-core
+    let core = build_persistent_core(
+        factory,
+        provider,
+        model,
+        Arc::new(storage.session_store_factory()),
+        Arc::new(storage.process_registry()),
+        Arc::new(storage.trigger_store()),
+        Arc::new(storage.effect_host()),
+        Arc::new(attachments),
+        Arc::new(storage.process_env_store()),
+    )?;
     Ok(())
 }
+
+#[allow(clippy::too_many_arguments)]
+fn build_persistent_core(
+    factory: lash::rlm::RlmProtocolPluginFactory,
+    provider: ProviderHandle,
+    model: lash::ModelSpec,
+    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    process_registry: Arc<dyn lash::process::ProcessRegistry>,
+    trigger_store: Arc<dyn lash::triggers::TriggerStore>,
+    effect_host: Arc<dyn lash::durability::EffectHost>,
+    attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
+    process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
+) -> lash::Result<LashCore> {
+    lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .provider(provider)
+        .model(model)
+        .store_factory(store_factory)
+        .process_registry(process_registry)
+        .trigger_store(trigger_store)
+        .effect_host(effect_host)
+        .attachment_store(attachment_store)
+        .process_env_store(process_env_store)
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .build()
+}
+// docs:end:postgres-core
 
 fn audit_process_cleanup(_report: lash::process::ProcessSessionDeleteReport) -> anyhow::Result<()> {
     Ok(())
@@ -203,7 +243,7 @@ async fn shared_factory(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
         ),
-        artifact_store,
+        artifact_store.clone(),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .provider(provider)
@@ -222,6 +262,9 @@ async fn shared_factory(
         .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
             data_dir.join("attachments"),
         )))
+        .process_env_store(artifact_store)
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .build()?;
 
     // Per request: open a session keyed by the app's chat id.
@@ -305,5 +348,56 @@ fn adaptive_reasoning_capability() -> lash::provider::ModelCapability {
         cache_control: None,
         stream_termination: None,
         sampling: lash::provider::SamplingCapability::Configurable,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn documented_persistence_builders_resolve() {
+        let data_dir = tempfile::tempdir().expect("temporary docs-snippet directory");
+        sqlite_core(
+            crate::test_support::provider(),
+            "docs-snippet-test".to_string(),
+            data_dir.path().to_path_buf(),
+        )
+        .await
+        .expect("SQLite persistence snippet must build");
+
+        let factory = lash::rlm::RlmProtocolPluginFactory::new(
+            lash::rlm::RlmProtocolPluginConfig::new(
+                lash::rlm::ExecutionBound::instructions(1_000_000),
+                lash::rlm::ExecutionBound::secs(30),
+            ),
+            Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
+        );
+        build_persistent_core(
+            factory,
+            crate::test_support::provider(),
+            crate::test_support::model(),
+            Arc::new(lash::persistence::InMemorySessionStoreFactory::new()),
+            Arc::new(
+                lash_sqlite_store::SqliteProcessRegistry::memory()
+                    .await
+                    .expect("in-memory process registry"),
+            ),
+            Arc::new(lash::triggers::InMemoryTriggerStore::default()),
+            Arc::new(lash::durability::InlineEffectHost::default()),
+            Arc::new(lash::persistence::InMemoryAttachmentStore::new()),
+            Arc::new(lash::persistence::InMemoryProcessExecutionEnvStore::new()),
+        )
+        .expect("Postgres wiring snippet must build with test stores");
+
+        shared_factory(
+            crate::test_support::provider(),
+            "docs-snippet-test".to_string(),
+            "medium".to_string(),
+            data_dir.path().to_path_buf(),
+            "docs-snippet-session",
+        )
+        .await
+        .expect("shared-factory snippet must build");
     }
 }

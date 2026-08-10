@@ -27,6 +27,11 @@ async fn jsonl_trace_core(provider: ProviderHandle, model: String) -> anyhow::Re
         )
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .trace_sink(trace_sink)
         .trace_level(TraceLevel::Extended)
         .build()?;
@@ -56,6 +61,11 @@ async fn lashlang_execution_jsonl(
         .attachment_store(std::sync::Arc::new(
             lash::persistence::InMemoryAttachmentStore::new(),
         ))
+        .process_env_store(std::sync::Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .build()?;
     // docs:end:lashlang-execution-jsonl
     Ok(())
@@ -87,6 +97,11 @@ async fn lashlang_graph_store(provider: ProviderHandle, model: ModelSpec) -> any
         .model(model)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .build()?;
 
     let graph = lashlang_graphs.graph("process:process-id");
@@ -110,7 +125,7 @@ impl TraceSink for FanoutTraceSink {
 }
 // docs:end:fanout-trace-sink
 
-async fn otel_trace_core() -> anyhow::Result<()> {
+async fn otel_trace_core(provider: ProviderHandle, model: ModelSpec) -> anyhow::Result<()> {
     // docs:start:otel-trace-core
     use std::sync::Arc;
 
@@ -123,8 +138,15 @@ async fn otel_trace_core() -> anyhow::Result<()> {
     // process-global OpenTelemetry tracer provider.
     let sink: Arc<dyn TraceSink> = Arc::new(OtelTraceSink::from_global_provider());
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .provider(provider)
+        .model(model)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .trace_sink(sink)
         .trace_level(TraceLevel::Extended)
         .build()?;
@@ -427,5 +449,38 @@ mod asserted_examples {
         assert_eq!(event_wire[10]["instructions_present"], true);
         assert!(event_wire[11]["type"] == "rolling_history_compaction_completed");
         assert_eq!(event_wire[11]["summary_nodes"], 1);
+    }
+}
+
+#[cfg(test)]
+mod builder_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn documented_tracing_builders_resolve() {
+        jsonl_trace_core(
+            crate::test_support::provider(),
+            "docs-snippet-test".to_string(),
+        )
+        .await
+        .expect("JSONL tracing snippet must build");
+        lashlang_execution_jsonl(
+            crate::test_support::provider(),
+            crate::test_support::model(),
+        )
+        .await
+        .expect("Lashlang JSONL snippet must build");
+        lashlang_graph_store(
+            crate::test_support::provider(),
+            crate::test_support::model(),
+        )
+        .await
+        .expect("Lashlang graph-store snippet must build");
+        otel_trace_core(
+            crate::test_support::provider(),
+            crate::test_support::model(),
+        )
+        .await
+        .expect("OpenTelemetry tracing snippet must build");
     }
 }

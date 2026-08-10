@@ -11,6 +11,7 @@ use lash::runtime::NoopTurnActivitySink;
 async fn facade_turn(
     provider: ProviderHandle,
     store_factory: Arc<dyn SessionStoreFactory>,
+    process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
     data_dir: PathBuf,
     chat_id: &str,
     user_text: String,
@@ -32,6 +33,9 @@ async fn facade_turn(
         .attachment_store(std::sync::Arc::new(
             lash::persistence::FileAttachmentStore::new(data_dir.join("attachments")),
         ))
+        .process_env_store(process_env_store)
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .build()?;
 
     let session = core.session(chat_id).open().await?;
@@ -41,4 +45,28 @@ async fn facade_turn(
         .await?;
     // docs:end:facade-turn
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn documented_facade_builder_resolves() {
+        let data_dir = tempfile::tempdir().expect("temporary docs-snippet directory");
+        let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+            data_dir.path().join("sessions"),
+        ));
+        let result = facade_turn(
+            crate::test_support::provider(),
+            store_factory,
+            Arc::new(lash::persistence::InMemoryProcessExecutionEnvStore::new()),
+            data_dir.path().to_path_buf(),
+            "docs-snippet-session",
+            "hello".to_string(),
+        )
+        .await;
+
+        crate::test_support::assert_builder_resolved(result);
+    }
 }

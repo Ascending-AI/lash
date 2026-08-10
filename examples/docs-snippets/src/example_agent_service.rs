@@ -61,12 +61,13 @@ async fn service_core(
         .effect_host(std::sync::Arc::new(
             lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .process_env_store(process_env_store)
-        .trigger_store(trigger_store)
         .attachment_store(std::sync::Arc::new(
             lash::persistence::FileAttachmentStore::new(data_dir.join("attachments")),
         ))
+        .process_env_store(process_env_store)
+        // Start bounded; tune both limits for your backend's latency envelope.
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .trigger_store(trigger_store)
         .trace_sink(trace_sink)
         .trace_level(TraceLevel::Extended)
         .build()?;
@@ -158,5 +159,36 @@ fn adaptive_reasoning_capability() -> lash::provider::ModelCapability {
         cache_control: Some(lash::provider::CacheControlDialect::Anthropic),
         stream_termination: None,
         sampling: lash::provider::SamplingCapability::Configurable,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash::tracing::{TraceRecord, TraceSinkError};
+
+    struct NoopTraceSink;
+
+    impl TraceSink for NoopTraceSink {
+        fn append(&self, _record: &TraceRecord) -> Result<(), TraceSinkError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn documented_agent_service_builder_resolves() {
+        let data_dir = tempfile::tempdir().expect("temporary docs-snippet directory");
+        service_core(
+            "test-api-key".to_string(),
+            "docs-snippet-test".to_string(),
+            "medium".to_string(),
+            data_dir.path().to_path_buf(),
+            Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+                data_dir.path().join("sessions"),
+            )),
+            Arc::new(NoopTraceSink),
+        )
+        .await
+        .expect("agent-service snippet must build");
     }
 }
