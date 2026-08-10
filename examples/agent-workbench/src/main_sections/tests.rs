@@ -1570,109 +1570,109 @@ finish initial
 
     #[test]
     #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
-    fn live_restate_cron_runs_trigger_and_queued_turn_end_to_end() {
-        run_async_test_on_stack_budget_multi_thread("workbench-restate-cron-e2e", 4, || {
-            live_restate_cron_runs_trigger_and_queued_turn_end_to_end_inner()
+    fn live_restate_cron_zombie_cancel_path_end_to_end() {
+        run_async_test_on_stack_budget_multi_thread("workbench-restate-cron-zombie-e2e", 4, || {
+            live_restate_cron_zombie_cancel_path_end_to_end_inner()
         });
     }
 
-    async fn live_restate_cron_runs_trigger_and_queued_turn_end_to_end_inner() {
-        let ingress_url = match std::env::var("RESTATE_INGRESS_URL") {
-            Ok(value) => value,
-            Err(_) => {
-                eprintln!("skipping live Restate E2E: RESTATE_INGRESS_URL is not set");
-                return;
-            }
+    async fn live_restate_cron_zombie_cancel_path_end_to_end_inner() {
+        let Some(scenario) = start_live_restate_cron_scenario(
+            "agent-workbench-restate-cron-zombie-e2e",
+            live_restate_cron_provider(LIVE_RESTATE_CRON_ZOMBIE_EXPR.to_string()),
+        )
+        .await
+        else {
+            return;
         };
-        let admin_url = std::env::var("RESTATE_ADMIN_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-        let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-            .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
-            .parse()
-            .expect("valid workbench E2E endpoint bind");
-        let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-            .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
-        let data_dir = std::env::temp_dir().join(format!(
-            "agent-workbench-restate-e2e-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-        let harness = live_workbench_restate_state(&data_dir, ingress_url).await;
-        restate::spawn_restate_endpoint(
-            endpoint_bind,
-            harness.state.clone(),
-            harness.process_deployment,
-            harness.process_worker,
+
+        // FIG-1130 ruling: sync cancel is the live fast path and zombie cancel
+        // is the crash-safety backstop. This future schedule leaves no queued
+        // turn in flight; retirement commits first, then an explicit run drives
+        // the backstop without relying on wall-clock ordering.
+        retire_cron_session_and_assert_zombie(
+            &scenario.state,
+            &scenario.trace_path,
+            &scenario.cron_session_id,
+            &scenario.cron_job_key,
+        )
+        .await;
+        assert_no_active_lash_restate_invocations(&scenario.state, Duration::from_secs(10)).await;
+        let _ = std::fs::remove_dir_all(scenario.data_dir);
+    }
+
+    #[test]
+    #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
+    fn live_restate_cron_queued_turn_sync_cancel_path_end_to_end() {
+        run_async_test_on_stack_budget_multi_thread(
+            "workbench-restate-cron-sync-cancel-e2e",
+            4,
+            live_restate_cron_queued_turn_sync_cancel_path_end_to_end_inner,
         );
-        wait_for_endpoint_socket(endpoint_bind).await;
-        register_restate_deployment(&admin_url, &endpoint_url).await;
-        let turn_invocation_id = run_workbench_turn_via_restate(
-            &harness.state,
-            &format!(
-                "Register a cron trigger that runs every {} seconds and reports the tick.",
-                LIVE_RESTATE_CRON_SCHEDULE_INTERVAL.as_secs()
-            ),
+    }
+
+    async fn live_restate_cron_queued_turn_sync_cancel_path_end_to_end_inner() {
+        let (provider, mut queued_turn_entered, release_queued_turn) =
+            gated_live_restate_cron_provider();
+        let Some(scenario) = start_live_restate_cron_scenario(
+            "agent-workbench-restate-cron-sync-cancel-e2e",
+            provider,
+        )
+        .await
+        else {
+            return;
+        };
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(20), queued_turn_entered.recv())
+                .await
+                .expect("first cron queued-turn provider call timeout"),
+            Some(1),
+            "provider call zero registers the cron; call one must be its queued turn"
+        );
+        // Holding that queued turn pins the job in its scheduled state until a
+        // second tick proves run() re-armed the chain. Releasing the provider
+        // then deterministically lets the queued-turn sync become the canceler.
+        wait_for_cron_trace_record_count(
+            &scenario.trace_path,
+            "agent_workbench.cron.restate.run",
+            &scenario.cron_session_id,
+            &scenario.cron_job_key,
+            2,
+            live_restate_cron_tick_wait(),
         )
         .await;
-        wait_for_workbench_message(&harness.state, "cron registered", Duration::from_secs(60))
-            .await;
-        wait_for_restate_invocation_success(
-            &harness.state,
-            &turn_invocation_id,
-            Duration::from_secs(30),
-        )
-        .await;
-        wait_for_restate_cron_sync(&harness.state, &harness.trace_path, Duration::from_secs(30))
-            .await;
-        let cron_session_id = rotate_cron_session_out_of_current(&harness.state);
-        let cron_job_key = cron_job_key_for_session(&harness.state, &cron_session_id);
-        // Pin this session's exact Restate object before observing either tick.
-        // Another cron job may legitimately share the trace file and key set;
-        // every decision assertion below must stay scoped to this session and
-        // object instead of accepting an unrelated whole-file match.
+        assert_live_non_current_cron_trace(
+            &scenario.trace_path,
+            &scenario.cron_session_id,
+            &scenario.cron_job_key,
+        );
+        disable_cron_registration_for_sync_scenario(&scenario).await;
+        release_queued_turn.notify_waiters();
         wait_for_cron_workbench_message(
-            &harness.state,
-            &harness.trace_path,
-            &cron_session_id,
-            &cron_job_key,
+            &scenario.state,
+            &scenario.trace_path,
+            &scenario.cron_session_id,
+            &scenario.cron_job_key,
             "cron tick observed",
             live_restate_cron_tick_wait(),
         )
         .await;
-        wait_for_cron_trace_record_count(
-            &harness.trace_path,
-            "agent_workbench.cron.restate.run",
-            &cron_session_id,
-            &cron_job_key,
-            1,
-            live_restate_cron_tick_wait(),
-        )
-        .await;
-        let trace_text =
-            std::fs::read_to_string(&harness.trace_path).expect("read workbench trace jsonl");
+        assert_queued_turn_sync_cancelled(&scenario).await;
+        // FIG-1130 ruling: both cancels are legitimate and idempotent, but the
+        // zombie path is only the crash-safety backstop. This live-session path
+        // requires sync_cancelled and terminal state, not zombie_cancelled.
         assert!(
-            trace_text.contains("agent_workbench.cron.restate.sync_upserted"),
-            "trace should include cron sync; trace at {}",
-            harness.trace_path.display()
+            cron_trace_records_for_job(
+                &scenario.trace_path,
+                "agent_workbench.cron.restate.zombie_cancelled",
+                &scenario.cron_session_id,
+                &scenario.cron_job_key,
+            )
+            .is_empty(),
+            "sync-cancel scenario must not need the zombie backstop"
         );
-        assert!(
-            trace_text.contains("agent_workbench.cron.restate.run"),
-            "trace should include cron run; trace at {}",
-            harness.trace_path.display()
-        );
-        // Regression for the single-tick chain kill: the occurrence
-        // idempotency key must be unique per tick and run() must re-arm, so a
-        // SECOND tick has to fire. The original bug passed any single-tick
-        // assertion and died silently on tick two.
-        assert_two_live_ticks_then_retire(
-            &harness.state,
-            &harness.trace_path,
-            &cron_session_id,
-            &cron_job_key,
-        )
-        .await;
-        assert_no_active_lash_restate_invocations(&harness.state, Duration::from_secs(10)).await;
-        let _ = std::fs::remove_dir_all(data_dir);
+        assert_no_active_lash_restate_invocations(&scenario.state, Duration::from_secs(10)).await;
+        let _ = std::fs::remove_dir_all(scenario.data_dir);
     }
 
     async fn run_workbench_turn_via_restate(
@@ -1861,7 +1861,7 @@ finish initial
                 data_dir.join("attachments"),
             )))
             .process_env_store(process_env_store)
-            .trigger_store(trigger_store)
+            .trigger_store(Arc::clone(&trigger_store))
             .trace_sink(Arc::clone(&trace_sink))
             .trace_level(TraceLevel::Extended)
             .plugin(Arc::new(WorkbenchPluginFactory::new("")))
@@ -1888,7 +1888,7 @@ finish initial
         let state = AppState {
             core,
             attachment_store: test_attachment_store(),
-            trigger_store: in_memory_trigger_store(),
+            trigger_store,
             process_observer,
             process_work_driver: process_deployment.process_work_driver(),
             session_ids,
