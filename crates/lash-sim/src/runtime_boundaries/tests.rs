@@ -128,6 +128,34 @@ async fn durable_effect_replays_through_runtime_effect_controller() {
 }
 
 #[tokio::test]
+async fn durable_effect_observation_counts_a_second_real_local_execution() {
+    let mut harness = harness();
+    let boundary = event(
+        BoundaryKind::DurableEffect,
+        "durable:duplicate-local-execution",
+        json!({
+            "durable_key": "sleep/session-001/duplicate",
+            "result": {"completed": true},
+            "runtime_effect": {"effect_id": "effect/sleep/duplicate"},
+        }),
+    );
+
+    let first = harness
+        .complete_durable_effect(&boundary)
+        .await
+        .expect("first durable effect");
+    harness.effect_controller = None;
+    let duplicate = harness
+        .complete_durable_effect(&boundary)
+        .await
+        .expect("duplicate local execution");
+
+    assert_eq!(first["execution_count"], 1);
+    assert_eq!(duplicate["execution_count"], 2);
+    assert_eq!(duplicate["runtime_effect"]["local_executor_called"], true);
+}
+
+#[tokio::test]
 async fn process_wake_uses_structural_source_identity_for_queued_work_claims() {
     let mut harness = harness();
     let payload = json!({

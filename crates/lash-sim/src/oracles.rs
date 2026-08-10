@@ -7479,6 +7479,30 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn seeded_duplicate_durable_execution_mutation_fails_generated_oracle() {
+        let workload = crate::generator::generate_workload(5, "fast-random", 24)
+            .expect("seeded generated workload");
+        let mut trace = crate::runner::run_generated_workload_for_fixture(workload, "bundle")
+            .await
+            .expect("generated trace");
+        let effect = trace
+            .final_summary
+            .durable_effects
+            .first_mut()
+            .expect("seed 5 exercises a durable effect");
+
+        // Acceptance mutation: model a replay-controller defect that invokes
+        // the local executor twice before the normal replay. The generated
+        // lane's summary must retain both real executions rather than clamp the
+        // observation to one.
+        effect.execution_count += 1;
+
+        let verdict = durable_effect_exactly_once(&trace.final_summary);
+        assert!(!verdict.is_passed(), "duplicate execution must be red");
+        assert!(verdict.message.contains("executed 2 times"));
+    }
+
     fn process_wake_turn_event(
         sequence: usize,
         boundary_id: &str,

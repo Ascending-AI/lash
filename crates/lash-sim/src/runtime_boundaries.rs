@@ -269,19 +269,22 @@ impl RuntimeBoundaryHarness {
         let local_execution_count = local_calls.load(Ordering::SeqCst);
         let replayed = local_execution_count == 0;
         let result_digest = value_digest(&record.output.value_for_projection());
-        let entry = self
-            .durable_entries
-            .entry(durable_key.clone())
-            .or_insert_with(|| DurableEntry {
+        let entry = match self.durable_entries.entry(durable_key.clone()) {
+            std::collections::btree_map::Entry::Vacant(slot) => slot.insert(DurableEntry {
                 result_digest: result_digest.clone(),
-                execution_count: usize::from(local_execution_count > 0),
-                replay_count: 0,
-            });
-        if replayed {
-            entry.replay_count += 1;
-        } else if entry.execution_count == 0 {
-            entry.execution_count = 1;
-        }
+                execution_count: local_execution_count,
+                replay_count: usize::from(replayed),
+            }),
+            std::collections::btree_map::Entry::Occupied(slot) => {
+                let entry = slot.into_mut();
+                if replayed {
+                    entry.replay_count += 1;
+                } else {
+                    entry.execution_count += local_execution_count;
+                }
+                entry
+            }
+        };
         Ok(json!({
             "durable_key": durable_key,
             "result_digest": entry.result_digest,
