@@ -6,24 +6,43 @@ use lashlang::{
     State as FlowState, Value as FlowValue, validate_canonical_messagepack_structure,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::projection::{prune_protected_bindings, prune_reserved_projected_bindings};
 
 use super::apply_global_defaults;
-use super::files::{clear_dir, collect_files, restore_files};
-use super::snapshot::{RLM_SNAPSHOT_VERSION, RlmSnapshotError, restore_runtime, snapshot_runtime};
+use super::files::{ScratchFileError, ScratchFileStamp, collect_files, restore_files};
+use super::snapshot::{RLM_SNAPSHOT_VERSION, RlmSnapshotError};
 
-#[derive(Serialize, Deserialize)]
-pub(super) struct RlmSnapshotEnvelope {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(super) struct RlmSnapshotRoot {
     version: u32,
     engine: String,
-    #[serde(with = "serde_bytes")]
-    pub(super) vars: Vec<u8>,
+    globals: BTreeMap<String, PersistedGlobal>,
     files: BTreeMap<String, String>,
     deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
 }
 
-const ENVELOPE_FIELDS: &[&str] = &["version", "engine", "vars", "files", "deferred_resolutions"];
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum PersistedGlobal {
+    Inline {
+        #[serde(with = "serde_bytes")]
+        body: Vec<u8>,
+    },
+    Leaf {
+        component: String,
+    },
+}
+
+const ROOT_FIELDS: &[&str] = &[
+    "version",
+    "engine",
+    "globals",
+    "files",
+    "deferred_resolutions",
+];
+const GLOBAL_FIELDS: &[&str] = &["kind", "body", "component"];
 const DEFERRED_RESOLUTION_FIELDS: &[&str] = &["link_key", "resolutions"];
 const DEFERRED_LINK_KEY_FIELDS: &[&str] = &[
     "session_id",
@@ -64,7 +83,7 @@ const RETRY_POLICY_FIELDS: &[&str] = &["type", "max_attempts", "base_delay_ms", 
 const OUTPUT_CONTRACT_FIELDS: &[&str] = &["kind", "input_field", "default_schema"];
 const ARGUMENT_PROJECTION_FIELDS: &[&str] = &["kind", "field"];
 
-fn validate_canonical_envelope(data: &[u8]) -> Result<(), RlmSnapshotError> {
+fn validate_canonical_root(data: &[u8]) -> Result<(), RlmSnapshotError> {
     if matches!(
         data.iter()
             .copied()
@@ -72,7 +91,7 @@ fn validate_canonical_envelope(data: &[u8]) -> Result<(), RlmSnapshotError> {
         Some(b'{' | b'[')
     ) {
         return Err(RlmSnapshotError::FormatMismatch {
-            details: "legacy JSON envelope is not canonical typed MessagePack".to_string(),
+            details: "legacy JSON envelope is not a canonical typed root".to_string(),
         });
     }
     // ToolDefinition flattens ToolManifest and ToolContract. Its field order is
@@ -81,10 +100,10 @@ fn validate_canonical_envelope(data: &[u8]) -> Result<(), RlmSnapshotError> {
     // objects below it remain strictly sorted and unique.
     validate_canonical_messagepack_structure(
         data,
-        "envelope",
+        "root",
         CANONICAL_MESSAGEPACK_DEPTH_LIMIT,
-        envelope_map_order,
-        envelope_map_required,
+        root_map_order,
+        root_map_required,
     )
     .map_err(|error| match error {
         SnapshotDecodeError::DepthLimitExceeded { limit }
@@ -100,17 +119,93 @@ fn validate_canonical_envelope(data: &[u8]) -> Result<(), RlmSnapshotError> {
     })
 }
 
-fn envelope_map_order(location: &str) -> CanonicalMapOrder {
-    if is_envelope_json_location(location) {
+fn probe_snapshot_version(data: &[u8]) -> Result<u32, RlmSnapshotError> {
+    fn take<'a>(data: &'a [u8], offset: &mut usize, len: usize) -> Option<&'a [u8]> {
+        let end = offset.checked_add(len)?;
+        let value = data.get(*offset..end)?;
+        *offset = end;
+        Some(value)
+    }
+
+    fn read_len(data: &[u8], offset: &mut usize, marker: u8) -> Option<usize> {
+        match marker {
+            0x80..=0x8f => Some(usize::from(marker & 0x0f)),
+            0xde => Some(usize::from(u16::from_be_bytes(
+                take(data, offset, 2)?.try_into().ok()?,
+            ))),
+            0xdf => {
+                usize::try_from(u32::from_be_bytes(take(data, offset, 4)?.try_into().ok()?)).ok()
+            }
+            _ => None,
+        }
+    }
+
+    fn read_string<'a>(data: &'a [u8], offset: &mut usize) -> Option<&'a [u8]> {
+        let marker = *take(data, offset, 1)?.first()?;
+        let len = match marker {
+            0xa0..=0xbf => usize::from(marker & 0x1f),
+            0xd9 => usize::from(*take(data, offset, 1)?.first()?),
+            0xda => usize::from(u16::from_be_bytes(take(data, offset, 2)?.try_into().ok()?)),
+            0xdb => {
+                usize::try_from(u32::from_be_bytes(take(data, offset, 4)?.try_into().ok()?)).ok()?
+            }
+            _ => return None,
+        };
+        take(data, offset, len)
+    }
+
+    fn read_u32(data: &[u8], offset: &mut usize) -> Option<u32> {
+        let marker = *take(data, offset, 1)?.first()?;
+        match marker {
+            0x00..=0x7f => Some(u32::from(marker)),
+            0xcc => Some(u32::from(*take(data, offset, 1)?.first()?)),
+            0xcd => Some(u32::from(u16::from_be_bytes(
+                take(data, offset, 2)?.try_into().ok()?,
+            ))),
+            0xce => Some(u32::from_be_bytes(take(data, offset, 4)?.try_into().ok()?)),
+            _ => None,
+        }
+    }
+
+    let incompatible = || RlmSnapshotError::FormatMismatch {
+        details: "snapshot root does not begin with a MessagePack `version` field".to_string(),
+    };
+    if matches!(
+        data.iter()
+            .copied()
+            .find(|byte| !byte.is_ascii_whitespace()),
+        Some(b'{' | b'[')
+    ) {
+        return Err(RlmSnapshotError::FormatMismatch {
+            details: "legacy JSON envelope is not a canonical typed root".to_string(),
+        });
+    }
+    let mut offset = 0;
+    let marker = *take(data, &mut offset, 1)
+        .and_then(<[u8]>::first)
+        .ok_or_else(incompatible)?;
+    if read_len(data, &mut offset, marker).ok_or_else(incompatible)? == 0
+        || read_string(data, &mut offset).ok_or_else(incompatible)? != b"version"
+    {
+        return Err(incompatible());
+    }
+    read_u32(data, &mut offset).ok_or_else(incompatible)
+}
+
+fn root_map_order(location: &str) -> CanonicalMapOrder {
+    if is_root_json_location(location) {
         return CanonicalMapOrder::Sorted;
     }
     match location {
-        "envelope" => CanonicalMapOrder::Declared(ENVELOPE_FIELDS),
-        "envelope.files" | "envelope.deferred_resolutions.resolutions" => CanonicalMapOrder::Sorted,
-        "envelope.deferred_resolutions" => CanonicalMapOrder::Declared(DEFERRED_RESOLUTION_FIELDS),
-        "envelope.deferred_resolutions.link_key" => {
+        "root" => CanonicalMapOrder::Declared(ROOT_FIELDS),
+        "root.globals" | "root.files" | "root.deferred_resolutions.resolutions" => {
+            CanonicalMapOrder::Sorted
+        }
+        "root.deferred_resolutions" => CanonicalMapOrder::Declared(DEFERRED_RESOLUTION_FIELDS),
+        "root.deferred_resolutions.link_key" => {
             CanonicalMapOrder::Declared(DEFERRED_LINK_KEY_FIELDS)
         }
+        _ if is_global_location(location) => CanonicalMapOrder::Declared(GLOBAL_FIELDS),
         _ if is_resolution_location(location) => CanonicalMapOrder::Declared(RESOLUTION_FIELDS),
         _ if location.ends_with(".definition") => CanonicalMapOrder::Fields(TOOL_DEFINITION_FIELDS),
         _ if location.ends_with(".input_schema") || location.ends_with(".output_schema") => {
@@ -138,15 +233,17 @@ fn envelope_map_order(location: &str) -> CanonicalMapOrder {
     }
 }
 
-fn envelope_map_required(location: &str) -> bool {
+fn root_map_required(location: &str) -> bool {
     matches!(
         location,
-        "envelope"
-            | "envelope.files"
-            | "envelope.deferred_resolutions"
-            | "envelope.deferred_resolutions.link_key"
-            | "envelope.deferred_resolutions.resolutions"
+        "root"
+            | "root.globals"
+            | "root.files"
+            | "root.deferred_resolutions"
+            | "root.deferred_resolutions.link_key"
+            | "root.deferred_resolutions.resolutions"
     ) || is_resolution_location(location)
+        || is_global_location(location)
         || location.ends_with(".definition")
         || location.ends_with(".input_schema")
         || location.ends_with(".output_schema")
@@ -159,15 +256,22 @@ fn envelope_map_required(location: &str) -> bool {
 }
 
 fn is_resolution_location(location: &str) -> bool {
-    location.starts_with("envelope.deferred_resolutions.resolutions[")
-        && !location["envelope.deferred_resolutions.resolutions".len()..].contains("].")
+    location.starts_with("root.deferred_resolutions.resolutions[")
+        && !location["root.deferred_resolutions.resolutions".len()..].contains("].")
+}
+
+fn is_global_location(location: &str) -> bool {
+    location
+        .strip_prefix("root.globals.")
+        .is_some_and(|suffix| !suffix.contains('.'))
+        || (location.starts_with("root.globals[") && location.ends_with(']'))
 }
 
 fn is_schema_override_location(location: &str) -> bool {
     location.contains(".projection.overrides[") && location.ends_with(']')
 }
 
-fn is_envelope_json_location(location: &str) -> bool {
+fn is_root_json_location(location: &str) -> bool {
     let json_field = [
         ".execution_binding",
         ".canonical",
@@ -189,6 +293,119 @@ fn is_envelope_json_location(location: &str) -> bool {
     json_field || location.ends_with(".bindings") || location.contains(".bindings[")
 }
 
+fn snapshot_runtime_value(value: &FlowValue) -> Result<Vec<u8>, lashlang::ContinuationError> {
+    let snapshot = lashlang::Snapshot {
+        globals: [("value".to_string(), value.clone())].into_iter().collect(),
+    };
+    snapshot.to_canonical_bytes()
+}
+
+fn restore_runtime_value(data: &[u8]) -> Result<FlowValue, RlmSnapshotError> {
+    let mut snapshot = lashlang::Snapshot::from_canonical_bytes(data)?;
+    if snapshot.globals.len() != 1 || snapshot.globals.get("value").is_none() {
+        return Err(RlmSnapshotError::FormatMismatch {
+            details: "value body must contain exactly the canonical `value` binding".to_string(),
+        });
+    }
+    Ok(snapshot
+        .globals
+        .remove("value")
+        .expect("the canonical value binding was checked"))
+}
+
+fn value_is_scalar(value: &FlowValue) -> bool {
+    matches!(
+        value,
+        FlowValue::Null | FlowValue::Bool(_) | FlowValue::Number(_) | FlowValue::String(_)
+    )
+}
+
+fn composite_prefers_leaf(encoded_len: usize) -> bool {
+    // One source of truth, owned by the crate both sides of the checkpoint
+    // contract depend on. Deliberately not a store blob-compression profile:
+    // that answers whether bytes should be compressed, not whether a value is
+    // worth its own component, and reading it here would make snapshot shape
+    // depend on the configured backend.
+    encoded_len >= lash_core::plugin::EXECUTION_STATE_LEAF_MIN_BODY_BYTES
+}
+
+fn leaf_component_key(body: &[u8]) -> String {
+    format!("execution_state/sha256/{:x}", Sha256::digest(body))
+}
+
+fn resolve_leaf<'a>(
+    state: &'a lash_core::plugin::HydratedExecutionState,
+    logical_key: &str,
+    component: &str,
+) -> Result<&'a [u8], RlmSnapshotError> {
+    let body = state
+        .components
+        .get(component)
+        .map(Vec::as_slice)
+        .ok_or_else(|| RlmSnapshotError::MissingLeaf {
+            logical_key: logical_key.to_string(),
+            component: component.to_string(),
+        })?;
+    let actual_component = leaf_component_key(body);
+    if actual_component != component {
+        return Err(RlmSnapshotError::LeafHashMismatch {
+            logical_key: logical_key.to_string(),
+            component: component.to_string(),
+            actual_component,
+        });
+    }
+    Ok(body)
+}
+
+fn root_leaf_keys(root: &RlmSnapshotRoot) -> BTreeSet<String> {
+    root_leaf_keys_from_sections(&root.globals, &root.files)
+}
+
+fn root_leaf_keys_from_sections(
+    globals: &BTreeMap<String, PersistedGlobal>,
+    files: &BTreeMap<String, String>,
+) -> BTreeSet<String> {
+    globals
+        .values()
+        .filter_map(|global| match global {
+            PersistedGlobal::Inline { .. } => None,
+            PersistedGlobal::Leaf { component } => Some(component.clone()),
+        })
+        .chain(files.values().cloned())
+        .collect()
+}
+
+/// Which state a capture is relative to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CaptureMode {
+    /// A checkpoint delta: re-encode assigned bindings and changed files only,
+    /// and reference every other leaf the receiver already holds.
+    Incremental,
+    /// Every binding and file, with every leaf body present. Relative to
+    /// nothing, so it neither reads nor advances capture bookkeeping.
+    Complete,
+}
+
+/// A capture that has been built but not yet installed as the pending capture.
+struct PreparedCapture {
+    snapshot: lash_core::plugin::ExecutionStateSnapshot,
+    persisted_globals: BTreeMap<String, PersistedGlobal>,
+    persisted_files: BTreeMap<String, String>,
+    persisted_file_stamps: BTreeMap<String, ScratchFileStamp>,
+    leaf_keys: BTreeSet<String>,
+    #[cfg(test)]
+    encoded_globals: usize,
+}
+
+struct CaptureRollback {
+    persisted_globals: BTreeMap<String, PersistedGlobal>,
+    persisted_files: BTreeMap<String, String>,
+    persisted_file_stamps: BTreeMap<String, ScratchFileStamp>,
+    persisted_leaf_keys: BTreeSet<String>,
+    dirty_globals: BTreeSet<String>,
+    dirty_files: BTreeSet<String>,
+}
+
 pub struct RlmExecutionState {
     pub(super) rlm: FlowState,
     pub(super) scratch: ExecutionScratch,
@@ -199,8 +416,29 @@ pub struct RlmExecutionState {
     /// a re-driven or recovered link replays the recorded grants and
     /// `NotAvailable` results without leaking them into a later code effect.
     pub(super) deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
-    pub(super) scratch_dir: tempfile::TempDir,
-    pub(super) dirty: bool,
+    /// Live scratch directory for this execution state.
+    ///
+    /// Change detection for its files is a metadata stamp (length, nanosecond
+    /// mtime, and on Unix device/inode/ctime), which a same-length rewrite
+    /// inside one filesystem timestamp tick could defeat. Any writer inside this
+    /// process must therefore mark the path in `dirty_files` as
+    /// [`Self::write_scratch_file`] does, rather than rely on the stamp. Today
+    /// no production code writes here — code effects write through Lashlang
+    /// values, and `restore_files` writes only into a fresh directory during
+    /// restore — so the only writer is that test helper. A first production
+    /// writer must be added with its marking, not without it.
+    scratch_dir: tempfile::TempDir,
+    persisted_globals: BTreeMap<String, PersistedGlobal>,
+    persisted_files: BTreeMap<String, String>,
+    persisted_file_stamps: BTreeMap<String, ScratchFileStamp>,
+    persisted_leaf_keys: BTreeSet<String>,
+    dirty_globals: BTreeSet<String>,
+    dirty_files: BTreeSet<String>,
+    root_dirty: bool,
+    capture_rollback: Option<CaptureRollback>,
+    pending_snapshot: Option<lash_core::plugin::ExecutionStateSnapshot>,
+    #[cfg(test)]
+    encoded_globals_in_last_snapshot: usize,
 }
 
 impl RlmExecutionState {
@@ -212,48 +450,370 @@ impl RlmExecutionState {
             stored_lashlang_modules: BTreeSet::new(),
             deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord::default(),
             scratch_dir: tempfile::TempDir::new()?,
-            dirty: true,
+            persisted_globals: BTreeMap::new(),
+            persisted_files: BTreeMap::new(),
+            persisted_file_stamps: BTreeMap::new(),
+            persisted_leaf_keys: BTreeSet::new(),
+            dirty_globals: BTreeSet::new(),
+            dirty_files: BTreeSet::new(),
+            root_dirty: true,
+            capture_rollback: None,
+            pending_snapshot: None,
+            #[cfg(test)]
+            encoded_globals_in_last_snapshot: 0,
         })
     }
 
     pub fn execution_state_dirty(&self) -> bool {
-        self.dirty
+        self.pending_snapshot.is_some()
+            || self.root_dirty
+            || !self.dirty_globals.is_empty()
+            || !self.dirty_files.is_empty()
     }
 
-    /// Encode the canonical RLM persistence envelope.
+    pub(super) fn mark_execution_started(&mut self) {
+        self.dirty_globals
+            .append(&mut self.scratch.take_assigned_globals());
+        if self.persisted_globals.is_empty() && self.root_dirty {
+            self.dirty_globals
+                .extend(self.rlm.globals().iter().map(|(name, _)| name.to_string()));
+        }
+        self.root_dirty = true;
+    }
+
+    /// Write a scratch file and mark it changed. The marking, not the metadata
+    /// stamp, is what makes a same-length rewrite safe; see [`Self::scratch_dir`].
+    #[cfg(test)]
+    fn write_scratch_file(&mut self, path: &str, body: &[u8]) -> Result<(), ScratchFileError> {
+        restore_files(
+            self.scratch_dir.path(),
+            &[(path.to_string(), body.to_vec())].into_iter().collect(),
+        )?;
+        self.dirty_files.insert(path.to_string());
+        self.root_dirty = true;
+        Ok(())
+    }
+
+    /// Encode the canonical RLM root and only the leaf bodies whose logical
+    /// values were assigned since the previous capture.
+    pub fn snapshot_execution_state(
+        &mut self,
+    ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
+        self.absorb_pending_assignments();
+        if !self.root_dirty
+            && self.dirty_globals.is_empty()
+            && self.dirty_files.is_empty()
+            && let Some(snapshot) = &self.pending_snapshot
+        {
+            return Ok(snapshot.clone());
+        }
+        let prepared = self.build_capture(CaptureMode::Incremental)?;
+        Ok(self.install_capture(prepared))
+    }
+
+    /// Answer whether the capture `snapshot_execution_state` would take right
+    /// now can succeed, without staging it.
     ///
-    /// Every byte sequence emitted here round-trips identically. Any accepted
-    /// foreign wire is also a fixed point except for field order within the
-    /// flattened `ToolDefinition` subtree; FIG-1210 tracks removing that sole
-    /// public wire-shape exception.
-    pub fn snapshot_execution_state(&mut self) -> Result<Option<Vec<u8>>, SessionError> {
-        let vars = snapshot_runtime(&self.rlm).map_err(|error| {
-            SessionError::Protocol(format!("failed to snapshot RLM canonical state: {error}"))
-        })?;
-        let files = collect_files(self.scratch_dir.path()).unwrap_or_default();
-        let combined = RlmSnapshotEnvelope {
+    /// The whole fallible part of a capture is building it — canonical encoding
+    /// of every assigned binding and reading every changed scratch file — so
+    /// this proves capturability by building the same capture and dropping it.
+    /// It advances no capture bookkeeping: the dirty set only absorbs the
+    /// assignments the last execution recorded, which is what keeps them from
+    /// being lost, and everything else stays exactly as the eventual capture
+    /// will find it.
+    pub fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
+        self.absorb_pending_assignments();
+        if !self.root_dirty
+            && self.dirty_globals.is_empty()
+            && self.dirty_files.is_empty()
+            && self.pending_snapshot.is_some()
+        {
+            return Ok(());
+        }
+        self.build_capture(CaptureMode::Incremental).map(|_| ())
+    }
+
+    /// The complete live execution state, with every leaf body present and no
+    /// capture bookkeeping touched. Explicit administrative snapshot uses this;
+    /// it is relative to nothing, so it never depends on which leaf bodies are
+    /// still resident in the runtime's checkpoint state.
+    pub fn hydrated_execution_state(
+        &self,
+    ) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
+        let prepared = self.build_capture(CaptureMode::Complete)?;
+        let mut components = BTreeMap::new();
+        for (key, component) in prepared.snapshot.components {
+            match component {
+                lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
+                    components.insert(key, body);
+                }
+                lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
+                    return Err(SessionError::Protocol(format!(
+                        "complete RLM execution state referenced leaf `{key}` without its body"
+                    )));
+                }
+            }
+        }
+        Ok(lash_core::plugin::HydratedExecutionState {
+            root: prepared
+                .snapshot
+                .root
+                .ok_or_else(|| SessionError::Protocol("RLM root was not encoded".to_string()))?,
+            components,
+        })
+    }
+
+    /// Fold the assignments the last execution recorded into the dirty set. On
+    /// a session's first capture nothing is persisted yet, so every live global
+    /// is dirty.
+    fn absorb_pending_assignments(&mut self) {
+        self.dirty_globals
+            .append(&mut self.scratch.take_assigned_globals());
+        if self.persisted_globals.is_empty() && self.root_dirty {
+            self.dirty_globals
+                .extend(self.rlm.globals().iter().map(|(name, _)| name.to_string()));
+        }
+    }
+
+    /// Build a capture. Reads state; mutates none of it.
+    fn build_capture(&self, mode: CaptureMode) -> Result<PreparedCapture, SessionError> {
+        let complete = mode == CaptureMode::Complete;
+        let current_globals = self.rlm.globals();
+        let all_global_names = || {
+            current_globals
+                .iter()
+                .map(|(name, _)| name.to_string())
+                .collect::<BTreeSet<_>>()
+        };
+        let dirty_globals = if complete {
+            std::borrow::Cow::Owned(all_global_names())
+        } else {
+            std::borrow::Cow::Borrowed(&self.dirty_globals)
+        };
+        // Leaves the receiver of this capture already holds. A staged but
+        // uncommitted capture supersedes the durable set, so a leaf it evicted
+        // must be resent even though it is still durable.
+        let prior_leaf_keys = if complete {
+            BTreeSet::new()
+        } else {
+            self.pending_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.components.keys().cloned().collect())
+                .unwrap_or_else(|| self.persisted_leaf_keys.clone())
+        };
+        let mut next_globals = if complete {
+            BTreeMap::new()
+        } else {
+            self.persisted_globals.clone()
+        };
+        let mut changed_leaves = if complete {
+            BTreeMap::new()
+        } else {
+            self.pending_snapshot
+                .as_ref()
+                .into_iter()
+                .flat_map(|snapshot| &snapshot.components)
+                .filter_map(|(key, component)| match component {
+                    lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
+                        Some((key.clone(), body.clone()))
+                    }
+                    lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => None,
+                })
+                .collect::<BTreeMap<_, _>>()
+        };
+        #[cfg(test)]
+        let mut encoded_globals = 0;
+        for name in dirty_globals.iter() {
+            let Some(value) = current_globals.get(name) else {
+                next_globals.remove(name);
+                continue;
+            };
+            let body = snapshot_runtime_value(value).map_err(|error| {
+                SessionError::Protocol(format!(
+                    "failed to snapshot RLM global `{name}` as canonical state: {error}"
+                ))
+            })?;
+            #[cfg(test)]
+            {
+                encoded_globals += 1;
+            }
+            let persisted = if value_is_scalar(value) || !composite_prefers_leaf(body.len()) {
+                PersistedGlobal::Inline { body }
+            } else {
+                let component = leaf_component_key(&body);
+                if !prior_leaf_keys.contains(&component) {
+                    changed_leaves.insert(component.clone(), body);
+                }
+                PersistedGlobal::Leaf { component }
+            };
+            next_globals.insert(name.clone(), persisted);
+        }
+
+        let mut reusable_file_stamps = if complete {
+            BTreeMap::new()
+        } else {
+            self.persisted_file_stamps.clone()
+        };
+        for path in &self.dirty_files {
+            reusable_file_stamps.remove(path);
+        }
+        let collected_files = collect_files(self.scratch_dir.path(), &reusable_file_stamps)
+            .map_err(|error| {
+                SessionError::Protocol(format!("failed to collect RLM scratch files: {error}"))
+            })?;
+        let mut persisted_files = BTreeMap::new();
+        let mut persisted_file_stamps = BTreeMap::new();
+        for (path, collected) in collected_files {
+            let component = if let Some(body) = collected.changed_body {
+                let component = leaf_component_key(&body);
+                if !prior_leaf_keys.contains(&component) {
+                    changed_leaves.entry(component.clone()).or_insert(body);
+                }
+                component
+            } else {
+                self.persisted_files.get(&path).cloned().ok_or_else(|| {
+                    SessionError::Protocol(format!(
+                        "unchanged RLM scratch file `{path}` has no persisted component"
+                    ))
+                })?
+            };
+            persisted_file_stamps.insert(path.clone(), collected.stamp);
+            persisted_files.insert(path, component);
+        }
+
+        let root = RlmSnapshotRoot {
             version: RLM_SNAPSHOT_VERSION,
             engine: "lashlang".to_string(),
-            vars,
-            files,
+            globals: next_globals.clone(),
+            files: persisted_files.clone(),
             deferred_resolutions: self.deferred_resolutions.clone(),
         };
-        let encoded = rmp_serde::to_vec_named(&combined).map_err(|error| {
-            SessionError::Protocol(format!("failed to encode RLM snapshot envelope: {error}"))
+        let encoded = rmp_serde::to_vec_named(&root).map_err(|error| {
+            SessionError::Protocol(format!("failed to encode RLM snapshot root: {error}"))
         })?;
-        validate_canonical_envelope(&encoded).map_err(|error| {
-            SessionError::Protocol(format!("failed to encode canonical RLM envelope: {error}"))
+        validate_canonical_root(&encoded).map_err(|error| {
+            SessionError::Protocol(format!("failed to encode canonical RLM root: {error}"))
         })?;
-        self.dirty = false;
-        Ok(Some(encoded))
+
+        let leaf_keys = root_leaf_keys(&root);
+        let mut snapshot = lash_core::plugin::ExecutionStateSnapshot::from_root(Some(encoded));
+        for key in &leaf_keys {
+            if let Some(body) = changed_leaves.remove(key) {
+                snapshot.changed_component(key.clone(), body);
+            } else {
+                snapshot.unchanged_component(key.clone());
+            }
+        }
+        Ok(PreparedCapture {
+            snapshot,
+            persisted_globals: next_globals,
+            persisted_files,
+            persisted_file_stamps,
+            leaf_keys,
+            #[cfg(test)]
+            encoded_globals,
+        })
     }
 
-    pub fn restore_execution_state(&mut self, data: &[u8]) -> Result<(), RlmSnapshotError> {
-        validate_canonical_envelope(data)?;
-        let parsed: RlmSnapshotEnvelope =
-            rmp_serde::from_slice(data).map_err(|error| RlmSnapshotError::FormatMismatch {
+    /// Make a built capture the pending capture: the caches it computed become
+    /// authoritative, and the first capture since the last settlement records
+    /// the rollback baseline an aborted commit restores.
+    fn install_capture(
+        &mut self,
+        prepared: PreparedCapture,
+    ) -> lash_core::plugin::ExecutionStateSnapshot {
+        let PreparedCapture {
+            snapshot,
+            persisted_globals,
+            persisted_files,
+            persisted_file_stamps,
+            leaf_keys,
+            #[cfg(test)]
+            encoded_globals,
+        } = prepared;
+        if self.capture_rollback.is_none() {
+            self.capture_rollback = Some(CaptureRollback {
+                persisted_globals: std::mem::replace(
+                    &mut self.persisted_globals,
+                    persisted_globals,
+                ),
+                persisted_files: std::mem::replace(&mut self.persisted_files, persisted_files),
+                persisted_file_stamps: std::mem::replace(
+                    &mut self.persisted_file_stamps,
+                    persisted_file_stamps,
+                ),
+                persisted_leaf_keys: std::mem::replace(&mut self.persisted_leaf_keys, leaf_keys),
+                dirty_globals: std::mem::take(&mut self.dirty_globals),
+                dirty_files: std::mem::take(&mut self.dirty_files),
+            });
+        } else {
+            self.persisted_globals = persisted_globals;
+            self.persisted_files = persisted_files;
+            self.persisted_file_stamps = persisted_file_stamps;
+            self.persisted_leaf_keys = leaf_keys;
+            self.dirty_globals.clear();
+            self.dirty_files.clear();
+        }
+        self.root_dirty = false;
+        #[cfg(test)]
+        {
+            self.encoded_globals_in_last_snapshot = encoded_globals;
+        }
+        self.pending_snapshot = Some(snapshot.clone());
+        snapshot
+    }
+
+    pub(crate) fn acknowledge_execution_state_capture(&mut self) {
+        self.capture_rollback = None;
+        self.pending_snapshot = None;
+    }
+
+    pub(crate) fn abort_execution_state_capture(&mut self) {
+        let Some(rollback) = self.capture_rollback.take() else {
+            return;
+        };
+        let prior_global_names = rollback
+            .persisted_globals
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        let prior_file_names = rollback.persisted_files.keys().cloned().collect::<Vec<_>>();
+        self.persisted_globals = rollback.persisted_globals;
+        self.persisted_files = rollback.persisted_files;
+        self.persisted_file_stamps = rollback.persisted_file_stamps;
+        self.persisted_leaf_keys = rollback.persisted_leaf_keys;
+        self.dirty_globals = rollback.dirty_globals;
+        self.dirty_files = rollback.dirty_files;
+        self.dirty_globals.extend(prior_global_names);
+        self.dirty_globals
+            .extend(self.rlm.globals().iter().map(|(name, _)| name.to_string()));
+        self.dirty_files.extend(prior_file_names);
+        self.root_dirty = true;
+        self.pending_snapshot = None;
+    }
+
+    #[cfg(test)]
+    pub(super) fn encoded_globals_in_last_snapshot(&self) -> usize {
+        self.encoded_globals_in_last_snapshot
+    }
+
+    pub fn restore_execution_state(
+        &mut self,
+        state: &lash_core::plugin::HydratedExecutionState,
+    ) -> Result<(), RlmSnapshotError> {
+        let found_version = probe_snapshot_version(&state.root)?;
+        if found_version != RLM_SNAPSHOT_VERSION {
+            return Err(RlmSnapshotError::VersionMismatch {
+                expected: RLM_SNAPSHOT_VERSION,
+                found: found_version,
+            });
+        }
+        validate_canonical_root(&state.root)?;
+        let parsed: RlmSnapshotRoot = rmp_serde::from_slice(&state.root).map_err(|error| {
+            RlmSnapshotError::FormatMismatch {
                 details: error.to_string(),
-            })?;
+            }
+        })?;
 
         if parsed.version != RLM_SNAPSHOT_VERSION {
             return Err(RlmSnapshotError::VersionMismatch {
@@ -267,18 +827,94 @@ impl RlmExecutionState {
             });
         }
 
-        self.rlm = restore_runtime(&parsed.vars)?;
-        prune_reserved_projected_bindings(&mut self.rlm);
+        let expected_leaf_keys = root_leaf_keys(&parsed);
+        let supplied_leaf_keys = state.components.keys().cloned().collect::<BTreeSet<_>>();
+        if expected_leaf_keys != supplied_leaf_keys {
+            return Err(RlmSnapshotError::LeafSetMismatch {
+                missing: expected_leaf_keys
+                    .difference(&supplied_leaf_keys)
+                    .cloned()
+                    .collect(),
+                unexpected: supplied_leaf_keys
+                    .difference(&expected_leaf_keys)
+                    .cloned()
+                    .collect(),
+            });
+        }
 
-        clear_dir(self.scratch_dir.path());
-        let _ = restore_files(self.scratch_dir.path(), &parsed.files);
+        let mut globals = lashlang::Record::new();
+        for (name, persisted) in &parsed.globals {
+            let body = match persisted {
+                PersistedGlobal::Inline { body } => body.as_slice(),
+                PersistedGlobal::Leaf { component } => resolve_leaf(state, name, component)?,
+            };
+            globals.insert(name.clone(), restore_runtime_value(body)?);
+        }
+        let mut next_rlm = FlowState::from_snapshot(lashlang::Snapshot { globals });
+        prune_reserved_projected_bindings(&mut next_rlm);
+
+        let mut files = BTreeMap::new();
+        for (path, component) in &parsed.files {
+            let body = resolve_leaf(state, path, component)?;
+            files.insert(path.clone(), body.to_vec());
+        }
+        let next_scratch_dir = tempfile::TempDir::new().map_err(ScratchFileError::CreateScratch)?;
+        restore_files(next_scratch_dir.path(), &files)?;
+        let next_file_stamps = collect_files(next_scratch_dir.path(), &BTreeMap::new())?
+            .into_iter()
+            .map(|(path, collected)| (path, collected.stamp))
+            .collect();
+        let next_live_names = next_rlm
+            .globals()
+            .iter()
+            .map(|(name, _)| name.to_string())
+            .collect::<BTreeSet<_>>();
+        let pruned_reserved = parsed.globals.len() != next_live_names.len();
+        let mut next_globals = parsed.globals;
+        next_globals.retain(|name, _| next_live_names.contains(name));
+        self.rlm = next_rlm;
+        self.scratch_dir = next_scratch_dir;
         self.deferred_resolutions = parsed.deferred_resolutions;
-        self.dirty = true;
+        self.persisted_globals = next_globals;
+        self.persisted_files = parsed.files;
+        self.persisted_file_stamps = next_file_stamps;
+        self.persisted_leaf_keys =
+            root_leaf_keys_from_sections(&self.persisted_globals, &self.persisted_files);
+        self.root_dirty = pruned_reserved;
+        self.dirty_globals.clear();
+        self.dirty_files.clear();
+        self.capture_rollback = None;
+        self.pending_snapshot = None;
         Ok(())
     }
 
     pub fn prune_protected_globals(&mut self, protected_names: &BTreeSet<String>) {
+        let before = self
+            .rlm
+            .globals()
+            .iter()
+            .map(|(name, _)| name.to_string())
+            .collect::<BTreeSet<_>>();
         prune_protected_bindings(&mut self.rlm, protected_names);
+        for removed in before.difference(
+            &self
+                .rlm
+                .globals()
+                .iter()
+                .map(|(name, _)| name.to_string())
+                .collect(),
+        ) {
+            self.dirty_globals.insert(removed.clone());
+        }
+    }
+
+    pub(super) fn mark_globals_removed<'a>(&mut self, names: impl IntoIterator<Item = &'a str>) {
+        for name in names {
+            if self.rlm.globals().get(name).is_some() {
+                self.dirty_globals.insert(name.to_string());
+                self.root_dirty = true;
+            }
+        }
     }
 
     pub fn patch_globals(
@@ -289,9 +925,22 @@ impl RlmExecutionState {
         if patch.is_empty() {
             return Ok(());
         }
+        let before = self
+            .rlm
+            .globals()
+            .iter()
+            .map(|(name, _)| name.to_string())
+            .collect::<BTreeSet<_>>();
         apply_global_defaults(&mut self.rlm, patch, protected_names)
             .map_err(SessionError::Protocol)?;
-        self.dirty = true;
+        self.dirty_globals.extend(
+            self.rlm
+                .globals()
+                .iter()
+                .map(|(name, _)| name.to_string())
+                .filter(|name| !before.contains(name)),
+        );
+        self.root_dirty = true;
         Ok(())
     }
 
@@ -320,360 +969,4 @@ impl RlmExecutionState {
 }
 
 #[cfg(test)]
-mod bound_variable_value_tests {
-    use super::*;
-    use lashlang::{
-        ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
-        ProjectedValue, Record as FlowRecord, Value as FlowValue,
-    };
-    use serde_json::json;
-
-    fn push_string(bytes: &mut Vec<u8>, value: &str) {
-        assert!(value.len() < 32);
-        bytes.push(0xa0 | value.len() as u8);
-        bytes.extend_from_slice(value.as_bytes());
-    }
-
-    fn push_map(bytes: &mut Vec<u8>, length: usize) {
-        assert!(length < 16);
-        bytes.push(0x80 | length as u8);
-    }
-
-    fn push_binary(bytes: &mut Vec<u8>, value: &[u8]) {
-        assert!(u8::try_from(value.len()).is_ok());
-        bytes.extend_from_slice(&[0xc4, value.len() as u8]);
-        bytes.extend_from_slice(value);
-    }
-
-    fn hand_crafted_envelope(file_keys: &[(&str, &str)], resolution_keys: &[&str]) -> Vec<u8> {
-        let vars = lashlang::Snapshot::default()
-            .to_canonical_bytes()
-            .expect("canonical vars");
-        let mut bytes = Vec::new();
-        push_map(&mut bytes, 5);
-        push_string(&mut bytes, "version");
-        bytes.push(RLM_SNAPSHOT_VERSION as u8);
-        push_string(&mut bytes, "engine");
-        push_string(&mut bytes, "lashlang");
-        push_string(&mut bytes, "vars");
-        push_binary(&mut bytes, &vars);
-        push_string(&mut bytes, "files");
-        push_map(&mut bytes, file_keys.len());
-        for (key, value) in file_keys {
-            push_string(&mut bytes, key);
-            push_string(&mut bytes, value);
-        }
-        push_string(&mut bytes, "deferred_resolutions");
-        push_map(&mut bytes, 1);
-        push_string(&mut bytes, "resolutions");
-        push_map(&mut bytes, resolution_keys.len());
-        for key in resolution_keys {
-            push_string(&mut bytes, key);
-            push_map(&mut bytes, 1);
-            push_string(&mut bytes, "kind");
-            push_string(&mut bytes, "not_available");
-        }
-        bytes
-    }
-
-    #[test]
-    fn old_json_snapshot_is_typed_format_rejection_with_cutover_remedy() {
-        let old_snapshot = serde_json::to_vec(&json!({
-            "version": 5,
-            "engine": "lashlang",
-            "vars": "{\"globals\":{}}",
-            "files": {},
-            "deferred_resolutions": {"resolutions": {}}
-        }))
-        .expect("old JSON snapshot");
-        let mut state = RlmExecutionState::new().expect("state");
-
-        let error = state
-            .restore_execution_state(&old_snapshot)
-            .expect_err("old JSON must not have a compatibility decoder");
-
-        assert!(matches!(&error, RlmSnapshotError::FormatMismatch { .. }));
-        let message = error.to_string();
-        assert!(message.contains("drain in-flight sessions on the old build"));
-        assert!(message.contains("recreate development/test stores"));
-    }
-
-    #[test]
-    fn old_snapshot_version_is_typed_rejection_with_cutover_remedy() {
-        let mut source = RlmExecutionState::new().expect("source state");
-        let bytes = source
-            .snapshot_execution_state()
-            .expect("snapshot")
-            .expect("snapshot bytes");
-        let mut envelope: RlmSnapshotEnvelope =
-            rmp_serde::from_slice(&bytes).expect("decode current envelope");
-        envelope.version = RLM_SNAPSHOT_VERSION - 1;
-        let old_version = rmp_serde::to_vec_named(&envelope).expect("old-version envelope");
-        let mut target = RlmExecutionState::new().expect("target state");
-
-        let error = target
-            .restore_execution_state(&old_version)
-            .expect_err("old version must be rejected before Lashlang decode");
-
-        assert!(matches!(
-            &error,
-            RlmSnapshotError::VersionMismatch {
-                expected: RLM_SNAPSHOT_VERSION,
-                found
-            } if *found == RLM_SNAPSHOT_VERSION - 1
-        ));
-        let message = error.to_string();
-        assert!(message.contains("drain in-flight sessions on the old build"));
-        assert!(message.contains("recreate development/test stores"));
-    }
-
-    #[test]
-    fn execution_envelope_is_deterministic_for_scratch_file_insertion_order() {
-        fn state_with_files(files: &[(&str, &str)]) -> RlmExecutionState {
-            let state = RlmExecutionState::new().expect("state");
-            for (path, contents) in files {
-                let path = state.scratch_dir.path().join(path);
-                if let Some(parent) = path.parent() {
-                    std::fs::create_dir_all(parent).expect("create scratch parent");
-                }
-                std::fs::write(path, contents).expect("write scratch file");
-            }
-            state
-        }
-
-        let mut left = state_with_files(&[
-            ("z-last.txt", "same-z"),
-            ("nested/middle.txt", "same-middle"),
-            ("a-first.txt", "same-a"),
-        ]);
-        let mut right = state_with_files(&[
-            ("a-first.txt", "same-a"),
-            ("nested/middle.txt", "same-middle"),
-            ("z-last.txt", "same-z"),
-        ]);
-
-        let left = left
-            .snapshot_execution_state()
-            .expect("left snapshot")
-            .expect("left bytes");
-        let right = right
-            .snapshot_execution_state()
-            .expect("right snapshot")
-            .expect("right bytes");
-
-        assert_eq!(left, right);
-    }
-
-    #[test]
-    fn canonical_envelope_rejects_unsorted_and_duplicate_files_with_typed_keys() {
-        for (keys, offending) in [
-            (&[("z.txt", "z"), ("a.txt", "a")][..], "a.txt"),
-            (&[("a.txt", "first"), ("a.txt", "second")][..], "a.txt"),
-        ] {
-            let error = validate_canonical_envelope(&hand_crafted_envelope(keys, &[]))
-                .expect_err("non-canonical files map must fail before serde");
-            assert!(matches!(
-                error,
-                RlmSnapshotError::NonCanonicalEnvelope { location, reason }
-                    if location == "envelope.files" && reason.contains(offending)
-            ));
-        }
-    }
-
-    #[test]
-    fn canonical_envelope_rejects_unsorted_and_duplicate_nested_resolution_keys() {
-        for keys in [&["z.tool", "a.tool"][..], &["a.tool", "a.tool"][..]] {
-            let error = validate_canonical_envelope(&hand_crafted_envelope(&[], keys))
-                .expect_err("non-canonical resolutions map must fail before serde");
-            assert!(matches!(
-                error,
-                RlmSnapshotError::NonCanonicalEnvelope { location, reason }
-                    if location == "envelope.deferred_resolutions.resolutions"
-                        && reason.contains("a.tool")
-            ));
-        }
-    }
-
-    #[test]
-    fn canonical_envelope_rejects_a_depth_bomb_before_serde() {
-        let vars = lashlang::Snapshot::default()
-            .to_canonical_bytes()
-            .expect("canonical vars");
-        let mut bytes = Vec::new();
-        push_map(&mut bytes, 5);
-        push_string(&mut bytes, "version");
-        bytes.push(RLM_SNAPSHOT_VERSION as u8);
-        push_string(&mut bytes, "engine");
-        push_string(&mut bytes, "lashlang");
-        push_string(&mut bytes, "vars");
-        push_binary(&mut bytes, &vars);
-        push_string(&mut bytes, "files");
-        push_map(&mut bytes, 1);
-        push_string(&mut bytes, "bomb");
-        bytes.extend(std::iter::repeat_n(
-            0x91,
-            CANONICAL_MESSAGEPACK_DEPTH_LIMIT + 1,
-        ));
-        bytes.push(0xc0);
-        push_string(&mut bytes, "deferred_resolutions");
-        push_map(&mut bytes, 1);
-        push_string(&mut bytes, "resolutions");
-        push_map(&mut bytes, 0);
-
-        assert!(matches!(
-            validate_canonical_envelope(&bytes),
-            Err(RlmSnapshotError::EnvelopeDepthLimitExceeded { limit })
-                if limit == CANONICAL_MESSAGEPACK_DEPTH_LIMIT
-        ));
-    }
-
-    #[test]
-    fn canonical_envelope_rejects_non_minimal_container_width_before_serde() {
-        let canonical = hand_crafted_envelope(&[], &[]);
-        assert_eq!(
-            canonical[0], 0x85,
-            "fixture root must be a five-field fixmap"
-        );
-        let mut non_minimal = vec![0xde, 0x00, 0x05];
-        non_minimal.extend_from_slice(&canonical[1..]);
-
-        assert!(matches!(
-            validate_canonical_envelope(&non_minimal),
-            Err(RlmSnapshotError::NonCanonicalEnvelope { location, reason })
-                if location == "envelope" && reason.contains("map length is not minimally encoded")
-        ));
-    }
-
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    #[test]
-    fn includes_globals_excludes_history_and_named() {
-        let mut state = RlmExecutionState::new().unwrap();
-        let mut set_default = serde_json::Map::new();
-        set_default.insert("inventory".to_string(), json!(["lantern"]));
-        set_default.insert("secret".to_string(), json!(1));
-        state
-            .patch_globals(
-                &lash_rlm_types::RlmGlobalsPatchPluginBody { set_default },
-                &BTreeSet::new(),
-            )
-            .unwrap();
-
-        let exclude: BTreeSet<String> = ["secret".to_string()].into_iter().collect();
-        let vars = state.bound_variable_values(&exclude);
-        assert!(vars.iter().any(|(name, _)| name == "inventory"), "{vars:?}");
-        assert!(
-            !vars.iter().any(|(name, _)| name == "secret"),
-            "excluded name leaked: {vars:?}"
-        );
-        assert!(
-            !vars.iter().any(|(name, _)| name == "history"),
-            "history leaked: {vars:?}"
-        );
-    }
-
-    #[test]
-    fn excludes_direct_projected_globals() {
-        let mut state = RlmExecutionState::new().unwrap();
-        let mut snapshot = state.rlm.snapshot();
-        snapshot.globals.insert(
-            "projected".to_string(),
-            FlowValue::Projected(ProjectedValue::scalar(
-                "projected",
-                FlowValue::String("host".into()),
-            )),
-        );
-        snapshot
-            .globals
-            .insert("plain".to_string(), FlowValue::String("local".into()));
-        state.rlm = FlowState::from_snapshot(snapshot);
-
-        let vars = state.bound_variable_values(&BTreeSet::new());
-
-        assert!(vars.iter().any(
-            |(name, value)| name == "plain" && value == &FlowValue::String("local".into())
-        ));
-        assert!(
-            !vars.iter().any(|(name, _)| name == "projected"),
-            "{vars:?}"
-        );
-    }
-
-    #[test]
-    fn excludes_top_level_globals_containing_nested_projected_values() {
-        let mut state = RlmExecutionState::new().unwrap();
-        let mut record = FlowRecord::new();
-        record.insert(
-            "body".to_string(),
-            FlowValue::Projected(ProjectedValue::scalar(
-                "body",
-                FlowValue::String("host".into()),
-            )),
-        );
-        record.insert("title".to_string(), FlowValue::String("local".into()));
-        let mut snapshot = state.rlm.snapshot();
-        snapshot
-            .globals
-            .insert("doc".to_string(), FlowValue::Record(Arc::new(record)));
-        snapshot.globals.insert(
-            "plain".to_string(),
-            FlowValue::List(vec![FlowValue::Number(1.0)].into()),
-        );
-        state.rlm = FlowState::from_snapshot(snapshot);
-
-        let vars = state.bound_variable_values(&BTreeSet::new());
-
-        assert!(vars.iter().any(|(name, _)| name == "plain"));
-        assert!(!vars.iter().any(|(name, _)| name == "doc"), "{vars:?}");
-    }
-
-    #[derive(Default)]
-    struct CountingProjectedValue {
-        materialize_count: AtomicUsize,
-        render_count: AtomicUsize,
-    }
-
-    impl ProjectedHostDescriptor for CountingProjectedValue {
-        fn type_name(&self) -> &str {
-            "string"
-        }
-
-        fn read_one(
-            &self,
-            request: ProjectedReadRequest,
-        ) -> ProjectedFuture<'_, ProjectedReadResponse> {
-            Box::pin(async move {
-                match request {
-                    ProjectedReadRequest::Render => {
-                        self.render_count.fetch_add(1, Ordering::SeqCst);
-                        ProjectedReadResponse::Text("rendered".to_string())
-                    }
-                    ProjectedReadRequest::Materialize => {
-                        self.materialize_count.fetch_add(1, Ordering::SeqCst);
-                        ProjectedReadResponse::Value(FlowValue::String("materialized".into()))
-                    }
-                    _ => ProjectedReadResponse::Missing,
-                }
-            })
-        }
-    }
-
-    #[test]
-    fn excludes_custom_projected_globals_without_rendering_or_materializing() {
-        let projected = Arc::new(CountingProjectedValue::default());
-        let mut state = RlmExecutionState::new().unwrap();
-        let mut snapshot = state.rlm.snapshot();
-        snapshot.globals.insert(
-            "projected".to_string(),
-            FlowValue::Projected(ProjectedValue::custom("projected", projected.clone())),
-        );
-        state.rlm = FlowState::from_snapshot(snapshot);
-
-        let vars = state.bound_variable_values(&BTreeSet::new());
-
-        assert!(vars.is_empty(), "{vars:?}");
-        assert_eq!(projected.render_count.load(Ordering::SeqCst), 0);
-        assert_eq!(projected.materialize_count.load(Ordering::SeqCst), 0);
-    }
-}
+mod tests;

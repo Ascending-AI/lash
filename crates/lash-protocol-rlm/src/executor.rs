@@ -130,7 +130,7 @@ async fn execute_code_inner(
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
 ) -> ExecResponse {
-    state.dirty = true;
+    state.mark_execution_started();
     select_deferred_resolution_link(state, &ctx);
     let mut host_environment = match lashlang_surface.host_environment(ctx.tool_catalog().as_ref())
     {
@@ -342,6 +342,7 @@ async fn execute_code_inner(
         }
     };
     let projected_names = projected.names().collect::<Vec<_>>();
+    state.mark_globals_removed(projected_names.iter().map(String::as_str));
     prune_projected_binding_names(&mut state.rlm, projected_names.iter().map(String::as_str));
     let tool_result_projectors = tool_result_projectors(&ctx);
     let deferred_execution_grants = deferred_execution_grants(&state.deferred_resolutions);
@@ -670,6 +671,84 @@ mod tests {
             .build()
             .expect("runtime")
             .block_on(future)
+    }
+
+    fn hydrate_snapshot(
+        snapshot: lash_core::plugin::ExecutionStateSnapshot,
+    ) -> lash_core::plugin::HydratedExecutionState {
+        lash_core::plugin::HydratedExecutionState {
+            root: snapshot.root.expect("snapshot root"),
+            components: snapshot
+                .components
+                .into_iter()
+                .map(|(key, component)| match component {
+                    lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
+                        (key, body)
+                    }
+                    lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
+                        panic!("fresh test snapshot unexpectedly reused `{key}`")
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    fn measure_snapshot(
+        snapshot: &lash_core::plugin::ExecutionStateSnapshot,
+    ) -> lash_core::testing::RuntimeCommitBudgetMeasurement {
+        let state = lash_core::RuntimeSessionState {
+            session_id: "rlm-snapshot-budget".to_string(),
+            ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+            ))
+        };
+        let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[]);
+        commit.checkpoint.components.insert(
+            "execution_state".to_string(),
+            lash_core::HydratedCheckpointComponent::changed(
+                snapshot.root.clone().expect("snapshot root"),
+            ),
+        );
+        for (key, component) in &snapshot.components {
+            let component = match component {
+                lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
+                    lash_core::HydratedCheckpointComponent::changed(body.clone())
+                }
+                lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
+                    lash_core::HydratedCheckpointComponent::unchanged(
+                        &lash_core::CheckpointComponentDescriptor {
+                            blob_ref: lash_core::BlobRef(key.clone()),
+                            encoding_version: 1,
+                        },
+                    )
+                }
+            };
+            commit.checkpoint.components.insert(key.clone(), component);
+        }
+        lash_core::testing::measure_runtime_commit_budget(&commit)
+            .expect("measure RLM runtime commit budget")
+    }
+
+    async fn execute_test_code(state: RlmExecutionState, code: String) -> RlmExecutionState {
+        let (state, response) = execute_code_unbounded_for_tests(
+            state,
+            lash_core::testing::code_execution_context(),
+            ExecRequest {
+                language: "lashlang".to_string(),
+                code,
+                accept_finish: true,
+            },
+            lashlang::global_in_memory_lashlang_artifact_store(),
+            LashlangSurface::default(),
+            None,
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+        )
+        .await
+        .expect("execute test Lashlang");
+        assert_eq!(response.error, None, "test Lashlang execution failed");
+        state
     }
 
     struct TestProjectedValue(Vec<FlowValue>);
@@ -1118,10 +1197,11 @@ mod tests {
             ));
             assert!(first_ctx.tool_catalog().tools.is_empty());
 
-            let snapshot = state
-                .snapshot_execution_state()
-                .expect("snapshot")
-                .expect("snapshot bytes");
+            let snapshot = hydrate_snapshot(
+                state
+                    .snapshot_execution_state()
+                    .expect("snapshot components"),
+            );
             let mut restored = RlmExecutionState::new().expect("state");
             restored
                 .restore_execution_state(&snapshot)
@@ -2440,26 +2520,442 @@ mod tests {
         );
         state.rlm = FlowState::from_snapshot(snapshot);
 
-        let bytes = state
-            .snapshot_execution_state()
-            .expect("executor snapshot")
-            .expect("snapshot bytes");
-
+        let snapshot =
+            hydrate_snapshot(state.snapshot_execution_state().expect("executor snapshot"));
         assert_eq!(projected.render_count.load(Ordering::SeqCst), 0);
         assert_eq!(projected.materialize_count.load(Ordering::SeqCst), 0);
-        let encoded_text = String::from_utf8_lossy(&bytes);
+        let mut encoded = snapshot.root.clone();
+        for body in snapshot.components.values() {
+            encoded.extend_from_slice(body);
+        }
+        let encoded_text = String::from_utf8_lossy(&encoded);
         assert!(!encoded_text.contains("rendered tool text"));
         assert!(!encoded_text.contains("materialized tool text"));
 
         let mut restored_execution = RlmExecutionState::new().expect("restored state");
         restored_execution
-            .restore_execution_state(&bytes)
+            .restore_execution_state(&snapshot)
             .expect("restore runtime");
         let restored = restored_execution.rlm;
         assert!(matches!(
             restored.snapshot().globals.get("m"),
             Some(FlowValue::Projected(_))
         ));
+    }
+
+    #[test]
+    fn measured_commit_budget_carries_only_changed_leaf_bodies() {
+        block_on(async {
+            let mut source = String::new();
+            for index in 0..12 {
+                let payload = format!("large-{index}-{}", "x".repeat(6 * 1024));
+                source.push_str(&format!("large_{index} = [\"{payload}\"]\n"));
+            }
+            for index in 0..40 {
+                source.push_str(&format!("small_{index} = {index}\n"));
+            }
+            let mut state =
+                execute_test_code(RlmExecutionState::new().expect("state"), source).await;
+            let initial = state.snapshot_execution_state().expect("initial snapshot");
+            assert_eq!(
+                initial
+                    .components
+                    .values()
+                    .filter(|component| matches!(
+                        component,
+                        lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
+                    ))
+                    .count(),
+                12
+            );
+            state.acknowledge_execution_state_capture();
+
+            state = execute_test_code(
+                state,
+                "large_0 = push(large_0, \"one changed binding\")".to_string(),
+            )
+            .await;
+            let changed = state.snapshot_execution_state().expect("changed snapshot");
+            let changed_bodies = changed
+                .components
+                .values()
+                .filter(|component| {
+                    matches!(
+                        component,
+                        lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
+                    )
+                })
+                .count();
+            let unchanged_refs = changed
+                .components
+                .values()
+                .filter(|component| {
+                    matches!(
+                        component,
+                        lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged
+                    )
+                })
+                .count();
+            assert_eq!(
+                changed_bodies, 1,
+                "only the assigned large binding carries bytes"
+            );
+            assert_eq!(unchanged_refs, 11, "all other large bindings ride as refs");
+
+            let initial_budget = measure_snapshot(&initial);
+            let changed_budget = measure_snapshot(&changed);
+            assert!(
+                changed_budget.checkpoint_bytes * 3 < initial_budget.checkpoint_bytes,
+                "measured changed commit must exclude unchanged leaf bodies: initial={}, changed={}",
+                initial_budget.checkpoint_bytes,
+                changed_budget.checkpoint_bytes
+            );
+        });
+    }
+
+    #[test]
+    fn progress_capture_then_later_assignment_survives_final_cold_reopen() {
+        block_on(async {
+            let initial_payload = format!("before-{}", "x".repeat(8 * 1024));
+            let mut state = execute_test_code(
+                RlmExecutionState::new().expect("state"),
+                format!("large = [\"{initial_payload}\"]"),
+            )
+            .await;
+            let progress_snapshot = state
+                .snapshot_execution_state()
+                .expect("progress-boundary capture");
+
+            state = execute_test_code(state, "large = push(large, \"after-progress\")".to_string())
+                .await;
+            let final_snapshot = state
+                .snapshot_execution_state()
+                .expect("final capture after later assignment");
+            assert_ne!(
+                final_snapshot.root, progress_snapshot.root,
+                "the final capture must supersede the pending progress capture"
+            );
+            assert_eq!(
+                final_snapshot
+                    .components
+                    .values()
+                    .filter(|component| matches!(
+                        component,
+                        lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
+                    ))
+                    .count(),
+                1,
+                "the post-progress value leaf must still carry its uncommitted body"
+            );
+
+            let hydrated = hydrate_snapshot(final_snapshot);
+            let mut reopened = RlmExecutionState::new().expect("cold state");
+            reopened
+                .restore_execution_state(&hydrated)
+                .expect("cold reopen final capture");
+            assert_eq!(
+                reopened.rlm.snapshot().globals.get("large"),
+                state.rlm.snapshot().globals.get("large"),
+                "cold reopen must include the assignment made after the progress capture"
+            );
+
+            state.abort_execution_state_capture();
+            let retry_snapshot = state
+                .snapshot_execution_state()
+                .expect("retry superseded capture after commit failure");
+            let retry_hydrated = hydrate_snapshot(retry_snapshot);
+            let mut retry_reopened = RlmExecutionState::new().expect("retry cold state");
+            retry_reopened
+                .restore_execution_state(&retry_hydrated)
+                .expect("cold reopen retry capture");
+            assert_eq!(
+                retry_reopened.rlm.snapshot().globals.get("large"),
+                state.rlm.snapshot().globals.get("large"),
+                "aborting a superseded capture must retain the post-progress assignment"
+            );
+        });
+    }
+
+    #[test]
+    fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
+        block_on(async {
+            let payload_a = format!("a-{}", "x".repeat(8 * 1024));
+            let payload_b = format!("b-{}", "y".repeat(8 * 1024));
+            let mut state = execute_test_code(
+                RlmExecutionState::new().expect("state"),
+                format!("large = [\"{payload_a}\"]"),
+            )
+            .await;
+            let durable_a = state.snapshot_execution_state().expect("durable A capture");
+            state.acknowledge_execution_state_capture();
+            let mut staged_runtime = lash_core::RuntimeSessionState {
+                session_id: "progress-a-b-a-staged".to_string(),
+                ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                ))
+            };
+            lash_core::testing::stage_execution_state_components(
+                &mut staged_runtime,
+                durable_a.clone(),
+            )
+            .expect("stage durable A");
+            let mut retry_runtime = lash_core::RuntimeSessionState {
+                session_id: "progress-a-b-a-retry".to_string(),
+                ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                ))
+            };
+            lash_core::testing::stage_execution_state_components(&mut retry_runtime, durable_a)
+                .expect("stage retry baseline A");
+
+            state = execute_test_code(state, format!("large = [\"{payload_b}\"]")).await;
+            let progress_b = state
+                .snapshot_execution_state()
+                .expect("progress-boundary B capture");
+            lash_core::testing::stage_execution_state_components(
+                &mut staged_runtime,
+                progress_b.clone(),
+            )
+            .expect("stage progress B");
+            state = execute_test_code(state, format!("large = [\"{payload_a}\"]")).await;
+            let final_a = state.snapshot_execution_state().expect("final A capture");
+            assert_ne!(final_a.root, progress_b.root);
+            assert_eq!(
+                final_a
+                    .components
+                    .values()
+                    .filter(|component| matches!(
+                        component,
+                        lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
+                    ))
+                    .count(),
+                1,
+                "A was evicted by the staged B root, so final A must resend its body"
+            );
+
+            lash_core::testing::stage_execution_state_components(&mut staged_runtime, final_a)
+                .expect("stage final A over progress B");
+            let final_hydration = staged_runtime
+                .execution_state_hydration()
+                .expect("hydrate staged final A")
+                .expect("final A root");
+            let mut reopened = RlmExecutionState::new().expect("cold state");
+            reopened
+                .restore_execution_state(&final_hydration)
+                .expect("cold reopen final A capture");
+            assert_eq!(
+                reopened.rlm.snapshot().globals.get("large"),
+                state.rlm.snapshot().globals.get("large")
+            );
+
+            state.abort_execution_state_capture();
+            let retry_a = state
+                .snapshot_execution_state()
+                .expect("retry A after final commit failure");
+            lash_core::testing::stage_execution_state_components(&mut retry_runtime, retry_a)
+                .expect("stage retry A over durable A");
+            let retry_hydration = retry_runtime
+                .execution_state_hydration()
+                .expect("hydrate retry A")
+                .expect("retry A root");
+            let mut retry_reopened = RlmExecutionState::new().expect("retry cold state");
+            retry_reopened
+                .restore_execution_state(&retry_hydration)
+                .expect("cold reopen retry A capture");
+            assert_eq!(
+                retry_reopened.rlm.snapshot().globals.get("large"),
+                state.rlm.snapshot().globals.get("large")
+            );
+        });
+    }
+
+    #[test]
+    fn measured_commit_growth_tracks_changed_state_not_session_size() {
+        block_on(async {
+            let mut source = String::new();
+            for index in 0..16 {
+                let payload = format!("session-{index}-{}", "y".repeat(8 * 1024));
+                source.push_str(&format!("large_{index} = [\"{payload}\"]\n"));
+            }
+            for index in 0..80 {
+                source.push_str(&format!("small_{index} = {index}\n"));
+            }
+            let mut state =
+                execute_test_code(RlmExecutionState::new().expect("state"), source).await;
+            let full_state_bytes = state
+                .rlm
+                .snapshot()
+                .to_canonical_bytes()
+                .expect("pre-arc flat snapshot baseline")
+                .len();
+            let _initial = state.snapshot_execution_state().expect("initial snapshot");
+            state.acknowledge_execution_state_capture();
+
+            let mut measured = Vec::new();
+            for turn in 0..40 {
+                let binding = turn % 16;
+                state = execute_test_code(
+                    state,
+                    format!("large_{binding} = push(large_{binding}, \"turn-{turn}\")"),
+                )
+                .await;
+                let snapshot = state.snapshot_execution_state().expect("turn snapshot");
+                assert_eq!(
+                    state.encoded_globals_in_last_snapshot(),
+                    1,
+                    "turn {turn} must re-encode only its assigned binding"
+                );
+                assert_eq!(
+                    snapshot
+                        .components
+                        .values()
+                        .filter(|component| matches!(
+                            component,
+                            lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
+                        ))
+                        .count(),
+                    1,
+                    "turn {turn} must submit one changed leaf body"
+                );
+                measured.push(measure_snapshot(&snapshot).checkpoint_bytes);
+                state.acknowledge_execution_state_capture();
+            }
+            let minimum = *measured.iter().min().expect("measurements");
+            let maximum = *measured.iter().max().expect("measurements");
+            println!(
+                "FIG1195_FLAT_GROWTH full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
+                measured.len()
+            );
+            assert!(
+                maximum - minimum < 1024,
+                "per-commit bytes must stay flat: min={minimum}, max={maximum}"
+            );
+            assert!(
+                maximum * 6 < full_state_bytes,
+                "changed-state commit {maximum} must stay far below retained state {full_state_bytes}"
+            );
+        });
+    }
+
+    /// The failure geometry this arc exists for: a research session whose state
+    /// is many mid-size composite bindings rather than a few large ones. Three
+    /// live jitindex episodes committed 1.52/1.32/1.24 MB of exactly this shape
+    /// against a 1 MiB budget, so per-commit bytes have to track the changed
+    /// binding here too — a payoff that only appears above some large-binding
+    /// size would not have prevented those failures.
+    #[test]
+    fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
+        block_on(async {
+            let mut source = String::new();
+            for index in 0..300 {
+                let payload = format!("note-{index}-{}", "n".repeat(3 * 1024 + 512));
+                source.push_str(&format!("mid_{index} = [\"{payload}\"]\n"));
+            }
+            let mut state =
+                execute_test_code(RlmExecutionState::new().expect("state"), source).await;
+            let full_state_bytes = state
+                .rlm
+                .snapshot()
+                .to_canonical_bytes()
+                .expect("accumulated canonical state")
+                .len();
+            assert!(
+                full_state_bytes > 1024 * 1024,
+                "the jitindex geometry must accumulate more than the historical 1 MiB cap: {full_state_bytes}"
+            );
+            let _initial = state.snapshot_execution_state().expect("initial snapshot");
+            state.acknowledge_execution_state_capture();
+
+            let mut measured = Vec::new();
+            for turn in 0..20 {
+                let binding = turn % 300;
+                state = execute_test_code(
+                    state,
+                    format!("mid_{binding} = push(mid_{binding}, \"turn-{turn}\")"),
+                )
+                .await;
+                let snapshot = state.snapshot_execution_state().expect("turn snapshot");
+                assert_eq!(
+                    state.encoded_globals_in_last_snapshot(),
+                    1,
+                    "turn {turn} must re-encode only its assigned binding"
+                );
+                assert_eq!(
+                    snapshot
+                        .components
+                        .values()
+                        .filter(|component| matches!(
+                            component,
+                            lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
+                        ))
+                        .count(),
+                    1,
+                    "turn {turn} must submit one changed leaf body"
+                );
+                measured.push(measure_snapshot(&snapshot).checkpoint_bytes);
+                state.acknowledge_execution_state_capture();
+            }
+            let minimum = *measured.iter().min().expect("measurements");
+            let maximum = *measured.iter().max().expect("measurements");
+            println!(
+                "FIG1195_FLAT_GROWTH_MID_SIZE full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
+                measured.len()
+            );
+            assert!(
+                maximum - minimum < 1024,
+                "per-commit bytes must stay flat: min={minimum}, max={maximum}"
+            );
+            assert!(
+                maximum * 4 < full_state_bytes,
+                "a mid-size-binding session's changed-state commit {maximum} must stay far below its retained state {full_state_bytes}"
+            );
+        });
+    }
+
+    /// The other side of the leaf line: a session of many short bindings must
+    /// keep them inline. Each leaf costs a root reference plus a checkpoint
+    /// manifest row on every commit, so promoting short values to leaves would
+    /// raise the per-commit floor instead of lowering it.
+    #[test]
+    fn many_short_bindings_stay_inline_and_hold_the_per_commit_floor() {
+        block_on(async {
+            let mut source = String::new();
+            for index in 0..200 {
+                let payload = format!("short-{index}-{}", "s".repeat(48));
+                source.push_str(&format!("short_{index} = [\"{payload}\"]\n"));
+            }
+            let mut state =
+                execute_test_code(RlmExecutionState::new().expect("state"), source).await;
+            let initial = state.snapshot_execution_state().expect("initial snapshot");
+            assert!(
+                initial.components.is_empty(),
+                "short composites must stay inline in the root: {} leaves",
+                initial.components.len()
+            );
+            state.acknowledge_execution_state_capture();
+
+            state = execute_test_code(
+                state,
+                "short_0 = push(short_0, \"one changed binding\")".to_string(),
+            )
+            .await;
+            let changed = state.snapshot_execution_state().expect("changed snapshot");
+            let commit_bytes = measure_snapshot(&changed).checkpoint_bytes;
+            println!(
+                "FIG1195_SHORT_BINDING_FLOOR commit_bytes={commit_bytes} leaves={}",
+                changed.components.len()
+            );
+            assert!(
+                changed.components.is_empty(),
+                "a changed short binding must not mint a leaf"
+            );
+            // 200 leaves would charge ~200 root refs plus ~200 manifest rows on
+            // every commit; inline short values charge their own bytes once.
+            assert!(
+                commit_bytes < 32 * 1024,
+                "many short bindings must keep the per-commit floor low: {commit_bytes}"
+            );
+        });
     }
 
     #[test]
@@ -2724,26 +3220,12 @@ mod tests {
         );
         state.rlm = FlowState::from_snapshot(snapshot);
 
-        let bytes = state
-            .snapshot_execution_state()
-            .expect("executor snapshot")
-            .expect("snapshot bytes");
-        let encoded_envelope: state::RlmSnapshotEnvelope =
-            rmp_serde::from_slice(&bytes).expect("decode typed envelope");
-        let encoded_snapshot = lashlang::Snapshot::from_canonical_bytes(&encoded_envelope.vars)
-            .expect("decode typed vars");
-        let Some(FlowValue::Projected(encoded_projected)) = encoded_snapshot.globals.get("doc")
-        else {
-            panic!("expected encoded projected value");
-        };
-        assert_eq!(
-            encoded_projected.projection_ref(),
-            Some(&serde_json::json!({"kind": "memory", "key": "doc"}))
-        );
+        let snapshot =
+            hydrate_snapshot(state.snapshot_execution_state().expect("executor snapshot"));
 
         let mut restored_execution = RlmExecutionState::new().expect("restored state");
         restored_execution
-            .restore_execution_state(&bytes)
+            .restore_execution_state(&snapshot)
             .expect("restore runtime");
         let restored = restored_execution.rlm;
         let restored_snapshot = restored.snapshot();

@@ -104,7 +104,10 @@ async fn session_operations_delegate_to_runtime() -> Result<()> {
     let err = session
         .admin()
         .state()
-        .restore_execution(&[1, 2, 3])
+        .restore_execution(&lash_core::plugin::HydratedExecutionState {
+            root: vec![1, 2, 3],
+            components: std::collections::BTreeMap::new(),
+        })
         .await
         .expect_err("standard protocol has no code executor to restore");
     assert!(matches!(

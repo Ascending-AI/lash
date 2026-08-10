@@ -648,17 +648,22 @@ impl SessionAdmin {
         Ok(summaries)
     }
 
-    async fn snapshot_execution_state(&self) -> Result<Option<Vec<u8>>> {
+    async fn snapshot_execution_state(
+        &self,
+    ) -> Result<Option<lash_core::plugin::HydratedExecutionState>> {
         self.with_writer(async |runtime: &mut LashRuntime| {
             runtime.snapshot_execution_state().await.map_err(Into::into)
         })
         .await
     }
 
-    async fn restore_execution_state(&self, bytes: &[u8]) -> Result<()> {
+    async fn restore_execution_state(
+        &self,
+        snapshot: &lash_core::plugin::HydratedExecutionState,
+    ) -> Result<()> {
         self.with_writer(async |runtime: &mut LashRuntime| {
             runtime
-                .restore_execution_state(bytes)
+                .restore_execution_state(snapshot)
                 .await
                 .map_err(Into::into)
         })
@@ -1246,12 +1251,17 @@ impl SessionStateAdmin {
         self.control.session_state_service().await
     }
 
-    pub async fn snapshot_execution(&self) -> Result<Option<Vec<u8>>> {
+    pub async fn snapshot_execution(
+        &self,
+    ) -> Result<Option<lash_core::plugin::HydratedExecutionState>> {
         self.control.snapshot_execution_state().await
     }
 
-    pub async fn restore_execution(&self, bytes: &[u8]) -> Result<()> {
-        self.control.restore_execution_state(bytes).await
+    pub async fn restore_execution(
+        &self,
+        snapshot: &lash_core::plugin::HydratedExecutionState,
+    ) -> Result<()> {
+        self.control.restore_execution_state(snapshot).await
     }
 
     pub async fn compact_context(

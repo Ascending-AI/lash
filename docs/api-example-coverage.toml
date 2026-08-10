@@ -70183,3 +70183,36 @@ availability = "all-features"
 area = "stores"
 disposition = "unused-justify"
 reason = "Shared backend law independently compares installed inherited ceilings with per-owner maxima from the raw edge walk."
+
+[[api]]
+symbol = "lash::persistence::RuntimeSessionState::execution_state_hydration"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeSessionState::execution_state_hydration"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Protocol-plugin seam (ADR 0051 class 3): a protocol plugin restoring a session reads the complete hydrated execution-state root and its exact keyed leaf set from the `RuntimeSessionState` it is handed, as the RLM protocol does in `restore_runtime_session_state` at crates/lash-protocol-rlm/src/plugin/runtime_state.rs. No example implements a protocol plugin, so no example names it."
+
+[[api]]
+symbol = "lash_core::plugin::protocol::HydratedExecutionState"
+kind = "struct"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Protocol-plugin seam (ADR 0051 class 3): the checkpoint runtime hands a code executor this fully hydrated root plus exact keyed leaf set on cold reopen and explicit administrative restore, and a code executor returns one from `hydrated_execution_state`. Implemented by the RLM protocol at crates/lash-protocol-rlm/src/plugin/runtime_state.rs; no example implements a code executor."
+
+[[api]]
+symbol = "lash_core::plugin::protocol::HydratedExecutionState::components"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Protocol-plugin seam (ADR 0051 class 3, consume-side): this map carries every materialized execution-state leaf a code executor must verify against the root's references before it replaces live state. Read by the RLM protocol at crates/lash-protocol-rlm/src/executor/state.rs; no example implements a code executor."
+
+[[api]]
+symbol = "lash_core::plugin::protocol::HydratedExecutionState::root"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Protocol-plugin seam (ADR 0051 class 3, consume-side): this body carries the authoritative typed execution-state root a code executor decodes on cold reopen and explicit administrative restore. Read by the RLM protocol at crates/lash-protocol-rlm/src/executor/state.rs; no example implements a code executor."

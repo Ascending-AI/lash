@@ -17,6 +17,8 @@ mod materialize;
 use materialize::*;
 mod accepted_commit;
 pub(super) use accepted_commit::AcceptedTurnCommit;
+mod execution_state;
+use execution_state::*;
 mod settlement;
 use settlement::*;
 
@@ -83,23 +85,6 @@ struct FinalCommitInput<'a> {
     enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
     interrupted_turn_input_turn_id: Option<String>,
     session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum ExecutionStateUpdate {
-    Clean,
-    Replace(Vec<u8>),
-    Clear,
-}
-
-impl ExecutionStateUpdate {
-    fn apply(self, state: &mut RuntimeSessionState) {
-        match self {
-            Self::Clean => {}
-            Self::Replace(snapshot) => state.set_execution_state_snapshot(Some(snapshot)),
-            Self::Clear => state.set_execution_state_snapshot(None),
-        }
-    }
 }
 
 impl TurnBoundary {
@@ -184,26 +169,24 @@ impl TurnBoundary {
         policy: SessionPolicy,
         turn_index: usize,
         messages: &MessageSequence,
-        session: Option<&mut Session>,
+        mut session: Option<&mut Session>,
     ) -> Result<(), StoreError> {
         if !crate::messages_are_prompt_resume_safe(messages.iter()) {
             return Ok(());
         }
 
+        if let Some(session) = session.as_deref_mut() {
+            probe_execution_state_capture(session)
+                .await
+                .map_err(accepted_commit::execution_state_capture_error)?;
+        }
         self.apply_prepared_messages(messages);
         let plugins = session
             .as_deref()
             .map(|session| Arc::clone(session.plugins()));
-        let execution_state_update = match session {
-            Some(session) => Self::capture_execution_state_update(session)
-                .await
-                .map_err(accepted_commit::execution_state_capture_error)?,
-            None => ExecutionStateUpdate::Clean,
-        };
         let state = self.draft_mut().state_mut();
         state.policy = policy;
         state.turn_index = turn_index;
-        execution_state_update.apply(state);
         if let Some(plugins) = plugins.as_ref() {
             state.refresh_plugin_snapshots(plugins.as_ref());
         }
@@ -224,7 +207,7 @@ impl TurnBoundary {
             });
         }
 
-        let execution_state_update = Self::capture_execution_state_update(session)
+        probe_execution_state_capture(session)
             .await
             .map_err(|err| {
                 RuntimeError::new(
@@ -238,7 +221,7 @@ impl TurnBoundary {
             turn_index,
             messages,
             event_delta,
-            execution_state_update,
+            execution_state_update: ExecutionStateUpdate::Clean,
             plugins: Some(plugins.as_ref()),
         })
         .await
@@ -268,7 +251,9 @@ impl TurnBoundary {
             let state = draft.state_mut();
             state.policy = policy;
             state.turn_index = turn_index;
-            execution_state_update.apply(state);
+            execution_state_update
+                .apply(state)
+                .map_err(super::runtime_error_from_store_commit)?;
             if let Some(plugins) = plugins {
                 state.refresh_plugin_snapshots(plugins);
             }
@@ -332,7 +317,7 @@ impl TurnBoundary {
                 let execution_state_update = if agent_frame_switch_materializes {
                     ExecutionStateUpdate::Clear
                 } else {
-                    Self::capture_execution_state_update(session)
+                    capture_execution_state_update(session)
                         .await
                         .map_err(accepted_commit::execution_state_capture_error)?
                 };
@@ -341,7 +326,9 @@ impl TurnBoundary {
             }
             None => (None, None, ExecutionStateUpdate::Clean),
         };
-        let enqueued_queue_batches = self
+        let captured_execution_state = !agent_frame_switch_materializes
+            && !matches!(execution_state_update, ExecutionStateUpdate::Clean);
+        let commit_result = self
             .final_commit_with_snapshots(FinalCommitInput {
                 returned_state: &returned_turn.state,
                 tool_calls: &returned_turn.tool_calls,
@@ -362,7 +349,14 @@ impl TurnBoundary {
                 interrupted_turn_input_turn_id,
                 session_execution_lease_completion,
             })
-            .await?;
+            .await;
+        settle_execution_state_capture(
+            plugins.as_deref(),
+            captured_execution_state,
+            commit_result.is_ok(),
+        )
+        .await;
+        let enqueued_queue_batches = commit_result?;
         returned_turn.state = self.final_state_mut().to_snapshot();
         Ok(AcceptedTurnCommit::new(
             enqueued_queue_batches.0,
@@ -453,7 +447,7 @@ impl TurnBoundary {
         if let Some(plugins) = plugins {
             state.refresh_plugin_snapshots(plugins);
         }
-        execution_state_update.apply(state);
+        execution_state_update.apply(state)?;
         materialize_terminal_output(state, outcome, clock.as_ref(), &terminal_message_id);
         materialize_agent_frame_switch(
             state,
@@ -615,28 +609,6 @@ impl TurnBoundary {
             draft.mark_node_ids_persisted(persisted_node_ids);
         }
         Ok((enqueued_queue_batches, committed_usage_delta_identities))
-    }
-
-    async fn capture_execution_state_update(
-        session: &mut Session,
-    ) -> Result<ExecutionStateUpdate, crate::SessionError> {
-        let Some(code_executor) = session.plugins().code_executor() else {
-            return Ok(ExecutionStateUpdate::Clean);
-        };
-        if !code_executor.execution_state_dirty() {
-            return Ok(ExecutionStateUpdate::Clean);
-        }
-        let session_id = session.session_id().to_string();
-        let snapshot = code_executor
-            .snapshot_execution_state(crate::plugin::ProtocolSessionContext::new(
-                session,
-                &session_id,
-            ))
-            .await?;
-        Ok(match snapshot {
-            Some(snapshot) => ExecutionStateUpdate::Replace(snapshot),
-            None => ExecutionStateUpdate::Clear,
-        })
     }
 }
 
@@ -1310,7 +1282,9 @@ mod tests {
             .final_commit_with_snapshots(FinalCommitInput {
                 returned_state: &returned_state,
                 plugins: None,
-                execution_state_update: ExecutionStateUpdate::Replace(b"runtime".to_vec()),
+                execution_state_update: ExecutionStateUpdate::Replace(
+                    crate::plugin::ExecutionStateSnapshot::from_root(Some(b"runtime".to_vec())),
+                ),
                 agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &usage,

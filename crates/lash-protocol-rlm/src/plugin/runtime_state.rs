@@ -164,7 +164,14 @@ impl RlmRuntimeState {
             *active_agent_frame_id = state.current_frame_node_id.clone();
         }
         let protected_names = self.protected_projected_binding_names().await;
-        if let Some(snapshot) = state.execution_state_snapshot().map(|bytes| bytes.to_vec()) {
+        if let Some(snapshot) =
+            state
+                .execution_state_hydration()
+                .map_err(|error| SessionError::Store {
+                    context: "failed to hydrate RLM execution-state components".to_string(),
+                    source: error,
+                })?
+        {
             execution
                 .restore_execution_state(&snapshot)
                 .map_err(|error| SessionError::Protocol(error.to_string()))?;
@@ -259,7 +266,9 @@ impl RlmRuntimeState {
             .unwrap_or(true)
     }
 
-    pub(super) async fn snapshot_execution_state(&self) -> Result<Option<Vec<u8>>, SessionError> {
+    pub(super) async fn snapshot_execution_state(
+        &self,
+    ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
         self.execution
             .lock()
             .await
@@ -268,12 +277,48 @@ impl RlmRuntimeState {
             .snapshot_execution_state()
     }
 
-    pub(super) async fn restore_execution_state(&self, data: &[u8]) -> Result<(), SessionError> {
+    pub(super) async fn probe_execution_state_capture(&self) -> Result<(), SessionError> {
+        self.execution
+            .lock()
+            .await
+            .as_mut()
+            .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?
+            .probe_execution_state_capture()
+    }
+
+    pub(super) async fn hydrated_execution_state(
+        &self,
+    ) -> Result<Option<lash_core::plugin::HydratedExecutionState>, SessionError> {
+        self.execution
+            .lock()
+            .await
+            .as_ref()
+            .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?
+            .hydrated_execution_state()
+            .map(Some)
+    }
+
+    pub(super) async fn acknowledge_execution_state_capture(&self) {
+        if let Some(execution) = self.execution.lock().await.as_mut() {
+            execution.acknowledge_execution_state_capture();
+        }
+    }
+
+    pub(super) async fn abort_execution_state_capture(&self) {
+        if let Some(execution) = self.execution.lock().await.as_mut() {
+            execution.abort_execution_state_capture();
+        }
+    }
+
+    pub(super) async fn restore_execution_state(
+        &self,
+        state: &lash_core::plugin::HydratedExecutionState,
+    ) -> Result<(), SessionError> {
         let mut execution = self.execution.lock().await;
         execution
             .as_mut()
             .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?
-            .restore_execution_state(data)
+            .restore_execution_state(state)
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
         drop(execution);
         self.refresh_bound_variables_prompt().await;
@@ -367,16 +412,38 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
     async fn snapshot_execution_state(
         &self,
         _ctx: ProtocolSessionContext<'_>,
-    ) -> Result<Option<Vec<u8>>, SessionError> {
+    ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
         self.state.snapshot_execution_state().await
+    }
+
+    async fn probe_execution_state_capture(
+        &self,
+        _ctx: ProtocolSessionContext<'_>,
+    ) -> Result<(), SessionError> {
+        self.state.probe_execution_state_capture().await
+    }
+
+    async fn hydrated_execution_state(
+        &self,
+        _ctx: ProtocolSessionContext<'_>,
+    ) -> Result<Option<lash_core::plugin::HydratedExecutionState>, SessionError> {
+        self.state.hydrated_execution_state().await
     }
 
     async fn restore_execution_state(
         &self,
         _ctx: ProtocolSessionContext<'_>,
-        data: &[u8],
+        state: &lash_core::plugin::HydratedExecutionState,
     ) -> Result<(), SessionError> {
-        self.state.restore_execution_state(data).await
+        self.state.restore_execution_state(state).await
+    }
+
+    async fn acknowledge_execution_state_capture(&self) {
+        self.state.acknowledge_execution_state_capture().await;
+    }
+
+    async fn abort_execution_state_capture(&self) {
+        self.state.abort_execution_state_capture().await;
     }
 }
 

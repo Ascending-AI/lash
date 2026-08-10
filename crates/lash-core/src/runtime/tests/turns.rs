@@ -250,21 +250,37 @@ impl crate::plugin::CodeExecutorPlugin for FailingCaptureExecutor {
     async fn snapshot_execution_state(
         &self,
         _ctx: crate::plugin::ProtocolSessionContext<'_>,
-    ) -> Result<Option<Vec<u8>>, crate::SessionError> {
+    ) -> Result<crate::plugin::ExecutionStateSnapshot, crate::SessionError> {
         if self.fail_capture.load(Ordering::SeqCst) {
             return Err(crate::SessionError::Protocol(
                 "injected dirty execution-state capture failure".to_string(),
             ));
         }
-        Ok(Some(self.snapshot.lock_recover().clone()))
+        Ok(crate::plugin::ExecutionStateSnapshot::from_root(Some(
+            self.snapshot.lock_recover().clone(),
+        )))
+    }
+
+    /// Reports the same obstacle the capture itself would hit, and stages
+    /// nothing — the runtime uses this to fail a turn before its provider call.
+    async fn probe_execution_state_capture(
+        &self,
+        _ctx: crate::plugin::ProtocolSessionContext<'_>,
+    ) -> Result<(), crate::SessionError> {
+        if self.fail_capture.load(Ordering::SeqCst) {
+            return Err(crate::SessionError::Protocol(
+                "injected dirty execution-state capture failure".to_string(),
+            ));
+        }
+        Ok(())
     }
 
     async fn restore_execution_state(
         &self,
         _ctx: crate::plugin::ProtocolSessionContext<'_>,
-        data: &[u8],
+        state: &crate::plugin::HydratedExecutionState,
     ) -> Result<(), crate::SessionError> {
-        self.restored.lock_recover().push(data.to_vec());
+        self.restored.lock_recover().push(state.root.clone());
         Ok(())
     }
 }
@@ -293,12 +309,19 @@ impl crate::plugin::ProtocolSessionPlugin for ResetExecutorOnSwitchProtocol {
         state: &crate::RuntimeSessionState,
     ) -> Result<(), crate::SessionError> {
         let snapshot = state
-            .execution_state_snapshot()
-            .unwrap_or(b"fresh-frame-execution-state");
+            .execution_state_hydration()
+            .map_err(|source| crate::SessionError::Store {
+                context: "hydrate test execution state".to_string(),
+                source,
+            })?
+            .unwrap_or_else(|| crate::plugin::HydratedExecutionState {
+                root: b"fresh-frame-execution-state".to_vec(),
+                components: std::collections::BTreeMap::new(),
+            });
         crate::plugin::CodeExecutorPlugin::restore_execution_state(
             self.executor.as_ref(),
             ctx,
-            snapshot,
+            &snapshot,
         )
         .await
     }
@@ -325,13 +348,19 @@ impl crate::plugin::ProtocolSessionPlugin for SwitchBeforeLlmProtocol {
         ctx: crate::plugin::ProtocolSessionContext<'_>,
         state: &crate::RuntimeSessionState,
     ) -> Result<(), crate::SessionError> {
-        if let (Some(executor), Some(snapshot)) =
-            (self.executor.as_ref(), state.execution_state_snapshot())
-        {
+        if let (Some(executor), Some(snapshot)) = (
+            self.executor.as_ref(),
+            state
+                .execution_state_hydration()
+                .map_err(|source| crate::SessionError::Store {
+                    context: "hydrate test execution state".to_string(),
+                    source,
+                })?,
+        ) {
             crate::plugin::CodeExecutorPlugin::restore_execution_state(
                 executor.as_ref(),
                 ctx,
-                snapshot,
+                &snapshot,
             )
             .await?;
         }
@@ -360,11 +389,18 @@ impl crate::plugin::ProtocolSessionPlugin for RestoreExecutorFromRuntimeState {
         ctx: crate::plugin::ProtocolSessionContext<'_>,
         state: &crate::RuntimeSessionState,
     ) -> Result<(), crate::SessionError> {
-        if let Some(snapshot) = state.execution_state_snapshot() {
+        if let Some(snapshot) =
+            state
+                .execution_state_hydration()
+                .map_err(|source| crate::SessionError::Store {
+                    context: "hydrate test execution state".to_string(),
+                    source,
+                })?
+        {
             crate::plugin::CodeExecutorPlugin::restore_execution_state(
                 self.executor.as_ref(),
                 ctx,
-                snapshot,
+                &snapshot,
             )
             .await?;
         }

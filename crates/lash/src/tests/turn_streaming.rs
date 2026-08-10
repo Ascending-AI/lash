@@ -3,6 +3,8 @@ use super::*;
 use crate::rlm::RlmTurnBuilderExt as _;
 use futures_util::StreamExt as _;
 use lash_sansio::sync::{LockResultExt, MutexExt};
+#[cfg(feature = "rlm")]
+use sha2::Digest as _;
 use std::collections::BTreeSet;
 
 struct QueuedWorkHydrationProbeFactory {
@@ -5469,21 +5471,137 @@ finish { established: control.total }"#,
 }
 
 #[cfg(feature = "rlm")]
+#[test]
+fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Result<()> {
+    run_async_test_on_stack_budget("rlm-leaf-append-stale-rollback-test", || async {
+        let retained_payload =
+            "x".repeat(lash_core::plugin::EXECUTION_STATE_LEAF_MIN_BODY_BYTES * 2);
+        let source =
+            format!("retained = [{{ payload: {retained_payload:?} }}]\nfinish \"committed\"");
+        let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+            crate::TurnBudget::Unbounded,
+            rlm_factory(),
+        ))
+        .provider(queued_text_provider(vec![lashlang_block(&source)]))
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .disable_queued_work_driver()
+        .build()?;
+        let session = core
+            .session("rlm-leaf-append-stale-rollback")
+            .open()
+            .await?;
+        session
+            .turn(TurnInput::text("commit leaf-bearing state"))
+            .run()
+            .await?;
+
+        let execution_before = session
+            .admin()
+            .state()
+            .snapshot_execution()
+            .await?
+            .expect("RLM has live execution state after the committed turn");
+        assert!(
+            !execution_before.components.is_empty(),
+            "the committed RLM state must contain at least one keyed leaf"
+        );
+
+        const ROLLED_BACK_MARKER: &str = "must-not-survive-stale-append";
+        let writer = session.runtime.writer();
+        let mut runtime = writer.lock().await;
+        let result = runtime
+            .append_session_nodes(lash_core::AppendSessionNodesRequest {
+                operation_id: "leaf-bearing-stale-append".to_string(),
+                nodes: vec![lash_core::SessionAppendNode::message(
+                    lash_core::PluginMessage::text(
+                        lash_core::MessageRole::User,
+                        ROLLED_BACK_MARKER,
+                    )
+                    .with_id("leaf-bearing-stale-append-message"),
+                )],
+                requires_ancestor_node_id: Some("inactive-ancestor".to_string()),
+            })
+            .await?;
+        assert!(matches!(
+            result,
+            lash_core::AppendSessionNodesResult::StaleBranch { ref required_node_id }
+                if required_node_id == "inactive-ancestor"
+        ));
+        assert!(
+            runtime.read_view().messages().iter().all(|message| message
+                .parts
+                .iter()
+                .all(|part| part.content != ROLLED_BACK_MARKER)),
+            "the stale append must be absent from the reconciled RLM history projection"
+        );
+        session.runtime.publish_from(&runtime);
+        drop(runtime);
+
+        let execution_after = session
+            .admin()
+            .state()
+            .snapshot_execution()
+            .await?
+            .expect("RLM execution state survives the stale append rollback");
+        assert_eq!(
+            execution_after, execution_before,
+            "the stale append rollback must preserve the live leaf-bearing RLM projection"
+        );
+        Ok(())
+    })
+}
+
+#[cfg(feature = "rlm")]
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 struct RlmExecutionSnapshotProbe {
     version: u32,
     engine: String,
-    #[serde(with = "serde_bytes")]
-    vars: Vec<u8>,
+    globals: std::collections::BTreeMap<String, RlmPersistedGlobalProbe>,
     files: std::collections::BTreeMap<String, String>,
     deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
 }
 
 #[cfg(feature = "rlm")]
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum RlmPersistedGlobalProbe {
+    Inline {
+        #[serde(with = "serde_bytes")]
+        body: Vec<u8>,
+    },
+    Leaf {
+        component: String,
+    },
+}
+
+#[cfg(feature = "rlm")]
+impl RlmExecutionSnapshotProbe {
+    fn global(
+        &self,
+        state: &lash_core::plugin::HydratedExecutionState,
+        name: &str,
+    ) -> Option<lashlang::Value> {
+        let body = match self.globals.get(name)? {
+            RlmPersistedGlobalProbe::Inline { body } => body.as_slice(),
+            RlmPersistedGlobalProbe::Leaf { component } => {
+                state.components.get(component)?.as_slice()
+            }
+        };
+        lashlang::Snapshot::from_canonical_bytes(body)
+            .ok()?
+            .globals
+            .remove("value")
+    }
+}
+
+#[cfg(feature = "rlm")]
 struct ColdReopenFrameState {
     switch_checkpoint_budget_bytes: usize,
-    resident_execution_state: RlmExecutionSnapshotProbe,
-    execution_state: RlmExecutionSnapshotProbe,
+    resident_execution_state: lash_core::plugin::HydratedExecutionState,
+    execution_state: lash_core::plugin::HydratedExecutionState,
 }
 
 #[cfg(feature = "rlm")]
@@ -5524,24 +5642,32 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     .build()?;
     let first_session = first_core.session(session_id).open().await?;
 
-    let initial_execution_state = first_session
+    let mut initial_execution_state = first_session
         .admin()
         .state()
         .snapshot_execution()
         .await?
         .expect("RLM has an execution snapshot");
-    let mut initial_execution_state: RlmExecutionSnapshotProbe =
-        rmp_serde::from_slice(&initial_execution_state).expect("decode RLM execution snapshot");
-    initial_execution_state
+    let mut initial_root: RlmExecutionSnapshotProbe =
+        rmp_serde::from_slice(&initial_execution_state.root)
+            .expect("decode RLM execution snapshot");
+    let old_file_body = b"scratch:abandoned".to_vec();
+    let old_file_component = format!(
+        "execution_state/sha256/{:x}",
+        sha2::Sha256::digest(&old_file_body)
+    );
+    initial_root
         .files
-        .insert("old-frame.txt".to_string(), "scratch:abandoned".to_string());
+        .insert("old-frame.txt".to_string(), old_file_component.clone());
+    initial_execution_state
+        .components
+        .insert(old_file_component, old_file_body);
+    initial_execution_state.root =
+        rmp_serde::to_vec_named(&initial_root).expect("encode mutated RLM execution snapshot");
     first_session
         .admin()
         .state()
-        .restore_execution(
-            &rmp_serde::to_vec_named(&initial_execution_state)
-                .expect("encode mutated RLM execution snapshot"),
-        )
+        .restore_execution(&initial_execution_state)
         .await?;
 
     let switched = first_session
@@ -5655,10 +5781,8 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
 
     Ok(ColdReopenFrameState {
         switch_checkpoint_budget_bytes,
-        resident_execution_state: rmp_serde::from_slice(&resident_execution_state)
-            .expect("decode resident RLM execution snapshot"),
-        execution_state: rmp_serde::from_slice(&execution_state)
-            .expect("decode cold-reopened RLM execution snapshot"),
+        resident_execution_state,
+        execution_state,
     })
 }
 
@@ -5669,18 +5793,18 @@ fn agent_frame_switch_clears_execution_state_across_cold_reopen() -> Result<()> 
         let small = frame_switch_state_after_cold_reopen("frame-clear-small", 16).await?;
         let large = frame_switch_state_after_cold_reopen("frame-clear-large", 128 * 1024).await?;
 
-        for (geometry, execution_state) in [
+        for (geometry, state) in [
             ("resident", &large.resident_execution_state),
             ("cold-reopened", &large.execution_state),
         ] {
-            let vars = lashlang::Snapshot::from_canonical_bytes(&execution_state.vars)
-                .expect("decode canonical Lashlang snapshot");
+            let execution_state: RlmExecutionSnapshotProbe =
+                rmp_serde::from_slice(&state.root).expect("decode canonical RLM execution root");
             assert!(
-                vars.globals.get("abandoned_global").is_none(),
+                execution_state.global(state, "abandoned_global").is_none(),
                 "the old frame's globals must not survive in the {geometry} executor"
             );
             assert!(matches!(
-                vars.globals.get("frame_seed"),
+                execution_state.global(state, "frame_seed"),
                 Some(lashlang::Value::String(value)) if value.as_str() == "seed:survives"
             ));
 
@@ -5704,6 +5828,88 @@ fn agent_frame_switch_clears_execution_state_across_cold_reopen() -> Result<()> 
             small.switch_checkpoint_budget_bytes,
             large.switch_checkpoint_budget_bytes
         );
+        Ok(())
+    })
+}
+
+#[cfg(feature = "rlm")]
+#[test]
+fn binary_scratch_files_survive_store_backed_cold_reopen_byte_exactly() -> Result<()> {
+    run_async_test_on_stack_budget("rlm-binary-scratch-cold-reopen-test", || async {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+            dir.path().join("sessions"),
+        ));
+        let first_core = explicit_ephemeral_facets(LashCore::rlm_builder(
+            crate::TurnBudget::Unbounded,
+            rlm_factory(),
+        ))
+        .provider(queued_text_provider(vec![lashlang_block(
+            "checkpoint_marker = 1\nfinish checkpoint_marker",
+        )]))
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .disable_queued_work_driver()
+        .build()?;
+        let first_session = first_core.session("binary-scratch-cold").open().await?;
+        let mut snapshot = first_session
+            .admin()
+            .state()
+            .snapshot_execution()
+            .await?
+            .expect("RLM has an initial execution snapshot");
+        let mut root: RlmExecutionSnapshotProbe =
+            rmp_serde::from_slice(&snapshot.root).expect("decode initial RLM root");
+        for (path, body) in [
+            ("binary.bin", vec![0xff, 0xfe, 0x80, 0x00, 0x7f]),
+            ("nested/embedded-nul.dat", b"prefix\0suffix".to_vec()),
+        ] {
+            let component = format!("execution_state/sha256/{:x}", sha2::Sha256::digest(&body));
+            root.files.insert(path.to_string(), component.clone());
+            snapshot.components.insert(component, body);
+        }
+        snapshot.root = rmp_serde::to_vec_named(&root).expect("encode file-bearing RLM root");
+        first_session
+            .admin()
+            .state()
+            .restore_execution(&snapshot)
+            .await?;
+        first_session
+            .turn(TurnInput::text("commit the restored scratch files"))
+            .run()
+            .await?;
+        drop(first_session);
+        drop(first_core);
+
+        let reopened_core = explicit_ephemeral_facets(LashCore::rlm_builder(
+            crate::TurnBudget::Unbounded,
+            rlm_factory(),
+        ))
+        .provider(queued_text_provider(Vec::<String>::new()))
+        .model(mock_model_spec())
+        .store_factory(store_factory)
+        .disable_queued_work_driver()
+        .build()?;
+        let reopened = reopened_core.session("binary-scratch-cold").open().await?;
+        let cold = reopened
+            .admin()
+            .state()
+            .snapshot_execution()
+            .await?
+            .expect("cold-reopened RLM has execution state");
+        let cold_root: RlmExecutionSnapshotProbe =
+            rmp_serde::from_slice(&cold.root).expect("decode cold RLM root");
+        for (path, expected) in [
+            ("binary.bin", vec![0xff, 0xfe, 0x80, 0x00, 0x7f]),
+            ("nested/embedded-nul.dat", b"prefix\0suffix".to_vec()),
+        ] {
+            let component = cold_root.files.get(path).expect("cold file root entry");
+            assert_eq!(
+                cold.components.get(component),
+                Some(&expected),
+                "cold-reopened `{path}` bytes"
+            );
+        }
         Ok(())
     })
 }
