@@ -22843,7 +22843,7 @@ aliases = ["lash_core::ProcessAwaitOutput::Cancelled::raw"]
 area = "processes"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:194#raw: None,"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:816#&& raw[\"retryable\"] == false"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:824#&& raw[\"retryable\"] == false"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:738; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:814 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `external_completion.outcome.as_ref()` matches `Some(ProcessAwaitOutput::Failure { class: lash::tools::ToolFailureClass::External, code...`."
 
 [[api]]
@@ -22875,7 +22875,7 @@ aliases = ["lash_core::ProcessAwaitOutput::Failure::code"]
 area = "processes"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:192#code: \"deterministic_failure\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:814#}) if code == \"batch_rejected\""
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:822#}) if code == \"batch_rejected\""
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:190; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:812 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `external_completion.outcome.as_ref()` matches `Some(ProcessAwaitOutput::Failure { class: lash::tools::ToolFailureClass::External, code...`."
 
 [[api]]
@@ -22907,7 +22907,7 @@ aliases = ["lash_core::ProcessAwaitOutput::Failure::raw"]
 area = "processes"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:194#raw: None,"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:816#&& raw[\"retryable\"] == false"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:824#&& raw[\"retryable\"] == false"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:192; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:814 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `external_completion.outcome.as_ref()` matches `Some(ProcessAwaitOutput::Failure { class: lash::tools::ToolFailureClass::External, code...`."
 
 [[api]]
@@ -23253,8 +23253,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessCompletionAuthority::workflow_key"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:818#assert_eq!(ProcessCompletionAuthority::workflow_key(\"wf-1\").label(), \"workflow-key\");"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:818#assert_eq!(ProcessCompletionAuthority::workflow_key(\"wf-1\").label(), \"workflow-key\");"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:826#assert_eq!(ProcessCompletionAuthority::workflow_key(\"wf-1\").label(), \"workflow-key\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:826#assert_eq!(ProcessCompletionAuthority::workflow_key(\"wf-1\").label(), \"workflow-key\");"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:816; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:816 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `ProcessCompletionAuthority::workflow_key(\"wf-1\").label()` equals `\"workflow-key\"`."
 
 [[api]]
@@ -24480,7 +24480,7 @@ aliases = ["lash_core::ProcessListFilter::originator_id"]
 area = "processes"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/app_state.rs:236#originator_id: Some(session_id.to_string()),"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:1030#assert!(!rail.contains(&reclaimed), \"reclaimed work leaves the rail\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:1038#assert!(!rail.contains(&reclaimed), \"reclaimed work leaves the rail\");"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:195, which scopes session-delete retention to the rows that session originated; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:1026 in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that the scoped row left the runtime-wide work rail."
 
 [[api]]
@@ -24770,8 +24770,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessOriginator::host_scoped"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:787#ProcessProvenance::new(ProcessOriginator::host_scoped(\"batch-service\")),"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:805#assert_eq!(external_completion.status, ProcessStatus::Failed);"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:795#ProcessProvenance::new(ProcessOriginator::host_scoped(\"batch-service\")),"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:813#assert_eq!(external_completion.status, ProcessStatus::Failed);"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:785; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:803 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `external_completion.status` equals `ProcessStatus::Failed`."
 
 [[api]]
@@ -24824,8 +24824,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessProvenance::new"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:787#ProcessProvenance::new(ProcessOriginator::host_scoped(\"batch-service\")),"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:805#assert_eq!(external_completion.status, ProcessStatus::Failed);"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:795#ProcessProvenance::new(ProcessOriginator::host_scoped(\"batch-service\")),"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:813#assert_eq!(external_completion.status, ProcessStatus::Failed);"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:785; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:803 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `external_completion.status` equals `ProcessStatus::Failed`."
 
 [[api]]
@@ -24868,8 +24868,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessPruneReport"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:820#let report = registry"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:824#assert_eq!(report.pruned_processes, 2);"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:828#let report = registry"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:832#assert_eq!(report.pruned_processes, 2);"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:818; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:822 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `report.pruned_processes` equals `2`."
 
 [[api]]
@@ -24879,8 +24879,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessPruneReport::pruned_events"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:825#assert!(report.pruned_events >= 2);"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:825#assert!(report.pruned_events >= 2);"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:833#assert!(report.pruned_events >= 2);"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:833#assert!(report.pruned_events >= 2);"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:823; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:823 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `report.pruned_events >= 2` holds."
 
 [[api]]
@@ -24890,8 +24890,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessPruneReport::pruned_processes"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:824#assert_eq!(report.pruned_processes, 2);"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:824#assert_eq!(report.pruned_processes, 2);"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:832#assert_eq!(report.pruned_processes, 2);"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:832#assert_eq!(report.pruned_processes, 2);"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:822; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:822 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `report.pruned_processes` equals `2`."
 
 [[api]]
@@ -24902,7 +24902,7 @@ aliases = ["lash_core::ProcessPruneReport::pruned_trigger_deliveries"]
 area = "triggers"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/app_state.rs:184#\"pruned_trigger_deliveries\": retention.pruned_trigger_deliveries,"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:1027#assert_eq!(retention.pruned_trigger_deliveries, 0, \"no delivery reserved\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:1035#assert_eq!(retention.pruned_trigger_deliveries, 0, \"no delivery reserved\");"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:143, which records what session-delete retention reclaimed; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:1023 in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that rows holding no trigger delivery reconcile none."
 
 [[api]]
@@ -25421,8 +25421,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessRegistry::compact_process_tombstones"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:839#.compact_process_tombstones("
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:846#assert_eq!(compacted, 0, \"unprojected deletions must retain their tombstones\");"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:847#.compact_process_tombstones("
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:854#assert_eq!(compacted, 0, \"unprojected deletions must retain their tombstones\");"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:837; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:844 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `compacted` equals `0` -- \"unprojected deletions must retain their tombstones\"."
 
 [[api]]
@@ -25510,8 +25510,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessRegistry::filter_tombstoned_process_ids"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:829#.filter_tombstoned_process_ids(&["
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:829#.filter_tombstoned_process_ids(&["
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:837#.filter_tombstoned_process_ids(&["
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:837#.filter_tombstoned_process_ids(&["
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:827; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:827 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `registry .filter_tombstoned_process_ids(&[ process_id.to_string(), external_id.to_strin...` equals `[process_id, external_id]`."
 
 [[api]]
@@ -25564,17 +25564,6 @@ aliases = ["lash_core::ProcessRegistry::list_live_observed_by"]
 area = "processes"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
-
-[[api]]
-symbol = "lash::process::ProcessRegistry::list_non_terminal"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::ProcessRegistry::list_non_terminal"]
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:763#.list_non_terminal()"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:516#assert!(registry"
-reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:761; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:760 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `registry .list_non_terminal() .await .expect(\"list recovery work\") .is_empty()` holds."
 
 [[api]]
 symbol = "lash::process::ProcessRegistry::list_observed_by"
@@ -25652,8 +25641,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessRegistry::prune_terminal_processes"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:821#.prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:824#assert_eq!(report.pruned_processes, 2);"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:829#.prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:832#assert_eq!(report.pruned_processes, 2);"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:819; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:822 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `report.pruned_processes` equals `2`."
 
 [[api]]
@@ -25701,8 +25690,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessRegistry::register_process"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:781#.register_process(ProcessRegistration::new("
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:805#assert_eq!(external_completion.status, ProcessStatus::Failed);"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:789#.register_process(ProcessRegistration::new("
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:813#assert_eq!(external_completion.status, ProcessStatus::Failed);"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:779; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:803 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `external_completion.status` equals `ProcessStatus::Failed`."
 
 [[api]]
@@ -27185,7 +27174,7 @@ availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/app_state.rs:232#.prune("
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:1025#assert_eq!(retention.pruned_processes, 1, \"one finished row reclaimed\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:1033#assert_eq!(retention.pruned_processes, 1, \"one finished row reclaimed\");"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:191, where deleting a session reclaims the terminal process rows it originated; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:1021 in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that the reclamation reports one pruned process."
 
 [[api]]
@@ -27260,8 +27249,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProjectionWatermark"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:821#.prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:824#assert_eq!(report.pruned_processes, 2);"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:829#.prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:832#assert_eq!(report.pruned_processes, 2);"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:819; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:822 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `report.pruned_processes` equals `2`."
 
 [[api]]
@@ -27271,8 +27260,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProjectionWatermark::NoProjector"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:821#.prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:824#assert_eq!(report.pruned_processes, 2);"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:829#.prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:832#assert_eq!(report.pruned_processes, 2);"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:819; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:822 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `report.pruned_processes` equals `2`."
 
 [[api]]
@@ -27282,8 +27271,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProjectionWatermark::UpTo"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:841#ProjectionWatermark::UpTo(initial_cursor),"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:846#assert_eq!(compacted, 0, \"unprojected deletions must retain their tombstones\");"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:849#ProjectionWatermark::UpTo(initial_cursor),"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:854#assert_eq!(compacted, 0, \"unprojected deletions must retain their tombstones\");"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:839; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:844 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `compacted` equals `0` -- \"unprojected deletions must retain their tombstones\"."
 
 [[api]]
@@ -27293,8 +27282,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProjectionWatermark::UpTo::0"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:841#ProjectionWatermark::UpTo(initial_cursor),"
-assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:846#assert_eq!(compacted, 0, \"unprojected deletions must retain their tombstones\");"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:849#ProjectionWatermark::UpTo(initial_cursor),"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:854#assert_eq!(compacted, 0, \"unprojected deletions must retain their tombstones\");"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/tests/process_work.rs:839; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:844 in `durable_process_registry_preserves_identity_lifecycle_and_fencing_inner` observes that `compacted` equals `0` -- \"unprojected deletions must retain their tombstones\"."
 
 [[api]]
@@ -69433,6 +69422,223 @@ aliases = ["lash_core::TraceEvent::LlmCallCompleted::attempts"]
 area = "observation-admin"
 disposition = "unused-justify"
 reason = "Concrete host class: custom observability sink implementers consuming structured retry-attempt trace events rather than bundled sinks."
+
+[[api]]
+symbol = "lash::plugins::PluginError::ProcessWorklistCursorBackendMismatch"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::ProcessWorklistCursorBackendMismatch"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: custom ProcessRegistry implementers and hosts diagnosing a cursor passed to the wrong durable backend."
+
+[[api]]
+symbol = "lash::plugins::PluginError::ProcessWorklistCursorBackendMismatch::actual"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::ProcessWorklistCursorBackendMismatch::actual"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: custom ProcessRegistry implementers and hosts diagnosing the actual backend identity in cursor misuse."
+
+[[api]]
+symbol = "lash::plugins::PluginError::ProcessWorklistCursorBackendMismatch::expected"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::ProcessWorklistCursorBackendMismatch::expected"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: custom ProcessRegistry implementers and hosts diagnosing the expected backend identity in cursor misuse."
+
+[[api]]
+symbol = "lash::process::ProcessWorklistCursor"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessWorklistCursor"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:762#let worklist_cursor = ProcessWorklistCursor::new(\"example\", \"invoice-a\", \"invoice-z\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:763#assert_eq!(worklist_cursor.backend(), \"example\");"
+
+[[api]]
+symbol = "lash::process::ProcessWorklistCursor::new"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessWorklistCursor::new"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:762#let worklist_cursor = ProcessWorklistCursor::new(\"example\", \"invoice-a\", \"invoice-z\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:763#assert_eq!(worklist_cursor.backend(), \"example\");"
+
+[[api]]
+symbol = "lash::process::ProcessWorklistCursor::backend"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessWorklistCursor::backend"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:763#assert_eq!(worklist_cursor.backend(), \"example\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:763#assert_eq!(worklist_cursor.backend(), \"example\");"
+
+[[api]]
+symbol = "lash::process::ProcessWorklistCursor::after_process_id"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessWorklistCursor::after_process_id"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:764#assert_eq!(worklist_cursor.after_process_id(), \"invoice-a\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:764#assert_eq!(worklist_cursor.after_process_id(), \"invoice-a\");"
+
+[[api]]
+symbol = "lash::process::ProcessWorklistCursor::through_process_id"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessWorklistCursor::through_process_id"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:765#assert_eq!(worklist_cursor.through_process_id(), \"invoice-z\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:765#assert_eq!(worklist_cursor.through_process_id(), \"invoice-z\");"
+
+[[api]]
+symbol = "lash::process::ProcessRegistry::list_non_terminal_page"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessRegistry::list_non_terminal_page"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:767#.list_non_terminal_page("
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:773#assert!(worklist_page.records.is_empty());"
+
+[[api]]
+symbol = "lash::process::ProcessWorklistPage"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessWorklistPage"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:766#let worklist_page = registry"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:773#assert!(worklist_page.records.is_empty());"
+
+[[api]]
+symbol = "lash::process::ProcessWorklistPage::records"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessWorklistPage::records"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:773#assert!(worklist_page.records.is_empty());"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:773#assert!(worklist_page.records.is_empty());"
+
+[[api]]
+symbol = "lash::process::ProcessWorklistPage::continuation"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::ProcessWorklistPage::continuation"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/process_work.rs:774#assert!(worklist_page.continuation.is_none());"
+assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:774#assert!(worklist_page.continuation.is_none());"
+
+[[api]]
+symbol = "lash::LashCoreBuilder::worker_slot_supplier"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::prelude::LashCoreBuilder::worker_slot_supplier"]
+area = "processes"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/worker_capacity.rs:81#.worker_slot_supplier(supplier.clone());"
+reason = "The external-signal worker-capacity example installs its host supplier on the public builder."
+
+[[api]]
+symbol = "lash::WorkerSlotKind"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::WorkerSlotKind"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/worker_capacity.rs:28#fn semaphore(&self, kind: WorkerSlotKind) -> &Arc<Semaphore> {"
+assertion = "examples/docs-snippets/src/worker_capacity.rs:100#assert_eq!(supplier.available_slots(WorkerSlotKind::QueuedWork), 1);"
+
+[[api]]
+symbol = "lash::WorkerSlotKind::Process"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::WorkerSlotKind::Process"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/worker_capacity.rs:30#WorkerSlotKind::Process => &self.process,"
+assertion = "examples/docs-snippets/src/worker_capacity.rs:99#assert_eq!(supplier.available_slots(WorkerSlotKind::Process), 1);"
+
+[[api]]
+symbol = "lash::WorkerSlotKind::QueuedWork"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::WorkerSlotKind::QueuedWork"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/worker_capacity.rs:31#WorkerSlotKind::QueuedWork => &self.queued_work,"
+assertion = "examples/docs-snippets/src/worker_capacity.rs:100#assert_eq!(supplier.available_slots(WorkerSlotKind::QueuedWork), 1);"
+
+[[api]]
+symbol = "lash::WorkerSlotPermit"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::WorkerSlotPermit"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/worker_capacity.rs:38#async fn reserve_slot(&self, kind: WorkerSlotKind) -> WorkerSlotPermit {"
+assertion = "examples/docs-snippets/src/worker_capacity.rs:99#assert_eq!(supplier.available_slots(WorkerSlotKind::Process), 1);"
+
+[[api]]
+symbol = "lash::WorkerSlotPermit::new"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::WorkerSlotPermit::new"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/worker_capacity.rs:53#WorkerSlotPermit::new(permit)"
+assertion = "examples/docs-snippets/src/worker_capacity.rs:99#assert_eq!(supplier.available_slots(WorkerSlotKind::Process), 1);"
+
+[[api]]
+symbol = "lash::WorkerSlotSupplier"
+kind = "trait"
+availability = "default+all-features"
+aliases = ["lash_core::WorkerSlotSupplier"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/worker_capacity.rs:37#impl WorkerSlotSupplier for ExternallyGatedSlots {"
+assertion = "examples/docs-snippets/src/worker_capacity.rs:94#assert!(supplier.try_reserve_slot(WorkerSlotKind::Process).is_none());"
+
+[[api]]
+symbol = "lash::WorkerSlotSupplier::available_slots"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::WorkerSlotSupplier::available_slots"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/worker_capacity.rs:67#fn available_slots(&self, kind: WorkerSlotKind) -> usize {"
+assertion = "examples/docs-snippets/src/worker_capacity.rs:97#assert_eq!(supplier.available_slots(WorkerSlotKind::Process), 0);"
+
+[[api]]
+symbol = "lash::WorkerSlotSupplier::reserve_slot"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::WorkerSlotSupplier::reserve_slot"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/worker_capacity.rs:96#let permit = supplier.reserve_slot(WorkerSlotKind::Process).await;"
+assertion = "examples/docs-snippets/src/worker_capacity.rs:97#assert_eq!(supplier.available_slots(WorkerSlotKind::Process), 0);"
+
+[[api]]
+symbol = "lash::WorkerSlotSupplier::try_reserve_slot"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::WorkerSlotSupplier::try_reserve_slot"]
+area = "processes"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/worker_capacity.rs:94#assert!(supplier.try_reserve_slot(WorkerSlotKind::Process).is_none());"
+assertion = "examples/docs-snippets/src/worker_capacity.rs:94#assert!(supplier.try_reserve_slot(WorkerSlotKind::Process).is_none());"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::LlmCallFailed::attempts"

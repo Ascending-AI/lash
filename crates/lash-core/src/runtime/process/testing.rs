@@ -32,70 +32,24 @@ mod continuation;
 mod identity;
 mod raw_state;
 mod support;
+mod types;
+mod worklist;
 pub use support::TestProcessRegistryWriteExt;
 use support::{
     ExecutionWritePause, process_external_ref_conflict, process_lease_expired,
     validate_in_memory_execution_authority,
 };
-
-/// In-memory process registry for core tests.
-pub struct TestLocalProcessRegistry {
-    transaction: Arc<Mutex<()>>,
-    managed: Arc<Mutex<ManagedProcessMap>>,
-    process_read_error: Arc<Mutex<Option<PluginError>>>,
-    process_read_error_after: Arc<Mutex<Option<(usize, PluginError)>>>,
-    process_read_absent: Arc<Mutex<bool>>,
-    process_read_override: Arc<Mutex<Option<ProcessRecord>>>,
-    process_lease_claim_error: Arc<Mutex<Option<PluginError>>>,
-    process_lease_renew_error: Arc<Mutex<Option<PluginError>>>,
-    process_terminal_write_error: Arc<Mutex<Option<PluginError>>>,
-    process_terminal_write_outcome: Arc<Mutex<Option<ProcessCompletionOutcome>>>,
-    process_lease_release_error: Arc<Mutex<Option<PluginError>>>,
-    next_change_seq: Arc<Mutex<u64>>,
-    observers: Arc<Mutex<HashMap<SessionId, HashSet<String>>>>,
-    wake_targets: Arc<Mutex<HashMap<String, SessionId>>>,
-    tombstones: Arc<Mutex<HashMap<String, ProcessTombstone>>>,
-    leases: Arc<Mutex<ManagedLeaseMap>>,
-    handovers: Arc<Mutex<HashMap<(String, u64), crate::PersistedSegmentHandover>>>,
-    execution_write_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
-    wake_mark_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
-    append_target_snapshot_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
-    append_outbox_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
-    prune_managed_removal_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
-    wake_delivery_config: super::WakeDeliveryConfig,
-    wake_deliveries: Arc<Mutex<HashMap<String, super::WakeDelivery>>>,
-    wake_allocation_floors: Arc<Mutex<HashMap<(SessionId, String), u64>>>,
-    clock: Arc<dyn crate::Clock>,
-}
-
-/// Concrete in-memory registry rows exposed to raw differential readers.
-///
-/// This is intentionally not a `ProcessRegistry` read model: it snapshots the
-/// maps that the implementation mutates so a differential does not validate a
-/// write through the same public query path.
-#[doc(hidden)]
-pub struct RawProcessRegistryStateForTesting {
-    pub records: Vec<(ProcessRecord, u64)>,
-    pub events: Vec<(String, ProcessEvent)>,
-    pub observers: Vec<(String, String)>,
-    pub leases: Vec<ProcessLease>,
-    pub wake_deliveries: Vec<super::WakeDelivery>,
-    pub wake_allocation_floors: Vec<(SessionId, String, u64)>,
-    pub tombstones: Vec<ProcessTombstone>,
-}
-
-type ManagedProcessMap = HashMap<String, ManagedProcessRecord>;
-type ManagedLeaseMap = HashMap<String, ProcessLease>;
-
-#[derive(Clone)]
-struct ManagedProcessRecord {
-    record: ProcessRecord,
-    change_seq: u64,
-    events: Vec<ProcessEvent>,
-    keyed_events: HashMap<String, ProcessEvent>,
-}
+use types::{ManagedLeaseMap, ManagedProcessRecord};
+pub use types::{RawProcessRegistryStateForTesting, TestLocalProcessRegistry};
 
 impl TestLocalProcessRegistry {
+    #[doc(hidden)]
+    pub async fn worklist_page_reads_for_testing(
+        &self,
+    ) -> Vec<(usize, Option<super::ProcessWorklistCursor>)> {
+        self.worklist_page_reads.lock().await.clone()
+    }
+
     async fn next_change_seq(&self) -> u64 {
         let mut next = self.next_change_seq.lock().await;
         *next = next.saturating_add(1);
@@ -1318,15 +1272,12 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         Ok(super::WakeDeliveryClaimOutcome::Applied)
     }
 
-    async fn list_non_terminal(&self) -> Result<Vec<ProcessRecord>, PluginError> {
-        let managed = self.managed.lock().await;
-        let mut records: Vec<ProcessRecord> = managed
-            .values()
-            .filter(|record| !record.record.is_terminal())
-            .map(|record| record.record.clone())
-            .collect();
-        records.sort_by(|a, b| a.id.cmp(&b.id));
-        Ok(records)
+    async fn list_non_terminal_page(
+        &self,
+        limit: std::num::NonZeroUsize,
+        continuation: Option<super::ProcessWorklistCursor>,
+    ) -> Result<super::ProcessWorklistPage, PluginError> {
+        worklist::list_non_terminal_page(self, limit, continuation).await
     }
 
     async fn live_reference_summary(

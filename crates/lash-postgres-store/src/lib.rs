@@ -157,7 +157,8 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Version 40 adds immutable graph generations and frame pointers plus
 // zero-copy fork-lineage accelerators. Older stores are rejected and recreated;
 // there is no backfill or compatibility read path.
-const SCHEMA_VERSION: i32 = 40;
+// Version 41 indexes the bounded non-terminal recovery worklist by process id.
+const SCHEMA_VERSION: i32 = 41;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

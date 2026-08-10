@@ -232,10 +232,11 @@ PostgreSQL tables. The operations runbook reset consequently clears
 `lash_wake_redelivery_fences`.
 
 Figments coordination is one Lash revision: SQLite durable-core schema 28,
-process-registry schema 22, and trigger schema 5 carry the required per-turn
-budget and v3 process-environment reference cutover; effect schema 8 is
-unchanged. PostgreSQL schema 40 includes the same forward-only policy cutover.
-Development/test stores must be recreated.
+process-registry schema 23, and trigger schema 5 carry the required per-turn
+budget, v3 process-environment reference cutover, immutable graph generations,
+and indexed recovery worklist; effect schema 8 is unchanged. PostgreSQL schema 41 includes
+the same forward-only cutovers and worklist index. Development/test
+stores must be recreated.
 Process-event sequences remain small ordered values; downstream prompts,
 origins, and workflow projections do not receive timestamp-scale identifiers.
 
@@ -328,14 +329,17 @@ A generalization of code that already existed for turns — not a new subsystem:
   single-owner contract. Implemented on `SqliteProcessRegistry` and
   `PostgresProcessRegistry` (durable, fencing CAS) plus
   `TestLocalProcessRegistry` (in-memory).
-- **`ProcessRegistry::list_non_terminal()`** — the worklist query: the
-  non-terminal rows *are* the durable work queue, alongside the claim / renew /
-  complete lease ops.
+- **`ProcessRegistry::list_non_terminal_page(limit, continuation)`** — the
+  bounded keyset worklist query: the non-terminal rows *are* the durable work
+  queue, alongside the claim / renew / complete lease ops. The first page
+  captures an inclusive upper process-id boundary; continuations advance
+  strictly after the prior page, so concurrent inserts cannot skip or duplicate
+  scan-start rows and a row completed between pages is not offered again.
 - **`DurableProcessWorker::drive_pending_processes`** — the sole inline
   process executor. Live tool starts, subagent fan-outs, trigger deliveries,
   admin starts, session-open work, and crash recovery all enter this same
-  lease-protected drive. It lists the full non-terminal worklist, claims each
-  lease (skipping any held live by another owner), re-checks terminality after
+  lease-protected drive. It fetches a bounded page only as dispatch capacity
+  frees, claims each lease (skipping any held live by another owner), re-checks terminality after
   claiming, then handles each row by its declared `RecoveryDisposition` (ADR
   0019). A `Rerunnable` row —
   or a not-yet-started `OwnerBound` one, since a first execution is not a
@@ -599,7 +603,7 @@ terminal are carried as request config / tool-access, not lost.
   worker-time Lashlang Host Requirements validation from captured Process Plugin
   Options.
 - `crates/lash-core/src/runtime/process/registry.rs` — `ProcessRegistry`
-  `list_non_terminal()` and the lease ops; state only, no wait loops.
+  `list_non_terminal_page(...)` and the lease ops; state only, no wait loops.
 - `crates/lash-core/src/runtime/process/awaiter.rs` — `ProcessChangeHub`,
   watched-registry decorator, `ProcessAwaiter`, and `ProcessAttach`.
 - `crates/lash-core/src/runtime/session_manager/process_runners/control.rs` —

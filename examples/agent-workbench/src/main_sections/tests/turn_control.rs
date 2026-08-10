@@ -531,9 +531,13 @@ finish (await handle)?
         let process_id = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 let live = process_registry
-                    .list_non_terminal()
+                    .list_non_terminal_page(
+                        std::num::NonZeroUsize::new(16).expect("non-zero test page size"),
+                        None,
+                    )
                     .await
-                    .expect("list live process while turn awaits");
+                    .expect("list live process while turn awaits")
+                    .records;
                 if let [process] = live.as_slice() {
                     break process.id.clone();
                 }

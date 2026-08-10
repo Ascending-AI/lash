@@ -688,6 +688,20 @@ async fn sqlite_process_registry_satisfies_conformance() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_process_registry_pagination_satisfies_conformance() {
+    let dir = tempfile::tempdir().expect("pagination tempdir");
+    let registry = Arc::new(
+        SqliteProcessRegistry::open(
+            &dir.path().join("processes.db"),
+            dir.path().join("sessions"),
+        )
+        .await
+        .expect("open pagination registry"),
+    ) as Arc<dyn ProcessRegistry>;
+    lash_core::testing::conformance::process_registry_pagination(registry).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_process_prune_batch_tombstones_are_ordered() {
     let dir = tempfile::tempdir().expect("batch prune tempdir");
     let registry = Arc::new(
@@ -902,7 +916,7 @@ async fn sqlite_process_registry_rejects_pre_unit_external_owner_schema_before_s
     };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash process registry schema"));
-    assert!(message.contains("supports schema version 22"));
+    assert!(message.contains("supports schema version 23"));
     assert!(message.contains("delete the process registry database and start fresh"));
 }
 
@@ -2180,9 +2194,13 @@ async fn assert_waiting_process_is_live_not_prunable(
     assert!(!waiting.is_terminal(), "a waiting process is not terminal");
 
     let live = registry
-        .list_non_terminal()
+        .list_non_terminal_page(
+            std::num::NonZeroUsize::new(16).expect("non-zero test page size"),
+            None,
+        )
         .await
-        .expect("list non-terminal processes");
+        .expect("list non-terminal processes")
+        .records;
     assert!(
         live.iter().any(|record| record.id == process_id),
         "a waiting process must be listed as live"
@@ -2268,8 +2286,8 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
         }
     }
     assert_eq!(
-        total, 2,
-        "expected exactly two status-list literal sites in the SQLite backend; \
+        total, 1,
+        "expected exactly one status-list literal site in the SQLite backend; \
          update this count (and the derivation check) when adding one"
     );
 }

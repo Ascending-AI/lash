@@ -299,6 +299,14 @@ async fn test_local_process_registry_satisfies_conformance() {
 }
 
 #[tokio::test]
+async fn test_local_process_registry_pagination_satisfies_conformance() {
+    crate::testing::conformance::process_registry_pagination(Arc::new(
+        TestLocalProcessRegistry::default(),
+    ))
+    .await;
+}
+
+#[tokio::test]
 async fn test_local_process_prune_scopes_to_the_retention_filter() {
     crate::testing::conformance::process_prune_scoped_by_originator(Arc::new(
         TestLocalProcessRegistry::default(),

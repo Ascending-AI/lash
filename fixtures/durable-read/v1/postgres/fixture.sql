@@ -792,7 +792,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 40);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 41);
 
 
 --
@@ -1318,6 +1318,13 @@ CREATE INDEX idx_lash_processes_created ON lash_durable_read_fixture.lash_proces
 --
 
 CREATE INDEX idx_lash_processes_identity ON lash_durable_read_fixture.lash_processes USING btree (identity_kind, identity_label);
+
+
+--
+-- Name: idx_lash_processes_live_worklist; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_processes_live_worklist ON lash_durable_read_fixture.lash_processes USING btree (process_id) WHERE (status = ANY (ARRAY['running'::text, 'waiting'::text]));
 
 
 --

@@ -1355,7 +1355,14 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
     );
     foreign.drive_pending_processes().await?;
     assert!(
-        registry.list_non_terminal().await?.is_empty(),
+        registry
+            .list_non_terminal_page(
+                std::num::NonZeroUsize::new(16).expect("non-zero test page size"),
+                None,
+            )
+            .await?
+            .records
+            .is_empty(),
         "a foreign sweep must not resurrect the abandoned row onto the worklist"
     );
     let re_awaited = core.processes().await_output(process_id).await?;

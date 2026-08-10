@@ -66,6 +66,8 @@ pub use lash_core::{
     facade_support::TurnCancellationEvidence, facade_support::TurnFinish,
     facade_support::TurnInputAcceptanceReceipt, facade_support::TurnOutcome,
     facade_support::TurnStop, facade_support::TurnTerminal, facade_support::TurnWorkDriver,
+    facade_support::WorkerSlotKind, facade_support::WorkerSlotPermit,
+    facade_support::WorkerSlotSupplier,
 };
 /// Cooperative cancellation handle accepted by
 /// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so
@@ -487,17 +489,18 @@ pub mod process {
         ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessService,
         ProcessSessionDeleteReport, ProcessStartOptions, ProcessStartRequest, ProcessStarted,
         ProcessStatus, ProcessStatusFilter, ProcessWakeDelivery, ProcessWakeSpec,
-        ProjectionWatermark, RecoveryDisposition, SessionScope, facade_support::ObservedProcess,
-        facade_support::ObservedProcessEvent, facade_support::ObservedWorkItem,
-        facade_support::ProcessAttach, facade_support::ProcessAwaiter,
-        facade_support::ProcessChangeHub, facade_support::ProcessEventSink,
-        facade_support::ProcessRunHandle, facade_support::ProcessRuntimeHost,
-        facade_support::ProcessToolVisibilityFilter, facade_support::ProcessWake,
-        facade_support::ProcessWorkDriver, facade_support::ProcessWorkObserver,
-        facade_support::ProcessWorkSnapshot, facade_support::SessionScopeId,
-        facade_support::ToolSessionProcessAdmin, facade_support::WakeCoalescingKey,
-        facade_support::WakeTurnMode, facade_support::WakeTurnPolicy,
-        facade_support::watch_process_registry, facade_support::watch_process_registry_with_sink,
+        ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, RecoveryDisposition,
+        SessionScope, facade_support::ObservedProcess, facade_support::ObservedProcessEvent,
+        facade_support::ObservedWorkItem, facade_support::ProcessAttach,
+        facade_support::ProcessAwaiter, facade_support::ProcessChangeHub,
+        facade_support::ProcessEventSink, facade_support::ProcessRunHandle,
+        facade_support::ProcessRuntimeHost, facade_support::ProcessToolVisibilityFilter,
+        facade_support::ProcessWake, facade_support::ProcessWorkDriver,
+        facade_support::ProcessWorkObserver, facade_support::ProcessWorkSnapshot,
+        facade_support::SessionScopeId, facade_support::ToolSessionProcessAdmin,
+        facade_support::WakeCoalescingKey, facade_support::WakeTurnMode,
+        facade_support::WakeTurnPolicy, facade_support::watch_process_registry,
+        facade_support::watch_process_registry_with_sink,
     };
     /// Event semantics a registration declares for its extra event types: which
     /// occurrences wake the process ([`ProcessWakeSpec`]) and how a payload is

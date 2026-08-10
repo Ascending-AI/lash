@@ -8873,9 +8873,13 @@ async fn sqlite_trigger_started_process_recovered_after_worker_registry_reopen()
     );
     assert_eq!(
         registry_b
-            .list_non_terminal()
+            .list_non_terminal_page(
+                std::num::NonZeroUsize::new(16).expect("non-zero test page size"),
+                None,
+            )
             .await
             .expect("list non-terminal after reopen")
+            .records
             .iter()
             .map(|record| record.id.as_str())
             .collect::<Vec<_>>(),
@@ -8902,9 +8906,13 @@ async fn sqlite_trigger_started_process_recovered_after_worker_registry_reopen()
     );
     assert!(
         registry_b
-            .list_non_terminal()
+            .list_non_terminal_page(
+                std::num::NonZeroUsize::new(16).expect("non-zero test page size"),
+                None,
+            )
             .await
             .expect("list non-terminal after recovery")
+            .records
             .is_empty(),
         "recovery must drive the trigger-started process to terminal"
     );

@@ -1,9 +1,8 @@
 use lash_sansio::sync::MutexExt;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::future::Future;
 use std::sync::Arc;
 
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 use self::recovery::{
@@ -12,8 +11,18 @@ use self::recovery::{
 };
 use self::registration::registration_from_record;
 
+mod drain;
+mod permit;
 mod recovery;
 mod registration;
+
+#[cfg(test)]
+use permit::{PROCESS_EXECUTION_PERMIT, ProcessExecutionPermit};
+pub(crate) use permit::{
+    ensure_process_execution_permit, inherit_process_execution_permit,
+    release_process_execution_permit_while,
+};
+pub(super) use permit::{scope_process_execution_permit, scope_queued_work_execution_permit};
 
 pub use self::recovery::{
     ProcessDrainDeferred, ProcessDrainReport, ProcessRecoveryAttemptDisposition,
@@ -22,6 +31,10 @@ pub use self::recovery::{
 
 use super::effect::ProcessRunner;
 use super::session_manager::RuntimeSessionServices;
+use super::worker_capacity::{
+    DefaultWorkerSlotSupplier, ObservedWorkerSlotSupplier, WorkerCapacityMetrics,
+    WorkerSlotSupplier as _,
+};
 use super::{EmbeddedRuntimeBuilder, ProcessWorkDriver, QueuedWorkDriver, RuntimeHostConfig};
 use crate::InMemorySessionStore;
 use crate::{
@@ -33,6 +46,9 @@ use crate::{
 /// Default maximum number of processes one [`DurableProcessWorker`] executes
 /// inline at once.
 pub const DEFAULT_PROCESS_EXECUTION_CONCURRENCY: usize = 64;
+const MAX_INTAKE_PAGE: usize = 256;
+const WORKLIST_FETCH_ATTEMPTS: usize = 3;
+const WORKLIST_FETCH_RETRY_BASE: std::time::Duration = std::time::Duration::from_millis(10);
 
 /// Validated per-worker inline process execution concurrency.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,6 +102,7 @@ pub struct DurableProcessWorkerConfig {
     /// another process or external owner must complete. This is a per-worker
     /// bound: two workers sharing one registry may execute twice this many.
     process_execution_concurrency: ProcessExecutionConcurrency,
+    worker_slot_supplier: Option<Arc<dyn super::WorkerSlotSupplier>>,
     /// Owner identity stem this worker derives per-recovery lease owners from.
     ///
     /// Each recovery attempt claims with a unique `(owner_id, incarnation_id)`
@@ -122,6 +139,7 @@ impl DurableProcessWorkerConfig {
             queued_work_driver: None,
             turn_phase_probe_slot: crate::runtime::RuntimeTurnPhaseProbeSlot::default(),
             process_execution_concurrency: ProcessExecutionConcurrency::DEFAULT,
+            worker_slot_supplier: None,
             lease_owner: crate::LeaseOwnerIdentity::opaque(
                 format!("durable-process-worker:{}", uuid::Uuid::new_v4()),
                 uuid::Uuid::new_v4().to_string(),
@@ -153,6 +171,16 @@ impl DurableProcessWorkerConfig {
 
     pub fn process_execution_concurrency(&self) -> usize {
         self.process_execution_concurrency.get()
+    }
+
+    /// Replace fixed process admission with a host-owned worker slot supplier.
+    #[doc(hidden)]
+    pub fn with_worker_slot_supplier(
+        mut self,
+        supplier: Arc<dyn super::WorkerSlotSupplier>,
+    ) -> Self {
+        self.worker_slot_supplier = Some(supplier);
+        self
     }
 
     pub fn with_process_work_driver(mut self, driver: ProcessWorkDriver) -> Self {
@@ -216,10 +244,30 @@ impl DurableProcessWorkerConfig {
 }
 
 /// Reconstructable background-process worker.
-#[derive(Clone)]
 pub struct DurableProcessWorker {
     config: Arc<DurableProcessWorkerConfig>,
     execution_scheduler: Arc<ProcessExecutionScheduler>,
+    lifetime: Option<Arc<ProcessWorkerLifetime>>,
+}
+
+impl Clone for DurableProcessWorker {
+    fn clone(&self) -> Self {
+        Self {
+            config: Arc::clone(&self.config),
+            execution_scheduler: Arc::clone(&self.execution_scheduler),
+            lifetime: self.lifetime.clone(),
+        }
+    }
+}
+
+struct ProcessWorkerLifetime {
+    shutdown: CancellationToken,
+}
+
+impl Drop for ProcessWorkerLifetime {
+    fn drop(&mut self) {
+        self.shutdown.cancel();
+    }
 }
 
 #[derive(Default)]
@@ -229,21 +277,72 @@ struct ProcessExecutionSchedulerState {
     rerun: BTreeMap<String, ProcessRecord>,
     active: usize,
     dispatcher_running: bool,
+    worklist_scan: ProcessWorklistScan,
+    rescan_requested: bool,
+    scan_incomplete: Option<PluginError>,
+}
+
+#[derive(Default)]
+enum ProcessWorklistScan {
+    #[default]
+    Idle,
+    Fetching(Option<crate::ProcessWorklistCursor>),
+    Ready(Option<crate::ProcessWorklistCursor>),
 }
 
 struct ProcessExecutionScheduler {
-    permits: Arc<Semaphore>,
+    slots: Arc<dyn super::WorkerSlotSupplier>,
+    metrics: WorkerCapacityMetrics,
     state: std::sync::Mutex<ProcessExecutionSchedulerState>,
     changed: Arc<tokio::sync::Notify>,
+    shutdown: CancellationToken,
 }
 
 impl ProcessExecutionScheduler {
-    fn new(concurrency: ProcessExecutionConcurrency) -> Self {
+    fn new(
+        concurrency: ProcessExecutionConcurrency,
+        supplier: Option<Arc<dyn super::WorkerSlotSupplier>>,
+    ) -> Self {
+        let supplier = supplier.unwrap_or_else(|| {
+            Arc::new(DefaultWorkerSlotSupplier::new(
+                concurrency.get(),
+                super::DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY,
+            ))
+        });
+        let metrics = WorkerCapacityMetrics::default();
+        let slots = ObservedWorkerSlotSupplier::new(supplier, metrics.clone());
+        metrics.slots(
+            super::WorkerSlotKind::Process,
+            0,
+            slots.available_slots(super::WorkerSlotKind::Process),
+        );
+        metrics.intake_depth(super::WorkerSlotKind::Process, 0);
         Self {
-            permits: Arc::new(Semaphore::new(concurrency.get())),
+            slots,
+            metrics,
             state: std::sync::Mutex::new(ProcessExecutionSchedulerState::default()),
             changed: Arc::new(tokio::sync::Notify::new()),
+            shutdown: CancellationToken::new(),
         }
+    }
+
+    fn complete_execution(&self, process_id: &str) {
+        let mut state = self.state.lock_recover();
+        state.active = state
+            .active
+            .checked_sub(1)
+            .expect("a completed process execution was active");
+        if let Some(record) = state.rerun.remove(process_id) {
+            state.pending.push_back(record);
+        } else {
+            state.scheduled.remove(process_id);
+        }
+        self.metrics.intake_depth(
+            super::WorkerSlotKind::Process,
+            state.pending.len() + state.rerun.len(),
+        );
+        drop(state);
+        self.changed.notify_one();
     }
 }
 
@@ -275,12 +374,20 @@ impl Drop for ProcessExecutionDispatcherGuard {
         }
         if let Some(mut state) = self.scheduler.state.try_lock_recover() {
             state.dispatcher_running = false;
+            if let ProcessWorklistScan::Fetching(continuation) = &state.worklist_scan {
+                state.worklist_scan = ProcessWorklistScan::Ready(continuation.clone());
+            }
             self.scheduler.changed.notify_one();
             return;
         }
         let scheduler = Arc::clone(&self.scheduler);
         crate::task::spawn(async move {
-            scheduler.state.lock_recover().dispatcher_running = false;
+            let mut state = scheduler.state.lock_recover();
+            state.dispatcher_running = false;
+            if let ProcessWorklistScan::Fetching(continuation) = &state.worklist_scan {
+                state.worklist_scan = ProcessWorklistScan::Ready(continuation.clone());
+            }
+            drop(state);
             scheduler.changed.notify_one();
         });
     }
@@ -288,216 +395,12 @@ impl Drop for ProcessExecutionDispatcherGuard {
 
 struct ProcessExecutionTaskCompletion {
     process_id: String,
-    completed: tokio::sync::mpsc::UnboundedSender<String>,
+    scheduler: Arc<ProcessExecutionScheduler>,
 }
 
 impl Drop for ProcessExecutionTaskCompletion {
     fn drop(&mut self) {
-        let _ = self.completed.send(self.process_id.clone());
-    }
-}
-
-/// Permit owned by one inline process execution. All clones refer to the same
-/// slot so child-turn and inline-effect task boundaries can park the outer run.
-///
-/// This type assumes one logical thread of execution per process run. Clones
-/// may move that one thread across task boundaries, but must not be awaited by
-/// concurrent branches: while one branch has released the slot, a second
-/// branch would observe no held permit and could resume without reacquiring it.
-/// Intra-run parallel execution must replace this shared-slot protocol before
-/// it is introduced.
-struct ProcessExecutionPermit {
-    semaphore: Arc<Semaphore>,
-    held: std::sync::Mutex<Option<OwnedSemaphorePermit>>,
-    reacquire: tokio::sync::Mutex<()>,
-    dispatcher_changed: Arc<tokio::sync::Notify>,
-    telemetry: ExecutionPermitTelemetry,
-}
-
-#[derive(Clone, Copy)]
-struct ExecutionPermitTelemetry {
-    reacquire_event: &'static str,
-    semaphore: &'static str,
-}
-
-const PROCESS_EXECUTION_PERMIT_TELEMETRY: ExecutionPermitTelemetry = ExecutionPermitTelemetry {
-    reacquire_event: "process_execution_permit.reacquire",
-    semaphore: "process_execution_semaphore",
-};
-
-const QUEUED_WORK_EXECUTION_PERMIT_TELEMETRY: ExecutionPermitTelemetry = ExecutionPermitTelemetry {
-    reacquire_event: "queued_work_execution_permit.reacquire",
-    semaphore: "queued_work_execution_semaphore",
-};
-
-impl ProcessExecutionPermit {
-    pub(super) fn new(
-        semaphore: Arc<Semaphore>,
-        permit: OwnedSemaphorePermit,
-        dispatcher_changed: Arc<tokio::sync::Notify>,
-    ) -> Self {
-        Self::new_with_telemetry(
-            semaphore,
-            permit,
-            dispatcher_changed,
-            PROCESS_EXECUTION_PERMIT_TELEMETRY,
-        )
-    }
-
-    fn new_with_telemetry(
-        semaphore: Arc<Semaphore>,
-        permit: OwnedSemaphorePermit,
-        dispatcher_changed: Arc<tokio::sync::Notify>,
-        telemetry: ExecutionPermitTelemetry,
-    ) -> Self {
-        Self {
-            semaphore,
-            held: std::sync::Mutex::new(Some(permit)),
-            reacquire: tokio::sync::Mutex::new(()),
-            dispatcher_changed,
-            telemetry,
-        }
-    }
-
-    async fn ensure_acquired(&self) {
-        if self.held.lock_recover().is_some() {
-            tracing::debug!(
-                consulted = "held_permit",
-                gate = "fast_path",
-                outcome = "already_held",
-                event = self.telemetry.reacquire_event,
-                "execution permit is already held; the run resumes without waiting"
-            );
-            return;
-        }
-        let _reacquire = self.reacquire.lock().await;
-        if self.held.lock_recover().is_some() {
-            tracing::debug!(
-                consulted = "held_permit",
-                gate = "reacquire_serialization",
-                outcome = "already_held",
-                event = self.telemetry.reacquire_event,
-                "another branch of this run reacquired the permit while this one waited"
-            );
-            return;
-        }
-        // This is a park: the run cannot continue until the scheduler hands the
-        // slot back, so whether it actually waited is decision evidence. The
-        // label comes from the try-acquire result rather than from a permit
-        // count read before the acquire, which could race either way.
-        let permit = match Arc::clone(&self.semaphore).try_acquire_owned() {
-            Ok(permit) => {
-                tracing::debug!(
-                    available_permits = self.semaphore.available_permits(),
-                    consulted = self.telemetry.semaphore,
-                    outcome = "immediate",
-                    event = self.telemetry.reacquire_event,
-                    "reacquired the execution permit without waiting"
-                );
-                permit
-            }
-            Err(_) => {
-                tracing::debug!(
-                    available_permits = 0,
-                    consulted = self.telemetry.semaphore,
-                    outcome = "waiting",
-                    event = self.telemetry.reacquire_event,
-                    "waiting for an execution permit before resuming the run"
-                );
-                Arc::clone(&self.semaphore)
-                    .acquire_owned()
-                    .await
-                    .expect("process execution semaphore remains open")
-            }
-        };
-        *self.held.lock_recover() = Some(permit);
-        tracing::debug!(
-            consulted = self.telemetry.semaphore,
-            outcome = "held",
-            event = self.telemetry.reacquire_event,
-            "reacquired the execution permit"
-        );
-    }
-
-    async fn release_while<F: Future>(&self, future: F) -> F::Output {
-        let released = self.held.lock_recover().take();
-        let Some(released) = released else {
-            return future.await;
-        };
-        drop(released);
-        self.dispatcher_changed.notify_one();
-        let output = future.await;
-        self.ensure_acquired().await;
-        output
-    }
-}
-
-tokio::task_local! {
-    static PROCESS_EXECUTION_PERMIT: Arc<ProcessExecutionPermit>;
-}
-
-/// Run one inline execution under the shared park-aware admission discipline.
-///
-/// Inline process recovery and inline queued-work hydration deliberately share
-/// this scope: the existing turn/process park seams release whichever
-/// reference-substrate slot admitted the logical run. Engine-owned execution
-/// never installs this task local and therefore remains substrate-bounded.
-pub(super) async fn scope_process_execution_permit<F: Future>(
-    semaphore: Arc<Semaphore>,
-    permit: OwnedSemaphorePermit,
-    dispatcher_changed: Arc<tokio::sync::Notify>,
-    future: F,
-) -> F::Output {
-    let permit = Arc::new(ProcessExecutionPermit::new(
-        semaphore,
-        permit,
-        dispatcher_changed,
-    ));
-    PROCESS_EXECUTION_PERMIT.scope(permit, future).await
-}
-
-/// Run one inline queued-work hydration under the shared park-aware admission
-/// discipline while keeping its telemetry distinct from process slots.
-pub(super) async fn scope_queued_work_execution_permit<F: Future>(
-    semaphore: Arc<Semaphore>,
-    permit: OwnedSemaphorePermit,
-    dispatcher_changed: Arc<tokio::sync::Notify>,
-    future: F,
-) -> F::Output {
-    let permit = Arc::new(ProcessExecutionPermit::new_with_telemetry(
-        semaphore,
-        permit,
-        dispatcher_changed,
-        QUEUED_WORK_EXECUTION_PERMIT_TELEMETRY,
-    ));
-    PROCESS_EXECUTION_PERMIT.scope(permit, future).await
-}
-
-pub(crate) async fn release_process_execution_permit_while<F: Future>(future: F) -> F::Output {
-    // Engine-scheduled tiers such as Restate never install this task local, so
-    // their direct shared-segment execution follows the unchanged path below.
-    let permit = PROCESS_EXECUTION_PERMIT.try_with(Arc::clone).ok();
-    match permit {
-        Some(permit) => permit.release_while(future).await,
-        None => future.await,
-    }
-}
-
-pub(crate) async fn ensure_process_execution_permit() {
-    if let Ok(permit) = PROCESS_EXECUTION_PERMIT.try_with(Arc::clone) {
-        permit.ensure_acquired().await;
-    }
-}
-
-pub(crate) fn inherit_process_execution_permit<F: Future>(
-    future: F,
-) -> impl Future<Output = F::Output> {
-    let permit = PROCESS_EXECUTION_PERMIT.try_with(Arc::clone).ok();
-    async move {
-        match permit {
-            Some(permit) => PROCESS_EXECUTION_PERMIT.scope(permit, future).await,
-            None => future.await,
-        }
+        self.scheduler.complete_execution(&self.process_id);
     }
 }
 
@@ -518,20 +421,38 @@ impl DurableProcessWorker {
     pub fn new(config: DurableProcessWorkerConfig) -> Self {
         let execution_scheduler = Arc::new(ProcessExecutionScheduler::new(
             config.process_execution_concurrency,
+            config.worker_slot_supplier.clone(),
         ));
+        let lifetime = Arc::new(ProcessWorkerLifetime {
+            shutdown: execution_scheduler.shutdown.clone(),
+        });
         Self {
             config: Arc::new(config),
             execution_scheduler,
+            lifetime: Some(lifetime),
         }
     }
 
     pub fn from_shared_config(config: Arc<DurableProcessWorkerConfig>) -> Self {
         let execution_scheduler = Arc::new(ProcessExecutionScheduler::new(
             config.process_execution_concurrency,
+            config.worker_slot_supplier.clone(),
         ));
+        let lifetime = Arc::new(ProcessWorkerLifetime {
+            shutdown: execution_scheduler.shutdown.clone(),
+        });
         Self {
             config,
             execution_scheduler,
+            lifetime: Some(lifetime),
+        }
+    }
+
+    fn detached_for_task(&self) -> Self {
+        Self {
+            config: Arc::clone(&self.config),
+            execution_scheduler: Arc::clone(&self.execution_scheduler),
+            lifetime: None,
         }
     }
 
@@ -679,21 +600,23 @@ impl DurableProcessWorker {
             .map_err(crate::ProcessInfraError::into_plugin_error)
     }
 
-    /// Queue every non-terminal process this worker can claim and execute the
-    /// runnable rows inline, driving each to a terminal state.
+    /// Page through non-terminal processes as execution capacity frees and run
+    /// the claimable rows inline, driving each to a terminal state.
     ///
     /// This is the sole inline executor for every process start: live tool and
     /// subagent starts, trigger deliveries, admin starts, session-open passes,
     /// and crash recovery all enter through this worklist. The drive:
     ///
-    /// 1. lists every non-terminal process ([`ProcessRegistry::list_non_terminal`]);
+    /// 1. reads bounded pages from the non-terminal worklist
+    ///    ([`ProcessRegistry::list_non_terminal_page`]);
     /// 2. claims the durable single-owner [`ProcessLease`] over each — a process
     ///    already leased live by *another* owner is skipped until its TTL
     ///    expires; a non-terminal process is re-run by exactly one owner (lease
     ///    fencing);
-    /// 3. queues the full worklist in a worker-scoped scheduler whose shared
-    ///    execution budget spans repeated host-driven passes, then runs claimed
-    ///    processes on this worker's wired controller while renewing
+    /// 3. keeps at most one capacity-sized intake page pending, fetching the
+    ///    continuation only after dispatch capacity frees; the worker-scoped
+    ///    scheduler's shared execution budget spans repeated host-driven passes
+    ///    and runs claimed processes on this worker's wired controller while renewing
     ///    the lease across the long-running execution so a healthy recovery is
     ///    not swept out from under itself;
     /// 4. atomically writes the terminal outcome and releases the validated lease.
@@ -704,52 +627,96 @@ impl DurableProcessWorker {
     /// not double-execute completed work.
     pub async fn drive_pending_processes(&self) -> Result<(), PluginError> {
         self.reconcile_trigger_deliveries().await?;
-        let records = self.config.process_registry.list_non_terminal().await?;
-        let should_start_dispatcher = {
+        let available = std::num::NonZeroUsize::new(
+            self.execution_scheduler
+                .slots
+                .available_slots(super::WorkerSlotKind::Process)
+                .clamp(1, MAX_INTAKE_PAGE),
+        )
+        .expect("the clamped intake page bound is non-zero");
+        let (fetch_initial_page, should_start_dispatcher, scan_incomplete) = {
             let mut state = self.execution_scheduler.state.lock_recover();
-            for record in records {
-                if state.scheduled.insert(record.id.clone()) {
-                    state.pending.push_back(record);
-                } else {
-                    // Coalesce a newer host-driven pass instead of dropping it.
-                    // The row may have gained an Abandon Request or other
-                    // execution-relevant state while its prior attempt was still
-                    // queued or finishing.
-                    state.rerun.insert(record.id.clone(), record);
-                }
-            }
-            if state.dispatcher_running {
+            let fetch_initial_page = if matches!(state.worklist_scan, ProcessWorklistScan::Idle) {
+                state.worklist_scan = ProcessWorklistScan::Fetching(None);
+                Some(available)
+            } else {
+                state.rescan_requested = true;
+                None
+            };
+            let should_start_dispatcher = if state.dispatcher_running {
                 false
             } else {
                 state.dispatcher_running = true;
                 true
-            }
+            };
+            (
+                fetch_initial_page,
+                should_start_dispatcher,
+                state.scan_incomplete.take(),
+            )
         };
+        if let Some(limit) = fetch_initial_page {
+            let page = match self
+                .config
+                .process_registry
+                .list_non_terminal_page(limit, None)
+                .await
+            {
+                Ok(page) => page,
+                Err(error) => {
+                    let mut state = self.execution_scheduler.state.lock_recover();
+                    state.worklist_scan = if state.rescan_requested {
+                        ProcessWorklistScan::Ready(None)
+                    } else {
+                        ProcessWorklistScan::Idle
+                    };
+                    let restart_dispatcher = should_start_dispatcher && state.rescan_requested;
+                    if should_start_dispatcher && !restart_dispatcher {
+                        state.dispatcher_running = false;
+                    }
+                    drop(state);
+                    self.execution_scheduler.changed.notify_one();
+                    if restart_dispatcher {
+                        let worker = self.detached_for_task();
+                        crate::task::spawn(async move {
+                            worker.run_process_execution_dispatcher().await
+                        });
+                    }
+                    return Err(error);
+                }
+            };
+            self.install_worklist_page(page);
+        }
         self.execution_scheduler.changed.notify_one();
         if should_start_dispatcher {
-            let worker = self.clone();
+            let worker = self.detached_for_task();
             crate::task::spawn(async move { worker.run_process_execution_dispatcher().await });
         }
-        Ok(())
+        match scan_incomplete {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     async fn run_process_execution_dispatcher(&self) {
         let mut dispatcher_guard =
             ProcessExecutionDispatcherGuard::new(Arc::clone(&self.execution_scheduler));
-        let (completed_tx, mut completed_rx) = tokio::sync::mpsc::unbounded_channel();
         loop {
+            if self.execution_scheduler.shutdown.is_cancelled() {
+                return;
+            }
             while let Some((record, permit)) = self.next_process_execution().await {
                 let worker = self.clone();
                 let completion = ProcessExecutionTaskCompletion {
                     process_id: record.id.clone(),
-                    completed: completed_tx.clone(),
+                    scheduler: Arc::clone(&self.execution_scheduler),
                 };
                 crate::task::spawn(async move {
                     let _completion = completion;
                     // Install the execution budget only at the inline worker
                     // boundary, never in the shared process-segment path.
                     Box::pin(scope_process_execution_permit(
-                        Arc::clone(&worker.execution_scheduler.permits),
+                        Arc::clone(&worker.execution_scheduler.slots),
                         permit,
                         Arc::clone(&worker.execution_scheduler.changed),
                         worker.recover_process(record),
@@ -758,9 +725,32 @@ impl DurableProcessWorker {
                 });
             }
 
+            if let Some((limit, continuation)) = self.next_worklist_page_request() {
+                match self
+                    .fetch_worklist_page_with_retry(limit, continuation.clone())
+                    .await
+                {
+                    Ok(page) => self.install_worklist_page(page),
+                    Err(error) => {
+                        tracing::warn!(error = %error, "process worklist scan remains incomplete after retry exhaustion");
+                        let mut state = self.execution_scheduler.state.lock_recover();
+                        state.worklist_scan = ProcessWorklistScan::Ready(continuation);
+                        state.rescan_requested = true;
+                        state.scan_incomplete = Some(error);
+                        state.dispatcher_running = false;
+                        dispatcher_guard.disarm();
+                        return;
+                    }
+                }
+                continue;
+            }
+
             {
                 let mut state = self.execution_scheduler.state.lock_recover();
-                if state.pending.is_empty() && state.active == 0 {
+                if state.pending.is_empty()
+                    && state.active == 0
+                    && matches!(state.worklist_scan, ProcessWorklistScan::Idle)
+                {
                     state.dispatcher_running = false;
                     dispatcher_guard.disarm();
                     return;
@@ -768,30 +758,127 @@ impl DurableProcessWorker {
             }
 
             tokio::select! {
-                Some(process_id) = completed_rx.recv() => {
-                    let mut state = self.execution_scheduler.state.lock_recover();
-                    state.active = state
-                        .active
-                        .checked_sub(1)
-                        .expect("a completed process execution was active");
-                    if let Some(record) = state.rerun.remove(&process_id) {
-                        state.pending.push_back(record);
-                    } else {
-                        state.scheduled.remove(&process_id);
-                    }
-                }
+                biased;
+                () = self.execution_scheduler.shutdown.cancelled() => return,
                 _ = self.execution_scheduler.changed.notified() => {}
             }
         }
     }
 
-    async fn next_process_execution(&self) -> Option<(ProcessRecord, OwnedSemaphorePermit)> {
+    fn install_worklist_page(&self, page: crate::ProcessWorklistPage) {
         let mut state = self.execution_scheduler.state.lock_recover();
-        let permit = Arc::clone(&self.execution_scheduler.permits)
-            .try_acquire_owned()
-            .ok()?;
-        let record = state.pending.pop_front()?;
+        for record in page.records {
+            if state.scheduled.insert(record.id.clone()) {
+                state.pending.push_back(record);
+            } else {
+                // Coalesce a newer host-driven pass instead of dropping it.
+                // The row may have gained an Abandon Request or other
+                // execution-relevant state while its prior attempt was still
+                // queued or finishing.
+                state.rerun.insert(record.id.clone(), record);
+            }
+        }
+        state.worklist_scan = match page.continuation {
+            Some(continuation) => ProcessWorklistScan::Ready(Some(continuation)),
+            None if state.rescan_requested => {
+                state.rescan_requested = false;
+                ProcessWorklistScan::Ready(None)
+            }
+            None => ProcessWorklistScan::Idle,
+        };
+        self.execution_scheduler.metrics.intake_depth(
+            super::WorkerSlotKind::Process,
+            state.pending.len() + state.rerun.len(),
+        );
+    }
+
+    fn next_worklist_page_request(
+        &self,
+    ) -> Option<(std::num::NonZeroUsize, Option<crate::ProcessWorklistCursor>)> {
+        let available = self
+            .execution_scheduler
+            .slots
+            .available_slots(super::WorkerSlotKind::Process);
+        let mut state = self.execution_scheduler.state.lock_recover();
+        if !state.pending.is_empty() {
+            return None;
+        }
+        if available == 0 && state.active != 0 {
+            return None;
+        }
+        let limit = std::num::NonZeroUsize::new(available.clamp(1, MAX_INTAKE_PAGE))
+            .expect("the clamped intake page bound is non-zero");
+        let ProcessWorklistScan::Ready(continuation) = &state.worklist_scan else {
+            return None;
+        };
+        let continuation = continuation.clone();
+        state.worklist_scan = ProcessWorklistScan::Fetching(continuation.clone());
+        Some((limit, continuation))
+    }
+
+    async fn fetch_worklist_page_with_retry(
+        &self,
+        limit: std::num::NonZeroUsize,
+        continuation: Option<crate::ProcessWorklistCursor>,
+    ) -> Result<crate::ProcessWorklistPage, PluginError> {
+        let mut retry_after = WORKLIST_FETCH_RETRY_BASE;
+        for attempt in 1..=WORKLIST_FETCH_ATTEMPTS {
+            match self
+                .config
+                .process_registry
+                .list_non_terminal_page(limit, continuation.clone())
+                .await
+            {
+                Ok(page) => return Ok(page),
+                Err(error) if attempt == WORKLIST_FETCH_ATTEMPTS => return Err(error),
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        attempt,
+                        "retrying incomplete process worklist scan"
+                    );
+                    tokio::time::sleep(retry_after).await;
+                    retry_after = retry_after.saturating_mul(2);
+                }
+            }
+        }
+        unreachable!("the non-zero worklist retry budget returns from the loop")
+    }
+
+    async fn next_process_execution(&self) -> Option<(ProcessRecord, super::WorkerSlotPermit)> {
+        if self
+            .execution_scheduler
+            .state
+            .lock_recover()
+            .pending
+            .is_empty()
+        {
+            return None;
+        }
+        let reserve = self
+            .execution_scheduler
+            .slots
+            .reserve_slot(super::WorkerSlotKind::Process);
+        tokio::pin!(reserve);
+        let permit = tokio::select! {
+            biased;
+            () = self.execution_scheduler.shutdown.cancelled() => return None,
+            permit = &mut reserve => permit,
+        };
+        if self.execution_scheduler.shutdown.is_cancelled() {
+            drop(permit);
+            return None;
+        }
+        let mut state = self.execution_scheduler.state.lock_recover();
+        let Some(record) = state.pending.pop_front() else {
+            drop(permit);
+            return None;
+        };
         state.active += 1;
+        self.execution_scheduler.metrics.intake_depth(
+            super::WorkerSlotKind::Process,
+            state.pending.len() + state.rerun.len(),
+        );
         Some((record, permit))
     }
 
@@ -860,104 +947,6 @@ impl DurableProcessWorker {
                 .await?;
         }
         Ok(())
-    }
-
-    /// Graceful owner drain: terminalize this host's own started `OwnerBound`
-    /// work as `Abandoned{OwnerDrain}` at close (ADR 0019).
-    ///
-    /// This is an explicit **host lever on the worker**, never an implicit
-    /// consequence of closing a session. Processes are global and outlive any
-    /// one session ([ADR 0011]), so `LashSession::close`/`park` must not touch
-    /// them; a host that wants its in-flight owner-bound work terminalized at
-    /// shutdown calls this on the worker it is tearing down.
-    /// Restate-owned rows use a substrate invocation owner rather than this
-    /// worker's configured owner, so this local-worker drain does not select
-    /// them; their recovery and abandonment remain Restate/sweep concerns.
-    ///
-    /// Drain sequence (the operations runbook owns the surrounding steps; this
-    /// is the terminal-writing step):
-    /// 1. stop admitting new work to this worker;
-    /// 2. cancel or await the worker's in-flight run tasks so they release their
-    ///    per-run leases — for **Rerunnable** in-flight work that is the whole
-    ///    story: stopping the local run task without any terminal write leaves
-    ///    the row non-terminal so the next worker re-runs it (its contract);
-    /// 3. call this lever: for every non-terminal **OwnerBound** row this exact
-    ///    worker started (`first_started.owner == self.config.lease_owner`),
-    ///    claim a fresh drain lease and, being the owner completing its own
-    ///    work, write `Abandoned{OwnerDrain}` under it — the ordinary graceful
-    ///    completion path, respecting the single-writer rule.
-    ///
-    /// A row still held by a live foreign lease (an in-flight run under one of
-    /// this worker's own recovery incarnations that step 2 has not yet released)
-    /// is deferred rather than reclaimed, so the drain never races a still-live
-    /// run; such a row reaches `Abandoned` on the next drain pass or at a peer's
-    /// recovery sweep. Rows started by a different owner, not-yet-started
-    /// OwnerBound rows (still claimable by anyone), Rerunnable rows, and
-    /// Externally-Owned rows are all left untouched.
-    ///
-    /// [ADR 0011]: durable process registration is session-independent.
-    pub async fn drain_owner_bound_work(&self) -> Result<ProcessDrainReport, PluginError> {
-        let mut abandoned = Vec::new();
-        let mut deferred = Vec::new();
-        for record in self.config.process_registry.list_non_terminal().await? {
-            if record.disposition != RecoveryDisposition::OwnerBound {
-                continue;
-            }
-            let Some(first_started) = record.first_started.as_ref() else {
-                // Never started: first execution is not re-execution, so any
-                // worker may still claim it. Draining it would strand runnable
-                // work as Abandoned.
-                continue;
-            };
-            if first_started.owner != self.config.lease_owner {
-                // Started by a different owner; not this host's to drain.
-                continue;
-            }
-            let owner = first_started.owner.clone();
-            match self.drain_one_owner_bound(&record.id, owner).await {
-                RecoveryCompletionDisposition::Committed => abandoned.push(record.id),
-                RecoveryCompletionDisposition::Busy => deferred.push(ProcessDrainDeferred {
-                    process_id: record.id,
-                    disposition: ProcessRecoveryAttemptDisposition::Busy,
-                }),
-                RecoveryCompletionDisposition::Absent => deferred.push(ProcessDrainDeferred {
-                    process_id: record.id,
-                    disposition: ProcessRecoveryAttemptDisposition::Absent,
-                }),
-                RecoveryCompletionDisposition::AlreadyApplied(terminal_status) => {
-                    deferred.push(ProcessDrainDeferred {
-                        process_id: record.id,
-                        disposition: ProcessRecoveryAttemptDisposition::AlreadyApplied {
-                            terminal_status,
-                        },
-                    });
-                }
-                RecoveryCompletionDisposition::SettledByPeer(terminal_status) => {
-                    deferred.push(ProcessDrainDeferred {
-                        process_id: record.id,
-                        disposition: ProcessRecoveryAttemptDisposition::SettledByPeer {
-                            terminal_status,
-                        },
-                    });
-                }
-                RecoveryCompletionDisposition::LeaseLost(operation) => {
-                    deferred.push(ProcessDrainDeferred {
-                        process_id: record.id,
-                        disposition: ProcessRecoveryAttemptDisposition::LeaseLost { operation },
-                    });
-                }
-                RecoveryCompletionDisposition::BackendError(error) => {
-                    deferred.push(ProcessDrainDeferred {
-                        process_id: record.id,
-                        disposition: error.into_public(),
-                    });
-                }
-            }
-        }
-        Ok(ProcessDrainReport {
-            abandoned,
-            deferred,
-        })
     }
 
     /// Terminalize one of this host's started OwnerBound rows as

@@ -295,6 +295,7 @@ pub mod facade_support {
     pub use crate::runtime::validate_replayed_effect_envelope;
     pub use crate::runtime::watch_process_registry;
     pub use crate::runtime::watch_process_registry_with_sink;
+    pub use crate::runtime::{WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier};
     pub use crate::session::InjectedTurnInput;
     pub use crate::session::ToolInvocation;
     pub use crate::session::ToolInvocationReply;
@@ -811,18 +812,19 @@ pub use runtime::{
     ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions, ProcessStartOutcome,
     ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalSpec,
     ProcessTombstone, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec,
-    ProjectionWatermark, PromptUsage, ProtocolSessionExtension, ProtocolSessionExtensionHandle,
-    ProtocolTurnExtension, ProtocolTurnExtensionHandle, RecoveryDisposition, Resolution,
-    ResolveOutcome, RuntimeError, RuntimeErrorCause, RuntimeErrorCode, ScopedEffectController,
-    SegmentHandover, SegmentProgress, SessionCursor, SessionCursorError, SessionId,
-    SessionObservationEvent, SessionObservationEventPayload, SessionProcessEventKind,
-    SessionQueueEventKind, SessionRevision, SessionScope, SessionStoreCreateRequest,
-    SessionStoreFactory, SlotPolicy, TokenLedgerEntry, ToolCallLaunch, TurnActivity,
-    TurnActivityId, TurnCancelOriginHint, TurnContext, TurnEvent, TurnInput, TurnInputApplication,
-    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputClaimMode,
-    TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputState, WaitKind,
-    WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
-    WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, PromptUsage,
+    ProtocolSessionExtension, ProtocolSessionExtensionHandle, ProtocolTurnExtension,
+    ProtocolTurnExtensionHandle, RecoveryDisposition, Resolution, ResolveOutcome, RuntimeError,
+    RuntimeErrorCause, RuntimeErrorCode, ScopedEffectController, SegmentHandover, SegmentProgress,
+    SessionCursor, SessionCursorError, SessionId, SessionObservationEvent,
+    SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
+    SessionRevision, SessionScope, SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy,
+    TokenLedgerEntry, ToolCallLaunch, TurnActivity, TurnActivityId, TurnCancelOriginHint,
+    TurnContext, TurnEvent, TurnInput, TurnInputApplication, TurnInputCheckpointBoundary,
+    TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,
+    TurnInputCompletionData, TurnInputIngress, TurnInputState, WaitKind, WaitState, WakeDelivery,
+    WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryReport,
+    WakeDeliveryState, WakeDiscardReason, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

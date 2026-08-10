@@ -16,7 +16,7 @@ pub(crate) use lash_core::{
     facade_support::QueuedWorkRunHandle, facade_support::QueuedWorkRunRequest,
     facade_support::RuntimeEnvironment, facade_support::RuntimeHandle,
     facade_support::RuntimeHostConfig, facade_support::RuntimeObservation,
-    facade_support::SessionSpec,
+    facade_support::SessionSpec, facade_support::WorkerSlotSupplier,
 };
 pub(crate) use tokio::sync::mpsc;
 pub(crate) use tokio::task::JoinHandle;
