@@ -6,26 +6,30 @@ use crate::{
 
 fn host_catalog() -> LashlangHostCatalog {
     let mut catalog = LashlangHostCatalog::new();
-    catalog.add_module_operation(
-        ["tools"],
-        "Tools",
-        "read_file",
-        "read_file",
-        TypeExpr::Object(vec![TypeField {
-            name: "path".into(),
-            ty: TypeExpr::Str,
-            optional: false,
-        }]),
-        TypeExpr::Str,
-    );
-    catalog.add_module_operation(
-        ["tools"],
-        "Tools",
-        "echo",
-        "echo",
-        TypeExpr::Any,
-        TypeExpr::Any,
-    );
+    catalog
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "read_file",
+            "read_file",
+            TypeExpr::Object(vec![TypeField {
+                name: "path".into(),
+                ty: TypeExpr::Str,
+                optional: false,
+            }]),
+            TypeExpr::Str,
+        )
+        .expect("host catalog operation must not conflict");
+    catalog
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "echo",
+            "echo",
+            TypeExpr::Any,
+            TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
     crate::add_trigger_resource_operations(&mut catalog);
     catalog
         .add_trigger_source_constructor(

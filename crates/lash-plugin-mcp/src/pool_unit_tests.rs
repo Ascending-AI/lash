@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ToolProvider;
 use lash_sansio::sync::RwLockExt;
 
 #[tokio::test]
@@ -149,6 +150,269 @@ async fn connect_tolerates_unreachable_server() {
     assert_eq!(failure.class, ToolFailureClass::Unavailable);
     assert_eq!(failure.code, "mcp_pool_shut_down");
     assert_eq!(failure.retry, ToolRetryDisposition::Never);
+}
+
+#[tokio::test]
+async fn connect_rejects_server_names_with_the_same_normalized_prefix() {
+    let servers = BTreeMap::from([
+        (
+            "Foo".to_string(),
+            McpServerConfig::stdio("sh", vec!["-c".to_string(), "exit 1".to_string()]),
+        ),
+        (
+            "foo".to_string(),
+            McpServerConfig::stdio("sh", vec!["-c".to_string(), "exit 1".to_string()]),
+        ),
+    ]);
+
+    let error = match McpConnectionPool::connect(servers).await {
+        Err(error) => error,
+        Ok(pool) => {
+            pool.shutdown_all().await;
+            panic!("colliding normalized server prefixes must be a configuration error");
+        }
+    };
+    let message = error.to_string();
+    assert!(message.contains("`Foo`"), "{message}");
+    assert!(message.contains("`foo`"), "{message}");
+    assert!(message.contains("prefix `foo`"), "{message}");
+}
+
+struct NativeAndMcpProvider {
+    native: ToolDefinition,
+    mcp: crate::McpToolProvider,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for NativeAndMcpProvider {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        let mut manifests = vec![self.native.manifest()];
+        manifests.extend(self.mcp.tool_manifests());
+        manifests
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        if name == self.native.name() {
+            return Some(Arc::new(self.native.contract()));
+        }
+        self.mcp.resolve_contract(name)
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolResult {
+        if call.name == self.native.name() {
+            return ToolResult::ok(json!("native-ok"));
+        }
+        self.mcp.execute(call).await
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
+    let initialize = json!({
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "catalog", "version": "1.0.0" }
+        }
+    });
+    let list = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+            "tools": [{
+                "name": "lookup",
+                "inputSchema": { "type": "object" }
+            }]
+        }
+    });
+    let config = || McpServerConfig::Stdio {
+        command: "sh".to_string(),
+        args: vec![
+            "-c".to_string(),
+            "read -r _; printf '%s\\n' \"$INITIALIZE\"; read -r _; \
+             read -r _; printf '%s\\n' \"$LIST\"; cat >/dev/null"
+                .to_string(),
+        ],
+        env: BTreeMap::from([
+            ("INITIALIZE".to_string(), initialize.to_string()),
+            ("LIST".to_string(), list.to_string()),
+        ]),
+        cwd: None,
+        startup_timeout_ms: 2_000,
+        call_policy: McpCallPolicy::default(),
+        binary_content_attachments: false,
+    };
+    let pool = McpConnectionPool::connect(BTreeMap::from([("Docs".to_string(), config())]))
+        .await
+        .expect("connect the original MCP server");
+
+    let attach_result = pool.attach("docs".to_string(), config()).await;
+    let native = ToolDefinition::raw(
+        "tool:native/status",
+        "native_status",
+        "native status",
+        ToolDefinition::default_input_schema(),
+        json!({ "type": "string" }),
+    );
+    let native_id = native.manifest.id.clone();
+    let rebuilt = lash_core::ToolRegistry::from_tool_provider(Arc::new(NativeAndMcpProvider {
+        native,
+        mcp: crate::McpToolProvider::new(Arc::clone(&pool)),
+    }));
+
+    // Reap every stdio child before making assertions that can panic. With the
+    // reservation reverted, the rejected attach above becomes a second child.
+    pool.shutdown_all().await;
+
+    let registry =
+        rebuilt.expect("a rejected collision must not kill the mixed native/MCP catalog");
+    let manifests = registry.tool_manifests();
+    assert_eq!(manifests.len(), 2, "native and original MCP tools survive");
+    assert!(
+        manifests
+            .iter()
+            .any(|manifest| manifest.name == "native_status"),
+        "the native tool remains in the rebuilt catalog"
+    );
+    assert!(
+        manifests
+            .iter()
+            .any(|manifest| manifest.name == "mcp__docs__lookup"),
+        "the original MCP tool remains in the rebuilt catalog"
+    );
+    let native_result = registry
+        .execute_by_id(
+            &native_id,
+            &json!({}),
+            &lash_core::testing::mock_tool_context(),
+        )
+        .await;
+    assert_eq!(native_result.value_for_projection(), json!("native-ok"));
+
+    let error = attach_result.expect_err("the colliding runtime attach must be rejected");
+    assert!(matches!(error, McpError::Config(_)), "{error:?}");
+}
+
+#[cfg(all(unix, feature = "lashlang"))]
+#[tokio::test]
+async fn normalization_collisions_dispatch_stably_across_respawn() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let respawn_marker = scratch.path().join("respawned");
+    let initialize = json!({
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "collision", "version": "1.0.0" }
+        }
+    });
+    let first_list = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": { "tools": [
+            { "name": "get-user", "inputSchema": { "type": "object" } },
+            { "name": "get_user", "inputSchema": { "type": "object" } }
+        ] }
+    });
+    let respawn_list = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": { "tools": [
+            { "name": "get_user", "inputSchema": { "type": "object" } },
+            { "name": "get-user", "inputSchema": { "type": "object" } }
+        ] }
+    });
+    let hyphen_call = json!({
+        "jsonrpc": "2.0", "id": 2,
+        "result": { "content": [{ "type": "text", "text": "hyphen" }] }
+    });
+    let underscore_call = json!({
+        "jsonrpc": "2.0", "id": 2,
+        "result": { "content": [{ "type": "text", "text": "underscore" }] }
+    });
+    let script = "\
+        read -r _; printf '%s\\n' \"$INITIALIZE\"; \
+        read -r _; \
+        read -r _; \
+        if [ -e \"$RESPAWN_MARKER\" ]; then printf '%s\\n' \"$RESPAWN_LIST\"; \
+        else : > \"$RESPAWN_MARKER\"; printf '%s\\n' \"$FIRST_LIST\"; fi; \
+        read -r first_call; \
+        case \"$first_call\" in *'\"name\":\"get-user\"'*) printf '%s\\n' \"$HYPHEN_CALL\";; \
+        *) printf '%s\\n' \"$UNDERSCORE_CALL\";; esac";
+    let servers = BTreeMap::from([(
+        "directory".to_string(),
+        McpServerConfig::Stdio {
+            command: "sh".to_string(),
+            args: vec!["-c".to_string(), script.to_string()],
+            env: BTreeMap::from([
+                ("INITIALIZE".to_string(), initialize.to_string()),
+                ("FIRST_LIST".to_string(), first_list.to_string()),
+                ("RESPAWN_LIST".to_string(), respawn_list.to_string()),
+                ("HYPHEN_CALL".to_string(), hyphen_call.to_string()),
+                ("UNDERSCORE_CALL".to_string(), underscore_call.to_string()),
+                (
+                    "RESPAWN_MARKER".to_string(),
+                    respawn_marker.display().to_string(),
+                ),
+            ]),
+            cwd: None,
+            startup_timeout_ms: 10_000,
+            call_policy: McpCallPolicy {
+                call_timeout_ms: 2_000,
+                ..Default::default()
+            },
+            binary_content_attachments: false,
+        },
+    )]);
+    let pool = McpConnectionPool::connect(servers)
+        .await
+        .expect("connect collision server");
+
+    async fn dispatch(pool: &McpConnectionPool, operation: &str) -> Option<lash_core::ToolResult> {
+        let definition = pool.advertised_tools().into_iter().find(|definition| {
+            lash_lashlang_runtime::tool_lashlang_binding(&definition.manifest)
+                .ok()
+                .flatten()
+                .and_then(|binding| binding.operation)
+                .as_deref()
+                == Some(operation)
+        })?;
+        Some(
+            pool.call_tool(
+                definition.name(),
+                &json!({}),
+                &lash_core::testing::mock_tool_context(),
+            )
+            .await,
+        )
+    }
+
+    let first = dispatch(&pool, "get_user")
+        .await
+        .expect("base Lashlang operation is available before respawn");
+    assert_eq!(first.value_for_projection(), json!("hyphen"));
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let Some(result) = dispatch(&pool, "get_user_2").await else {
+            panic!("missing uniquified Lashlang operation `get_user_2` after respawn");
+        };
+        if result.is_success() {
+            assert_eq!(result.value_for_projection(), json!("underscore"));
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "server did not respawn before deadline: {result:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    pool.shutdown_all().await;
 }
 
 /// The first eager attempt fails, then a background reconnect spawns a live

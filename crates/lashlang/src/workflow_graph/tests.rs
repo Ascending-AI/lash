@@ -620,22 +620,24 @@ fn nodes_expose_stable_identifiers_available_before_their_execution() {
 #[test]
 fn catalog_projection_exposes_typed_facets_non_fatally() {
     let mut catalog = crate::LashlangHostCatalog::new();
-    catalog.add_module_operation(
-        ["tools"],
-        "Tools",
-        "lookup",
-        "lookup",
-        TypeExpr::Object(vec![TypeField {
-            name: "query".into(),
-            ty: TypeExpr::Str,
-            optional: false,
-        }]),
-        TypeExpr::Object(vec![TypeField {
-            name: "answer".into(),
-            ty: TypeExpr::Str,
-            optional: false,
-        }]),
-    );
+    catalog
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "lookup",
+            "lookup",
+            TypeExpr::Object(vec![TypeField {
+                name: "query".into(),
+                ty: TypeExpr::Str,
+                optional: false,
+            }]),
+            TypeExpr::Object(vec![TypeField {
+                name: "answer".into(),
+                ty: TypeExpr::Str,
+                optional: false,
+            }]),
+        )
+        .expect("host catalog operation must not conflict");
     let environment = crate::LashlangHostEnvironment::new(catalog, crate::LashlangAbilities::all())
         .with_language_features(
             crate::LashlangLanguageFeatures::default().with_label_annotations(),

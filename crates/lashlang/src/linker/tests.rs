@@ -15,7 +15,7 @@ mod tests {
                 optional: false,
             }]),
             TypeExpr::Str,
-        );
+        ).expect("host catalog operation must not conflict");
         catalog.add_module_operation(
             ["tools"],
             "Tools",
@@ -23,7 +23,7 @@ mod tests {
             "echo",
             TypeExpr::Any,
             TypeExpr::Any,
-        );
+        ).expect("host catalog operation must not conflict");
         for (operation, input_ty) in [
             ("accept_str", TypeExpr::Str),
             ("accept_int", TypeExpr::Int),
@@ -40,7 +40,7 @@ mod tests {
                 operation,
                 input_ty,
                 TypeExpr::Null,
-            );
+            ).expect("host catalog operation must not conflict");
         }
         catalog.add_module_operation(
             ["tools"],
@@ -53,7 +53,7 @@ mod tests {
                 optional: false,
             }]),
             TypeExpr::Null,
-        );
+        ).expect("host catalog operation must not conflict");
         crate::add_trigger_resource_operations(&mut catalog);
         catalog
             .add_trigger_source_constructor(
@@ -313,7 +313,7 @@ mod tests {
             "read",
             read_input,
             read_output,
-        );
+        ).expect("host catalog operation must not conflict");
         catalog.add_module_operation(
             ["board"],
             "Board",
@@ -321,7 +321,7 @@ mod tests {
             "play",
             play_input,
             play_output,
-        );
+        ).expect("host catalog operation must not conflict");
         let environment =
             LashlangHostEnvironment::new(catalog, LashlangAbilities::all());
         let program = crate::parse(
@@ -1383,7 +1383,7 @@ mod tests {
             "unrelated",
             TypeExpr::Any,
             TypeExpr::Any,
-        );
+        ).expect("host catalog operation must not conflict");
         let program = crate::parse(
             "process scan(tool: Tools) { finish (await tool.read_file({ path: \".\" }))? }",
         )
@@ -1422,7 +1422,7 @@ mod tests {
             "inbox__work__send",
             TypeExpr::Any,
             TypeExpr::Any,
-        );
+        ).expect("host catalog operation must not conflict");
         catalog.add_module_operation(
             ["inbox", "personal"],
             "Inbox",
@@ -1430,7 +1430,7 @@ mod tests {
             "inbox__personal__send",
             TypeExpr::Any,
             TypeExpr::Any,
-        );
+        ).expect("host catalog operation must not conflict");
 
         assert_eq!(
             catalog
@@ -1443,6 +1443,64 @@ mod tests {
                 .resolve_module_operation("Inbox", "inbox.personal", "send")
                 .map(|binding| binding.host_operation.as_str()),
             Some("inbox__personal__send")
+        );
+    }
+
+    #[test]
+    fn conflicting_module_operation_binding_returns_a_typed_error() {
+        let mut catalog = LashlangHostCatalog::new();
+        catalog
+            .add_module_operation(
+                ["directory"],
+                "Directory",
+                "lookup",
+                "first",
+                TypeExpr::Any,
+                TypeExpr::Any,
+            )
+            .expect("first binding is valid");
+
+        let error = catalog
+            .add_module_operation(
+                ["directory"],
+                "Directory",
+                "lookup",
+                "second",
+                TypeExpr::Any,
+                TypeExpr::Any,
+            )
+            .expect_err("conflicting dispatch must be rejected");
+
+        assert_eq!(
+            error,
+            LashlangHostCatalogError::ConflictingModuleOperation {
+                module: "directory".to_string(),
+                operation: "lookup".to_string(),
+                existing: "first".to_string(),
+                incoming: "second".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn identical_module_operation_binding_is_idempotent() {
+        let mut catalog = LashlangHostCatalog::new();
+        for _ in 0..2 {
+            catalog.add_module_operation(
+                ["directory"],
+                "Directory",
+                "lookup",
+                "directory_lookup",
+                TypeExpr::Any,
+                TypeExpr::Any,
+            ).expect("host catalog operation must not conflict");
+        }
+
+        assert_eq!(
+            catalog
+                .resolve_module_operation("Directory", "directory", "lookup")
+                .map(|binding| binding.host_operation.as_str()),
+            Some("directory_lookup")
         );
     }
 
@@ -1972,7 +2030,7 @@ mod tests {
                         default_schema,
                     }),
                 },
-            );
+            ).expect("host catalog operation must not conflict");
         }
         resources.add_module_operation(
             ["static_tool"],
@@ -1985,7 +2043,7 @@ mod tests {
                 ty: TypeExpr::Str,
                 optional: false,
             }]),
-        );
+        ).expect("host catalog operation must not conflict");
         LashlangHostEnvironment::new(resources, LashlangAbilities::all())
     }
 

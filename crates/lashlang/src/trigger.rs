@@ -179,14 +179,16 @@ pub fn add_trigger_resource_operations(catalog: &mut LashlangHostCatalog) {
         )
         .expect("trigger registration named data type is stable");
     for operation in TriggerHostOperation::ALL {
-        catalog.add_module_operation(
-            [TRIGGERS_ALIAS],
-            TRIGGERS_RESOURCE_TYPE,
-            operation.receiver_method(),
-            operation.host_operation(),
-            operation.input_ty(),
-            operation.output_ty(),
-        );
+        catalog
+            .add_module_operation(
+                [TRIGGERS_ALIAS],
+                TRIGGERS_RESOURCE_TYPE,
+                operation.receiver_method(),
+                operation.host_operation(),
+                operation.input_ty(),
+                operation.output_ty(),
+            )
+            .expect("host catalog operation must not conflict");
     }
 }
 

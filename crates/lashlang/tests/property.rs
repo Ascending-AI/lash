@@ -86,22 +86,26 @@ async fn execute<H: ExecutionHost>(
 
 fn property_host_environment() -> lashlang::LashlangHostEnvironment {
     let mut resources = lashlang::LashlangHostCatalog::new();
-    resources.add_module_operation(
-        ["tools"],
-        "Tools",
-        "echo",
-        "echo",
-        lashlang::TypeExpr::Any,
-        lashlang::TypeExpr::Any,
-    );
-    resources.add_module_operation(
-        ["tools"],
-        "Tools",
-        "fail",
-        "fail",
-        lashlang::TypeExpr::Any,
-        lashlang::TypeExpr::Any,
-    );
+    resources
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "echo",
+            "echo",
+            lashlang::TypeExpr::Any,
+            lashlang::TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    resources
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "fail",
+            "fail",
+            lashlang::TypeExpr::Any,
+            lashlang::TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
     lashlang::LashlangHostEnvironment::new(resources, lashlang::LashlangAbilities::all())
 }
 

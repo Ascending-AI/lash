@@ -4,6 +4,12 @@ use thiserror::Error;
 #[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum LashlangRuntimeError {
+    /// A projected tool or host resource conflicts with another Lashlang catalog entry.
+    #[error("invalid Lashlang host catalog: {source}")]
+    HostCatalog {
+        #[from]
+        source: lashlang::LashlangHostCatalogError,
+    },
     /// A tool definition omits its Lashlang module path.
     #[error("tool `{tool}` is missing an explicit Lashlang module path")]
     MissingToolModulePath { tool: String },

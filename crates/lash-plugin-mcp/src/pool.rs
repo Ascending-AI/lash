@@ -139,6 +139,7 @@ impl McpConnectionPool {
         servers: BTreeMap<String, McpServerConfig>,
         host_services: McpHostServices,
     ) -> Result<Arc<Self>, McpError> {
+        validate_unique_server_prefixes(servers.keys().map(String::as_str))?;
         let pool = Arc::new(Self::empty_with_host_services(host_services));
         for (name, config) in servers {
             config.validate(&name)?;
@@ -147,12 +148,10 @@ impl McpConnectionPool {
                 config,
                 pool.host_services.clone(),
             ));
-            if let Err(rejected) = pool.install(name.clone(), Arc::clone(&entry)) {
+            if let Err((rejected, error)) = pool.install(name.clone(), Arc::clone(&entry)) {
                 rejected.cancel();
                 rejected.shutdown().await;
-                return Err(McpError::Protocol(
-                    "MCP connection pool shut down during construction".to_string(),
-                ));
+                return Err(error);
             }
             let connect_result = entry.establish().await;
             let _ = entry.spawn_keepalive_loop();
@@ -182,6 +181,7 @@ impl McpConnectionPool {
             ));
         }
         config.validate(&server_name)?;
+        self.validate_server_prefix_available(&server_name)?;
         let entry = Arc::new(McpEntry::new(
             server_name.clone(),
             config,
@@ -189,12 +189,10 @@ impl McpConnectionPool {
         ));
         entry.establish().await?;
         let _ = entry.spawn_keepalive_loop();
-        if let Err(rejected) = self.install(server_name, entry) {
+        if let Err((rejected, error)) = self.install(server_name, entry) {
             rejected.cancel();
             rejected.shutdown().await;
-            Err(McpError::Protocol(
-                "MCP connection pool shut down while attaching a server".to_string(),
-            ))
+            Err(error)
         } else {
             Ok(())
         }
@@ -214,17 +212,50 @@ impl McpConnectionPool {
     }
 
     /// Register an entry, shutting down any previous entry under the name.
-    fn install(&self, server_name: String, entry: Arc<McpEntry>) -> Result<(), Arc<McpEntry>> {
+    fn install(
+        &self,
+        server_name: String,
+        entry: Arc<McpEntry>,
+    ) -> Result<(), (Arc<McpEntry>, McpError)> {
         let previous = {
             let mut entries = self.entries.write_recover();
             if self.shut_down.load(Ordering::SeqCst) {
-                return Err(entry);
+                return Err((
+                    entry,
+                    McpError::Protocol("MCP connection pool has already shut down".to_string()),
+                ));
+            }
+            if let Some((existing_server, prefix)) =
+                conflicting_server_prefix(entries.keys().map(String::as_str), &server_name)
+            {
+                return Err((
+                    entry,
+                    McpError::Config(prefix_collision_message(
+                        existing_server,
+                        &server_name,
+                        &prefix,
+                    )),
+                ));
             }
             entries.insert(server_name, entry)
         };
         if let Some(previous) = previous {
             previous.cancel();
             tokio::spawn(async move { previous.shutdown().await });
+        }
+        Ok(())
+    }
+
+    fn validate_server_prefix_available(&self, server_name: &str) -> Result<(), McpError> {
+        let entries = self.entries.read_recover();
+        if let Some((existing_server, prefix)) =
+            conflicting_server_prefix(entries.keys().map(String::as_str), server_name)
+        {
+            return Err(McpError::Config(prefix_collision_message(
+                existing_server,
+                server_name,
+                &prefix,
+            )));
         }
         Ok(())
     }
@@ -542,6 +573,43 @@ fn pool_shut_down_failure() -> ToolResult {
         retry: ToolRetryDisposition::Never,
         raw: None,
     })
+}
+
+fn validate_unique_server_prefixes<'a>(
+    server_names: impl IntoIterator<Item = &'a str>,
+) -> Result<(), McpError> {
+    let mut prefixes = BTreeMap::<String, &'a str>::new();
+    for server_name in server_names {
+        let prefix = naming::normalize_identifier(server_name);
+        if let Some(existing_server) = prefixes.insert(prefix.clone(), server_name) {
+            return Err(McpError::Config(prefix_collision_message(
+                existing_server,
+                server_name,
+                &prefix,
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn conflicting_server_prefix<'a>(
+    existing_server_names: impl IntoIterator<Item = &'a str>,
+    incoming_server: &str,
+) -> Option<(&'a str, String)> {
+    let incoming_prefix = naming::normalize_identifier(incoming_server);
+    existing_server_names
+        .into_iter()
+        .find(|existing_server| {
+            *existing_server != incoming_server
+                && naming::normalize_identifier(existing_server) == incoming_prefix
+        })
+        .map(|existing_server| (existing_server, incoming_prefix))
+}
+
+fn prefix_collision_message(existing_server: &str, incoming_server: &str, prefix: &str) -> String {
+    format!(
+        "MCP servers `{existing_server}` and `{incoming_server}` normalize to the same prefix `{prefix}`"
+    )
 }
 
 /// Transport-level failures mean the connection is gone (dead child process,
@@ -1081,8 +1149,9 @@ fn build_http_headers(
 
 fn import_tools(
     server_name: &str,
-    tools: Vec<rmcp::model::Tool>,
+    mut tools: Vec<rmcp::model::Tool>,
 ) -> BTreeMap<String, ImportedTool> {
+    tools.sort_by(|left, right| left.name.cmp(&right.name));
     let mut used_names = BTreeSet::new();
     let mut imported = BTreeMap::new();
     for tool in tools {

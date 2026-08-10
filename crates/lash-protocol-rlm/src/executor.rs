@@ -2176,14 +2176,16 @@ mod tests {
     #[test]
     fn executor_reports_rlm_bare_tool_call_diagnostic_at_link_time() {
         let mut resources = lashlang::LashlangHostCatalog::new();
-        resources.add_module_operation(
-            ["files"],
-            "Files",
-            "read",
-            "read_file",
-            lashlang::TypeExpr::Any,
-            lashlang::TypeExpr::Any,
-        );
+        resources
+            .add_module_operation(
+                ["files"],
+                "Files",
+                "read",
+                "read_file",
+                lashlang::TypeExpr::Any,
+                lashlang::TypeExpr::Any,
+            )
+            .expect("host catalog operation must not conflict");
 
         block_on(async {
             let response = execute_with_lashlang_host_environment(

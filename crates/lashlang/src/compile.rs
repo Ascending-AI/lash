@@ -323,14 +323,16 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn compile_module_facade_reports_rich_introspection() {
         let mut resources = crate::LashlangHostCatalog::new();
-        resources.add_module_operation(
-            ["files"],
-            "File",
-            "read",
-            "files.read",
-            crate::TypeExpr::Ref("File".into()),
-            crate::TypeExpr::Str,
-        );
+        resources
+            .add_module_operation(
+                ["files"],
+                "File",
+                "read",
+                "files.read",
+                crate::TypeExpr::Ref("File".into()),
+                crate::TypeExpr::Str,
+            )
+            .expect("host catalog operation must not conflict");
         resources.add_value_constructor(
             ["files", "Open"],
             crate::TypeExpr::Object(vec![crate::TypeField {

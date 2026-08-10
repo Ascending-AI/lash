@@ -156,54 +156,66 @@ async fn execute<H: ExecutionHost>(
 
 fn test_host_environment() -> lashlang::LashlangHostEnvironment {
     let mut resources = lashlang::LashlangHostCatalog::tool_default(["echo", "boom"]);
-    resources.add_module_operation(
-        ["files"],
-        "Files",
-        "read",
-        "read_file",
-        lashlang::TypeExpr::Any,
-        lashlang::TypeExpr::Any,
-    );
-    resources.add_module_operation(
-        ["files"],
-        "Files",
-        "edit",
-        "edit",
-        lashlang::TypeExpr::Any,
-        lashlang::TypeExpr::Any,
-    );
-    resources.add_module_operation(
-        ["files"],
-        "Files",
-        "write",
-        "write",
-        lashlang::TypeExpr::Any,
-        lashlang::TypeExpr::Any,
-    );
-    resources.add_module_operation(
-        ["shell"],
-        "Shell",
-        "exec",
-        "exec_command",
-        lashlang::TypeExpr::Any,
-        lashlang::TypeExpr::Any,
-    );
-    resources.add_module_operation(
-        ["agents"],
-        "Agents",
-        "spawn",
-        "spawn_agent",
-        lashlang::TypeExpr::Any,
-        lashlang::TypeExpr::Any,
-    );
-    resources.add_module_operation(
-        ["processes"],
-        "Processes",
-        "list",
-        "list_process_handles",
-        lashlang::TypeExpr::Any,
-        lashlang::TypeExpr::Any,
-    );
+    resources
+        .add_module_operation(
+            ["files"],
+            "Files",
+            "read",
+            "read_file",
+            lashlang::TypeExpr::Any,
+            lashlang::TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    resources
+        .add_module_operation(
+            ["files"],
+            "Files",
+            "edit",
+            "edit",
+            lashlang::TypeExpr::Any,
+            lashlang::TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    resources
+        .add_module_operation(
+            ["files"],
+            "Files",
+            "write",
+            "write",
+            lashlang::TypeExpr::Any,
+            lashlang::TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    resources
+        .add_module_operation(
+            ["shell"],
+            "Shell",
+            "exec",
+            "exec_command",
+            lashlang::TypeExpr::Any,
+            lashlang::TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    resources
+        .add_module_operation(
+            ["agents"],
+            "Agents",
+            "spawn",
+            "spawn_agent",
+            lashlang::TypeExpr::Any,
+            lashlang::TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    resources
+        .add_module_operation(
+            ["processes"],
+            "Processes",
+            "list",
+            "list_process_handles",
+            lashlang::TypeExpr::Any,
+            lashlang::TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
     lashlang::LashlangHostEnvironment::new(resources, lashlang::LashlangAbilities::all())
 }
 

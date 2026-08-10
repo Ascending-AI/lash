@@ -185,38 +185,46 @@ async fn execute<H: ExecutionHost>(
 
 fn test_host_environment() -> lashlang::LashlangHostEnvironment {
     let mut resources = lashlang::LashlangHostCatalog::new();
-    resources.add_module_operation(
-        ["files"],
-        "Files",
-        "read",
-        "read_file",
-        TypeExpr::Any,
-        TypeExpr::Any,
-    );
-    resources.add_module_operation(
-        ["files"],
-        "Files",
-        "glob",
-        "glob",
-        TypeExpr::Any,
-        TypeExpr::Any,
-    );
-    resources.add_module_operation(
-        ["agents"],
-        "Agents",
-        "spawn",
-        "spawn_agent",
-        TypeExpr::Any,
-        TypeExpr::Any,
-    );
-    resources.add_module_operation(
-        ["tools"],
-        "Tools",
-        "sleep_echo",
-        "sleep_echo",
-        TypeExpr::Any,
-        TypeExpr::Any,
-    );
+    resources
+        .add_module_operation(
+            ["files"],
+            "Files",
+            "read",
+            "read_file",
+            TypeExpr::Any,
+            TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    resources
+        .add_module_operation(
+            ["files"],
+            "Files",
+            "glob",
+            "glob",
+            TypeExpr::Any,
+            TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    resources
+        .add_module_operation(
+            ["agents"],
+            "Agents",
+            "spawn",
+            "spawn_agent",
+            TypeExpr::Any,
+            TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    resources
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "sleep_echo",
+            "sleep_echo",
+            TypeExpr::Any,
+            TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
     lashlang::LashlangHostEnvironment::new(resources, lashlang::LashlangAbilities::all())
 }
 

@@ -69,7 +69,7 @@ fn build_benchmark_host_environment() -> LashlangHostEnvironment {
         "exec_command",
         TypeExpr::Any,
         TypeExpr::Any,
-    );
+    ).expect("host catalog operation must not conflict");
     resources.add_module_operation(
         ["llm"],
         "Llm",
@@ -77,7 +77,7 @@ fn build_benchmark_host_environment() -> LashlangHostEnvironment {
         "llm_query",
         TypeExpr::Any,
         TypeExpr::Any,
-    );
+    ).expect("host catalog operation must not conflict");
     resources.add_module_operation(
         ["agents"],
         "Agents",
@@ -85,7 +85,7 @@ fn build_benchmark_host_environment() -> LashlangHostEnvironment {
         "spawn_agent",
         TypeExpr::Any,
         TypeExpr::Any,
-    );
+    ).expect("host catalog operation must not conflict");
     resources.add_module_operation(
         ["processes"],
         "Processes",
@@ -93,7 +93,7 @@ fn build_benchmark_host_environment() -> LashlangHostEnvironment {
         "list_process_handles",
         TypeExpr::Any,
         TypeExpr::Any,
-    );
+    ).expect("host catalog operation must not conflict");
     resources.add_module_operation(
         ["control"],
         "Control",
@@ -101,7 +101,7 @@ fn build_benchmark_host_environment() -> LashlangHostEnvironment {
         "continue_as",
         TypeExpr::Any,
         TypeExpr::Any,
-    );
+    ).expect("host catalog operation must not conflict");
     LashlangHostEnvironment::new(resources, LashlangAbilities::all()).with_globals([
         "history", "ctx", "snap", "img", "docs", "proj",
     ])
