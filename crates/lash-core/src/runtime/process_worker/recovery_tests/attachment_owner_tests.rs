@@ -8,6 +8,29 @@ struct ParentBoundSessionStoreFactory {
     store: Arc<InMemorySessionStore>,
 }
 
+// This test factory owns one attachment-aware store, so its explicit root-set
+// capability projects that store's manifest rather than asserting emptiness.
+#[async_trait::async_trait]
+impl crate::AttachmentRootSet for ParentBoundSessionStoreFactory {
+    async fn live_attachment_refs(
+        &self,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, crate::StoreError> {
+        self.store
+            .forget_aged_uncommitted_intents(intent_grace_cutoff_epoch_ms)?;
+        Ok(self.store.list_all_refs()?.into_iter().collect())
+    }
+
+    async fn has_live_attachment_ref(
+        &self,
+        id: &crate::AttachmentId,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<bool, crate::StoreError> {
+        self.store
+            .has_live_ref_for_id(id, intent_grace_cutoff_epoch_ms)
+    }
+}
+
 #[async_trait::async_trait]
 impl SessionStoreFactory for ParentBoundSessionStoreFactory {
     async fn create_store(

@@ -286,6 +286,38 @@ struct CreateOnlySessionStoreFactory {
     inner: lash_core::facade_support::InMemorySessionStoreFactory,
 }
 
+// The fixture narrows the factory surface, but attachment ownership remains
+// with the real inner factory and must be delegated unchanged.
+#[async_trait]
+impl lash_core::AttachmentRootSet for CreateOnlySessionStoreFactory {
+    async fn live_attachment_refs(
+        &self,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> std::result::Result<
+        std::collections::BTreeSet<lash_core::AttachmentId>,
+        lash_core::StoreError,
+    > {
+        lash_core::AttachmentRootSet::live_attachment_refs(
+            &self.inner,
+            intent_grace_cutoff_epoch_ms,
+        )
+        .await
+    }
+
+    async fn has_live_attachment_ref(
+        &self,
+        id: &lash_core::AttachmentId,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> std::result::Result<bool, lash_core::StoreError> {
+        lash_core::AttachmentRootSet::has_live_attachment_ref(
+            &self.inner,
+            id,
+            intent_grace_cutoff_epoch_ms,
+        )
+        .await
+    }
+}
+
 #[async_trait]
 impl lash_core::SessionStoreFactory for CreateOnlySessionStoreFactory {
     async fn create_store(

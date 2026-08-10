@@ -715,6 +715,29 @@ struct ReusableStoreFactory {
     store: Arc<dyn lash_core::RuntimePersistence>,
 }
 
+// The reusable mock store uses a no-op attachment manifest; this fixture
+// explicitly owns no attachment roots.
+#[async_trait::async_trait]
+impl lash_core::AttachmentRootSet for ReusableStoreFactory {
+    async fn live_attachment_refs(
+        &self,
+        _intent_grace_cutoff_epoch_ms: u64,
+    ) -> std::result::Result<
+        std::collections::BTreeSet<lash_core::AttachmentId>,
+        lash_core::StoreError,
+    > {
+        Ok(std::collections::BTreeSet::new())
+    }
+
+    async fn has_live_attachment_ref(
+        &self,
+        _id: &lash_core::AttachmentId,
+        _intent_grace_cutoff_epoch_ms: u64,
+    ) -> std::result::Result<bool, lash_core::StoreError> {
+        Ok(false)
+    }
+}
+
 #[async_trait::async_trait]
 impl lash_core::SessionStoreFactory for ReusableStoreFactory {
     async fn create_store(
@@ -1062,6 +1085,29 @@ impl RecordingStoreFactory {
     }
 }
 
+// SnapshotStore has a no-op attachment manifest; this request-recording
+// fixture explicitly owns no attachment roots.
+#[async_trait::async_trait]
+impl lash_core::AttachmentRootSet for RecordingStoreFactory {
+    async fn live_attachment_refs(
+        &self,
+        _intent_grace_cutoff_epoch_ms: u64,
+    ) -> std::result::Result<
+        std::collections::BTreeSet<lash_core::AttachmentId>,
+        lash_core::StoreError,
+    > {
+        Ok(std::collections::BTreeSet::new())
+    }
+
+    async fn has_live_attachment_ref(
+        &self,
+        _id: &lash_core::AttachmentId,
+        _intent_grace_cutoff_epoch_ms: u64,
+    ) -> std::result::Result<bool, lash_core::StoreError> {
+        Ok(false)
+    }
+}
+
 #[async_trait::async_trait]
 impl lash_core::SessionStoreFactory for RecordingStoreFactory {
     async fn create_store(
@@ -1080,6 +1126,29 @@ impl lash_core::SessionStoreFactory for RecordingStoreFactory {
 #[derive(Default)]
 struct DeletingStoreFactory {
     stores: std::sync::Mutex<std::collections::HashMap<String, Arc<SnapshotStore>>>,
+}
+
+// SnapshotStore has a no-op attachment manifest; this deletion fixture
+// explicitly owns no attachment roots.
+#[async_trait::async_trait]
+impl lash_core::AttachmentRootSet for DeletingStoreFactory {
+    async fn live_attachment_refs(
+        &self,
+        _intent_grace_cutoff_epoch_ms: u64,
+    ) -> std::result::Result<
+        std::collections::BTreeSet<lash_core::AttachmentId>,
+        lash_core::StoreError,
+    > {
+        Ok(std::collections::BTreeSet::new())
+    }
+
+    async fn has_live_attachment_ref(
+        &self,
+        _id: &lash_core::AttachmentId,
+        _intent_grace_cutoff_epoch_ms: u64,
+    ) -> std::result::Result<bool, lash_core::StoreError> {
+        Ok(false)
+    }
 }
 
 #[async_trait::async_trait]

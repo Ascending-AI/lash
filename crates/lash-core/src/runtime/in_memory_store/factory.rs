@@ -460,7 +460,13 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             source_session_id,
         })
     }
+}
 
+#[async_trait::async_trait]
+// The compile error should direct wrappers to implement the capability, not
+// suggest replacing their factory with this concrete implementation.
+#[diagnostic::do_not_recommend]
+impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
     async fn live_attachment_refs(
         &self,
         intent_grace_cutoff_epoch_ms: u64,

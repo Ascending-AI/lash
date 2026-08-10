@@ -6,6 +6,26 @@ use lash_sansio::sync::MutexExt;
 // fields + recording-count getters back the existing assertions).
 pub(crate) use crate::runtime::in_memory_store::InMemorySessionStore as RecordingStore;
 
+pub(crate) struct FixedAttachmentRoots(pub(crate) std::collections::BTreeSet<crate::AttachmentId>);
+
+#[async_trait::async_trait]
+impl crate::AttachmentRootSet for FixedAttachmentRoots {
+    async fn live_attachment_refs(
+        &self,
+        _intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, crate::StoreError> {
+        Ok(self.0.clone())
+    }
+
+    async fn has_live_attachment_ref(
+        &self,
+        id: &crate::AttachmentId,
+        _intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<bool, crate::StoreError> {
+        Ok(self.0.contains(id))
+    }
+}
+
 pub(crate) fn default_state() -> RuntimeSessionState {
     let mut state =
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
@@ -312,6 +332,43 @@ impl RecordingSessionStoreFactory {
     }
 }
 
+// RecordingSessionStoreFactory retains every attachment-aware store it creates,
+// so its root-set answer is the union of those stores' manifests.
+#[async_trait::async_trait]
+impl crate::AttachmentRootSet for RecordingSessionStoreFactory {
+    async fn live_attachment_refs(
+        &self,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, crate::StoreError> {
+        let mut refs = std::collections::BTreeSet::new();
+        for store in self.stores() {
+            crate::AttachmentManifest::forget_aged_uncommitted_intents(
+                &*store,
+                intent_grace_cutoff_epoch_ms,
+            )?;
+            refs.extend(crate::AttachmentManifest::list_all_refs(&*store)?);
+        }
+        Ok(refs)
+    }
+
+    async fn has_live_attachment_ref(
+        &self,
+        id: &crate::AttachmentId,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<bool, crate::StoreError> {
+        for store in self.stores() {
+            if crate::AttachmentManifest::has_live_ref_for_id(
+                &*store,
+                id,
+                intent_grace_cutoff_epoch_ms,
+            )? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+}
+
 #[async_trait::async_trait]
 impl SessionStoreFactory for RecordingSessionStoreFactory {
     async fn create_store(
@@ -351,6 +408,51 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
     async fn delete_session(&self, _session_id: &str) -> Result<(), String> {
         Ok(())
     }
+}
+
+#[tokio::test]
+async fn recording_factory_root_set_keeps_committed_blob() {
+    let factory = RecordingSessionStoreFactory::default();
+    let request = crate::SessionStoreCreateRequest {
+        session_id: "recording-factory-gc".to_string(),
+        relation: crate::SessionRelation::Root,
+        policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+    };
+    let store = factory.create_store(&request).await.expect("create store");
+    let backend = Arc::new(crate::InMemoryAttachmentStore::new());
+    let attachment_backend: Arc<dyn crate::AttachmentStore> = backend.clone();
+    let manifest: Arc<dyn crate::AttachmentManifest> = store.clone();
+    let session = crate::SessionAttachmentStore::new(
+        attachment_backend,
+        manifest,
+        request.session_id.clone(),
+    );
+    let attachment = session
+        .put(
+            b"recording-factory-live-blob".to_vec(),
+            crate::AttachmentCreateMeta::new(
+                crate::MediaType::parse("application/octet-stream").unwrap(),
+                None,
+                None,
+            ),
+        )
+        .await
+        .expect("put attachment");
+    store
+        .commit_refs(&request.session_id, std::slice::from_ref(&attachment.id))
+        .expect("commit attachment ref");
+    assert_eq!(store.list_all_refs().unwrap(), vec![attachment.id.clone()]);
+
+    let report = crate::reclaim_unreferenced_attachments(&factory, &*backend, 0)
+        .await
+        .expect("sweep");
+
+    assert_eq!(report.scanned_blob_count, 1);
+    assert_eq!(report.reclaimed_count, 0);
+    assert!(report.deleted_while_referenced.is_empty());
+    crate::AttachmentStore::get(&*backend, &attachment.id)
+        .await
+        .expect("committed blob survives");
 }
 
 pub(crate) fn plugin_session_with_tools(

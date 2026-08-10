@@ -27,3 +27,9 @@ fn model_selection_requires_model_and_variant_together() {
         t.pass("tests/ui/rlm_facade_boundary_types_are_public.rs");
     }
 }
+
+#[test]
+fn attachment_gc_requires_explicit_root_set() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/ui/attachment_gc_requires_explicit_root_set.rs");
+}

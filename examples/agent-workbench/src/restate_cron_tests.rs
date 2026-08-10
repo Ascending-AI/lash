@@ -804,6 +804,38 @@ impl MetaLossSessionStoreFactory {
     }
 }
 
+// This decorator changes only metadata visibility; attachment ownership stays
+// with the inner factory and must be delegated explicitly.
+#[async_trait::async_trait]
+impl lash::persistence::AttachmentRootSet for MetaLossSessionStoreFactory {
+    async fn live_attachment_refs(
+        &self,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<
+        std::collections::BTreeSet<lash::attachments::AttachmentId>,
+        lash::persistence::StoreError,
+    > {
+        lash::persistence::AttachmentRootSet::live_attachment_refs(
+            &self.inner,
+            intent_grace_cutoff_epoch_ms,
+        )
+        .await
+    }
+
+    async fn has_live_attachment_ref(
+        &self,
+        id: &lash::attachments::AttachmentId,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<bool, lash::persistence::StoreError> {
+        lash::persistence::AttachmentRootSet::has_live_attachment_ref(
+            &self.inner,
+            id,
+            intent_grace_cutoff_epoch_ms,
+        )
+        .await
+    }
+}
+
 #[async_trait::async_trait]
 impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
     async fn create_store(

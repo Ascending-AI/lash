@@ -163,7 +163,10 @@ pub trait AttachmentStore: Send + Sync {
 /// Implemented by session-store factories, which own the full set of sessions:
 /// a global manifest table answers in one query (Postgres); a per-session
 /// database topology answers by iterating the factory's session databases at
-/// sweep time (SQLite); an in-memory factory answers from its live stores.
+/// sweep time (SQLite); an in-memory factory answers from its live stores. An
+/// empty set asserts that the implementor owns no attachments. If it cannot
+/// enumerate its roots, it must return an error from [`Self::live_attachment_refs`];
+/// the sweep then aborts before listing or deleting blobs.
 #[async_trait::async_trait]
 pub trait AttachmentRootSet: Send + Sync {
     /// The live root set, reconciled against `intent_grace_cutoff_epoch_ms`.
@@ -187,42 +190,12 @@ pub trait AttachmentRootSet: Send + Sync {
     /// in the narrow window between the freshness re-check and the delete, so the
     /// sweep re-probes just that id. Unlike the snapshot, this is a read-only probe
     /// — it must NOT reconcile (forget) aged intents. Backends answer with a single
-    /// indexed query / first-hit scan rather than materializing the whole set. The
-    /// default re-materializes the root set and tests membership.
+    /// indexed query / first-hit scan rather than materializing the whole set.
     async fn has_live_attachment_ref(
         &self,
         id: &AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, StoreError> {
-        Ok(self
-            .live_attachment_refs(intent_grace_cutoff_epoch_ms)
-            .await?
-            .contains(id))
-    }
-}
-
-/// Every session-store factory is a root set: it owns all sessions, so it can
-/// enumerate their refs. The concrete factories override
-/// [`SessionStoreFactory::live_attachment_refs`](crate::SessionStoreFactory::live_attachment_refs);
-/// this blanket makes any of them (including `dyn SessionStoreFactory`) usable
-/// as the GC lever's `root_set`.
-#[async_trait::async_trait]
-impl<T: crate::SessionStoreFactory + ?Sized> AttachmentRootSet for T {
-    async fn live_attachment_refs(
-        &self,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<BTreeSet<AttachmentId>, StoreError> {
-        crate::SessionStoreFactory::live_attachment_refs(self, intent_grace_cutoff_epoch_ms).await
-    }
-
-    async fn has_live_attachment_ref(
-        &self,
-        id: &AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, StoreError> {
-        crate::SessionStoreFactory::has_live_attachment_ref(self, id, intent_grace_cutoff_epoch_ms)
-            .await
-    }
+    ) -> Result<bool, StoreError>;
 }
 
 /// Outcome of a host-invoked unreferenced-attachment reclamation sweep.
@@ -846,6 +819,10 @@ pub async fn resolve_llm_request_attachments(
 }
 
 #[cfg(test)]
+#[path = "attachments/fail_closed_tests.rs"]
+mod fail_closed_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use lash_sansio::{AttachmentTypeMetadata, MediaType};
@@ -960,6 +937,41 @@ mod tests {
             }
             Ok(refs)
         }
+
+        async fn has_live_attachment_ref(
+            &self,
+            id: &AttachmentId,
+            intent_grace_cutoff_epoch_ms: u64,
+        ) -> Result<bool, crate::StoreError> {
+            for manifest in &self.manifests {
+                if manifest.has_live_ref_for_id(id, intent_grace_cutoff_epoch_ms)? {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
+    }
+
+    #[tokio::test]
+    async fn recording_targeted_probe_does_not_reconcile_aged_intent() {
+        let manifest = Arc::new(RecordingManifest::default());
+        let id = content_id(b"aged-targeted-probe-root");
+        manifest
+            .record_intent(AttachmentIntent {
+                attachment_id: id.clone(),
+                session_id: "targeted-probe".to_string(),
+                canonical_uri: attachment_uri(&id),
+                intent_at_epoch_ms: 1,
+                owner_kind: None,
+                owner_id: None,
+            })
+            .expect("record intent");
+        let roots = RecordingRootSet {
+            manifests: vec![Arc::clone(&manifest)],
+        };
+
+        assert!(roots.has_live_attachment_ref(&id, 1).await.unwrap());
+        assert_eq!(manifest.list_all_refs().unwrap(), vec![id]);
     }
 
     fn meta() -> AttachmentCreateMeta {
@@ -968,6 +980,107 @@ mod tests {
             Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
             Some("pixel".to_string()),
         )
+    }
+
+    async fn committed_factory_attachment() -> (
+        crate::InMemorySessionStoreFactory,
+        Arc<InMemoryAttachmentStore>,
+        AttachmentId,
+    ) {
+        let factory = crate::InMemorySessionStoreFactory::new();
+        let request = crate::SessionStoreCreateRequest {
+            session_id: "explicit-root-factory".to_string(),
+            relation: crate::SessionRelation::Root,
+            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        };
+        let store = crate::SessionStoreFactory::create_store(&factory, &request)
+            .await
+            .expect("create attachment-aware store");
+        let backend = Arc::new(InMemoryAttachmentStore::new());
+        let session = SessionAttachmentStore::new(
+            backend.clone(),
+            Arc::new(PersistenceManifestAdapter(Arc::clone(&store))),
+            request.session_id.clone(),
+        );
+        let reference = session
+            .put(vec![8, 8, 1], meta())
+            .await
+            .expect("put factory attachment");
+        store
+            .commit_refs(&request.session_id, std::slice::from_ref(&reference.id))
+            .expect("commit factory attachment ref");
+        (factory, backend, reference.id)
+    }
+
+    #[tokio::test]
+    async fn explicit_factory_root_set_keeps_committed_blob() {
+        let (factory, backend, id) = committed_factory_attachment().await;
+
+        let report = reclaim_unreferenced_attachments(&factory, &*backend, 0)
+            .await
+            .expect("sweep committed factory attachment");
+
+        assert_eq!(report.scanned_blob_count, 1);
+        assert_eq!(report.reclaimed_count, 0);
+        assert!(report.failed_ids.is_empty());
+        assert!(report.deleted_while_referenced.is_empty());
+        backend.get(&id).await.expect("committed blob survives");
+    }
+
+    /// Deliberately faulty snapshot projection over a factory that really does
+    /// hold a committed ref. The first targeted probe also misses, modelling a
+    /// ref landing in the delete window; the post-delete probe delegates to the
+    /// factory's explicit targeted implementation and must raise the alarm.
+    struct EmptySnapshotFactoryRoots<'a> {
+        factory: &'a crate::InMemorySessionStoreFactory,
+        targeted_probe_count: Mutex<u8>,
+    }
+
+    #[async_trait::async_trait]
+    impl AttachmentRootSet for EmptySnapshotFactoryRoots<'_> {
+        async fn live_attachment_refs(
+            &self,
+            _intent_grace_cutoff_epoch_ms: u64,
+        ) -> Result<BTreeSet<AttachmentId>, crate::StoreError> {
+            Ok(BTreeSet::new())
+        }
+
+        async fn has_live_attachment_ref(
+            &self,
+            id: &AttachmentId,
+            intent_grace_cutoff_epoch_ms: u64,
+        ) -> Result<bool, crate::StoreError> {
+            let probe = {
+                let mut count = self.targeted_probe_count.lock_recover();
+                *count += 1;
+                *count
+            };
+            if probe == 1 {
+                return Ok(false);
+            }
+            AttachmentRootSet::has_live_attachment_ref(
+                self.factory,
+                id,
+                intent_grace_cutoff_epoch_ms,
+            )
+            .await
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_targeted_probe_alarms_when_empty_snapshot_deletes_live_blob() {
+        let (factory, backend, id) = committed_factory_attachment().await;
+        let roots = EmptySnapshotFactoryRoots {
+            factory: &factory,
+            targeted_probe_count: Mutex::new(0),
+        };
+
+        let report = reclaim_unreferenced_attachments(&roots, &*backend, 0)
+            .await
+            .expect("sweep with deliberately empty snapshot");
+
+        assert_eq!(report.reclaimed_count, 1);
+        assert_eq!(report.deleted_while_referenced, vec![id]);
     }
 
     #[tokio::test]

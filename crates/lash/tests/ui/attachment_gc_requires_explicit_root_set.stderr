@@ -1,0 +1,58 @@
+error[E0277]: the trait bound `DelegatingFactory: AttachmentRootSet` is not satisfied
+  --> tests/ui/attachment_gc_requires_explicit_root_set.rs:13:30
+   |
+13 | impl SessionStoreFactory for DelegatingFactory {
+   |                              ^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `AttachmentRootSet` is not implemented for `DelegatingFactory`
+  --> tests/ui/attachment_gc_requires_explicit_root_set.rs:8:1
+   |
+ 8 | struct DelegatingFactory {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `SessionStoreFactory`
+  --> $WORKSPACE/crates/lash-core/src/runtime/mod.rs
+   |
+   | pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
+   |                                ^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `SessionStoreFactory`
+
+error[E0277]: the trait bound `DelegatingFactory: AttachmentRootSet` is not satisfied
+  --> tests/ui/attachment_gc_requires_explicit_root_set.rs:35:46
+   |
+35 |     let _ = reclaim_unreferenced_attachments(factory, &backend, 0);
+   |             -------------------------------- ^^^^^^^ unsatisfied trait bound
+   |             |
+   |             required by a bound introduced by this call
+   |
+help: the trait `AttachmentRootSet` is not implemented for `DelegatingFactory`
+  --> tests/ui/attachment_gc_requires_explicit_root_set.rs:8:1
+   |
+ 8 | struct DelegatingFactory {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `reclaim_unreferenced_attachments`
+  --> $WORKSPACE/crates/lash-core/src/attachments.rs
+   |
+   | pub async fn reclaim_unreferenced_attachments<R>(
+   |              -------------------------------- required by a bound in this function
+...
+   |     R: AttachmentRootSet + ?Sized,
+   |        ^^^^^^^^^^^^^^^^^ required by this bound in `reclaim_unreferenced_attachments`
+
+error[E0277]: the trait bound `DelegatingFactory: AttachmentRootSet` is not satisfied
+  --> tests/ui/attachment_gc_requires_explicit_root_set.rs:35:13
+   |
+35 |     let _ = reclaim_unreferenced_attachments(factory, &backend, 0);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `AttachmentRootSet` is not implemented for `DelegatingFactory`
+  --> tests/ui/attachment_gc_requires_explicit_root_set.rs:8:1
+   |
+ 8 | struct DelegatingFactory {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `reclaim_unreferenced_attachments`
+  --> $WORKSPACE/crates/lash-core/src/attachments.rs
+   |
+   | pub async fn reclaim_unreferenced_attachments<R>(
+   |              -------------------------------- required by a bound in this function
+...
+   |     R: AttachmentRootSet + ?Sized,
+   |        ^^^^^^^^^^^^^^^^^ required by this bound in `reclaim_unreferenced_attachments`

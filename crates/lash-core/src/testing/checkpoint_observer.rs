@@ -343,7 +343,13 @@ impl SessionStoreFactory for ObservedSessionStoreFactory {
     async fn fork_at(&self, request: &ForkSessionRequest) -> Result<ForkSessionResult, StoreError> {
         self.inner.fork_at(request).await
     }
+}
 
+#[async_trait::async_trait]
+// The compile error should direct wrappers to implement the capability, not
+// suggest replacing their factory with this concrete implementation.
+#[diagnostic::do_not_recommend]
+impl crate::AttachmentRootSet for ObservedSessionStoreFactory {
     async fn live_attachment_refs(
         &self,
         intent_grace_cutoff_epoch_ms: u64,

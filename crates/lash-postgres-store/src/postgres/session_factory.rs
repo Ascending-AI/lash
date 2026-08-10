@@ -481,7 +481,10 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             source_session_id,
         })
     }
+}
 
+#[async_trait::async_trait]
+impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
     async fn live_attachment_refs(
         &self,
         intent_grace_cutoff_epoch_ms: u64,

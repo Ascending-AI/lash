@@ -1351,7 +1351,7 @@ pub struct ForkSessionResult {
 }
 
 #[async_trait::async_trait]
-pub trait SessionStoreFactory: Send + Sync {
+pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
@@ -1446,45 +1446,6 @@ pub trait SessionStoreFactory: Send + Sync {
         Err(crate::StoreError::UnsupportedStoreOperation {
             operation: "fork_at",
         })
-    }
-
-    /// The attachment GC root set across every session this factory owns. An
-    /// uncommitted intent is forgotten only when it is old enough and its
-    /// durable owner is dead: a superseding session turn commit or an absent
-    /// process row. Ownerless host puts use age alone. Factories with no
-    /// attachment story default to empty; durable factories evaluate and prune
-    /// the predicate atomically. Exposed to the GC lever via the blanket
-    /// [`AttachmentRootSet`](crate::AttachmentRootSet) implementation.
-    async fn live_attachment_refs(
-        &self,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, crate::store::StoreError> {
-        let _ = intent_grace_cutoff_epoch_ms;
-        Ok(std::collections::BTreeSet::new())
-    }
-
-    /// Whether ANY session this factory owns currently holds a GC-live ref for
-    /// `attachment_id` under that same age plus owner-reachability rule. The
-    /// single-id counterpart to
-    /// [`Self::live_attachment_refs`], used by the attachment GC lever's
-    /// delete-time root re-check so it need not re-materialize the whole root set
-    /// per candidate blob. The default re-materializes the root set and tests
-    /// membership; the durable factories override with a targeted single-id query
-    /// (Postgres one indexed `SELECT`; SQLite iterates its per-session databases
-    /// only until the first hit).
-    ///
-    /// Unlike [`Self::live_attachment_refs`], this MUST NOT forget aged intents —
-    /// it is a read-only probe run after the reconciling snapshot was already
-    /// taken.
-    async fn has_live_attachment_ref(
-        &self,
-        attachment_id: &crate::AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, crate::store::StoreError> {
-        Ok(self
-            .live_attachment_refs(intent_grace_cutoff_epoch_ms)
-            .await?
-            .contains(attachment_id))
     }
 }
 
