@@ -2,8 +2,10 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value, json};
 
-use crate::scheduler::{BoundaryKind, DeliveredBoundary};
-use crate::store::CheckpointWriteEvent;
+#[cfg(test)]
+use crate::scheduler::BoundaryKind;
+use crate::scheduler::DeliveredBoundary;
+use crate::store::{CHECKPOINT_WRITE_EVENT_SCHEMA, CheckpointWriteEvent};
 use crate::trace::OracleVerdict;
 
 #[derive(Default)]
@@ -25,10 +27,10 @@ pub fn checkpoint_state_consistency(
     writes: &[CheckpointWriteEvent],
 ) -> OracleVerdict {
     match check_checkpoint_state(events, writes) {
-        Ok((sessions, commits)) => OracleVerdict::passed(
+        Ok((sessions, commits, runtime_facts, skipped_runtime_facts)) => OracleVerdict::passed(
             "sim.oracle.independent-checkpoint-state.v1",
             format!(
-                "independent checkpoint checker matched raw rows, read models, and runtime facts across {commits} commits in {sessions} sessions"
+                "independent checkpoint checker matched raw rows, read models, and {runtime_facts} runtime-facts observations across {commits} commits in {sessions} sessions; skipped_runtime_facts={skipped_runtime_facts}"
             ),
         ),
         Err(message) => {
@@ -40,13 +42,20 @@ pub fn checkpoint_state_consistency(
 fn check_checkpoint_state(
     events: &[DeliveredBoundary],
     writes: &[CheckpointWriteEvent],
-) -> Result<(usize, usize), String> {
+) -> Result<(usize, usize, usize, usize), String> {
     let mut sessions = BTreeMap::<String, CheckedSession>::new();
     for write in writes
         .iter()
         .filter(|write| write.cause_boundary_id.is_none())
     {
         let Some(state) = &write.state else {
+            if write.schema == CHECKPOINT_WRITE_EVENT_SCHEMA {
+                return Err(format!(
+                    "checkpoint checker `{}` commit {} uses schema v3 without required state",
+                    write.attributed_session(),
+                    write.commit_index
+                ));
+            }
             // Promoted v1/v2 replay fixtures predate checker state. Their normal
             // replay remains supported; newly generated v3 events are checked.
             continue;
@@ -79,22 +88,39 @@ fn check_checkpoint_state(
         compare_read_model(checked, accepted_read, &session_id)?;
     }
 
+    let mut runtime_facts_checked = 0usize;
+    let mut skipped_runtime_facts = 0usize;
     for (session_id, checked) in &sessions {
-        let Some(runtime) = events
-            .iter()
-            .rev()
-            .find(|event| event.kind == BoundaryKind::Provider && event.actor_alias == *session_id)
-        else {
-            continue;
+        let Some(runtime) = events.iter().rev().find(|event| {
+            event.actor_alias == *session_id
+                && event.observed.get("runtime_invariant_facts").is_some()
+        }) else {
+            skipped_runtime_facts += 1;
+            return Err(format!(
+                "checkpoint checker `{session_id}` checked {} commits but found no matching runtime-facts observation; skipped_runtime_facts={skipped_runtime_facts}",
+                checked.checked_commits
+            ));
         };
         compare_runtime_facts(checked, runtime, session_id)?;
+        runtime_facts_checked += 1;
     }
 
     let checked_commits = sessions
         .values()
         .map(|session| session.checked_commits)
         .sum();
-    Ok((sessions.len(), checked_commits))
+    if checked_commits == 0 {
+        return Err(
+            "independent checkpoint checker checked 0 commits; generated lane is vacuous"
+                .to_string(),
+        );
+    }
+    Ok((
+        sessions.len(),
+        checked_commits,
+        runtime_facts_checked,
+        skipped_runtime_facts,
+    ))
 }
 
 fn fold_graph_append(
@@ -237,6 +263,20 @@ fn compare_runtime_facts(
     runtime: &DeliveredBoundary,
     session_id: &str,
 ) -> Result<(), String> {
+    if runtime
+        .observed
+        .pointer("/runtime_invariant_facts/graph/leaf_node_id")
+        .and_then(Value::as_str)
+        != checked.leaf_node_id.as_deref()
+    {
+        return Err(format!(
+            "checkpoint checker `{session_id}` store leaf {:?} diverged from runtime-facts leaf {:?}",
+            checked.leaf_node_id,
+            runtime
+                .observed
+                .pointer("/runtime_invariant_facts/graph/leaf_node_id")
+        ));
+    }
     if runtime
         .observed
         .get("graph_node_count")
@@ -439,5 +479,73 @@ mod tests {
         let verdict = checkpoint_state_consistency(&trace.events, &trace.durable_writes);
         assert!(!verdict.is_passed(), "corrupted runtime usage must be red");
         assert!(verdict.message.contains("usage reconstruction diverged"));
+    }
+
+    #[test]
+    fn independent_checker_rejects_zero_commits() {
+        let verdict = checkpoint_state_consistency(&[], &[]);
+        assert!(!verdict.is_passed(), "zero checked commits must be red");
+        assert!(verdict.message.contains("checked 0 commits"));
+    }
+
+    #[tokio::test]
+    async fn standard_generated_run_checks_commits_and_requires_v3_state() {
+        let workload = generate_workload(5, "fast-random", 24).expect("workload");
+        let mut trace = run_generated_workload_for_fixture(workload, "bundle")
+            .await
+            .expect("trace");
+        let baseline = checkpoint_state_consistency(&trace.events, &trace.durable_writes);
+        assert!(baseline.is_passed(), "{}", baseline.message);
+        assert!(!baseline.message.contains("across 0 commits"));
+        assert!(baseline.message.contains("skipped_runtime_facts=0"));
+
+        let v3 = trace
+            .durable_writes
+            .iter_mut()
+            .find(|write| {
+                write.schema == CHECKPOINT_WRITE_EVENT_SCHEMA && write.cause_boundary_id.is_none()
+            })
+            .expect("generated v3 runtime write");
+        v3.state = None;
+        let verdict = checkpoint_state_consistency(&trace.events, &trace.durable_writes);
+        assert!(!verdict.is_passed(), "v3 state omission must be red");
+        assert!(verdict.message.contains("schema v3 without required state"));
+    }
+
+    #[tokio::test]
+    async fn checker_rejects_commit_session_without_runtime_facts_and_leaf_mismatch() {
+        let workload = generate_workload(5, "fast-random", 24).expect("workload");
+        let trace = run_generated_workload_for_fixture(workload, "bundle")
+            .await
+            .expect("trace");
+        let session = trace
+            .durable_writes
+            .iter()
+            .find(|write| write.cause_boundary_id.is_none() && write.state.is_some())
+            .expect("runtime write")
+            .attributed_session()
+            .to_string();
+
+        let mut missing = trace.events.clone();
+        missing
+            .retain(|event| event.kind != BoundaryKind::Provider || event.actor_alias != session);
+        let verdict = checkpoint_state_consistency(&missing, &trace.durable_writes);
+        assert!(!verdict.is_passed(), "missing runtime facts must be red");
+        assert!(verdict.message.contains("no matching runtime-facts"));
+
+        let mut wrong_leaf = trace.events.clone();
+        let runtime = wrong_leaf
+            .iter_mut()
+            .rev()
+            .find(|event| event.kind == BoundaryKind::Provider && event.actor_alias == session)
+            .expect("matching provider facts");
+        runtime.observed["runtime_invariant_facts"]["graph"]["leaf_node_id"] =
+            json!("mutated-leaf");
+        let verdict = checkpoint_state_consistency(&wrong_leaf, &trace.durable_writes);
+        assert!(
+            !verdict.is_passed(),
+            "runtime/store leaf mismatch must be red"
+        );
+        assert!(verdict.message.contains("runtime-facts leaf"));
     }
 }

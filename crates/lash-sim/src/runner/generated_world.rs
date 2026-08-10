@@ -973,7 +973,11 @@ impl GeneratedRuntimeWorld {
             ))
         })??;
         let completed_after = turn.events.tool_completed_count().await;
+        let activities = turn.events.snapshot().await;
         let assistant_message = result.assistant_message().unwrap_or_default().to_string();
+        let read_view = result.state.read_view();
+        let graph_invariant = runtime_graph_invariant_facts(&result.state.session_graph);
+        let usage_invariant = runtime_usage_invariant_facts(&result, &activities);
         let resumed_after_completion = completed_after > completed_before
             && matches!(
                 &result.outcome,
@@ -998,6 +1002,12 @@ impl GeneratedRuntimeWorld {
                 "completed_event_count_before_resolution": completed_before,
                 "completed_event_count_after_resolution": completed_after,
                 "final_assistant_message": assistant_message,
+            },
+            "graph_node_count": result.state.session_graph.nodes.len(),
+            "transcript_message_count": read_view.messages().len(),
+            "runtime_invariant_facts": {
+                "graph": graph_invariant,
+                "usage": usage_invariant,
             },
         }))
     }

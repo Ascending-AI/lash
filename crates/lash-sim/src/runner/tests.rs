@@ -1053,6 +1053,12 @@ fn generated_sim_search_mode_keeps_summary_lean_and_labels_shards() {
     assert_eq!(report.seed_source, "salted_exploration");
     // Shard 1/2 of 4 configured seeds owns seed indices 0 and 2.
     assert_eq!(report.counts.generated_seeds, 2);
+    assert_eq!(report.determinism_sample.attempted_seeds, 1);
+    assert_eq!(report.determinism_sample.reproduced_identically, 1);
+    assert_eq!(
+        report.counts.real_observation_oracles + report.counts.model_property_oracles,
+        report.counts.oracle_passes + report.counts.oracle_failures
+    );
     assert_eq!(report.events_path, None);
     assert_eq!(report.events_sha256, None);
     assert!(report.replay_reports.is_empty());
@@ -1083,6 +1089,142 @@ fn generated_sim_search_mode_keeps_summary_lean_and_labels_shards() {
         !tmp.path().join(GENERATED_SIM_EVENTS).exists(),
         "search mode must not retain the delivered-boundary log"
     );
+}
+
+#[tokio::test]
+async fn determinism_projection_canonicalizes_entropy_but_keeps_state_semantics() {
+    fn replace_string(value: &mut Value, from: &str, to: &str) {
+        match value {
+            Value::Object(object) => {
+                for value in object.values_mut() {
+                    replace_string(value, from, to);
+                }
+            }
+            Value::Array(values) => {
+                for value in values {
+                    replace_string(value, from, to);
+                }
+            }
+            Value::String(value) if value == from => *value = to.to_string(),
+            _ => {}
+        }
+    }
+
+    let workload = generate_workload(5, "fast-random", 24).expect("workload");
+    let first = run_generated_workload_for_fixture(workload, "bundle")
+        .await
+        .expect("trace");
+    let mut scheduler_change: SimulationTrace =
+        serde_json::from_value(serde_json::to_value(&first).expect("trace value"))
+            .expect("trace clone");
+    scheduler_change.events[0].scheduler.min_scheduled_at = 987_654;
+    require_identical_simulation_rerun(0, &first, &scheduler_change)
+        .expect_err("scheduler timing mutation must be red");
+    let mut entropy_only: SimulationTrace =
+        serde_json::from_value(serde_json::to_value(&first).expect("trace value"))
+            .expect("trace clone");
+    let state = entropy_only
+        .durable_writes
+        .iter_mut()
+        .filter_map(|write| write.state.as_mut())
+        .find(|state| {
+            state
+                .submitted_graph_append
+                .pointer("/nodes/0/node_id")
+                .and_then(Value::as_str)
+                .is_some()
+        })
+        .expect("checkpoint graph state");
+    let node_id = state
+        .submitted_graph_append
+        .pointer("/nodes/0/node_id")
+        .and_then(Value::as_str)
+        .expect("node id")
+        .to_string();
+    let replacement = format!("entropy-replacement-{node_id}");
+    for event in &mut entropy_only.events {
+        replace_string(&mut event.payload, &node_id, &replacement);
+        replace_string(&mut event.observed, &node_id, &replacement);
+    }
+    for write in &mut entropy_only.durable_writes {
+        if let Some(state) = &mut write.state {
+            for value in [
+                &mut state.submitted_graph_append,
+                &mut state.submitted_turn_state,
+                &mut state.submitted_usage_rows,
+            ] {
+                replace_string(value, &node_id, &replacement);
+            }
+            if let Some(value) = &mut state.accepted_raw_rows {
+                replace_string(value, &node_id, &replacement);
+            }
+            if let Some(value) = &mut state.accepted_read_model {
+                replace_string(value, &node_id, &replacement);
+            }
+        }
+    }
+    require_identical_simulation_rerun(0, &first, &entropy_only)
+        .expect("runtime identity entropy must canonicalize");
+
+    let mut semantic_change: SimulationTrace =
+        serde_json::from_value(serde_json::to_value(&first).expect("trace value"))
+            .expect("trace clone");
+    let turn_state = semantic_change
+        .durable_writes
+        .iter_mut()
+        .filter_map(|write| write.state.as_mut())
+        .map(|state| &mut state.submitted_turn_state)
+        .find(|turn_state| turn_state.get("token_usage").is_some())
+        .expect("submitted turn state");
+    turn_state["token_usage"]["input_tokens"] = json!(999_999);
+    let error = require_identical_simulation_rerun(0, &first, &semantic_change)
+        .expect_err("semantic checkpoint-state mutation must be red");
+    let message = error.to_string();
+    assert!(message.contains("durable_writes"));
+    assert!(message.contains("state"));
+
+    let mut graph_count_change: SimulationTrace =
+        serde_json::from_value(serde_json::to_value(&first).expect("trace value"))
+            .expect("trace clone");
+    let read_model = graph_count_change
+        .durable_writes
+        .iter_mut()
+        .filter_map(|write| write.state.as_mut())
+        .filter_map(|state| state.accepted_read_model.as_mut())
+        .next()
+        .expect("accepted read model");
+    read_model["graph_node_count"] = json!(4_242);
+    require_identical_simulation_rerun(0, &first, &graph_count_change)
+        .expect_err("graph-node-count mutation must be red");
+
+    let mut messages_change: SimulationTrace =
+        serde_json::from_value(serde_json::to_value(&first).expect("trace value"))
+            .expect("trace clone");
+    let read_model = messages_change
+        .durable_writes
+        .iter_mut()
+        .filter_map(|write| write.state.as_mut())
+        .filter_map(|state| state.accepted_read_model.as_mut())
+        .next()
+        .expect("accepted read model");
+    read_model["messages"] = json!([{"mutated": true}]);
+    require_identical_simulation_rerun(0, &first, &messages_change)
+        .expect_err("read-model messages mutation must be red");
+
+    let mut ledger_change: SimulationTrace =
+        serde_json::from_value(serde_json::to_value(&first).expect("trace value"))
+            .expect("trace clone");
+    let usage = ledger_change
+        .durable_writes
+        .iter_mut()
+        .filter_map(|write| write.state.as_mut())
+        .filter_map(|state| state.accepted_raw_rows.as_mut())
+        .filter_map(|raw| raw.pointer_mut("/token_ledger/0/usage/output_tokens"))
+        .next()
+        .expect("accepted token-ledger usage");
+    *usage = json!(31_337);
+    require_identical_simulation_rerun(0, &first, &ledger_change)
+        .expect_err("accepted token-ledger usage mutation must be red");
 }
 
 #[test]

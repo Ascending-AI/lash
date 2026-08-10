@@ -80,7 +80,9 @@ pub fn replay_trace(
         let observed = if matches!(
             event.kind,
             BoundaryKind::Worker | BoundaryKind::ProcessLifecycle | BoundaryKind::BackendFailure
-        ) {
+        ) || event.payload.get("suspend_resume").and_then(Value::as_bool)
+            == Some(true)
+        {
             store.apply_observed_boundary(&event, &expected.observed);
             expected.observed.clone()
         } else {

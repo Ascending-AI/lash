@@ -128,7 +128,7 @@ pub struct GeneratedSimProfileReport {
 pub struct GeneratedDeterminismSample {
     pub policy: &'static str,
     pub selected_seed_indices: Vec<usize>,
-    pub checked_seeds: usize,
+    pub attempted_seeds: usize,
     pub reproduced_identically: usize,
 }
 

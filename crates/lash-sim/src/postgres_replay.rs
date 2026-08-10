@@ -175,12 +175,14 @@ pub async fn replay_trace_to_postgres(
     for delivered in &trace.events {
         let event = delivered.as_event();
         let observed = if event.kind == BoundaryKind::BackendFailure {
-            // BackendFailure evidence comes from the dedicated real SQLite
-            // injector during generation; Postgres replay carries that recorded
-            // observation rather than fabricating a model failure.
+            // BackendFailure evidence is produced by the dedicated real SQLite
+            // injector during generation; a Postgres replay carries that recorded
+            // observation rather than fabricating a different model failure.
             delivered.observed.clone()
         } else if is_suspend_replay_boundary(&event) {
-            store.project_boundary_observation(&event)
+            // The generated suspend path already captured real committed runtime
+            // facts; backend replay preserves that observation verbatim.
+            delivered.observed.clone()
         } else if is_runtime_session_boundary(event.kind) {
             world.deliver_boundary(&event, &delivered.observed).await?
         } else if is_runtime_backed_boundary(event.kind) {
