@@ -272,8 +272,8 @@ jobs:
       - name: Check Restate handler panic boundary
         run: python3 scripts/check-restate-handler-panics.py
 
-      - name: Surface durable transcript changes
-        run: python3 scripts/check-transcript-diff.py
+      - name: Enforce durable transcript justification
+        run: python3 scripts/check-transcript-diff.py --enforce
 
       - name: Check durable-read fixture schema declaration
         run: python3 scripts/check-durable-read-fixture-version.py

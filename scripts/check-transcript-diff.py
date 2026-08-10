@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Surface durable-semantics changes in inline insta snapshots without blocking CI."""
+"""Check durable-semantics changes in inline insta snapshots."""
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import re
@@ -48,6 +49,11 @@ class Finding(NamedTuple):
     path: str
     old: ChangedLine | None
     new: ChangedLine | None
+
+
+class Options(NamedTuple):
+    enforce: bool
+    revision_range: str
 
 
 def snapshot_body(line: str, delimiter: str | None) -> tuple[str | None, str | None]:
@@ -177,19 +183,35 @@ def append_summary(summary_path: str, findings: list[Finding]) -> None:
         summary.write("```\n")
 
 
-def requested_range(argv: list[str]) -> str:
-    if not argv:
-        return DEFAULT_RANGE
-    if len(argv) == 1:
-        return argv[0]
-    if len(argv) == 2 and argv[0] == "--range":
-        return argv[1]
-    raise ValueError("usage: check-transcript-diff.py [--range] [REV_RANGE]")
+def requested_options(argv: list[str]) -> Options:
+    enforce = True
+    args = list(argv)
+    if args and args[0] in {"--enforce", "--advisory"}:
+        enforce = args.pop(0) == "--enforce"
+    if not args:
+        return Options(enforce, DEFAULT_RANGE)
+    if len(args) == 1:
+        return Options(enforce, args[0])
+    if len(args) == 2 and args[0] == "--range":
+        return Options(enforce, args[1])
+    raise ValueError(
+        "usage: check-transcript-diff.py [--enforce|--advisory] "
+        "[--range] [REV_RANGE]"
+    )
+
+
+def has_transcript_justification() -> bool:
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if not event_path:
+        return False
+    event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+    body = event.get("pull_request", {}).get("body") or ""
+    return bool(re.search(r"(?m)^\s*Transcript:\s+\S", body))
 
 
 def main(argv: list[str]) -> int:
     try:
-        revision_range = requested_range(argv)
+        options = requested_options(argv)
         result = subprocess.run(
             [
                 "git",
@@ -197,7 +219,7 @@ def main(argv: list[str]) -> int:
                 "--unified=100000",
                 "--no-color",
                 "--no-ext-diff",
-                revision_range,
+                options.revision_range,
                 "--",
                 *RUST_TEST_PATHS,
             ],
@@ -209,11 +231,14 @@ def main(argv: list[str]) -> int:
         print(render_findings(findings))
         if summary_path := os.environ.get("GITHUB_STEP_SUMMARY"):
             append_summary(summary_path, findings)
+        if findings and options.enforce and not has_transcript_justification():
+            return 1
     except Exception as error:
         print(
-            f"warning: durable transcript classifier could not run: {error}",
+            f"error: durable transcript classifier could not run: {error}",
             file=sys.stderr,
         )
+        return 2
     return 0
 
 
