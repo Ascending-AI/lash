@@ -108,10 +108,7 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
     state.set_tool_state_snapshot(Some(tool_state));
     state.set_plugin_snapshot(Some(plugin_snapshot));
     store
-        .admit_and_bind_session(&lash_core::SessionBinding::root(
-            state.session_id.clone(),
-            &state.policy,
-        ))
+        .admit_and_bind_session(&lash_core::SessionBinding::root(state.session_id.clone()))
         .await
         .expect("bind session to store");
     state.ensure_agent_frame_initialized();
@@ -191,10 +188,7 @@ async fn auto_gc_runs_after_commit_without_reentrant_locking() {
         ))
     };
     store
-        .admit_and_bind_session(&lash_core::SessionBinding::root(
-            state.session_id.clone(),
-            &state.policy,
-        ))
+        .admit_and_bind_session(&lash_core::SessionBinding::root(state.session_id.clone()))
         .await
         .expect("bind session to store");
     let owner = lease_owner("auto-gc-test");
@@ -294,17 +288,13 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
         .expect("load meta")
         .expect("meta");
     assert_eq!(meta.session_id, "chat/alpha");
-    assert_eq!(meta.model, "first-model");
+    assert_eq!(meta.parent_session_id(), Some("parent"));
 
     store
         .save_session_meta(lash_core::SessionMeta {
             session_id: "chat/alpha".to_string(),
-            session_name: "Renamed".to_string(),
-            created_at: "original".to_string(),
-            model: "preserved-model".to_string(),
-            cwd: Some("/tmp/original".to_string()),
             relation: lash_core::SessionRelation::Child {
-                parent_session_id: "parent".to_string(),
+                parent_session_id: "preserved-parent".to_string(),
                 caused_by: None,
             },
         })
@@ -313,6 +303,7 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
 
     let reopened = factory
         .create_store(&SessionStoreCreateRequest {
+            relation: lash_core::SessionRelation::Root,
             policy: SessionPolicy {
                 model: model_spec("second-model"),
                 ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
@@ -326,9 +317,7 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
         .await
         .expect("load reopened meta")
         .expect("reopened meta");
-    assert_eq!(reopened_meta.session_name, "Renamed");
-    assert_eq!(reopened_meta.model, "preserved-model");
-    assert_eq!(reopened_meta.created_at, "original");
+    assert_eq!(reopened_meta.parent_session_id(), Some("preserved-parent"));
 }
 
 #[tokio::test]
@@ -747,76 +736,6 @@ async fn sqlite_snapshot_read_rejects_undecodable_graph_nodes() {
             ..
         }
     ));
-}
-
-#[tokio::test]
-async fn sqlite_picker_reads_inherited_history_from_fork_head_columns() {
-    let root = unique_temp_dir("fork-picker");
-    let factory = SqliteSessionStoreFactory::new(&root);
-    let policy = SessionPolicy::new(lash_core::TurnBudget::Unbounded);
-    let source = factory
-        .create_store(&SessionStoreCreateRequest {
-            session_id: "picker-source".to_string(),
-            relation: lash_core::SessionRelation::Root,
-            policy: policy.clone(),
-        })
-        .await
-        .expect("create source store");
-    let mut source_state = factory_state(&source, "picker-source", 0).await;
-    source_state.ensure_agent_frame_initialized();
-    source_state.append_active_conversation_messages(&[
-        user_message("first", "first inherited message"),
-        user_message("second", "second inherited message"),
-    ]);
-    source
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&source_state, &[]))
-        .await
-        .expect("commit source graph");
-    let source_read = source
-        .load_session()
-        .await
-        .expect("load source")
-        .expect("source exists");
-    let source_leaf = source_read.graph.leaf_node_id.clone().expect("source leaf");
-    factory
-        .fork_at(&lash_core::ForkSessionRequest {
-            session_id: "picker-fork".to_string(),
-            node_id: source_leaf,
-            relation: lash_core::SessionRelation::Root,
-            policy,
-        })
-        .await
-        .expect("fork source");
-    let branch = factory
-        .open_existing_store(&SessionStoreCreateRequest {
-            session_id: "picker-fork".to_string(),
-            relation: lash_core::SessionRelation::Root,
-            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-        })
-        .await
-        .expect("open fork")
-        .expect("fork exists");
-    let branch_state = lash_core::store::load_persisted_session_state(branch.as_ref())
-        .await
-        .expect("load fork state")
-        .expect("fork state exists");
-    assert_eq!(branch_state.session_graph.nodes.len(), 3);
-
-    let picker_store = Store::open(&factory.catalog_path())
-        .await
-        .expect("open picker store");
-    picker_store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&branch_state, &[]))
-        .await
-        .expect("bind picker store to fork");
-    let picker = picker_store
-        .load_picker_info()
-        .await
-        .expect("read picker info")
-        .expect("picker info");
-
-    assert_eq!(picker.first_user_message, "first inherited message");
-    assert_eq!(picker.user_message_count, 2);
 }
 
 #[tokio::test]

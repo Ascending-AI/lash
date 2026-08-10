@@ -327,10 +327,9 @@ pub struct ErrorEnvelope {
 pub enum SessionStreamEvent {
     #[serde(rename = "text_delta")]
     TextDelta { content: String },
-    /// Streaming update for the model's reasoning summary ("thinking").
-    /// The UI renders these incrementally in a muted/italic style;
-    /// reasoning content is never fed back to the model on subsequent
-    /// turns.
+    /// Streaming update for the model's reasoning summary ("thinking"), kept
+    /// separate from assistant response text and never fed back to the model
+    /// on subsequent turns.
     #[serde(rename = "reasoning_delta")]
     ReasoningDelta { content: String },
     #[serde(rename = "tool_call")]

@@ -2,9 +2,9 @@
 //!
 //! The shared
 //! `*_from_conn` helpers are **synchronous** and take a `&rusqlite::Connection`
-//! so `lifecycle::load_picker_info` (and any future caller already on the
-//! connection thread) can reuse them inside a `conn.call` closure — this is the
-//! load-bearing change from the prior store, which had them `async`.
+//! so callers already on the connection thread can reuse them inside a
+//! `conn.call` closure — this is the load-bearing change from the prior store,
+//! which had them `async`.
 //!
 //! Read paths go through `self.conn.call(...)`; the graph-mutating and GC paths
 //! go through `self.conn.write(...)` so `BEGIN IMMEDIATE` takes the write lock
@@ -326,7 +326,7 @@ mod tests {
             .session_graph
             .append_plugin("healthy-whole-graph", serde_json::json!({"second": true}));
         store
-            .admit_and_bind_session(&lash_core::SessionBinding::root(session_id, &state.policy))
+            .admit_and_bind_session(&lash_core::SessionBinding::root(session_id))
             .await
             .expect("bind healthy whole-graph session");
         store

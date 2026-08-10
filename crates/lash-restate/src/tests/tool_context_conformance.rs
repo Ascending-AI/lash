@@ -268,7 +268,6 @@ async fn every_registered_first_party_tool_succeeds_and_replays_in_every_context
             .runtime_store
             .admit_and_bind_session(&lash_core::SessionBinding::root(
                 inline_cell.session_id.clone(),
-                &inline_cell.policy,
             ))
             .await
             .expect("bind inline session");

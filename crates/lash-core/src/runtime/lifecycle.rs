@@ -29,7 +29,6 @@ fn initial_park_operation(
 }
 
 async fn bind_state_to_store(
-    policy: &SessionPolicy,
     store: &(dyn crate::store::RuntimePersistence + '_),
     state: &mut RuntimeSessionState,
     relation: crate::SessionRelation,
@@ -37,10 +36,6 @@ async fn bind_state_to_store(
     let binding = crate::SessionBinding {
         session_id: state.session_id.clone(),
         relation,
-        model_id: policy.model.id.clone(),
-        cwd: std::env::current_dir()
-            .ok()
-            .and_then(|path| path.to_str().map(str::to_string)),
     };
     store
         .admit_and_bind_session(&binding)
@@ -84,13 +79,12 @@ async fn bind_state_to_store(
 }
 
 async fn bind_state_to_store_with_trace(
-    policy: &SessionPolicy,
     host: &crate::RuntimeHostConfig,
     store: &(dyn crate::store::RuntimePersistence + '_),
     state: &mut RuntimeSessionState,
     relation: crate::SessionRelation,
 ) -> Result<(), SessionError> {
-    let result = bind_state_to_store(policy, store, state, relation).await;
+    let result = bind_state_to_store(store, state, relation).await;
     if let Err(SessionError::Store { source, .. }) = &result {
         crate::trace::emit_store_error(
             &host.tracing.trace_sink,
@@ -307,7 +301,6 @@ impl LashRuntime {
         mut state: RuntimeSessionState,
     ) -> Result<Self, SessionError> {
         bind_state_to_store_with_trace(
-            &policy,
             &host.core,
             services.store().as_ref(),
             &mut state,
@@ -325,7 +318,6 @@ impl LashRuntime {
         mut state: RuntimeSessionState,
     ) -> Result<Self, SessionError> {
         bind_state_to_store_with_trace(
-            &policy,
             &host.embedded.core,
             services.store().as_ref(),
             &mut state,
@@ -357,14 +349,9 @@ impl LashRuntime {
             attachment_manifest_store,
         } = persistence;
         if let Some(store) = store.as_deref()
-            && let Err(error) = bind_state_to_store_with_trace(
-                &policy,
-                &embedded_host.core,
-                store,
-                &mut state,
-                relation,
-            )
-            .await
+            && let Err(error) =
+                bind_state_to_store_with_trace(&embedded_host.core, store, &mut state, relation)
+                    .await
         {
             return Err(error);
         }
@@ -620,14 +607,9 @@ mod tests {
             ))
         };
 
-        let error = bind_state_to_store(
-            &policy,
-            store.as_ref(),
-            &mut state,
-            crate::SessionRelation::Root,
-        )
-        .await
-        .expect_err("runtime binding must refuse a retired session");
+        let error = bind_state_to_store(store.as_ref(), &mut state, crate::SessionRelation::Root)
+            .await
+            .expect_err("runtime binding must refuse a retired session");
 
         assert!(matches!(
             error,

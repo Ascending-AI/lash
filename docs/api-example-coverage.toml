@@ -14575,15 +14575,6 @@ disposition = "unused-justify"
 reason = "Internal integrator seam: `lash_core::SessionBinding` is consumed inside the workspace at crates/lash-core/src/runtime/in_memory_store.rs:1440. The `lash` facade is built on lash-core, so that caller cannot migrate to the `lash` facade -- the core path is the seam itself, not a pending migration. Host-facing projection: `lash::persistence::SessionBinding`."
 
 [[api]]
-symbol = "lash::persistence::SessionBinding::cwd"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::SessionBinding::cwd"]
-area = "stores"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionBinding::cwd. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
 symbol = "lash::persistence::SessionBinding::from_create_request"
 kind = "function"
 availability = "default+all-features"
@@ -14593,22 +14584,13 @@ disposition = "unused-justify"
 reason = "Public binding fields already permit construction; bundled and alternative persistence backends use the canonical operation."
 
 [[api]]
-symbol = "lash::persistence::SessionBinding::model_id"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::SessionBinding::model_id"]
-area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
-
-[[api]]
 symbol = "lash::persistence::SessionBinding::relation"
 kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::SessionBinding::relation"]
 area = "stores"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionBinding::relation. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Retained integrator contract: alternative persistence hosts construct the exact durable session relation consumed by admission and lineage reconciliation."
 
 [[api]]
 symbol = "lash::persistence::SessionBinding::root"
@@ -14625,8 +14607,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::SessionBinding::session_id"]
 area = "stores"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionBinding::session_id. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Retained integrator contract: alternative persistence hosts construct the durable session identity checked by admission and binding-mismatch fences."
 
 [[api]]
 symbol = "lash::persistence::SessionBinding::validate"
@@ -15226,15 +15208,6 @@ usage = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:96#le
 assertion = "examples/agent-workbench/src/main_sections/tests/derived_notes.rs:98#note.parent_node_id.as_deref(),"
 
 [[api]]
-symbol = "lash::persistence::SessionGraph::first_user_message"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::SessionGraph::first_user_message"]
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete consumer: bundled Postgres/SQLite stores and runtime projection uses lash_core::SessionGraph::first_user_message; retain the canonical host operation."
-
-[[api]]
 symbol = "lash::persistence::SessionGraph::from_active_read_state"
 kind = "function"
 availability = "default+all-features"
@@ -15296,15 +15269,6 @@ aliases = ["lash_core::SessionGraph::trim_to_active_path"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete consumer: bundled Postgres/SQLite stores and runtime projection uses lash_core::SessionGraph::trim_to_active_path; retain the canonical host operation."
-
-[[api]]
-symbol = "lash::persistence::SessionGraph::user_message_count"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::SessionGraph::user_message_count"]
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete consumer: bundled Postgres/SQLite stores and runtime projection uses lash_core::SessionGraph::user_message_count; retain the canonical host operation."
 
 [[api]]
 symbol = "lash::persistence::SessionHead"
@@ -15653,33 +15617,6 @@ disposition = "unused-justify"
 reason = "Internal integrator seam: `lash_core::SessionMeta` is consumed inside the workspace at crates/lash-core/src/runtime/in_memory_store.rs:110. The `lash` facade is built on lash-core, so that caller cannot migrate to the `lash` facade -- the core path is the seam itself, not a pending migration. Host-facing projection: `lash::persistence::SessionMeta`."
 
 [[api]]
-symbol = "lash::persistence::SessionMeta::created_at"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::SessionMeta::created_at"]
-area = "stores"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionMeta::created_at. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash::persistence::SessionMeta::cwd"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::SessionMeta::cwd"]
-area = "stores"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionMeta::cwd. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash::persistence::SessionMeta::model"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::SessionMeta::model"]
-area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
-
-[[api]]
 symbol = "lash::persistence::SessionMeta::parent_session_id"
 kind = "function"
 availability = "default+all-features"
@@ -15694,8 +15631,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::SessionMeta::relation"]
 area = "stores"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionMeta::relation. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Retained integrator contract: persisted child and fork lineage drives parent lookup and observer-intent reconciliation."
 
 [[api]]
 symbol = "lash::persistence::SessionMeta::session_id"
@@ -15703,17 +15640,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::SessionMeta::session_id"]
 area = "stores"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionMeta::session_id. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
-
-[[api]]
-symbol = "lash::persistence::SessionMeta::session_name"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::SessionMeta::session_name"]
-area = "stores"
-disposition = "unused-remove"
-reason = "No example or concrete unrepresented host class establishes a need for lash_core::SessionMeta::session_name. Breaking: remove this export; downstream callers must own an equivalent local type or stop depending on the unexercised contract."
+disposition = "unused-justify"
+reason = "Retained integrator contract: the persisted identity is read back and compared by the session binding-mismatch fence."
 
 [[api]]
 symbol = "lash::persistence::SessionNodeRecord"
@@ -68799,14 +68727,6 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::RuntimeExecutionContext::call_tool_batch` hands `ToolInvocation` to hosts (runtime embedders). Consumer class: the RLM protocol crate and facade agent-scenario tests -- this field is exercised in-repo at crates/lash-protocol-rlm/src/executor/host_bridge.rs:1165, crates/lash-protocol-rlm/src/executor/host_bridge.rs:1169, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash_core::session::tool_execution::ToolInvocation::label"
-kind = "function"
-availability = "default+all-features"
-area = "sessions-turns"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::RuntimeExecutionContext::call_tool_batch` hands `ToolInvocation` to hosts (runtime embedders). Consumer class: facade agent-scenario tests and the Standard protocol crate -- this function is exercised in-repo at crates/lash/src/tests/turn_streaming.rs:493, crates/lash-protocol-standard/src/lib.rs:240, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::session::tool_execution::ToolInvocation::new"

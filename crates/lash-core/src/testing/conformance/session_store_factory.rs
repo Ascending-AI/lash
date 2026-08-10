@@ -731,27 +731,16 @@ pub(crate) fn session_store_request(
     }
 }
 
-fn assert_meta_matches_request(
-    meta: &SessionMeta,
-    request: &crate::SessionStoreCreateRequest,
-    expected_model: &str,
-) {
+fn assert_meta_matches_request(meta: &SessionMeta, request: &crate::SessionStoreCreateRequest) {
     assert_eq!(meta.session_id, request.session_id);
-    assert_eq!(meta.session_name, request.session_id);
-    assert_eq!(meta.model, expected_model);
     assert_eq!(meta.relation, request.relation);
-    assert!(
-        !meta.created_at.is_empty(),
-        "created session metadata must carry a timestamp"
-    );
 }
 
 async fn session_admission_contract(
     factory: Arc<dyn crate::SessionStoreFactory>,
     unbound: Arc<dyn crate::RuntimePersistence>,
 ) {
-    let empty =
-        crate::SessionBinding::root("", &crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    let empty = crate::SessionBinding::root("");
     assert!(matches!(
         unbound
             .admit_and_bind_session(&empty)
@@ -768,8 +757,6 @@ async fn session_admission_contract(
     let binding = crate::SessionBinding {
         session_id: request.session_id.clone(),
         relation,
-        model_id: request.policy.model.id.clone(),
-        cwd: Some("/tmp/admission-cwd".to_string()),
     };
     assert_eq!(
         unbound
@@ -785,13 +772,9 @@ async fn session_admission_contract(
         .expect("admission must durably materialize metadata");
     assert_eq!(created_meta.session_id, binding.session_id);
     assert_eq!(created_meta.relation, binding.relation);
-    assert_eq!(created_meta.model, binding.model_id);
-    assert_eq!(created_meta.cwd, binding.cwd);
 
     let changed_binding = crate::SessionBinding {
-        model_id: "must-not-replace-model".to_string(),
         relation: crate::SessionRelation::Root,
-        cwd: None,
         ..binding.clone()
     };
     assert_eq!(
@@ -1027,7 +1010,7 @@ async fn session_store_factory_create_seeds_and_reopens_meta(
         .await
         .expect("load created session meta")
         .expect("created session meta");
-    assert_meta_matches_request(&created_meta, &request, "model-a");
+    assert_meta_matches_request(&created_meta, &request);
 
     let reopened = factory
         .open_existing_store(&request)
@@ -1039,7 +1022,7 @@ async fn session_store_factory_create_seeds_and_reopens_meta(
         .await
         .expect("load reopened session meta")
         .expect("reopened session meta");
-    assert_meta_matches_request(&reopened_meta, &request, "model-a");
+    assert_meta_matches_request(&reopened_meta, &request);
 }
 
 async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::SessionStoreFactory>) {
@@ -1055,10 +1038,6 @@ async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::Sess
     created
         .save_session_meta(SessionMeta {
             session_id: "stable-session".to_string(),
-            session_name: "custom-name".to_string(),
-            created_at: "custom-created-at".to_string(),
-            model: "custom-model".to_string(),
-            cwd: Some("/tmp/conformance".to_string()),
             relation: crate::SessionRelation::Child {
                 parent_session_id: "custom-parent".to_string(),
                 caused_by: None,
@@ -1081,11 +1060,6 @@ async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::Sess
         .await
         .expect("load recreated meta")
         .expect("recreated meta");
-    assert_eq!(
-        meta.session_name, "custom-name",
-        "create_store must not overwrite existing session metadata"
-    );
-    assert_eq!(meta.model, "custom-model");
     assert_eq!(
         meta.parent_session_id(),
         Some("custom-parent"),

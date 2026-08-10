@@ -75,7 +75,6 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
     ) -> Result<Arc<dyn RuntimePersistence>, crate::StoreError> {
         let binding = crate::SessionBinding::from_create_request(request);
         binding.validate()?;
-        let created_at = self.clock.timestamp_rfc3339();
         let _transaction = self.write_transaction.lock_recover();
         if self
             .deleted_session_ids
@@ -103,10 +102,6 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 ));
                 *store.session_meta.lock_recover() = Some(crate::SessionMeta {
                     session_id: request.session_id.clone(),
-                    session_name: request.session_id.clone(),
-                    created_at: created_at.clone(),
-                    model: binding.model_id.clone(),
-                    cwd: binding.cwd.clone(),
                     relation: binding.relation.clone(),
                 });
                 store
@@ -316,7 +311,6 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         &self,
         request: &crate::ForkSessionRequest,
     ) -> Result<crate::ForkSessionResult, crate::StoreError> {
-        let created_at = self.clock.timestamp_rfc3339();
         let _transaction = self.write_transaction.lock_recover();
         if self.stores.lock_recover().contains_key(&request.session_id) {
             return Err(crate::StoreError::ForkSessionAlreadyExists {
@@ -455,10 +449,6 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         ));
         *store.session_meta.lock_recover() = Some(crate::SessionMeta {
             session_id: request.session_id.clone(),
-            session_name: request.session_id.clone(),
-            created_at,
-            model: request.policy.model.id.clone(),
-            cwd: None,
             relation: request.relation.clone(),
         });
         self.stores

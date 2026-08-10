@@ -109,7 +109,7 @@ impl LashRuntime {
         Ok(())
     }
 
-    /// Export current session state for inspection/UI purposes.
+    /// Export a snapshot of the current in-memory session state.
     /// This keeps persistence-heavy snapshots untouched; callers that need a
     /// fully persisted view should use `export_persisted_state`.
     pub fn export_state(&self) -> crate::SessionSnapshot {

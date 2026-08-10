@@ -527,10 +527,6 @@ impl SessionCommitStore for PostgresSessionStore {
         planner.validate_session_binding(existing.as_ref().map(|meta| meta.session_id.as_str()))?;
         let direct_meta = SessionMeta {
             session_id: commit.session_id.clone(),
-            session_name: commit.session_id.clone(),
-            created_at: self.clock.timestamp_rfc3339(),
-            model: commit.config.model.id.clone(),
-            cwd: None,
             relation: lash_core::SessionRelation::Root,
         };
         sqlx::query(
@@ -980,10 +976,6 @@ impl SessionCommitStore for PostgresSessionStore {
         self.bind_session_id(session_id)?;
         let meta = SessionMeta {
             session_id: session_id.to_string(),
-            session_name: session_id.to_string(),
-            created_at: self.clock.timestamp_rfc3339(),
-            model: binding.model_id.clone(),
-            cwd: binding.cwd.clone(),
             relation: binding.relation.clone(),
         };
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;

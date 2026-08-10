@@ -567,7 +567,7 @@ async fn sqlite_load_session_graph_accepts_healthy_non_empty_session() {
         .session_graph
         .append_plugin("healthy-whole-graph", serde_json::json!({"second": true}));
     store
-        .admit_and_bind_session(&lash_core::SessionBinding::root(session_id, &state.policy))
+        .admit_and_bind_session(&lash_core::SessionBinding::root(session_id))
         .await
         .expect("bind healthy SQLite graph session");
     store

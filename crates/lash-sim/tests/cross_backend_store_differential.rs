@@ -877,10 +877,6 @@ fn usage_delta_observation(entry: TokenLedgerEntry) -> UsageDeltaObservation {
 
 fn session_meta_observation(meta: SessionMeta) -> SessionMetaObservation {
     SessionMetaObservation {
-        session_name: meta.session_name,
-        created_at: meta.created_at,
-        model: meta.model,
-        cwd: meta.cwd,
         relation: meta.relation,
     }
 }
@@ -891,16 +887,12 @@ fn read_sqlite_session_meta_observation(
 ) -> Option<SessionMetaObservation> {
     connection
         .query_row(
-            "SELECT session_name, created_at, model, cwd, relation_json
+            "SELECT relation_json
              FROM session_meta WHERE session_id = ?1",
             [session_id],
             |row| {
-                let relation_json: Option<String> = row.get(4)?;
+                let relation_json: Option<String> = row.get(0)?;
                 Ok(SessionMetaObservation {
-                    session_name: row.get(0)?,
-                    created_at: row.get(1)?,
-                    model: row.get(2)?,
-                    cwd: row.get(3)?,
                     relation: relation_json
                         .map(|json| serde_json::from_str(&json).expect("decode SQLite relation"))
                         .unwrap_or_default(),
@@ -2153,11 +2145,10 @@ async fn runners_for_case(
     };
     let expected_meta = SessionMeta {
         session_id: session_id.clone(),
-        session_name: format!("differential:{}", case.as_str()),
-        created_at: clock.timestamp_rfc3339(),
-        model: create_request.policy.model.id.clone(),
-        cwd: None,
-        relation: SessionRelation::Root,
+        relation: SessionRelation::Child {
+            parent_session_id: format!("fig-778-{run_nonce}-parent"),
+            caused_by: None,
+        },
     };
 
     let memory_factory = Arc::new(InMemorySessionStoreFactory::with_clock(Arc::clone(&clock)));
@@ -2187,15 +2178,10 @@ async fn runners_for_case(
         connection
             .execute(
                 "UPDATE session_meta
-                 SET session_name = ?2, created_at = ?3,
-                     model = ?4, cwd = ?5, relation_json = ?6
+                 SET relation_json = ?2
                 WHERE session_id = ?1",
                 rusqlite::params![
                     &expected_meta.session_id,
-                    &expected_meta.session_name,
-                    &expected_meta.created_at,
-                    &expected_meta.model,
-                    &expected_meta.cwd,
                     serde_json::to_string(&expected_meta.relation)
                         .expect("encode SQLite session relation"),
                 ],

@@ -428,28 +428,16 @@ pub(super) async fn fork_at_in_catalog(
             }
             let session_meta = lash_core::SessionMeta {
                 session_id: request.session_id.clone(),
-                session_name: request.session_id.clone(),
-                created_at: lash_core::Clock::timestamp_rfc3339(
-                    &lash_core::facade_support::SystemClock,
-                ),
-                model: request.policy.model.id.clone(),
-                cwd: std::env::current_dir()
-                    .ok()
-                    .and_then(|path| path.to_str().map(str::to_string)),
                 relation: request.relation,
             };
             tx.execute(
                 "INSERT INTO session_meta
-                 (session_id, session_name, created_at, model, cwd, relation_json)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    session_meta.session_id,
-                    session_meta.session_name,
-                    session_meta.created_at,
-                    session_meta.model,
-                    session_meta.cwd,
-                    encode_json(&session_meta.relation)?
-                ],
+                 (session_id, relation_json)
+                 VALUES (?1, ?2)",
+                 params![
+                     session_meta.session_id,
+                     encode_json(&session_meta.relation)?
+                 ],
             )
             .map_err(sqlite_error)?;
             Ok(lash_core::ForkSessionResult {

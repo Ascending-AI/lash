@@ -101,7 +101,6 @@ fn standard_protocol_scenario_coverage_metadata_is_unique_and_complete() {
             "unexpected Standard Protocol Scenario test name {}",
             coverage.test_name
         );
-        assert!(!coverage.display_name.trim().is_empty());
         assert!(!coverage.owned_invariant.trim().is_empty());
         assert!(
             names.insert(coverage.test_name),

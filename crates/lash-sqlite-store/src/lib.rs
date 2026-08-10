@@ -77,7 +77,7 @@ use lash_core::{
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionMeta,
     SessionStoreCreateRequest, SessionStoreFactory, SlotPolicy, StoreError, StoreMaintenance,
     TurnInputStore, VacuumReport, facade_support::MergeKey, facade_support::ProcessStartPlan,
-    facade_support::SessionPickerInfo, facade_support::registry_transitions,
+    facade_support::registry_transitions,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
@@ -615,12 +615,6 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         );
         let meta = SessionMeta {
             session_id: request.session_id.clone(),
-            session_name: request.session_id.clone(),
-            created_at: self.clock.timestamp_rfc3339(),
-            model: request.policy.model.id.clone(),
-            cwd: std::env::current_dir()
-                .ok()
-                .and_then(|path| path.to_str().map(str::to_string)),
             relation: request.relation.clone(),
         };
         let relation_json = encode_json(&meta.relation)?;
@@ -644,16 +638,9 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                 }
                 tx.execute(
                     "INSERT OR IGNORE INTO session_meta
-                     (session_id, session_name, created_at, model, cwd, relation_json)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![
-                        meta.session_id,
-                        meta.session_name,
-                        meta.created_at,
-                        meta.model,
-                        meta.cwd,
-                        relation_json
-                    ],
+                     (session_id, relation_json)
+                     VALUES (?1, ?2)",
+                    params![meta.session_id, relation_json],
                 )?;
                 Ok(TxOutcome::Commit(Ok(())))
             })
@@ -1165,23 +1152,14 @@ fn load_session_meta_from_conn(
 ) -> Result<Option<SessionMeta>, StoreError> {
     let row = conn
         .query_row(
-            "SELECT session_id, session_name, created_at, model, cwd, relation_json
+            "SELECT session_id, relation_json
              FROM session_meta WHERE session_id = ?1",
             params![session_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                ))
-            },
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
         )
         .optional()
         .map_err(sqlite_error)?;
-    let Some((session_id, session_name, created_at, model, cwd, relation_json)) = row else {
+    let Some((session_id, relation_json)) = row else {
         return Ok(None);
     };
     let relation = relation_json
@@ -1193,10 +1171,6 @@ fn load_session_meta_from_conn(
         .unwrap_or_default();
     Ok(Some(SessionMeta {
         session_id,
-        session_name,
-        created_at,
-        model,
-        cwd,
         relation,
     }))
 }
@@ -1251,7 +1225,7 @@ mod tests {
             ))
         };
         store
-            .admit_and_bind_session(&lash_core::SessionBinding::root(session_id, &state.policy))
+            .admit_and_bind_session(&lash_core::SessionBinding::root(session_id))
             .await
             .expect("bind SQLite test session");
         state

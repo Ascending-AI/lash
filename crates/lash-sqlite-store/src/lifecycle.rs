@@ -180,84 +180,6 @@ impl Store {
         })
     }
 
-    pub async fn load_picker_info(&self) -> Result<Option<SessionPickerInfo>, StoreError> {
-        let Some(selected_session_id) = self.session_id.get().cloned() else {
-            return Ok(None);
-        };
-        self.conn
-            .call(move |conn| {
-                let meta = conn
-                    .query_row(
-                        "SELECT session_id, cwd, relation_json
-                         FROM session_meta WHERE session_id = ?1",
-                        params![selected_session_id],
-                        |row| {
-                            let relation_json: Option<String> = row.get(2)?;
-                            let relation = relation_json
-                                .map(|json| {
-                                    serde_json::from_str(&json).map_err(|error| {
-                                        sqlite_conversion_error(stored_data_corrupt(
-                                            "SessionMeta relation",
-                                            error,
-                                        ))
-                                    })
-                                })
-                                .transpose()?
-                                .unwrap_or_default();
-                            Ok((
-                                row.get::<_, String>(0)?,
-                                row.get::<_, Option<String>>(1)?,
-                                relation,
-                            ))
-                        },
-                    )
-                    .optional()?;
-                let Some((session_id, cwd, relation)) = meta else {
-                    return Ok(None);
-                };
-
-                let head_row: Option<(String, i64, Option<String>, Option<String>)> = conn
-                    .query_row(
-                        "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref
-                         FROM session_head WHERE session_id = ?1",
-                        params![session_id],
-                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-                    )
-                    .optional()?;
-                let Some((head_json, head_revision, leaf_node_id, checkpoint_ref)) = head_row
-                else {
-                    return Ok(None);
-                };
-                let payload = lash_core::store::decode_versioned_json_record::<SessionHeadPayload>(
-                    &head_json,
-                    "SessionHeadMeta",
-                    lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
-                )
-                .map_err(|error| {
-                    sqlite_conversion_error(map_record_decode_error("SessionHeadMeta", error))
-                })?;
-                let head_meta = SessionHeadMeta::assemble(
-                    payload,
-                    u64_from_sql("SessionHeadMeta", "head_revision", head_revision)?,
-                    checkpoint_ref.map(Into::into),
-                    leaf_node_id,
-                );
-                let graph =
-                    Self::load_session_graph_from_conn(conn, &session_id, head_meta.leaf_node_id)
-                        .map_err(sqlite_conversion_error)?;
-
-                Ok(Some(SessionPickerInfo {
-                    session_id,
-                    cwd,
-                    relation,
-                    first_user_message: graph.first_user_message(),
-                    user_message_count: graph.user_message_count(),
-                }))
-            })
-            .await
-            .map_err(sqlite_error)
-    }
-
     pub async fn memory() -> tokio_rusqlite::Result<Self> {
         Self::memory_with_options(StoreOptions {
             blob_profile: BuiltinBlobProfile::LowLatency,
@@ -342,22 +264,11 @@ impl Store {
                     crate::persistence::ensure_session_not_deleted_conn(tx, &meta.session_id)?;
                     tx.execute(
                         "INSERT INTO session_meta
-                     (session_id, session_name, created_at, model, cwd, relation_json)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     (session_id, relation_json)
+                     VALUES (?1, ?2)
                      ON CONFLICT(session_id) DO UPDATE SET
-                         session_name = excluded.session_name,
-                         created_at = excluded.created_at,
-                         model = excluded.model,
-                         cwd = excluded.cwd,
                          relation_json = excluded.relation_json",
-                        params![
-                            meta.session_id,
-                            meta.session_name,
-                            meta.created_at,
-                            meta.model,
-                            meta.cwd,
-                            relation_json,
-                        ],
+                        params![meta.session_id, relation_json],
                     )
                     .map_err(sqlite_error)?;
                     Ok(())

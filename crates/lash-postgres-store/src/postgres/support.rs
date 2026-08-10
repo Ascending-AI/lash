@@ -19,13 +19,6 @@ pub(crate) async fn postgres_transaction_epoch_ms(
         .map_err(|_| StoreError::Backend(format!("postgres returned invalid epoch millis `{now}`")))
 }
 
-pub(crate) fn current_timestamp_string() -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("unix:{}", now.as_secs())
-}
-
 pub(crate) fn store_sqlx_error(err: sqlx::Error) -> StoreError {
     if is_contention_error(&err) {
         StoreError::Contended

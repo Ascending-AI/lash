@@ -34,10 +34,6 @@ impl ToolInvocation {
         }
     }
 
-    pub fn label(&self) -> String {
-        self.tool_id.to_string()
-    }
-
     pub fn with_child_execution_trace_hook(
         mut self,
         hook: crate::ToolChildExecutionTraceHook,

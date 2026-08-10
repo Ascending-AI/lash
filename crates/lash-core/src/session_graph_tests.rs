@@ -1,6 +1,6 @@
 use super::*;
 use crate::facade_support::AgentFrameReasonFacadeOps;
-use crate::{Part, shared_parts};
+use crate::{MessageRole, Part, shared_parts};
 
 fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
     Message {

@@ -96,10 +96,6 @@ CREATE INDEX IF NOT EXISTS idx_usage_deltas_session_seq
 
 CREATE TABLE IF NOT EXISTS session_meta (
     session_id    TEXT PRIMARY KEY,
-    session_name  TEXT NOT NULL,
-    created_at    TEXT NOT NULL,
-    model         TEXT NOT NULL,
-    cwd           TEXT,
     relation_json TEXT
 );
 
@@ -306,7 +302,10 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// component descriptor set carrying per-component encoding versions. Older
 /// roots have no honest compatibility interpretation and are rejected with the
 /// existing recreate-store remedy.
-pub(crate) const SCHEMA_VERSION: i32 = 29;
+/// Version 30 removes the CLI-era session name, creation timestamp, model, and
+/// working-directory columns from session metadata. Older databases are
+/// rejected and recreated; there is no compatibility read path.
+pub(crate) const SCHEMA_VERSION: i32 = 30;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

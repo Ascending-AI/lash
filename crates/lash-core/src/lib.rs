@@ -308,7 +308,6 @@ pub mod facade_support {
     pub use crate::store::LeaseTimings;
     pub use crate::store::LeaseTimingsError;
     pub use crate::store::SessionHead;
-    pub use crate::store::SessionPickerInfo;
     pub use crate::store::{CommitBudget, CommitBudgetLimit};
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
     pub use crate::tool_provider::ToolSessionProcessAdmin;

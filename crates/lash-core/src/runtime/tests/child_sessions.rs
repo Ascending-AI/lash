@@ -351,10 +351,6 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
     let root_store = Arc::new(RecordingStore::default());
     *root_store.session_meta.lock_recover() = Some(crate::SessionMeta {
         session_id: "root".to_string(),
-        session_name: "root".to_string(),
-        created_at: "2026-07-29T00:00:00Z".to_string(),
-        model: "mock-model".to_string(),
-        cwd: None,
         relation: crate::SessionRelation::Root,
     });
     let bytes = Arc::new(crate::InMemoryAttachmentStore::new());

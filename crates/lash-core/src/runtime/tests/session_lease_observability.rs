@@ -36,10 +36,7 @@ fn short_timings() -> LeaseTimings {
 
 async fn bind_test_session(store: &Arc<dyn crate::store::RuntimePersistence>, session_id: &str) {
     store
-        .admit_and_bind_session(&crate::SessionBinding::root(
-            session_id,
-            &crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
-        ))
+        .admit_and_bind_session(&crate::SessionBinding::root(session_id))
         .await
         .expect("bind observability test session");
 }

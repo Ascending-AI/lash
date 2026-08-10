@@ -108,7 +108,7 @@ mod tests {
             ))
         };
         state.ensure_agent_frame_initialized();
-        let binding = crate::SessionBinding::root(state.session_id.clone(), &state.policy);
+        let binding = crate::SessionBinding::root(state.session_id.clone());
         assert_eq!(
             store
                 .admit_and_bind_session(&binding)

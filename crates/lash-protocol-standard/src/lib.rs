@@ -229,7 +229,7 @@ async fn execute_batch_tool_call(call: ToolCall<'_>) -> ToolResult {
     for ((index, invocation), outcome) in
         parallel_specs.into_iter().zip(parallel_outcomes.drain(..))
     {
-        let tool_label = invocation.label();
+        let tool_label = invocation.tool_id.to_string();
         let tool_record = outcome.record.unwrap_or(lash_core::ToolCallRecord {
             call_id: Some(invocation.id),
             tool: tool_label,
