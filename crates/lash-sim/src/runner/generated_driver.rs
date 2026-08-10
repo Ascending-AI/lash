@@ -436,6 +436,7 @@ pub(super) async fn run_generated_workload(
         runtime_graph_acyclic(&events),
         runtime_single_active_agent_frame(&events),
         runtime_usage_monotonic(&events),
+        checkpoint_usage_conservation(&durable_writes),
         durable_effect_exactly_once(&final_summary),
         worker_stale_completion_rejected(&final_summary),
         worker_failover_continues_work(&events),

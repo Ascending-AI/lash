@@ -30,6 +30,7 @@ pub mod state_checker;
 pub mod store;
 pub mod trace;
 mod transcript;
+mod usage_oracle;
 
 pub use artifacts::{
     FixedScriptManifest, FixedScriptProof, FixedScriptSummary, GeneratedPostgresReplayReport,

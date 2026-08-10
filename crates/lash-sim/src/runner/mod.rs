@@ -95,6 +95,7 @@ use crate::trace::{
     AbstractWorldSummary, OracleStatus, OracleVerdict, SimulationTrace, TraceEventLine,
     TraceIoError, write_event_lines, write_replay_report, write_trace,
 };
+use crate::usage_oracle::checkpoint_usage_conservation;
 
 pub const FIXED_SCRIPT_PROFILE: &str = "tiny-fixed-provider-scripts";
 pub const FIXED_SCRIPT_EVENTS: &str = "events.jsonl";
