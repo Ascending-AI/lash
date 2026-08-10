@@ -16,6 +16,7 @@ use lash_sansio::sync::{LockResultExt, RwLockExt};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::sync::RwLock;
+use std::sync::Weak;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -46,7 +47,7 @@ use lash_tool_support::ToolDefinitionLashlangExt;
 use crate::config::McpCallPolicy;
 use crate::config::{McpServerConfig, TimeoutDisconnectPolicy};
 use crate::error::McpError;
-use crate::host::{LashMcpClientHandler, McpHostServices};
+use crate::host::{LashMcpClientHandler, McpHostServices, McpToolListChangedHandler};
 use crate::naming;
 
 /// Shared, per-core connection pool. Wrapped in `Arc` and cloned into each
@@ -102,6 +103,20 @@ struct McpEntry {
     reconnect_idle_notify: tokio::sync::Notify,
 }
 
+struct McpToolListRefresh {
+    entry: Weak<McpEntry>,
+    service_generation: u64,
+}
+
+#[async_trait::async_trait]
+impl McpToolListChangedHandler for McpToolListRefresh {
+    async fn refresh_tools(&self, peer: Peer<RoleClient>) {
+        if let Some(entry) = self.entry.upgrade() {
+            entry.refresh_tools(peer, self.service_generation).await;
+        }
+    }
+}
+
 #[derive(Clone)]
 struct ImportedTool {
     /// The native MCP tool name as advertised by the server (before
@@ -124,8 +139,8 @@ impl McpConnectionPool {
         }
     }
 
-    /// Build a pool for the configured servers. Each server is tried eagerly
-    /// in turn so tools are available immediately when servers are up, but a
+    /// Build a pool for the configured servers. Every server is tried eagerly
+    /// in parallel so tools are available immediately when servers are up, but a
     /// connection failure never aborts construction: the entry stays
     /// registered and reconnects in the background. Only configuration errors
     /// (a misconfigured server, not an outage) fail the build.
@@ -141,6 +156,7 @@ impl McpConnectionPool {
     ) -> Result<Arc<Self>, McpError> {
         validate_unique_server_prefixes(servers.keys().map(String::as_str))?;
         let pool = Arc::new(Self::empty_with_host_services(host_services));
+        let mut entries = Vec::with_capacity(servers.len());
         for (name, config) in servers {
             config.validate(&name)?;
             let entry = Arc::new(McpEntry::new(
@@ -153,6 +169,9 @@ impl McpConnectionPool {
                 rejected.shutdown().await;
                 return Err(error);
             }
+            entries.push((name, entry));
+        }
+        join_all(entries.into_iter().map(|(name, entry)| async move {
             let connect_result = entry.establish().await;
             let _ = entry.spawn_keepalive_loop();
             if let Err(err) = connect_result {
@@ -163,13 +182,15 @@ impl McpConnectionPool {
                 );
                 entry.spawn_reconnect_loop();
             }
-        }
+        }))
+        .await;
         Ok(pool)
     }
 
-    /// Add (or replace) one server in the pool. Connects eagerly and returns
-    /// the definitive result — use this for interactive attach, where the
-    /// caller wants to know whether the server is reachable.
+    /// Add (or replace) one server in the pool. Like initial pool construction,
+    /// attach registers the entry before an eager connection attempt and keeps
+    /// retrying startup outages in the background. Only configuration and pool
+    /// lifecycle errors fail the attach.
     pub async fn attach(
         self: &Arc<Self>,
         server_name: String,
@@ -187,15 +208,34 @@ impl McpConnectionPool {
             config,
             self.host_services.clone(),
         ));
-        entry.establish().await?;
-        let _ = entry.spawn_keepalive_loop();
-        if let Err((rejected, error)) = self.install(server_name, entry) {
-            rejected.cancel();
-            rejected.shutdown().await;
-            Err(error)
-        } else {
-            Ok(())
+        let previous = match self.install(server_name.clone(), Arc::clone(&entry)) {
+            Ok(previous) => previous,
+            Err((rejected, error)) => {
+                rejected.cancel();
+                rejected.shutdown().await;
+                return Err(error);
+            }
+        };
+        if let Some(previous) = previous {
+            previous.cancel();
+            previous.shutdown().await;
         }
+        let connect_result = entry.establish().await;
+        let _ = entry.spawn_keepalive_loop();
+        if let Err(err) = connect_result {
+            if self.shut_down.load(Ordering::SeqCst) || entry.cancelled.load(Ordering::SeqCst) {
+                return Err(McpError::Protocol(
+                    "MCP connection pool shut down while attaching a server".to_string(),
+                ));
+            }
+            tracing::warn!(
+                server = %server_name,
+                error = %err,
+                "MCP server unavailable during attach; retrying in the background"
+            );
+            entry.spawn_reconnect_loop();
+        }
+        Ok(())
     }
 
     /// Remove and shut down one server.
@@ -211,12 +251,12 @@ impl McpConnectionPool {
         Ok(())
     }
 
-    /// Register an entry, shutting down any previous entry under the name.
+    /// Register an entry and return any previous entry under the same name.
     fn install(
         &self,
         server_name: String,
         entry: Arc<McpEntry>,
-    ) -> Result<(), (Arc<McpEntry>, McpError)> {
+    ) -> Result<Option<Arc<McpEntry>>, (Arc<McpEntry>, McpError)> {
         let previous = {
             let mut entries = self.entries.write_recover();
             if self.shut_down.load(Ordering::SeqCst) {
@@ -239,11 +279,7 @@ impl McpConnectionPool {
             }
             entries.insert(server_name, entry)
         };
-        if let Some(previous) = previous {
-            previous.cancel();
-            tokio::spawn(async move { previous.shutdown().await });
-        }
-        Ok(())
+        Ok(previous)
     }
 
     fn validate_server_prefix_available(&self, server_name: &str) -> Result<(), McpError> {
@@ -616,10 +652,14 @@ fn prefix_collision_message(existing_server: &str, incoming_server: &str, prefix
 /// closed HTTP stream) — reconnect. Protocol-level errors (a tool failing,
 /// an unexpected response) leave the connection usable.
 fn is_connection_loss(err: &ServiceError) -> bool {
-    matches!(
-        err,
-        ServiceError::TransportSend(_) | ServiceError::TransportClosed
-    )
+    match err {
+        ServiceError::TransportSend(_) | ServiceError::TransportClosed => true,
+        ServiceError::McpError(_)
+        | ServiceError::UnexpectedResponse
+        | ServiceError::Cancelled { .. }
+        | ServiceError::Timeout { .. } => false,
+        _ => true,
+    }
 }
 
 impl McpEntry {
@@ -651,7 +691,7 @@ impl McpEntry {
     /// One connection attempt: handshake, tool discovery, then swap in the
     /// fresh service and definitions. Records the error on failure so status
     /// and call-time messages can report it.
-    async fn establish(&self) -> Result<(), McpError> {
+    async fn establish(self: &Arc<Self>) -> Result<(), McpError> {
         match self.try_connect().await {
             Ok(()) => Ok(()),
             Err(err) => {
@@ -661,16 +701,30 @@ impl McpEntry {
         }
     }
 
-    async fn try_connect(&self) -> Result<(), McpError> {
+    async fn try_connect(self: &Arc<Self>) -> Result<(), McpError> {
         if self.cancelled.load(Ordering::SeqCst) {
             return Err(McpError::Protocol(format!(
                 "MCP connection for `{}` was cancelled",
                 self.server_name
             )));
         }
+        let next_generation = self
+            .service_generation
+            .load(Ordering::SeqCst)
+            .checked_add(1)
+            .expect("MCP service generation exhausted");
+        let tool_list_refresh = Arc::new(McpToolListRefresh {
+            entry: Arc::downgrade(self),
+            service_generation: next_generation,
+        });
         let service = timeout(
             self.config.startup_timeout(),
-            connect_service(&self.server_name, &self.config, self.host_services.clone()),
+            connect_service(
+                &self.server_name,
+                &self.config,
+                self.host_services.clone(),
+                tool_list_refresh,
+            ),
         )
         .await
         .map_err(|_| McpError::StartupTimeout {
@@ -737,12 +791,44 @@ impl McpEntry {
         *self.imported_tools.write_recover() = import_tools(&self.server_name, tools);
         let mut service_guard = self.service.lock().await;
         *service_guard = Some(service);
-        self.service_generation.fetch_add(1, Ordering::SeqCst);
+        self.service_generation
+            .store(next_generation, Ordering::SeqCst);
         self.connected.store(true, Ordering::SeqCst);
         // A fresh connection starts with a fresh timeout budget.
         self.consecutive_timeouts.store(0, Ordering::SeqCst);
         *self.last_error.write_recover() = None;
         Ok(())
+    }
+
+    async fn refresh_tools(&self, peer: Peer<RoleClient>, observed_generation: u64) {
+        let discovery_timeout = self.config.startup_timeout();
+        let tools = match timeout(discovery_timeout, peer.list_all_tools()).await {
+            Ok(Ok(tools)) => tools,
+            Ok(Err(error)) => {
+                tracing::warn!(
+                    server = %self.server_name,
+                    error = %error,
+                    "MCP tools/list refresh failed after list-changed notification"
+                );
+                return;
+            }
+            Err(_) => {
+                tracing::warn!(
+                    server = %self.server_name,
+                    timeout_ms = discovery_timeout.as_millis() as u64,
+                    "MCP tools/list refresh timed out after list-changed notification"
+                );
+                return;
+            }
+        };
+        let service_guard = self.service.lock().await;
+        if self.cancelled.load(Ordering::SeqCst)
+            || service_guard.is_none()
+            || self.service_generation.load(Ordering::SeqCst) != observed_generation
+        {
+            return;
+        }
+        *self.imported_tools.write_recover() = import_tools(&self.server_name, tools);
     }
 
     /// Retry [`establish`](Self::establish) with exponential backoff until it
@@ -1082,8 +1168,10 @@ async fn connect_service(
     server_name: &str,
     config: &McpServerConfig,
     host_services: McpHostServices,
+    tool_list_changed: Arc<dyn McpToolListChangedHandler>,
 ) -> Result<RunningService<RoleClient, LashMcpClientHandler>, McpError> {
-    let client_handler = LashMcpClientHandler::new(server_name, host_services);
+    let client_handler = LashMcpClientHandler::new(server_name, host_services)
+        .with_tool_list_changed_handler(tool_list_changed);
 
     match config {
         McpServerConfig::Stdio {

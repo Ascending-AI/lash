@@ -122,12 +122,15 @@ of shadowing either implementation.
 
 The bundled process is demonstration wiring, not a deployment prescription. A
 real deployment normally configures `McpServerConfig::streamable_http(...)`, puts
-credentials in the HTTP `headers` map or the deployment's secret injection, and
-points at a separately operated MCP endpoint. `SLACK_CLONE_MCP_SERVER` can override
+fixed credentials in `.with_headers(...)` or the deployment's secret injection,
+and points at a separately operated MCP endpoint. `SLACK_CLONE_MCP_SERVER` can override
 the local server executable while developing this example; the bot passes the API
 origin and token to its child process without placing the token in argv. Bot boot
 fails with a clear error when a configured stdio executable cannot be found, so
 an absent binary cannot leave the prompt advertising unavailable bundled tools.
+HTTP headers are static across reconnects: Lash does not enable rmcp OAuth or
+token refresh, so a deployment that rotates tokens must rebuild or reattach the
+server config with a host-managed credential.
 
 Each stdio or streamable-HTTP server has the same timeout, liveness, and reconnect
 policy knobs. In Rust these fields live in `McpCallPolicy`, one flattened

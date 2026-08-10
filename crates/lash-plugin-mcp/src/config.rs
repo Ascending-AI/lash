@@ -241,6 +241,10 @@ pub enum McpServerConfig {
         binary_content_attachments: bool,
     },
     /// Newer MCP spec HTTP/JSON streaming transport.
+    ///
+    /// `headers` are static values installed when the transport connects.
+    /// Lash does not enable rmcp's `auth` feature and does not perform OAuth,
+    /// token acquisition, or token refresh.
     StreamableHttp {
         url: String,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -281,6 +285,84 @@ impl McpServerConfig {
             call_policy: McpCallPolicy::default(),
             binary_content_attachments: false,
         }
+    }
+
+    /// Set static HTTP headers for a streamable-HTTP server.
+    ///
+    /// These values are reused unchanged on reconnect. This is suitable for
+    /// fixed API keys and host-managed tokens, but it does not enable OAuth or
+    /// token refresh; rmcp's `auth` feature is not enabled by this crate.
+    ///
+    /// # Panics
+    ///
+    /// Panics when called on a stdio configuration.
+    pub fn with_headers<K, V>(mut self, headers: impl IntoIterator<Item = (K, V)>) -> Self
+    where
+        K: Into<String>,
+        V: Into<String>,
+    {
+        let Self::StreamableHttp {
+            headers: configured,
+            ..
+        } = &mut self
+        else {
+            panic!("MCP HTTP headers can only be configured for streamable-HTTP servers");
+        };
+        *configured = headers
+            .into_iter()
+            .map(|(name, value)| (name.into(), value.into()))
+            .collect();
+        self
+    }
+
+    /// Set environment variables for a stdio server child process.
+    ///
+    /// # Panics
+    ///
+    /// Panics when called on a streamable-HTTP configuration.
+    pub fn with_env<K, V>(mut self, env: impl IntoIterator<Item = (K, V)>) -> Self
+    where
+        K: Into<String>,
+        V: Into<String>,
+    {
+        let Self::Stdio {
+            env: configured, ..
+        } = &mut self
+        else {
+            panic!("MCP child environment can only be configured for stdio servers");
+        };
+        *configured = env
+            .into_iter()
+            .map(|(name, value)| (name.into(), value.into()))
+            .collect();
+        self
+    }
+
+    /// Set startup, idle call, and total call timeouts for either transport.
+    pub fn with_timeouts(
+        mut self,
+        startup_timeout: Duration,
+        call_timeout: Duration,
+        call_max_total_timeout: Duration,
+    ) -> Self {
+        let startup_timeout_ms = duration_millis(startup_timeout);
+        match &mut self {
+            Self::Stdio {
+                startup_timeout_ms: configured,
+                call_policy,
+                ..
+            }
+            | Self::StreamableHttp {
+                startup_timeout_ms: configured,
+                call_policy,
+                ..
+            } => {
+                *configured = startup_timeout_ms;
+                call_policy.call_timeout_ms = duration_millis(call_timeout);
+                call_policy.call_max_total_timeout_ms = duration_millis(call_max_total_timeout);
+            }
+        }
+        self
     }
 
     pub fn startup_timeout(&self) -> Duration {
@@ -404,6 +486,11 @@ impl McpServerConfig {
     }
 }
 
+fn duration_millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis())
+        .expect("MCP timeout exceeds the supported millisecond range")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -421,6 +508,36 @@ mod tests {
             serde_json::to_value(enabled).unwrap()["binary_content_attachments"],
             true
         );
+    }
+
+    #[test]
+    fn transport_builders_cover_headers_env_and_timeouts() {
+        let http = McpServerConfig::streamable_http("https://mcp.example.test")
+            .with_headers([("Authorization", "Bearer static")])
+            .with_timeouts(
+                Duration::from_secs(1),
+                Duration::from_secs(2),
+                Duration::from_secs(3),
+            );
+        let McpServerConfig::StreamableHttp {
+            headers,
+            startup_timeout_ms,
+            call_policy,
+            ..
+        } = http
+        else {
+            panic!("streamable constructor changed transport")
+        };
+        assert_eq!(headers["Authorization"], "Bearer static");
+        assert_eq!(startup_timeout_ms, 1_000);
+        assert_eq!(call_policy.call_timeout_ms, 2_000);
+        assert_eq!(call_policy.call_max_total_timeout_ms, 3_000);
+
+        let stdio = McpServerConfig::stdio("server", Vec::new()).with_env([("TOKEN", "static")]);
+        let McpServerConfig::Stdio { env, .. } = stdio else {
+            panic!("stdio constructor changed transport")
+        };
+        assert_eq!(env["TOKEN"], "static");
     }
 
     #[test]

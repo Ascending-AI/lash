@@ -233,6 +233,7 @@ async fn mcp_core(
 ) -> anyhow::Result<()> {
     // docs:start:mcp-core
     use std::collections::BTreeMap;
+    use std::time::Duration;
 
     use lash_plugin_mcp::{MCP_PROTOCOL_VERSION, McpPluginFactory, McpServerConfig};
 
@@ -241,11 +242,20 @@ async fn mcp_core(
     let mut servers = BTreeMap::new();
     servers.insert(
         "docs".to_string(),
-        McpServerConfig::stdio("uvx", vec!["mcp-server-docs".into()]),
+        McpServerConfig::stdio("uvx", vec!["mcp-server-docs".into()])
+            .with_env([("DOCS_INDEX", "/srv/docs")]),
     );
     servers.insert(
         "web".to_string(),
-        McpServerConfig::streamable_http("https://mcp.example.com/rpc"),
+        // Headers are static across reconnects: Lash does not perform OAuth
+        // or token refresh, so the host must rotate credentials itself.
+        McpServerConfig::streamable_http("https://mcp.example.com/rpc")
+            .with_headers([("Authorization", "Bearer host-managed-token")])
+            .with_timeouts(
+                Duration::from_secs(10),
+                Duration::from_secs(60),
+                Duration::from_secs(600),
+            ),
     );
 
     // Capabilities are advertised only for handlers installed here. Lash

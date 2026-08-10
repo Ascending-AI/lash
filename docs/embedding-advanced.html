@@ -287,9 +287,10 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         <div class="section" id="mcp-servers">
           <div class="section-header">
             <h2>MCP Servers</h2>
-            <p><code>lash-plugin-mcp</code> wraps the <code>rmcp</code> SDK with two transports: <code>stdio</code> and <code>streamable_http</code>. SSE-capable servers are reached through <code>streamable_http</code>, which negotiates SSE responses itself. The plugin keeps a shared connection pool; stdio servers spawn once per process, not per session.</p>
+            <p><code>lash-plugin-mcp</code> wraps the <code>rmcp</code> SDK with two transports: <code>stdio</code> and <code>streamable_http</code>. SSE-capable servers are reached through <code>streamable_http</code>, which negotiates SSE responses itself. HTTP headers are static across reconnects: Lash does not enable rmcp OAuth or token refresh, so the host must supply and rotate credentials. The plugin keeps a shared connection pool; stdio servers spawn once per process, not per session.</p>
           </div>
           <pre data-lang="rust" data-snippet="embedding_advanced#mcp-core"><code>use std::collections::BTreeMap;
+use std::time::Duration;
 
 use lash_plugin_mcp::{MCP_PROTOCOL_VERSION, McpPluginFactory, McpServerConfig};
 
@@ -298,11 +299,20 @@ println!("Lash MCP handshake protocol: {MCP_PROTOCOL_VERSION}");
 let mut servers = BTreeMap::new();
 servers.insert(
     "docs".to_string(),
-    McpServerConfig::stdio("uvx", vec!["mcp-server-docs".into()]),
+    McpServerConfig::stdio("uvx", vec!["mcp-server-docs".into()])
+        .with_env([("DOCS_INDEX", "/srv/docs")]),
 );
 servers.insert(
     "web".to_string(),
-    McpServerConfig::streamable_http("https://mcp.example.com/rpc"),
+    // Headers are static across reconnects: Lash does not perform OAuth
+    // or token refresh, so the host must rotate credentials itself.
+    McpServerConfig::streamable_http("https://mcp.example.com/rpc")
+        .with_headers([("Authorization", "Bearer host-managed-token")])
+        .with_timeouts(
+            Duration::from_secs(10),
+            Duration::from_secs(60),
+            Duration::from_secs(600),
+        ),
 );
 
 // Capabilities are advertised only for handlers installed here. Lash
@@ -375,7 +385,7 @@ mcp.detach_server("old-tool").await?;
 
 // Call this after the host's dynamic roots change.
 mcp.notify_roots_changed().await?;</code></pre>
-          <p>Failures are isolated: an exited child, a 500ing endpoint, or a dropped SSE stream surfaces as <code>ToolResult::err(...)</code> on the affected tool; other servers keep working. If a server is unreachable at <code>new</code> time, the call fails; use <code>McpPluginFactory::empty()</code> plus runtime <code>attach_server</code> when initial connectivity is unreliable.</p>
+          <p>Failures are isolated: an exited child, a 500ing endpoint, or a dropped SSE stream surfaces as a structured unavailable <code>ToolResult</code> on the affected tool; other servers keep working. Both initial construction and <code>attach_server</code> register an unreachable server and retry it in the background. Configuration errors still fail immediately, and <code>server_statuses()</code> exposes connectivity and the latest error.</p>
         </div>
 
         <div class="section" id="advanced-runtime">
