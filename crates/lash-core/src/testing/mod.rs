@@ -107,6 +107,19 @@ pub fn measure_runtime_commit_budget(
     })
 }
 
+/// Stage a protocol-owned execution-state root and its complete keyed leaf set
+/// into resident session state, exactly as the runtime's turn boundary does.
+///
+/// The staging mutator itself is runtime-owned (ADR 0051's "neither" class), so
+/// protocol crates reach it through this fixture rather than through
+/// `RuntimeSessionState`'s public surface.
+pub fn stage_execution_state_components(
+    state: &mut RuntimeSessionState,
+    snapshot: crate::plugin::ExecutionStateSnapshot,
+) -> Result<(), crate::StoreError> {
+    state.set_execution_state_components(snapshot)
+}
+
 type CompletionFuture =
     Pin<Box<dyn Future<Output = Result<LlmResponse, LlmTransportError>> + Send>>;
 type CompletionFn = dyn Fn(LlmRequest) -> CompletionFuture + Send + Sync;

@@ -17,6 +17,16 @@ enum CheckpointComponentCompleteness {
     Unproven,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExecutionStateBodyResidency {
+    /// Bodies are present or their absence has not been authorized in process.
+    Resident,
+    /// `discard_known_bodies` deliberately released the protocol-owned bytes.
+    DiscardedPostCommit,
+    /// A store result disagreed with the complete component intent held before adoption.
+    CommitResultMismatch,
+}
+
 #[derive(Clone, Debug)]
 enum ResidentCheckpointComponentBody {
     ToolState {
@@ -54,6 +64,9 @@ struct ResidentCheckpointComponent {
 pub struct RuntimeCheckpointComponents {
     completeness: CheckpointComponentCompleteness,
     entries: std::collections::BTreeMap<String, ResidentCheckpointComponent>,
+    /// Resident-only proof. `RuntimeSessionState` skips this entire component set
+    /// during serialization, and store hydration always constructs `Resident`.
+    execution_state_body_residency: ExecutionStateBodyResidency,
 }
 
 impl Default for RuntimeCheckpointComponents {
@@ -63,10 +76,13 @@ impl Default for RuntimeCheckpointComponents {
 }
 
 impl RuntimeCheckpointComponents {
+    const EXECUTION_STATE_LEAF_PREFIX: &'static str = "execution_state/";
+
     pub(crate) fn complete_empty() -> Self {
         Self {
             completeness: CheckpointComponentCompleteness::Complete,
             entries: std::collections::BTreeMap::new(),
+            execution_state_body_residency: ExecutionStateBodyResidency::Resident,
         }
     }
 
@@ -74,6 +90,7 @@ impl RuntimeCheckpointComponents {
         Self {
             completeness: CheckpointComponentCompleteness::Unproven,
             entries: std::collections::BTreeMap::new(),
+            execution_state_body_residency: ExecutionStateBodyResidency::Resident,
         }
     }
 
@@ -192,6 +209,7 @@ impl RuntimeCheckpointComponents {
         Ok(Self {
             completeness: CheckpointComponentCompleteness::Complete,
             entries,
+            execution_state_body_residency: ExecutionStateBodyResidency::Resident,
         })
     }
 
@@ -215,6 +233,7 @@ impl RuntimeCheckpointComponents {
         Self {
             completeness: CheckpointComponentCompleteness::Complete,
             entries,
+            execution_state_body_residency: ExecutionStateBodyResidency::Resident,
         }
     }
 
@@ -360,6 +379,13 @@ impl RuntimeCheckpointComponents {
     }
 
     fn set_execution_state_snapshot(&mut self, snapshot: Option<Vec<u8>>) {
+        self.execution_state_body_residency = ExecutionStateBodyResidency::Resident;
+        self.entries
+            .retain(|key, _| !key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX));
+        self.set_execution_state_root(snapshot);
+    }
+
+    fn set_execution_state_root(&mut self, snapshot: Option<Vec<u8>>) {
         let key = crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string();
         let Some(snapshot) = snapshot else {
             self.entries.remove(&key);
@@ -379,13 +405,151 @@ impl RuntimeCheckpointComponents {
         );
     }
 
-    fn discard_known_bodies(&mut self) {
+    fn set_execution_state_components(
+        &mut self,
+        snapshot: crate::plugin::ExecutionStateSnapshot,
+    ) -> Result<(), crate::StoreError> {
+        if snapshot.root.is_none() && !snapshot.components.is_empty() {
+            return Err(crate::StoreError::Backend(
+                "an absent execution-state root cannot retain leaf components".to_string(),
+            ));
+        }
+        self.execution_state_body_residency = ExecutionStateBodyResidency::Resident;
+        let mut replacement_entries = std::collections::BTreeMap::new();
+        for (key, component) in &snapshot.components {
+            if !key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX) {
+                return Err(crate::StoreError::Backend(format!(
+                    "execution-state leaf component `{key}` is outside the `{}` namespace",
+                    Self::EXECUTION_STATE_LEAF_PREFIX
+                )));
+            }
+            let replacement = match component {
+                crate::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
+                    ResidentCheckpointComponent {
+                        descriptor: self
+                            .entries
+                            .get(key)
+                            .and_then(|entry| entry.descriptor.clone()),
+                        body: ResidentCheckpointComponentBody::Opaque(Some(body.clone())),
+                        dirty: true,
+                    }
+                }
+                crate::plugin::ExecutionStateComponentSnapshot::Unchanged => {
+                    let Some(existing) = self.entries.get(key) else {
+                        return Err(crate::StoreError::Backend(format!(
+                            "execution-state leaf component `{key}` was marked unchanged without resident state"
+                        )));
+                    };
+                    let has_pending_body = existing.dirty
+                        && matches!(
+                            &existing.body,
+                            ResidentCheckpointComponentBody::Opaque(Some(_))
+                        );
+                    if existing.descriptor.is_none() && !has_pending_body {
+                        return Err(crate::StoreError::Backend(format!(
+                            "execution-state leaf component `{key}` was marked unchanged without a durable ref or pending body"
+                        )));
+                    }
+                    existing.clone()
+                }
+            };
+            replacement_entries.insert(key.clone(), replacement);
+        }
+
+        self.entries
+            .retain(|key, _| !key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX));
+        self.entries.extend(replacement_entries);
+        self.set_execution_state_root(snapshot.root);
+        Ok(())
+    }
+
+    fn execution_state_hydration(
+        &self,
+    ) -> Result<Option<crate::plugin::HydratedExecutionState>, crate::StoreError> {
+        if self.execution_state_body_residency == ExecutionStateBodyResidency::CommitResultMismatch
+        {
+            return Err(crate::StoreError::StoredDataCorrupt {
+                record_kind: "RuntimeCommitResult",
+                message: "committed checkpoint components differ from resident commit intent"
+                    .to_string(),
+            });
+        }
+        let Some(root) = self.execution_state_snapshot() else {
+            let has_leaves = self
+                .entries
+                .keys()
+                .any(|key| key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX));
+            if has_leaves
+                && self.execution_state_body_residency
+                    != ExecutionStateBodyResidency::DiscardedPostCommit
+            {
+                return Err(crate::StoreError::StoredDataCorrupt {
+                    record_kind: "RuntimeCheckpointComponents",
+                    message: "execution-state leaves exist without a root component".to_string(),
+                });
+            }
+            return Ok(None);
+        };
+        let mut components = std::collections::BTreeMap::new();
+        for (key, component) in &self.entries {
+            if !key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX) {
+                continue;
+            }
+            let ResidentCheckpointComponentBody::Opaque(Some(body)) = &component.body else {
+                return Err(crate::StoreError::StoredDataCorrupt {
+                    record_kind: "RuntimeCheckpointComponents",
+                    message: format!("execution-state leaf component `{key}` was not hydrated"),
+                });
+            };
+            components.insert(key.clone(), body.clone());
+        }
+        Ok(Some(crate::plugin::HydratedExecutionState {
+            root: root.to_vec(),
+            components,
+        }))
+    }
+
+    fn manifest_matches_resident_commit_intent(
+        &self,
+        manifest: &crate::store::SessionCheckpoint,
+    ) -> bool {
+        // This compares the store result with the complete intent already held
+        // in process. It performs no store lookup and does not infer permission
+        // from the bodiless descriptor shape produced after adoption.
+        self.build_checkpoint(crate::PersistedTurnState::default(), None)
+            .and_then(|checkpoint| checkpoint.manifest())
+            .is_ok_and(|resident| resident.components == manifest.components)
+    }
+
+    fn discard_known_bodies(&mut self, committed_components_match: bool) {
+        // This is the sole writer of the privileged `DiscardedPostCommit`
+        // state. Staging may only reset the proof to `Resident`.
+        self.execution_state_body_residency = match (
+            self.execution_state_body_residency,
+            committed_components_match,
+        ) {
+            (ExecutionStateBodyResidency::CommitResultMismatch, _) => {
+                ExecutionStateBodyResidency::CommitResultMismatch
+            }
+            (_, true) => ExecutionStateBodyResidency::DiscardedPostCommit,
+            (_, false) => ExecutionStateBodyResidency::CommitResultMismatch,
+        };
         for component in self.entries.values_mut() {
+            let dirty = component.dirty;
             match &mut component.body {
                 ResidentCheckpointComponentBody::ToolState { snapshot, .. } => *snapshot = None,
                 ResidentCheckpointComponentBody::PluginSnapshot(snapshot) => *snapshot = None,
                 ResidentCheckpointComponentBody::ExecutionState(snapshot) => *snapshot = None,
-                ResidentCheckpointComponentBody::Opaque(_) => {}
+                // Keyed execution-state leaves are the same class of body: once
+                // the durable ref is authoritative, the encoded bytes are a
+                // second resident copy of state the protocol already holds in
+                // its own form. A body that is still dirty has not been
+                // committed yet and is the retry's only source, so it stays.
+                ResidentCheckpointComponentBody::Opaque(body) => {
+                    if !dirty {
+                        *body = None;
+                    }
+                }
             }
         }
     }
@@ -678,8 +842,12 @@ impl RuntimeSessionState {
             .apply_realized_node_timestamps(&result.realized_node_timestamps);
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
         self.plugin_snapshot_revision = result.manifest.plugin_snapshot_revision;
+        let committed_components_match = self
+            .checkpoint_components
+            .manifest_matches_resident_commit_intent(&result.manifest);
         self.checkpoint_components.adopt_manifest(&result.manifest);
-        self.checkpoint_components.discard_known_bodies();
+        self.checkpoint_components
+            .discard_known_bodies(committed_components_match);
     }
 
     pub(crate) fn pending_graph_commit(&self) -> crate::GraphAppend {
@@ -713,7 +881,7 @@ impl RuntimeSessionState {
     /// Clears in-memory tool, plugin, and execution-state snapshots for protocol implementors after
     /// their durable references have become authoritative.
     pub fn discard_runtime_snapshots(&mut self) {
-        self.checkpoint_components.discard_known_bodies();
+        self.checkpoint_components.discard_known_bodies(true);
     }
 
     /// Updates execution state snapshot state for protocol and process-engine implementors while
@@ -726,11 +894,33 @@ impl RuntimeSessionState {
             .set_execution_state_snapshot(execution_state_snapshot);
     }
 
+    /// Replaces the complete protocol-owned execution-state root and leaf set.
+    ///
+    /// Runtime-owned staging: the turn boundary and the explicit administrative
+    /// restore path are the only callers, so this is not integrator surface
+    /// (ADR 0051's "neither" class — it only mutates state the runtime owns).
+    /// Downstream tests reach the same staging through
+    /// `lash_core::testing::stage_execution_state_components`.
+    pub(crate) fn set_execution_state_components(
+        &mut self,
+        snapshot: crate::plugin::ExecutionStateSnapshot,
+    ) -> Result<(), crate::StoreError> {
+        self.checkpoint_components
+            .set_execution_state_components(snapshot)
+    }
+
     /// Exposes execution state snapshot to protocol and process-engine implementors while
     /// materializing or restoring protocol session state. Returns `None` when no execution state
     /// snapshot is present.
     pub fn execution_state_snapshot(&self) -> Option<&[u8]> {
         self.checkpoint_components.execution_state_snapshot()
+    }
+
+    /// Returns the fully hydrated protocol-owned execution-state root and leaves.
+    pub fn execution_state_hydration(
+        &self,
+    ) -> Result<Option<crate::plugin::HydratedExecutionState>, crate::StoreError> {
+        self.checkpoint_components.execution_state_hydration()
     }
 
     /// Updates plugin snapshots state for protocol and process-engine implementors while
@@ -934,179 +1124,7 @@ pub(crate) mod facade_ops {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use lash_sansio::sync::MutexExt;
-
-    #[test]
-    fn commit_operation_identity_depends_on_caller_boundary_not_head_revision() {
-        let first = boundary_operation("session", "request-42", "append-session-nodes");
-        let retry = boundary_operation("session", "request-42", "append-session-nodes");
-        let next = boundary_operation("session", "request-43", "append-session-nodes");
-
-        assert_eq!(first, retry);
-        assert_ne!(first, next);
-    }
-    use std::sync::{Arc, Mutex};
-
-    struct DynamicSnapshotTools {
-        names: Arc<Mutex<Vec<String>>>,
-    }
-
-    #[async_trait::async_trait]
-    impl crate::ToolProvider for DynamicSnapshotTools {
-        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-            self.names
-                .lock_recover()
-                .iter()
-                .map(|name| {
-                    crate::ToolDefinition::raw(
-                        format!("tool:{name}"),
-                        name,
-                        "dynamic snapshot tool",
-                        crate::ToolDefinition::default_input_schema(),
-                        serde_json::json!({}),
-                    )
-                    .manifest()
-                })
-                .collect()
-        }
-
-        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-            self.names
-                .lock_recover()
-                .iter()
-                .any(|candidate| candidate == name)
-                .then(|| {
-                    Arc::new(
-                        crate::ToolDefinition::raw(
-                            format!("tool:{name}"),
-                            name,
-                            "dynamic snapshot tool",
-                            crate::ToolDefinition::default_input_schema(),
-                            serde_json::json!({}),
-                        )
-                        .contract(),
-                    )
-                })
-        }
-
-        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
-            crate::ToolResult::ok(serde_json::json!("ok"))
-        }
-    }
-
-    #[test]
-    fn session_snapshot_serialization_excludes_runtime_only_fields_and_round_trips() {
-        let mut state = RuntimeSessionState {
-            session_id: "snapshot-test".to_string(),
-            policy: SessionPolicy {
-                provider_id: "mock".to_string(),
-                ..SessionPolicy::new(crate::TurnBudget::Unbounded)
-            },
-            head_revision: 42,
-            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-        };
-        state.set_tool_state_snapshot(Some(crate::ToolState::default()));
-        state.set_plugin_snapshot(Some(crate::PluginSessionSnapshot::default()));
-        state.set_execution_state_snapshot(Some(vec![1, 2, 3]));
-        state.ensure_agent_frame_initialized();
-
-        let value = serde_json::to_value(state.to_snapshot()).expect("serialize snapshot");
-
-        for runtime_key in [
-            "head_revision",
-            "persisted_node_ids",
-            "tool_state_snapshot",
-            "plugin_snapshot",
-            "execution_state_snapshot",
-        ] {
-            assert!(
-                value.get(runtime_key).is_none(),
-                "snapshot unexpectedly exposed {runtime_key}"
-            );
-        }
-        assert!(value.get("agent_frames").is_none());
-
-        let snapshot: SessionSnapshot = serde_json::from_value(value).expect("round-trip snapshot");
-        let hydrated = RuntimeSessionState::from_snapshot(snapshot);
-
-        assert_eq!(hydrated.session_id, "snapshot-test");
-        assert_eq!(hydrated.policy.recorded_provider_id(), "mock");
-        assert_eq!(hydrated.head_revision, 0);
-        assert!(hydrated.tool_state_snapshot().is_none());
-        assert!(hydrated.plugin_snapshot().is_none());
-        assert!(hydrated.execution_state_snapshot().is_none());
-        assert!(!hydrated.agent_frames.is_empty());
-    }
-
-    #[test]
-    fn reconciled_generation_forces_next_plugin_snapshot_export() {
-        let names = Arc::new(Mutex::new(vec!["dynamic_one".to_string()]));
-        let tools: Arc<dyn crate::ToolProvider> = Arc::new(DynamicSnapshotTools {
-            names: Arc::clone(&names),
-        });
-        let plugins = crate::runtime::tests::helpers::plugin_session_with_tools("root", tools);
-        let snapshot = plugins.tool_registry().export_state();
-        let persisted_generation = snapshot.generation();
-        let mut projected =
-            RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-                .to_snapshot();
-        projected.tool_state_ref = Some("persisted-tool-state".to_string().into());
-        projected.tool_state_generation = Some(persisted_generation);
-        let mut state = RuntimeSessionState::from_snapshot(projected);
-
-        names.lock_recover().push("dynamic_two".to_string());
-        let report = plugins
-            .tool_registry()
-            .restore_state(snapshot)
-            .expect("live surface restore");
-        assert_eq!(report.generation, persisted_generation + 1);
-
-        state.refresh_plugin_snapshots(&plugins);
-        let refreshed = state
-            .tool_state_snapshot()
-            .expect("generation change re-exports the tool snapshot");
-        assert_eq!(refreshed.generation(), report.generation);
-        assert!(refreshed.contains(&crate::ToolId::from("tool:dynamic_two")));
-    }
-
-    #[test]
-    fn incomplete_checkpoint_component_projection_is_a_typed_error() {
-        let projected =
-            RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-                .to_snapshot();
-        let state = RuntimeSessionState::from_snapshot(projected);
-
-        let error = state
-            .checkpoint_components
-            .build_checkpoint(crate::PersistedTurnState::default(), None)
-            .expect_err("snapshot projection cannot prove the complete keyed set");
-
-        assert!(matches!(
-            error,
-            crate::StoreError::IncompleteCheckpointComponentSet
-        ));
-    }
-
-    #[test]
-    fn new_session_rejects_unproven_checkpoint_component_projection() {
-        let projected =
-            RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-                .to_snapshot();
-        let state = RuntimeSessionState::from_snapshot(projected);
-
-        let error = state
-            .checkpoint_components
-            .complete_for_new_session()
-            .expect_err("a public projection cannot prove a complete new-session root");
-
-        assert!(matches!(
-            error,
-            crate::StoreError::IncompleteCheckpointComponentSet
-        ));
-    }
-}
+mod tests;
 
 pub(super) fn apply_persisted_session_config(
     policy: &mut SessionPolicy,

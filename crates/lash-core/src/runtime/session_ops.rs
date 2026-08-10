@@ -384,8 +384,17 @@ impl LashRuntime {
         Ok(())
     }
 
-    /// Explicitly snapshot protocol-local execution state, if any.
-    pub async fn snapshot_execution_state(&mut self) -> Result<Option<Vec<u8>>, SessionError> {
+    /// Explicitly snapshot protocol-local execution state, including leaf bodies, if any.
+    ///
+    /// This reads the executor's complete live state and stages nothing. A turn's
+    /// capture is a checkpoint delta whose unchanged leaves ride as body-free
+    /// refs, and the runtime releases their resident bodies once the durable refs
+    /// are authoritative — so reassembling a portable snapshot out of resident
+    /// checkpoint state would be both incomplete and a capture this path cannot
+    /// honestly acknowledge, because it writes nothing durable.
+    pub async fn snapshot_execution_state(
+        &mut self,
+    ) -> Result<Option<crate::plugin::HydratedExecutionState>, SessionError> {
         self.reload_invalidated_resident_session_state_for_session()
             .await?;
         let Some(session) = self.session.as_mut() else {
@@ -398,18 +407,19 @@ impl LashRuntime {
             .code_executor()
             .ok_or(SessionError::CodeExecutionUnavailable)?;
         let session_id = self.state.session_id.clone();
-        let blob = code_executor
-            .snapshot_execution_state(crate::plugin::ProtocolSessionContext::new(
+        code_executor
+            .hydrated_execution_state(crate::plugin::ProtocolSessionContext::new(
                 session,
                 &session_id,
             ))
-            .await?;
-        self.state.set_execution_state_snapshot(blob.clone());
-        Ok(blob)
+            .await
     }
 
-    /// Explicitly restore protocol-local execution state from an opaque snapshot blob.
-    pub async fn restore_execution_state(&mut self, snapshot: &[u8]) -> Result<(), SessionError> {
+    /// Explicitly restore protocol-local execution state from a hydrated snapshot.
+    pub async fn restore_execution_state(
+        &mut self,
+        snapshot: &crate::plugin::HydratedExecutionState,
+    ) -> Result<(), SessionError> {
         self.reload_invalidated_resident_session_state_for_session()
             .await?;
         let Some(session) = self.session.as_mut() else {
@@ -429,7 +439,13 @@ impl LashRuntime {
             )
             .await?;
         self.state
-            .set_execution_state_snapshot(Some(snapshot.to_vec()));
+            .set_execution_state_components(crate::plugin::ExecutionStateSnapshot::from_hydrated(
+                snapshot.clone(),
+            ))
+            .map_err(|source| SessionError::Store {
+                context: "failed to stage restored execution-state components".to_string(),
+                source,
+            })?;
         Ok(())
     }
 

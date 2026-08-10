@@ -444,6 +444,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             pending_error_span: None,
             instructions_executed: 0,
             active_execution_elapsed: std::time::Duration::ZERO,
+            assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
         }
@@ -471,6 +472,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             pending_error_span: None,
             instructions_executed: 0,
             active_execution_elapsed: std::time::Duration::ZERO,
+            assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
         }
@@ -636,6 +638,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             pending_error_span: continuation.pending_error_span,
             instructions_executed: continuation.instructions_executed,
             active_execution_elapsed: continuation.active_execution_elapsed,
+            // A resumed VM records assignments from here on. Continuations are
+            // only used by durable process segments, which run on their own
+            // `State` and never recycle into an `ExecutionScratch`, so there are
+            // no earlier marks to carry across the handover blob.
+            assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
         })

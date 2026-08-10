@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted.
+Accepted. Amended 2026-08-10 (FIG-1195): the inline-versus-leaf line comes from a named constant rather than a store blob profile.
 
 ## Context
 
@@ -54,12 +54,22 @@ Execution state uses hybrid granularity:
 - scalar values are always inline in the root; and
 - only composite values cross the inline-versus-leaf size line.
 
-That line is structural and profile-driven. Its threshold comes from the
-existing blob-profile machinery; this decision introduces no fixed size
-constant. Small composites stay inline, while oversized composites become
-leaves under stable logical keys. Content-defined chunking is deferred. It may
-later operate inside one oversized leaf, as Git added packfile deltas beneath
-its tree/blob model, without changing the checkpoint contract.
+That line is structural and lives in exactly one place: the named constant
+`lash_core::plugin::EXECUTION_STATE_LEAF_MIN_BODY_BYTES`, which every protocol
+plugin's capture consumes. It is deliberately **not** taken from a store's
+blob-compression profile, which this decision originally reached for. Those
+profiles answer whether bytes should be compressed, not whether a value is
+worth its own component; there are three of them and one never compresses at
+all, so reading one would both make snapshot shape depend on the configured
+backend and leave the granularity of a checkpoint tied to an unrelated knob.
+The constant's value follows from what each choice costs per commit — an inline
+value costs its encoded length because the root is re-encoded in full every
+commit, while a leaf costs a root reference plus a manifest row and nothing
+else — which puts break-even near 250 bytes of encoded body and the line at
+twice that. Small composites stay inline, while composites above the line
+become leaves under stable logical keys. Content-defined chunking is deferred.
+It may later operate inside one oversized leaf, as Git added packfile deltas
+beneath its tree/blob model, without changing the checkpoint contract.
 
 Root and value leaves use typed MessagePack. File leaves contain their verbatim
 raw bytes. Encoding observes these normative rules:

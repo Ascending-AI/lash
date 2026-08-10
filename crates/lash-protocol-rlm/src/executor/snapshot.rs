@@ -1,9 +1,9 @@
-use lashlang::State as FlowState;
 use thiserror::Error;
 
-// v6 cuts persisted Lashlang state over from marker-based JSON to canonical
-// typed MessagePack. Older snapshots are rejected, never compatibility-decoded.
-pub(super) const RLM_SNAPSHOT_VERSION: u32 = 6;
+// v7 cuts persisted execution state over from one envelope to a canonical
+// typed root plus content-addressed value/file leaves. Older snapshots are
+// rejected, never compatibility-decoded.
+pub(super) const RLM_SNAPSHOT_VERSION: u32 = 7;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -23,15 +23,30 @@ pub(crate) enum RlmSnapshotError {
     VersionMismatch { expected: u32, found: u32 },
     #[error("RLM snapshot engine `{found}` is unsupported; expected `lashlang`")]
     EngineMismatch { found: String },
+    #[error(
+        "RLM snapshot logical key `{logical_key}` references missing leaf component `{component}`"
+    )]
+    MissingLeaf {
+        logical_key: String,
+        component: String,
+    },
+    #[error(
+        "RLM snapshot logical key `{logical_key}` references leaf component `{component}` whose content address is `{actual_component}`"
+    )]
+    LeafHashMismatch {
+        logical_key: String,
+        component: String,
+        actual_component: String,
+    },
+    #[error(
+        "RLM snapshot root/leaf set is inconsistent; missing={missing:?}, unexpected={unexpected:?}"
+    )]
+    LeafSetMismatch {
+        missing: Vec<String>,
+        unexpected: Vec<String>,
+    },
+    #[error("RLM scratch-file snapshot is invalid: {0}")]
+    Scratch(#[from] super::files::ScratchFileError),
     #[error("RLM canonical Lashlang snapshot is invalid: {0}")]
     Lashlang(#[from] lashlang::SnapshotDecodeError),
-}
-
-pub(super) fn snapshot_runtime(rlm: &FlowState) -> Result<Vec<u8>, lashlang::ContinuationError> {
-    rlm.snapshot().to_canonical_bytes()
-}
-
-pub(super) fn restore_runtime(data: &[u8]) -> Result<FlowState, RlmSnapshotError> {
-    let snapshot = lashlang::Snapshot::from_canonical_bytes(data)?;
-    Ok(FlowState::from_snapshot(snapshot))
 }

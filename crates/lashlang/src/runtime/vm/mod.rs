@@ -228,6 +228,7 @@ pub struct Vm<'a, H> {
     pending_error_span: Option<Span>,
     instructions_executed: u64,
     active_execution_elapsed: Duration,
+    assigned_globals: std::collections::BTreeSet<String>,
     #[cfg(test)]
     test_suspension: TestSuspension,
 }
@@ -1499,7 +1500,10 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         }
     }
 
-    fn record_assignment(&mut self, _slot: usize) {}
+    fn record_assignment(&mut self, slot: usize) {
+        self.assigned_globals
+            .insert(self.chunk.slot_names[slot].text.to_string());
+    }
 
     pub fn into_globals(self) -> Record {
         self.slots.into_globals(&self.chunk.slot_names)
@@ -1510,6 +1514,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         self.iter_stack.clear();
         scratch.stack = std::mem::take(&mut self.stack);
         scratch.iter_stack = std::mem::take(&mut self.iter_stack);
+        scratch.assigned_globals = std::mem::take(&mut self.assigned_globals);
         self.slots
             .recycle_into_globals(&self.chunk.slot_names, &mut scratch.slot_values)
     }

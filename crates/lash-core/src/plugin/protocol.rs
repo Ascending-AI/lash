@@ -125,6 +125,87 @@ pub struct ProtocolBeforeLlmCallContext {
     pub latest_prompt_usage: Option<PromptUsage>,
 }
 
+/// Minimum encoded body size at which a composite protocol-owned
+/// execution-state value is persisted as its own content-addressed checkpoint
+/// leaf instead of being inlined into the execution-state root.
+///
+/// This is a checkpoint-shape decision, not a storage decision, and it is
+/// deliberately independent of any store's blob-compression profile: "is this
+/// value worth its own component" and "should these bytes be compressed" are
+/// different questions, and snapshot shape must not change because a different
+/// backend is configured.
+///
+/// The line follows from what each choice costs *per commit*, because the root
+/// is re-encoded in full on every commit while an unchanged leaf rides as a
+/// body-free reference: an inline value costs its own encoded length plus its
+/// root map entry, while a leaf costs its root reference plus its checkpoint
+/// manifest row and nothing else. Measured against the budget accounting a
+/// commit is actually charged for, an inline value costs about `len + 26` bytes
+/// per commit and a leaf a flat `~250`, so break-even sits near 250 bytes of
+/// encoded body. This line is set at twice that, which keeps every promotion a
+/// clear win rather than a marginal one and keeps the manifest — the per-commit
+/// floor of a session made of short bindings — small.
+///
+/// Above the line, per-commit bytes stop tracking retained state: a session of
+/// 300 mid-size bindings (1.09 MB retained) commits ~100 KB when one binding
+/// changes, where inlining them all commits the whole 1.09 MB every turn.
+pub const EXECUTION_STATE_LEAF_MIN_BODY_BYTES: usize = 512;
+
+/// Complete protocol-owned execution-state component update for one checkpoint.
+///
+/// `root` is the well-known execution-state root body. `components` is the
+/// complete leaf-key listing reachable from that root: a changed body submits
+/// new logical bytes, while an unchanged key reuses its resident durable ref.
+/// An absent key is deleted. An absent root requires an empty leaf set.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ExecutionStateSnapshot {
+    pub root: Option<Vec<u8>>,
+    pub components: BTreeMap<String, ExecutionStateComponentSnapshot>,
+}
+
+impl ExecutionStateSnapshot {
+    pub fn from_root(root: Option<Vec<u8>>) -> Self {
+        Self {
+            root,
+            components: BTreeMap::new(),
+        }
+    }
+
+    pub fn changed_component(&mut self, key: impl Into<String>, body: Vec<u8>) {
+        self.components
+            .insert(key.into(), ExecutionStateComponentSnapshot::Changed(body));
+    }
+
+    pub fn unchanged_component(&mut self, key: impl Into<String>) {
+        self.components
+            .insert(key.into(), ExecutionStateComponentSnapshot::Unchanged);
+    }
+
+    pub fn from_hydrated(state: HydratedExecutionState) -> Self {
+        Self {
+            root: Some(state.root),
+            components: state
+                .components
+                .into_iter()
+                .map(|(key, body)| (key, ExecutionStateComponentSnapshot::Changed(body)))
+                .collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExecutionStateComponentSnapshot {
+    Changed(Vec<u8>),
+    Unchanged,
+}
+
+/// Fully hydrated protocol-owned execution state supplied during restore.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HydratedExecutionState {
+    pub root: Vec<u8>,
+    pub components: BTreeMap<String, Vec<u8>>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProtocolLlmCallAction {
     SwitchAgentFrame { frame_id: String, task: String },
@@ -191,14 +272,55 @@ pub trait CodeExecutorPlugin: Send + Sync {
     async fn snapshot_execution_state(
         &self,
         _ctx: ProtocolSessionContext<'_>,
-    ) -> Result<Option<Vec<u8>>, crate::SessionError> {
+    ) -> Result<ExecutionStateSnapshot, crate::SessionError> {
+        Ok(ExecutionStateSnapshot::default())
+    }
+
+    /// Report whether a dirty execution-state capture *would* succeed, staging
+    /// nothing.
+    ///
+    /// Only the final turn commit stages a capture, so a capture failure
+    /// discovered there has already spent the turn's provider round trip and
+    /// tool work. The runtime therefore asks this question at every
+    /// prompt-resume-safe boundary before a provider call, and aborts the turn
+    /// there if the answer is an error. An implementation must not stage,
+    /// acknowledge, or roll back anything: it answers only whether the same
+    /// capture attempted at this instant would fail. An executor that
+    /// implements [`CodeExecutorPlugin::snapshot_execution_state`] with fallible
+    /// encoding or I/O should implement this too; the default answers "no known
+    /// obstacle".
+    async fn probe_execution_state_capture(
+        &self,
+        _ctx: ProtocolSessionContext<'_>,
+    ) -> Result<(), crate::SessionError> {
+        Ok(())
+    }
+
+    /// Complete live execution state, with every leaf body present.
+    ///
+    /// [`CodeExecutorPlugin::snapshot_execution_state`] is a checkpoint delta:
+    /// it reports unchanged leaves as body-free references, and the runtime
+    /// releases their resident bodies once the durable refs are authoritative.
+    /// Explicit administrative snapshot needs the whole state instead, so it
+    /// asks the executor rather than reassembling one from resident checkpoint
+    /// bodies. Implementations build this from live state and stage nothing.
+    /// `None` means the executor holds no snapshotable state; an executor that
+    /// implements `snapshot_execution_state` should implement this too.
+    async fn hydrated_execution_state(
+        &self,
+        _ctx: ProtocolSessionContext<'_>,
+    ) -> Result<Option<HydratedExecutionState>, crate::SessionError> {
         Ok(None)
     }
+
+    async fn acknowledge_execution_state_capture(&self) {}
+
+    async fn abort_execution_state_capture(&self) {}
 
     async fn restore_execution_state(
         &self,
         _ctx: ProtocolSessionContext<'_>,
-        _data: &[u8],
+        _state: &HydratedExecutionState,
     ) -> Result<(), crate::SessionError> {
         Ok(())
     }

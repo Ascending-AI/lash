@@ -104,11 +104,21 @@ pub struct ExecutionScratch {
     stack: Vec<Value>,
     iter_stack: Vec<IterState>,
     slot_values: Vec<Option<Value>>,
+    assigned_globals: std::collections::BTreeSet<String>,
 }
 
 impl ExecutionScratch {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Returns and clears the top-level globals assigned by the last execution.
+    ///
+    /// The VM records assignment roots while it executes, including nested
+    /// path assignments. Callers use this to persist only values that may have
+    /// changed without comparing or re-encoding the complete global map.
+    pub fn take_assigned_globals(&mut self) -> std::collections::BTreeSet<String> {
+        std::mem::take(&mut self.assigned_globals)
     }
 }
 
