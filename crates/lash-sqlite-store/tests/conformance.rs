@@ -13,7 +13,8 @@ use lash_core::testing::conformance::{
     GraphFactObservation, GraphIntegrityCorruption, GraphIntegrityHandles, GraphIntegrityInjector,
     GraphIntegrityRead, GraphIntegrityTarget, LineageConformanceHandles,
     LineageConformanceInjector, ReopenableProcessRegistry, ReopenableRuntimePersistence,
-    ReopenableTriggerStore,
+    ReopenableTriggerStore, SessionExecutionLeaseRenewalZeroRowHandles,
+    SessionExecutionLeaseRenewalZeroRowInjector,
 };
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
@@ -239,6 +240,59 @@ fn open_store_with_clock(
             .await
             .expect("file store with conformance clock")
     })) as Arc<dyn RuntimePersistence>
+}
+
+struct SqliteSessionExecutionLeaseRenewalZeroRowInjector {
+    path: PathBuf,
+    _dir: TempDir,
+}
+
+#[async_trait::async_trait]
+impl SessionExecutionLeaseRenewalZeroRowInjector
+    for SqliteSessionExecutionLeaseRenewalZeroRowInjector
+{
+    async fn arm(&self, session_id: &str) {
+        assert_eq!(session_id, "zero-row-session-lease-renewal");
+        rusqlite::Connection::open(&self.path)
+            .expect("open SQLite zero-row renewal injector")
+            .execute_batch(
+                "CREATE TRIGGER lash_test_session_lease_renewal_zero_row
+                 BEFORE UPDATE OF lease_expires_at_ms ON session_execution_leases
+                 WHEN OLD.session_id = 'zero-row-session-lease-renewal'
+                 BEGIN
+                     SELECT RAISE(IGNORE);
+                 END;",
+            )
+            .expect("arm SQLite zero-row renewal trigger");
+    }
+
+    async fn disarm(&self) {
+        rusqlite::Connection::open(&self.path)
+            .expect("open SQLite zero-row renewal injector for cleanup")
+            .execute_batch("DROP TRIGGER lash_test_session_lease_renewal_zero_row;")
+            .expect("disarm SQLite zero-row renewal trigger");
+    }
+}
+
+#[tokio::test]
+async fn sqlite_zero_row_session_execution_lease_renewal_is_refused() {
+    let dir = tempfile::tempdir().expect("SQLite zero-row renewal tempdir");
+    let path = dir.path().join("zero-row-renewal.db");
+    let store = Arc::new(
+        Store::open(&path)
+            .await
+            .expect("open SQLite zero-row renewal store"),
+    );
+    lash_core::testing::conformance::session_execution_lease_zero_row_renewal_is_refused(
+        SessionExecutionLeaseRenewalZeroRowHandles {
+            store: store as Arc<dyn RuntimePersistence>,
+            injector: Arc::new(SqliteSessionExecutionLeaseRenewalZeroRowInjector {
+                path,
+                _dir: dir,
+            }),
+        },
+    )
+    .await;
 }
 
 fn artifact_store_handles(

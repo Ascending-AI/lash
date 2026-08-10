@@ -125,6 +125,27 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
                 session_id: fence.session_id.clone(),
             });
         }
+        #[cfg(test)]
+        if self
+            .force_next_session_execution_lease_renewal_zero_match
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            crate::store_backend_support::trace_session_execution_lease_refusal(
+                crate::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,
+                "conditional_update_did_not_match",
+                "in_memory_write_transaction",
+                fence,
+                crate::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
+                    current.owner.as_ref(),
+                    current.lease_token.as_deref(),
+                ),
+            );
+            return Err(
+                crate::store::StoreError::SessionExecutionLeaseRenewalRefused {
+                    session_id: fence.session_id.clone(),
+                },
+            );
+        }
         current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
         let renewed = crate::SessionExecutionLease {
             session_id: fence.session_id.clone(),

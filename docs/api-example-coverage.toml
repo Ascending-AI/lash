@@ -50770,6 +50770,62 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::RuntimeRebuildBackend::process_registry to the agent-workbench durable process flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::SessionExecutionLeaseRenewalZeroRowHandles"
+kind = "struct"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance bundle supplies the runtime persistence and zero-row renewal injector exercised by all bundled stores."
+
+[[api]]
+symbol = "lash::testing::conformance::SessionExecutionLeaseRenewalZeroRowHandles::injector"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance seam supplies the implementation-specific zero-row renewal control."
+
+[[api]]
+symbol = "lash::testing::conformance::SessionExecutionLeaseRenewalZeroRowHandles::store"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance seam supplies the runtime persistence under test."
+
+[[api]]
+symbol = "lash::testing::conformance::SessionExecutionLeaseRenewalZeroRowInjector"
+kind = "trait"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance seam implemented by in-memory, SQLite, and PostgreSQL zero-row renewal test adapters."
+
+[[api]]
+symbol = "lash::testing::conformance::SessionExecutionLeaseRenewalZeroRowInjector::arm"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance hook forces the next already-validated conditional renewal mutation to match no lease."
+
+[[api]]
+symbol = "lash::testing::conformance::SessionExecutionLeaseRenewalZeroRowInjector::disarm"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance hook removes the implementation-specific zero-row renewal control after the law runs."
+
+[[api]]
+symbol = "lash::testing::conformance::session_execution_lease_zero_row_renewal_is_refused"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend conformance law is executed by the in-memory, SQLite, and PostgreSQL store test suites."
+
+[[api]]
 symbol = "lash::testing::conformance::SessionGraphContractOp"
 kind = "enum"
 availability = "all-features"

@@ -237,6 +237,13 @@ impl InMemorySessionStore {
             .lock_recover() = Some(error);
     }
 
+    /// Make the next already-validated conditional renewal mutation match no
+    /// lease, mirroring a zero-row compare-and-set result in a SQL backend.
+    pub(crate) fn force_next_session_execution_lease_renewal_zero_match(&self) {
+        self.force_next_session_execution_lease_renewal_zero_match
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
     /// Replace the next successful backend renewal response without changing
     /// the durable row, emulating a corrupt or mis-targeted backend result.
     pub(crate) fn respond_to_next_session_execution_lease_renewal_with(

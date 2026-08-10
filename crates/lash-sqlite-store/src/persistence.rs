@@ -1167,7 +1167,7 @@ impl SessionExecutionLeaseStore for Store {
                         "session_execution_lease_expires_at_ms",
                         expires_at,
                     )?;
-                    tx.execute(
+                    let renewed = tx.execute(
                         "UPDATE session_execution_leases
                          SET lease_expires_at_ms = ?5
                          WHERE session_id = ?1
@@ -1183,6 +1183,21 @@ impl SessionExecutionLeaseStore for Store {
                         ],
                     )
                     .map_err(sqlite_error)?;
+                    if renewed != 1 {
+                        lash_core::store_backend_support::trace_session_execution_lease_refusal(
+                            lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,
+                            "conditional_update_did_not_match",
+                            "sqlite_write_transaction",
+                            &fence,
+                            lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
+                                current.owner.as_ref(),
+                                current.lease_token.as_deref(),
+                            ),
+                        );
+                        return Err(StoreError::SessionExecutionLeaseRenewalRefused {
+                            session_id: fence.session_id.clone(),
+                        });
+                    }
                     Ok(SessionExecutionLease {
                         session_id: fence.session_id,
                         owner: fence.owner,

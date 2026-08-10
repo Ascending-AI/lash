@@ -39,6 +39,7 @@ mod process_registry;
 mod process_trigger_retention;
 mod runtime_persistence;
 mod runtime_persistence_state_machine;
+mod session_execution_lease_renewal;
 mod session_graph_append;
 mod session_graph_state_machine;
 mod session_store_factory;
@@ -65,6 +66,7 @@ pub use process_registry::*;
 pub use process_trigger_retention::*;
 pub use runtime_persistence::*;
 pub use runtime_persistence_state_machine::*;
+pub use session_execution_lease_renewal::*;
 pub use session_graph_append::*;
 pub use session_graph_state_machine::*;
 pub use session_store_factory::*;
@@ -525,6 +527,35 @@ mod tests {
         let store = Arc::new(crate::InMemorySessionStore::with_clock(clock.clone()))
             as Arc<dyn crate::RuntimePersistence>;
         runtime_persistence_clock_expiry(store, |duration_ms| clock.advance(duration_ms)).await;
+    }
+
+    struct InMemorySessionExecutionLeaseRenewalZeroRowInjector {
+        store: Arc<crate::InMemorySessionStore>,
+    }
+
+    #[async_trait::async_trait]
+    impl SessionExecutionLeaseRenewalZeroRowInjector
+        for InMemorySessionExecutionLeaseRenewalZeroRowInjector
+    {
+        async fn arm(&self, session_id: &str) {
+            assert_eq!(session_id, "zero-row-session-lease-renewal");
+            self.store
+                .force_next_session_execution_lease_renewal_zero_match();
+        }
+
+        async fn disarm(&self) {}
+    }
+
+    #[tokio::test]
+    async fn in_memory_zero_row_session_execution_lease_renewal_is_refused() {
+        let store = Arc::new(crate::InMemorySessionStore::new());
+        session_execution_lease_zero_row_renewal_is_refused(
+            SessionExecutionLeaseRenewalZeroRowHandles {
+                store: Arc::clone(&store) as Arc<dyn RuntimePersistence>,
+                injector: Arc::new(InMemorySessionExecutionLeaseRenewalZeroRowInjector { store }),
+            },
+        )
+        .await;
     }
 
     #[tokio::test]
