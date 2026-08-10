@@ -222,6 +222,63 @@ mod tests {
         assert_eq!(originating, vec![completion()]);
     }
 
+    fn foreign_row_completion() -> crate::QueuedWorkCompletion {
+        crate::QueuedWorkCompletion {
+            session_id: "fig905".to_string(),
+            claim_id: "stale-claim".to_string(),
+            lease_token: "stale-token".to_string(),
+            data: crate::QueuedWorkCompletionData {
+                batch_ids: vec!["fig905-other-row".to_string()],
+            },
+        }
+    }
+
+    fn foreign_row_turn_input_completion() -> crate::TurnInputCompletion {
+        crate::TurnInputCompletion {
+            session_id: "fig905".to_string(),
+            claim_id: "stale-claim".to_string(),
+            lease_token: "stale-token".to_string(),
+            data: crate::TurnInputCompletionData {
+                input_ids: vec!["fig905-other-row".to_string()],
+                applications: Vec::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn recovered_queue_settlement_escape_mutates_nothing_when_only_one_side_holds_the_row() {
+        let mut completed = vec![completion()];
+        let mut originating = vec![foreign_row_completion()];
+        let generations = std::iter::once(("stale-claim".to_string(), 1)).collect();
+
+        assert!(!drop_superseded_recovered_queue_settlement(
+            &superseded_error(Some("fig905-row".into())),
+            &generations,
+            Some(2),
+            &mut completed,
+            &mut originating,
+        ));
+        assert_eq!(completed, vec![completion()]);
+        assert_eq!(originating, vec![foreign_row_completion()]);
+    }
+
+    #[test]
+    fn recovered_turn_input_settlement_escape_mutates_nothing_when_only_one_side_holds_the_row() {
+        let mut completed = vec![turn_input_completion()];
+        let mut originating = vec![foreign_row_turn_input_completion()];
+        let generations = std::iter::once(("stale-claim".to_string(), 1)).collect();
+
+        assert!(!drop_superseded_recovered_turn_input_settlement(
+            &turn_input_superseded_error(),
+            &generations,
+            Some(2),
+            &mut completed,
+            &mut originating,
+        ));
+        assert_eq!(completed, vec![turn_input_completion()]);
+        assert_eq!(originating, vec![foreign_row_turn_input_completion()]);
+    }
+
     #[test]
     fn recovered_settlement_escape_rejects_an_error_without_a_row_id() {
         let mut completed = vec![completion()];

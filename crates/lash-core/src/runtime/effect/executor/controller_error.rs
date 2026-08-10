@@ -147,6 +147,23 @@ mod tests {
     }
 
     #[test]
+    fn transient_store_failures_stay_retryable_and_non_terminal() {
+        for store_error in [
+            crate::StoreError::StorageFailure {
+                backend: "sqlite",
+                message: "database is locked".to_string(),
+            },
+            crate::StoreError::Contended,
+        ] {
+            let controller_error = RuntimeEffectControllerError::from(store_error);
+            let runtime_error = controller_error.into_runtime_error();
+            assert_eq!(runtime_error.code, crate::RuntimeErrorCode::RuntimeStore);
+            assert!(runtime_error.is_retryable());
+            assert!(!runtime_error.is_terminal());
+        }
+    }
+
+    #[test]
     fn replay_mismatch_summary_survives_runtime_error_conversion() {
         let summary = crate::RuntimeEffectReplayMismatchSummary {
             divergent_path_count: 2,

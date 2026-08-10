@@ -1585,7 +1585,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCoreBuilder::lease_timings"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:1878#.lease_timings(lease_timings)"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:1872#.lease_timings(lease_timings)"
 assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1665#takeover_latency < default_ttl,"
 
 [[api]]
@@ -8525,7 +8525,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmOutputPart::Text"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/restate.rs:540#parts: vec![LlmOutputPart::Text {"
+usage = "examples/agent-service/src/restate.rs:542#parts: vec![LlmOutputPart::Text {"
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart::Text::response_meta"
@@ -8534,7 +8534,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmOutputPart::Text::response_meta"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/restate.rs:542#response_meta: None,"
+usage = "examples/agent-service/src/restate.rs:544#response_meta: None,"
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart::Text::text"
@@ -24655,8 +24655,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2313#definition: None,"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2336#.any(|process| process.process_id == *process_id),"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2307#definition: None,"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2330#.any(|process| process.process_id == *process_id),"
 
 [[api]]
 symbol = "lash::process::ProcessListFilter::caused_by_occurrence_id"
@@ -24712,7 +24712,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter::definition"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2313#definition: None,"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2307#definition: None,"
 
 [[api]]
 symbol = "lash::process::ProcessListFilter::identity_kind"
@@ -24782,7 +24782,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter::waiting"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2315#waiting: None,"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2309#waiting: None,"
 
 [[api]]
 symbol = "lash::process::ProcessListMode"
@@ -27421,8 +27421,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2320#.list(&filter)"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2337#\"remote process list did not include started process {process_id}\""
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2314#.list(&filter)"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2331#\"remote process list did not include started process {process_id}\""
 
 [[api]]
 symbol = "lash::process::Processes::list_observed_by"
@@ -27481,8 +27481,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2343#.session_snapshot(session_id)"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2354#assert_eq!(round_trip_snapshot.session_id, session_id);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2337#.session_snapshot(session_id)"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2348#assert_eq!(round_trip_snapshot.session_id, session_id);"
 
 [[api]]
 symbol = "lash::process::Processes::signal"
@@ -29215,7 +29215,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmResponse"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/restate.rs:538#Ok(LlmResponse {"
+usage = "examples/agent-service/src/restate.rs:540#Ok(LlmResponse {"
 
 [[api]]
 symbol = "lash::provider::LlmResponse::execution_evidence"
@@ -29233,7 +29233,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmResponse::full_text"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/restate.rs:539#full_text: text.to_string(),"
+usage = "examples/agent-service/src/restate.rs:541#full_text: text.to_string(),"
 
 [[api]]
 symbol = "lash::provider::LlmResponse::generation_disposition"
@@ -29260,7 +29260,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmResponse::parts"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/restate.rs:540#parts: vec![LlmOutputPart::Text {"
+usage = "examples/agent-service/src/restate.rs:542#parts: vec![LlmOutputPart::Text {"
 
 [[api]]
 symbol = "lash::provider::LlmResponse::provider_usage"
@@ -29287,7 +29287,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmResponse::response_metadata"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/restate.rs:544#response_metadata: Default::default(),"
+usage = "examples/agent-service/src/restate.rs:546#response_metadata: Default::default(),"
 
 [[api]]
 symbol = "lash::provider::LlmResponse::terminal_diagnostic"
@@ -39034,8 +39034,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2271#.validate(\"WorkbenchTriggerSubscription\")"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2276#assert_eq!(&round_trip_record, record);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2265#.validate(\"WorkbenchTriggerSubscription\")"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2270#assert_eq!(&round_trip_record, record);"
 
 [[api]]
 symbol = "lash::remote::triggers::RemoteTriggerSubscriptionRecord::created_at_ms"
@@ -39227,8 +39227,8 @@ kind = "function"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2271#.validate(\"WorkbenchTriggerSubscription\")"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2276#assert_eq!(&round_trip_record, record);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2265#.validate(\"WorkbenchTriggerSubscription\")"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2270#assert_eq!(&round_trip_record, record);"
 
 [[api]]
 symbol = "lash::remote::triggers::RemoteTriggerSubscriptionRecord::wake_target"
@@ -47939,8 +47939,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ScopedEffectController"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2430#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:2399#assert_eq!(round_trip_tail, expected_tail);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2424#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:2393#assert_eq!(round_trip_tail, expected_tail);"
 
 [[api]]
 symbol = "lash::runtime::ScopedEffectController::borrowed"
@@ -47977,7 +47977,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ScopedEffectController::shared"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2430#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2424#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
 assertion = "examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs:76#assert_eq!(first_report.started_process_ids().len(), 1);"
 
 [[api]]

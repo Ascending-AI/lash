@@ -104,14 +104,13 @@ struct LiveRestateCronScenario {
 async fn start_live_restate_cron_scenario(
     data_dir_label: &str,
     provider: ProviderHandle,
-) -> Option<LiveRestateCronScenario> {
-    let ingress_url = match std::env::var("RESTATE_INGRESS_URL") {
-        Ok(value) => value,
-        Err(_) => {
-            eprintln!("skipping live Restate E2E: RESTATE_INGRESS_URL is not set");
-            return None;
-        }
-    };
+) -> LiveRestateCronScenario {
+    // The cron scenarios are `#[ignore]`d, so they only run when the recipe
+    // asked for them. Skipping on an absent ingress URL would report the live
+    // E2E green having exercised nothing; fail instead, as the recovery
+    // scenarios in the sibling file do.
+    let ingress_url = std::env::var("RESTATE_INGRESS_URL")
+        .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url = std::env::var("RESTATE_ADMIN_URL")
         .unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
     let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
@@ -161,13 +160,13 @@ async fn start_live_restate_cron_scenario(
     wait_for_restate_cron_sync(&state, &trace_path, Duration::from_secs(30)).await;
     let cron_session_id = rotate_cron_session_out_of_current(&state);
     let cron_job_key = cron_job_key_for_session(&state, &cron_session_id);
-    Some(LiveRestateCronScenario {
+    LiveRestateCronScenario {
         data_dir,
         state,
         trace_path,
         cron_session_id,
         cron_job_key,
-    })
+    }
 }
 
 async fn disable_cron_registration_for_sync_scenario(scenario: &LiveRestateCronScenario) {

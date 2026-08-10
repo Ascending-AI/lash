@@ -22,6 +22,16 @@ RELEASE_NOTES = ROOT / "scripts" / "release_notes.py"
 GATE = ROOT / "scripts" / "confidence-gate.sh"
 PUSH_GATE = ROOT / "scripts" / "push-gate.sh"
 QUARANTINE_CHECK = ROOT / "scripts" / "check_test_quarantines.py"
+PERF_SCENARIOS_RS = ROOT / "crates" / "lash-perf" / "src" / "runtime_perf" / "scenarios.rs"
+PERF_STORE_HARDENING_RS = (
+    ROOT
+    / "crates"
+    / "lash-perf"
+    / "src"
+    / "runtime_perf"
+    / "measurement"
+    / "store_hardening.rs"
+)
 CARGO_TOML = ROOT / "Cargo.toml"
 JUSTFILE = ROOT / "justfile"
 FOCUSED_SQLITE_REPRO = ROOT / "scripts" / "lash-sim-focused-sqlite-repro.sh"
@@ -59,6 +69,17 @@ def workflow_job_block(workflow: str, job_id: str) -> str:
     if next_job is None:
         return workflow[start:]
     return workflow[start : start + len(marker) + next_job.start()]
+
+
+def workflow_step_block(job_block: str, step_name: str) -> str:
+    marker = f"      - name: {step_name}\n"
+    start = job_block.index(marker)
+    next_step = re.search(
+        r"^      - name: ", job_block[start + len(marker) :], re.MULTILINE
+    )
+    if next_step is None:
+        return job_block[start:]
+    return job_block[start : start + len(marker) + next_step.start()]
 
 
 def shell_function_body(script: str, function_name: str) -> str:
@@ -603,6 +624,22 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for workflow_with_postgres in (perf, release):
             self.assertIn("LASH_POSTGRES_DATABASE_URL:", workflow_with_postgres)
 
+        # These two legs run no `cargo test`, so they carry no
+        # `LASH_REQUIRE_POSTGRES`: their Postgres service exists for one
+        # consumer, the store-hardening perf scenario, which refuses to run
+        # without the URL instead of degrading to a SQLite-only measurement.
+        # Pin both halves — a deleted scenario would leave the service
+        # decorative, and a softened refusal would turn a missing database into
+        # a green perf report with silently fewer phases.
+        perf_scenarios = PERF_SCENARIOS_RS.read_text(encoding="utf-8")
+        perf_store_hardening = PERF_STORE_HARDENING_RS.read_text(encoding="utf-8")
+        self.assertIn('"store_hardening_hot_paths"', perf_scenarios)
+        self.assertIn(
+            'std::env::var("LASH_POSTGRES_DATABASE_URL").map_err(',
+            perf_store_hardening,
+        )
+        self.assertNotIn("skipping", perf_store_hardening)
+
     def test_secret_bearing_workflows_pin_external_actions_by_sha(self) -> None:
         for path in (RELEASE_WORKFLOW, DOCS_PAGES_WORKFLOW):
             workflow = path.read_text(encoding="utf-8")
@@ -1018,6 +1055,31 @@ derive_mutation_jobs() {{
 
         self.assertIn('LASH_REQUIRE_POSTGRES: "1"', workflow)
         self.assertIn('LASH_CROSS_BACKEND_CASES: "4"', postgres_store_job)
+
+        # Every live-Postgres step needs the flag on its OWN env block. Without
+        # it the suites short-circuit on the absent URL, print a skip reason and
+        # report `ok` — the cross-backend differential reports "ok in 0.00s"
+        # with `compared_backends=[]`, so losing the flag from one step silently
+        # returns the differential to comparing nothing. A workflow-wide
+        # `assertIn` cannot see that: the sibling step still carries the flag.
+        for step_name in (
+            "Test Postgres store (conformance)",
+            "Test cross-backend store differential",
+        ):
+            with self.subTest(step=step_name):
+                step = workflow_step_block(postgres_store_job, step_name)
+                self.assertIn("LASH_POSTGRES_DATABASE_URL:", step)
+                self.assertIn('LASH_REQUIRE_POSTGRES: "1"', step)
+
+        # The differential's skip reason and its `compared_backends` inventory
+        # go to stderr, which libtest swallows for a passing test: uncaptured
+        # output is what makes a real run distinguishable from a skipped one.
+        self.assertIn(
+            "--no-capture",
+            workflow_step_block(
+                postgres_store_job, "Test cross-backend store differential"
+            ),
+        )
         self.assertIn(
             'LASH_CROSS_BACKEND_CASES="${LASH_CROSS_BACKEND_PR_CASES:-4}"',
             push_gate,
@@ -1051,6 +1113,18 @@ derive_mutation_jobs() {{
         )
         self.assertIn('LASH_REQUIRE_MINIO: "1"', s3_store_job)
         self.assertIn("attachment_blob_store_differential_agrees", s3_store_job)
+
+        # Same per-step rule as the Postgres lane: both MinIO steps skip green
+        # on an absent endpoint, so each needs the require flag in its own env
+        # block rather than relying on its sibling's.
+        for step_name in (
+            "Test S3 store conformance",
+            "Test attachment blob-store differential",
+        ):
+            with self.subTest(step=step_name):
+                step = workflow_step_block(s3_store_job, step_name)
+                self.assertIn("LASH_MINIO_ENDPOINT:", step)
+                self.assertIn('LASH_REQUIRE_MINIO: "1"', step)
 
     def test_generated_postgres_dynamic_rerun_is_bounded_and_artifacted(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
