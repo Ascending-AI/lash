@@ -433,7 +433,7 @@ pub(super) async fn run_generated_workload(
         cross_session_isolation(&final_summary),
         observer_convergence(&final_summary),
         runtime_session_graph_contract(&final_summary),
-        runtime_graph_acyclic(&events),
+        runtime_graph_acyclic(&durable_writes),
         runtime_single_active_agent_frame(&events),
         runtime_usage_monotonic(&events),
         checkpoint_usage_conservation(&durable_writes),
