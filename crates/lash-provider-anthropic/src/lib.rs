@@ -185,7 +185,8 @@ mod tests {
             "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\n",
             "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n",
             "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call-1\",\"name\":\"lookup\",\"input\":{}}}\n\n",
-            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"q\\\":\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"q\\\":\\\"x\\\"}\"}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
             "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":3}}\n\n"
         );
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
@@ -219,10 +220,102 @@ mod tests {
                 .any(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
         );
         assert!(
+            events
+                .lock_recover()
+                .iter()
+                .any(|event| matches!(event, LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })))
+        );
+    }
+
+    #[tokio::test]
+    async fn anthropic_mid_arguments_eof_keeps_partial_without_emitting_tool_call() {
+        let body = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":8}}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call-1\",\"name\":\"lookup\",\"input\":{}}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"q\\\":\"}}\n\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":3}}\n\n"
+        );
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let event_sink = Arc::clone(&events);
+        let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+        req.stream_events = Some(LlmEventSender::new(move |event| {
+            event_sink.lock_recover().push(event);
+        }));
+        let mut provider =
+            AnthropicProvider::new("key").with_transport(Arc::new(StaticSseTransport(body)));
+
+        let error = provider
+            .complete(req)
+            .await
+            .expect_err("EOF mid-arguments must fail without message_stop");
+        let partial = error.partial_response.as_deref().expect("partial response");
+        let input_json = partial.parts.iter().find_map(|part| match part {
+            LlmOutputPart::ToolCall { input_json, .. } => Some(input_json.as_str()),
+            _ => None,
+        });
+
+        assert_eq!(input_json, Some("{\"q\":"));
+        assert!(
             events.lock_recover().iter().all(|event| !matches!(
                 event,
                 LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })
             ))
+        );
+    }
+
+    #[test]
+    fn duplicate_content_block_stop_is_deduped_on_abort_by_call_id() {
+        let mut state = StreamState::default();
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let event_sink = Arc::clone(&events);
+        let sender = LlmEventSender::new(move |event| {
+            event_sink.lock_recover().push(event);
+        });
+        let wire = [
+            json!({ "type": "message_start", "message": { "usage": { "input_tokens": 1 } } }),
+            json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "tool_use", "id": "call_abort", "name": "lookup", "input": {} } }),
+            json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "input_json_delta", "partial_json": "{\"q\":\"x\"}" } }),
+            json!({ "type": "content_block_stop", "index": 0 }),
+            json!({ "type": "content_block_stop", "index": 0 }),
+        ];
+        for event in wire {
+            AnthropicProvider::process_sse_event(
+                &event.to_string(),
+                &mut state,
+                Some(&sender),
+                true,
+            )
+            .expect("anthropic SSE event parses");
+        }
+
+        let stream_events = events.lock_recover().clone();
+        let emitted_tool_calls = stream_events
+            .iter()
+            .filter(|event| matches!(event, LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })))
+            .count();
+        let aborted = lash_core::testing::response_synthesized_from_aborted_stream(&stream_events);
+        let aborted_tool_calls = aborted
+            .parts
+            .iter()
+            .filter(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
+            .count();
+        let (finalized, _, _, _) = AnthropicProvider::finalize(state);
+        let finalized_tool_calls = finalized
+            .iter()
+            .filter(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
+            .count();
+
+        assert_eq!(
+            emitted_tool_calls, 2,
+            "fixture must exercise duplicate emission"
+        );
+        assert_eq!(
+            finalized_tool_calls, 1,
+            "finalization walks each block once"
+        );
+        assert_eq!(
+            aborted_tool_calls, 1,
+            "emitted_part_tool_calls={emitted_tool_calls} abort_synthesized_tool_calls={aborted_tool_calls} finalized_response_tool_calls={finalized_tool_calls}"
         );
     }
 
@@ -1117,6 +1210,19 @@ mod tests {
                             json!({ "q": "x" }),
                         )
                     }
+                    Scenario::StreamingToolCallAbortEquivalence => {
+                        ProviderWire::body(Value::Null).with_aborted_tool_call_stream(
+                            vec![
+                                json!({ "type": "message_start", "message": { "usage": { "input_tokens": U::BASE_INPUT } } }).to_string(),
+                                json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "tool_use", "id": "call_abort", "name": "lookup", "input": {} } }).to_string(),
+                                json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "input_json_delta", "partial_json": "{\"q\":" } }).to_string(),
+                                json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "input_json_delta", "partial_json": "\"x\"}" } }).to_string(),
+                                json!({ "type": "content_block_stop", "index": 0 }).to_string(),
+                            ],
+                            "lookup",
+                            json!({ "q": "x" }),
+                        )
+                    }
                     Scenario::UsageCacheHit => ProviderWire::body(text_message(
                         "end_turn",
                         "ok",
@@ -1196,12 +1302,22 @@ mod tests {
                 sse_events: &[String],
             ) -> StreamAssembly {
                 let mut state = StreamState::default();
+                let stream_events = Arc::new(std::sync::Mutex::new(Vec::new()));
+                let event_sink = Arc::clone(&stream_events);
+                let sender = LlmEventSender::new(move |event| {
+                    event_sink.lock_recover().push(event);
+                });
                 for raw in sse_events {
-                    AnthropicProvider::process_sse_event(raw, &mut state, None, true)
+                    AnthropicProvider::process_sse_event(raw, &mut state, Some(&sender), true)
                         .expect("anthropic sse event parses");
                 }
                 let (parts, _text, usage, _terminal) = AnthropicProvider::finalize(state);
-                StreamAssembly { parts, usage }
+                let stream_events = stream_events.lock_recover().clone();
+                StreamAssembly {
+                    parts,
+                    usage,
+                    stream_events,
+                }
             }
 
             fn build_next_request(&self, messages: Vec<LlmMessage>) -> Value {

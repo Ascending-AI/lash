@@ -856,11 +856,10 @@ impl RuntimeTurnDriver<'_> {
             *state.abort_requested = true;
         }
         for reasoning_delta in outcome.reasoning_deltas {
-            state.stream_accumulator.push_reasoning(
-                reasoning_delta.clone(),
-                None,
-                Vec::new(),
-                None,
+            fold_llm_stream_event(
+                state.stream_accumulator,
+                state.streamed_usage,
+                &LlmStreamEvent::ReasoningDelta(reasoning_delta.clone()),
             );
             let correlation_id = stream_correlation_id(state.reasoning_correlation, None);
             remember_attempt_correlation(state.reasoning_attempt_correlations, &correlation_id);
@@ -886,7 +885,11 @@ impl RuntimeTurnDriver<'_> {
             },
         );
         if !text.is_empty() {
-            state.stream_accumulator.push_text(&text);
+            fold_llm_stream_event(
+                state.stream_accumulator,
+                state.streamed_usage,
+                &LlmStreamEvent::Delta(text.clone()),
+            );
             let correlation_id = stream_correlation_id(state.assistant_prose_correlation, item_id);
             remember_attempt_correlation(
                 state.assistant_prose_attempt_correlations,
@@ -926,8 +929,11 @@ impl RuntimeTurnDriver<'_> {
                         )
                         .await;
                 }
-                *state.stream_accumulator = LlmStreamAccumulator::default();
-                *state.streamed_usage = LlmUsage::default();
+                fold_llm_stream_event(
+                    state.stream_accumulator,
+                    state.streamed_usage,
+                    &LlmStreamEvent::AttemptReset,
+                );
                 *state.text_streamed = false;
                 *state.assistant_prose_correlation = None;
                 *state.reasoning_correlation = None;
@@ -955,9 +961,11 @@ impl RuntimeTurnDriver<'_> {
                     // Delta-only streaming path (fix 1.3a display). No
                     // encrypted content yet — that arrives with the full
                     // item on `output_item.done` (fix 1.3b).
-                    state
-                        .stream_accumulator
-                        .push_reasoning(delta.clone(), None, Vec::new(), None);
+                    fold_llm_stream_event(
+                        state.stream_accumulator,
+                        state.streamed_usage,
+                        &LlmStreamEvent::ReasoningDelta(delta.clone()),
+                    );
                     let correlation_id = stream_correlation_id(state.reasoning_correlation, None);
                     remember_attempt_correlation(
                         state.reasoning_attempt_correlations,
@@ -985,7 +993,14 @@ impl RuntimeTurnDriver<'_> {
                         tool_call: None,
                     },
                 );
-                state.stream_accumulator.push_text_part(text, response_meta);
+                fold_llm_stream_event(
+                    state.stream_accumulator,
+                    state.streamed_usage,
+                    &LlmStreamEvent::Part(LlmOutputPart::Text {
+                        text,
+                        response_meta,
+                    }),
+                );
             }
             LlmStreamEvent::Part(LlmOutputPart::ToolCall {
                 call_id,
@@ -1012,9 +1027,16 @@ impl RuntimeTurnDriver<'_> {
                         }),
                     },
                 );
-                state
-                    .stream_accumulator
-                    .push_tool_call(call_id, tool_name, input_json, replay);
+                fold_llm_stream_event(
+                    state.stream_accumulator,
+                    state.streamed_usage,
+                    &LlmStreamEvent::Part(LlmOutputPart::ToolCall {
+                        call_id,
+                        tool_name,
+                        input_json,
+                        replay,
+                    }),
+                );
             }
             LlmStreamEvent::Part(LlmOutputPart::Reasoning { text, replay }) => {
                 let item_id = replay.as_ref().and_then(|meta| meta.item_id.as_deref());
@@ -1045,9 +1067,11 @@ impl RuntimeTurnDriver<'_> {
                         text.clone(),
                     );
                 }
-                state
-                    .stream_accumulator
-                    .push_reasoning_with_replay(text, replay);
+                fold_llm_stream_event(
+                    state.stream_accumulator,
+                    state.streamed_usage,
+                    &LlmStreamEvent::Part(LlmOutputPart::Reasoning { text, replay }),
+                );
             }
             LlmStreamEvent::Usage(usage) => {
                 self.log_llm_stream_event(
@@ -1064,7 +1088,11 @@ impl RuntimeTurnDriver<'_> {
                         tool_call: None,
                     },
                 );
-                *state.streamed_usage = usage;
+                fold_llm_stream_event(
+                    state.stream_accumulator,
+                    state.streamed_usage,
+                    &LlmStreamEvent::Usage(usage),
+                );
             }
             LlmStreamEvent::RetryStatus {
                 wait_seconds,

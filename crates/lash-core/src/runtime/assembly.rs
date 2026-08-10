@@ -12,8 +12,8 @@ use std::collections::BTreeMap;
 
 use crate::ToolCallRecord;
 use crate::llm::types::{
-    LlmOutputPart, LlmResponse, LlmUsage, ProviderReasoningReplay, ProviderReplayMeta,
-    ResponseTextMeta,
+    LlmOutputPart, LlmResponse, LlmStreamEvent, LlmUsage, ProviderReasoningReplay,
+    ProviderReplayMeta, ResponseTextMeta,
 };
 use crate::session_model::{MessageRole, PartKind, SessionStreamEvent, TokenUsage};
 use crate::{TurnFinish, TurnOutcome, TurnStop};
@@ -236,6 +236,11 @@ impl LlmStreamAccumulator {
         input_json: String,
         replay: Option<ProviderReplayMeta>,
     ) {
+        if self.parts.iter().any(|part| {
+            matches!(part, LlmOutputPart::ToolCall { call_id: existing, .. } if existing == &call_id)
+        }) {
+            return;
+        }
         self.parts.push(LlmOutputPart::ToolCall {
             call_id,
             tool_name,
@@ -345,6 +350,43 @@ impl LlmStreamAccumulator {
         if response.full_text.is_empty() {
             response.full_text = crate::visible_response_text_from_parts(&response.parts);
         }
+    }
+}
+
+pub(super) fn fold_llm_stream_event(
+    accumulator: &mut LlmStreamAccumulator,
+    usage: &mut LlmUsage,
+    event: &LlmStreamEvent,
+) {
+    match event {
+        LlmStreamEvent::AttemptReset => {
+            *accumulator = LlmStreamAccumulator::default();
+            *usage = LlmUsage::default();
+        }
+        LlmStreamEvent::Delta(text) => accumulator.push_text(text),
+        LlmStreamEvent::ReasoningDelta(text) => {
+            accumulator.push_reasoning(text.clone(), None, Vec::new(), None);
+        }
+        LlmStreamEvent::Part(LlmOutputPart::Text {
+            text,
+            response_meta,
+        }) => accumulator.push_text_part(text.clone(), response_meta.clone()),
+        LlmStreamEvent::Part(LlmOutputPart::ToolCall {
+            call_id,
+            tool_name,
+            input_json,
+            replay,
+        }) => accumulator.push_tool_call(
+            call_id.clone(),
+            tool_name.clone(),
+            input_json.clone(),
+            replay.clone(),
+        ),
+        LlmStreamEvent::Part(LlmOutputPart::Reasoning { text, replay }) => {
+            accumulator.push_reasoning_with_replay(text.clone(), replay.clone());
+        }
+        LlmStreamEvent::Usage(streamed) => *usage = streamed.clone(),
+        LlmStreamEvent::RetryStatus { .. } => {}
     }
 }
 

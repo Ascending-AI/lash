@@ -1697,6 +1697,17 @@ mod conformance {
                             json!({ "q": "x" }),
                         )
                     }
+                    Scenario::StreamingToolCallAbortEquivalence => {
+                        ProviderWire::body(json!({})).with_aborted_tool_call_stream(
+                            vec![
+                                json!({"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_abort","call_id":"call_abort","name":"lookup","arguments":""}}).to_string(),
+                                json!({"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_abort","delta":"{\"q\":\"x\"}"}).to_string(),
+                                json!({"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_abort","call_id":"call_abort","name":"lookup","arguments":"{\"q\":\"x\"}","status":"completed"}}).to_string(),
+                            ],
+                            "lookup",
+                            json!({ "q": "x" }),
+                        )
+                    }
                     Scenario::UsageCacheHit => ProviderWire::body(json!({
                         "status": "completed",
                         "output": [{
@@ -1777,15 +1788,25 @@ mod conformance {
             openai_terminal_reason_from_response_value(body, parts)
         }
 
-        fn assemble_stream(&self, _scenario: Scenario, sse_events: &[String]) -> StreamAssembly {
+        fn assemble_stream(&self, scenario: Scenario, sse_events: &[String]) -> StreamAssembly {
             let mut state = shared::ResponsesStreamState::default();
+            let mut stream_events = Vec::new();
             for raw in sse_events {
-                shared::process_sse_event(PROVIDER, raw, &mut state, None)
+                let mut emitted_parts = Vec::new();
+                let capture_parts = matches!(scenario, Scenario::StreamingToolCallAbortEquivalence)
+                    .then_some(&mut emitted_parts);
+                shared::process_sse_event(PROVIDER, raw, &mut state, capture_parts)
                     .expect("responses sse event parses");
+                stream_events.extend(
+                    emitted_parts
+                        .into_iter()
+                        .map(lash_core::llm::types::LlmStreamEvent::Part),
+                );
             }
             StreamAssembly {
                 parts: state.response_parts(),
                 usage: state.usage.clone(),
+                stream_events,
             }
         }
 

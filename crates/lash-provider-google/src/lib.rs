@@ -200,10 +200,39 @@ mod tests {
                 .any(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
         );
         assert!(
-            events.lock_recover().iter().all(|event| !matches!(
-                event,
-                LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })
-            ))
+            events
+                .lock_recover()
+                .iter()
+                .any(|event| matches!(event, LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })))
+        );
+    }
+
+    #[tokio::test]
+    async fn mixed_text_and_tool_chunk_preserves_completed_response_order_on_abort() {
+        let body = "data: {\"response\":{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"before tool\"},{\"functionCall\":{\"id\":\"call-1\",\"name\":\"lookup\",\"args\":{\"q\":\"x\"}}}]}}]}}\n\n";
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let event_sink = Arc::clone(&events);
+        let provider = GoogleOAuthProvider::new("access", "refresh", 0)
+            .with_transport(Arc::new(StaticSseTransport::new(body)));
+        let completed = provider
+            .execute_request(
+                "access",
+                json!({ "model": "gemini-test" }),
+                Some(LlmEventSender::new(move |event| {
+                    event_sink.lock_recover().push(event);
+                })),
+                None,
+                StreamTermination::RequireTerminalEvidence,
+                None,
+            )
+            .await
+            .expect("mixed text/tool stream completes");
+        let stream_events = events.lock_recover().clone();
+        let aborted = lash_core::testing::response_synthesized_from_aborted_stream(&stream_events);
+
+        assert_eq!(
+            aborted.parts, completed.parts,
+            "the abort accumulator must retain the provider's text-before-tool ordering; events were {stream_events:?}"
         );
     }
 
@@ -1302,6 +1331,24 @@ mod tests {
                         )
                     }
                     Scenario::StreamingToolArgumentMerge => return None,
+                    Scenario::StreamingToolCallAbortEquivalence => {
+                        ProviderWire::body(json!({})).with_aborted_tool_call_stream(
+                            vec![json!({
+                                "response": { "candidates": [{
+                                    "content": { "parts": [{
+                                        "functionCall": {
+                                            "id": "call_abort",
+                                            "name": "lookup",
+                                            "args": { "q": "x" }
+                                        }
+                                    }] }
+                                }] }
+                            })
+                            .to_string()],
+                            "lookup",
+                            json!({ "q": "x" }),
+                        )
+                    }
                     Scenario::UsageCacheHit => ProviderWire::body(json!({
                         "candidates": [{
                             "content": { "parts": [{ "text": "ok" }] },
@@ -1403,7 +1450,13 @@ mod tests {
                 let mut output_parts = Vec::new();
                 let mut tool_calls = Vec::new();
                 let mut finish_event = None;
+                let stream_events = Arc::new(std::sync::Mutex::new(Vec::new()));
+                let event_sink = Arc::clone(&stream_events);
+                let sender = LlmEventSender::new(move |event| {
+                    event_sink.lock_recover().push(event);
+                });
                 for raw in sse_events {
+                    let first_new_tool_call = tool_calls.len();
                     GoogleOAuthProvider::process_sse_event_with_text_parts(
                         raw,
                         crate::support::SseTextPartSink {
@@ -1419,10 +1472,17 @@ mod tests {
                         None,
                     )
                     .expect("google sse event parses");
+                    for part in &tool_calls[first_new_tool_call..] {
+                        sender.send(LlmStreamEvent::Part(part.clone()));
+                    }
                 }
                 let mut parts = output_parts;
                 parts.extend(tool_calls);
-                StreamAssembly { parts, usage }
+                StreamAssembly {
+                    parts,
+                    usage,
+                    stream_events: stream_events.lock_recover().clone(),
+                }
             }
 
             fn build_next_request(&self, messages: Vec<LlmMessage>) -> Value {

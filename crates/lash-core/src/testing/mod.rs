@@ -21,7 +21,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use crate::llm::transport::LlmTransportError;
-use crate::llm::types::{LlmRequest, LlmResponse};
+use crate::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent};
 use crate::plugin::{PluginError, SessionCreateRequest, SessionHandle, SessionSnapshot};
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
 use crate::session_model::{ConversationRecord, SessionHistoryRecord};
@@ -30,6 +30,16 @@ use crate::{
     ProviderOptions, RuntimeSessionState, SessionPolicy, TokenUsage, TurnFinish, TurnOutcome,
     TurnStop,
 };
+
+/// Synthesize the response produced when a plugin aborts an in-flight LLM
+/// stream after `events` have reached core's stream accumulator.
+///
+/// This test seam deliberately uses the production accumulator and its
+/// empty-response branch: on the abort path, those accumulated parts are the
+/// whole response rather than gap-fill input for a provider completion.
+pub fn response_synthesized_from_aborted_stream(events: &[LlmStreamEvent]) -> LlmResponse {
+    crate::runtime::response_synthesized_from_aborted_stream(events)
+}
 
 /// Controllable epoch clock shared by store and runtime conformance tests.
 #[derive(Debug)]

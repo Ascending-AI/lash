@@ -657,6 +657,11 @@ async fn drive_streaming_chat(
             } else {
                 state.take_reasoning_deltas();
             }
+            if let Some(tx) = &stream_events {
+                for part in state.take_completed_tool_call_parts() {
+                    tx.send(LlmStreamEvent::Part(part));
+                }
+            }
             Ok(())
         },
     )
@@ -682,13 +687,11 @@ async fn drive_streaming_chat(
             .with_partial_response(chat_response_from_state(state, &url)));
     }
     if let Some(tx) = &stream_events {
-        for part in parts
-            .iter()
-            .filter(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
-        {
-            tx.send(LlmStreamEvent::Part(part.clone()));
+        for part in state.take_remaining_tool_call_parts() {
+            tx.send(LlmStreamEvent::Part(part));
         }
     }
+    let parts = state.parts();
     let terminal_reason = if state.terminal_reason == LlmTerminalReason::Unknown {
         terminal_reason_from_parts(&parts)
     } else {

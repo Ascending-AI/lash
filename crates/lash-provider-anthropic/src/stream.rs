@@ -24,6 +24,27 @@ pub(crate) struct StreamBlock {
     pub(crate) redacted: bool,
 }
 
+impl StreamBlock {
+    fn tool_call_part(&self) -> Option<LlmOutputPart> {
+        if self.kind != BlockKind::ToolUse || self.tool_name.is_empty() {
+            return None;
+        }
+        let input_json = if !self.input_buffer.is_empty() {
+            self.input_buffer.clone()
+        } else if self.tool_initial_input.is_object() {
+            serde_json::to_string(&self.tool_initial_input).unwrap_or_else(|_| "{}".to_string())
+        } else {
+            "{}".to_string()
+        };
+        Some(LlmOutputPart::ToolCall {
+            call_id: self.tool_call_id.clone(),
+            tool_name: self.tool_name.clone(),
+            input_json,
+            replay: None,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum BlockKind {
     #[default]
@@ -237,8 +258,15 @@ impl AnthropicProvider {
                 }
             }
             "content_block_stop" => {
-                // No state change required — the block is finalized by later
-                // reconstruction. Anthropic does not send block content here.
+                let index = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                if let Some(tx) = stream_events
+                    && let Some(part) = state
+                        .blocks
+                        .get(index)
+                        .and_then(StreamBlock::tool_call_part)
+                {
+                    tx.send(LlmStreamEvent::Part(part));
+                }
             }
             "message_delta" => {
                 if let Some(usage) = event.get("usage") {
@@ -323,23 +351,9 @@ impl AnthropicProvider {
                     });
                 }
                 BlockKind::ToolUse => {
-                    let input_json = if !block.input_buffer.is_empty() {
-                        block.input_buffer
-                    } else if block.tool_initial_input.is_object() {
-                        serde_json::to_string(&block.tool_initial_input)
-                            .unwrap_or_else(|_| "{}".to_string())
-                    } else {
-                        "{}".to_string()
-                    };
-                    if block.tool_name.is_empty() {
-                        continue;
+                    if let Some(part) = block.tool_call_part() {
+                        parts.push(part);
                     }
-                    parts.push(LlmOutputPart::ToolCall {
-                        call_id: block.tool_call_id,
-                        tool_name: block.tool_name,
-                        input_json,
-                        replay: None,
-                    });
                 }
                 BlockKind::Unknown => {}
             }

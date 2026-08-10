@@ -2193,7 +2193,7 @@ async fn response_metadata_headers_are_preserved_on_partial_stream_responses() {
 #[tokio::test]
 async fn chat_stream_ending_without_finish_reason_is_retryable_truncation_with_partials() {
     let body = concat!(
-        "data: {\"id\":\"gen-partial\",\"model\":\"provider/model\",\"choices\":[{\"delta\":{\"content\":\"partial\",\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"q\\\":\"}}]}}]}\n\n",
+        "data: {\"id\":\"gen-partial\",\"model\":\"provider/model\",\"choices\":[{\"delta\":{\"content\":\"partial\",\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"q\\\":\\\"x\\\"}\"}}]}}]}\n\n",
         "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":4}}\n\n",
         "data: [DONE]\n\n"
     );
@@ -2231,7 +2231,7 @@ async fn chat_stream_ending_without_finish_reason_is_retryable_truncation_with_p
         events
             .lock_recover()
             .iter()
-            .all(|event| !matches!(event, LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })))
+            .any(|event| matches!(event, LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })))
     );
 }
 
