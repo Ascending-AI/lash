@@ -30,7 +30,7 @@
 //! migrations can participate.
 
 use std::sync::{Arc, OnceLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use lash_core::runtime::{
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
@@ -161,7 +161,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Version 42 replaces the fixed checkpoint slots with a complete keyed
 // component descriptor set carrying per-component encoding versions. Older
 // roots are rejected under the existing drain-and-recreate policy.
-const SCHEMA_VERSION: i32 = 42;
+// Version 43 removes the CLI-era session name, creation timestamp, model, and
+// working-directory keys from the session metadata JSON payload. Older stores
+// are rejected and recreated; there is no compatibility read path.
+const SCHEMA_VERSION: i32 = 43;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

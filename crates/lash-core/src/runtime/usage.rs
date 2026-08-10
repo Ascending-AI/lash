@@ -21,8 +21,7 @@ use lash_sansio::PromptUsage;
 pub struct TokenLedgerEntry {
     /// Caller-supplied label: `"turn"`, `"subagent"`, `"compaction"`,
     /// `"observer"`, `"reflector"`, or any plugin-defined
-    /// string. Core doesn't interpret the value; the UI uses it for
-    /// grouping and display.
+    /// string. Core treats the value as an opaque grouping key.
     pub source: String,
     /// Model identifier used for the LLM call (e.g.
     /// `"anthropic/claude-haiku-4-5"`).

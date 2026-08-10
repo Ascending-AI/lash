@@ -152,10 +152,6 @@ mod persisted_state_tests {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SessionMeta {
     pub session_id: String,
-    pub session_name: String,
-    pub created_at: String,
-    pub model: String,
-    pub cwd: Option<String>,
     pub relation: crate::SessionRelation,
 }
 
@@ -176,39 +172,26 @@ impl SessionMeta {
 pub struct SessionBinding {
     pub session_id: String,
     pub relation: crate::SessionRelation,
-    pub model_id: String,
-    pub cwd: Option<String>,
 }
 
 impl SessionBinding {
-    /// Builds a root binding for store implementors from session policy and the current working
-    /// directory when it is representable as UTF-8.
-    pub fn root(session_id: impl Into<String>, policy: &crate::SessionPolicy) -> Self {
+    /// Builds a root binding for store implementors.
+    pub fn root(session_id: impl Into<String>) -> Self {
         Self {
             session_id: session_id.into(),
             relation: crate::SessionRelation::Root,
-            model_id: policy.model.id.clone(),
-            cwd: std::env::current_dir()
-                .ok()
-                .and_then(|path| path.to_str().map(str::to_string)),
         }
     }
 
-    /// Projects the durable binding fields store implementors need from a create request, capturing
-    /// the current UTF-8 working directory when available.
+    /// Projects the durable binding fields store implementors need from a create request.
     pub fn from_create_request(request: &crate::SessionStoreCreateRequest) -> Self {
         Self {
             session_id: request.session_id.clone(),
             relation: request.relation.clone(),
-            model_id: request.policy.model.id.clone(),
-            cwd: std::env::current_dir()
-                .ok()
-                .and_then(|path| path.to_str().map(str::to_string)),
         }
     }
 
-    /// Rejects an empty session ID before store implementors admit the binding; relation, model,
-    /// and working directory do not affect admission validity.
+    /// Rejects an empty session ID before store implementors admit the binding.
     pub fn validate(&self) -> Result<(), StoreError> {
         validate_session_id(&self.session_id)
     }
@@ -230,22 +213,6 @@ pub fn validate_session_id(session_id: &str) -> Result<(), StoreError> {
         })
     } else {
         Ok(())
-    }
-}
-
-/// Lightweight session info for the resume picker.
-#[derive(Clone, Debug)]
-pub struct SessionPickerInfo {
-    pub session_id: String,
-    pub cwd: Option<String>,
-    pub relation: crate::SessionRelation,
-    pub first_user_message: String,
-    pub user_message_count: usize,
-}
-
-impl SessionPickerInfo {
-    pub fn parent_session_id(&self) -> Option<&str> {
-        self.relation.parent_session_id()
     }
 }
 
@@ -1074,7 +1041,7 @@ pub trait TurnInputStore: Send + Sync {
         input: crate::PendingTurnInputDraft,
     ) -> Result<crate::PendingTurnInput, StoreError>;
 
-    /// List pending user inputs for UI reconciliation and queue preview.
+    /// List pending user inputs available for reconciliation or queue preview.
     ///
     /// This excludes completed/cancelled rows and rows currently held by a live
     /// claim. Expired claims are visible again according to their state.

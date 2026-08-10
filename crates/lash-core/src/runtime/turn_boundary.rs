@@ -826,7 +826,7 @@ mod tests {
     ) -> (TurnBoundary, crate::SessionExecutionLease) {
         crate::SessionCommitStore::admit_and_bind_session(
             store,
-            &crate::SessionBinding::root(state.session_id.clone(), &state.policy),
+            &crate::SessionBinding::root(state.session_id.clone()),
         )
         .await
         .expect("admit turn-boundary test session");

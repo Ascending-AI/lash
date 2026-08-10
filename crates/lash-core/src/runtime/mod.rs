@@ -1488,7 +1488,7 @@ pub trait SessionStoreFactory: Send + Sync {
     }
 }
 
-/// Generic runtime for CLI or programmatic embedding.
+/// Runtime session orchestration over host-supplied services and policy.
 pub struct LashRuntime {
     pub(in crate::runtime) session: Option<Session>,
     pub(in crate::runtime) policy: SessionPolicy,

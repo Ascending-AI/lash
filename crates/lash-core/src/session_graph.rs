@@ -6,7 +6,7 @@ use crate::session_graph_integrity::{
     ancestry_indices, graph_node_indices, validate_graph_parent_topology,
 };
 use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
-use crate::{BaseRenderCache, Clock, Message, MessageRole, PromptUsage, TokenUsage};
+use crate::{BaseRenderCache, Clock, Message, PromptUsage, TokenUsage};
 use facade_ops::{SessionGraphFacadeOps, SessionNodeRecordFacadeOps};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1091,27 +1091,6 @@ impl SessionGraph {
         node_ids
     }
 
-    /// Exposes user message count to store, effect-host, and protocol implementors while
-    /// materializing, executing, or persisting a session turn.
-    pub fn user_message_count(&self) -> usize {
-        self.nodes
-            .iter()
-            .filter_map(SessionNodeRecord::message)
-            .filter(|message| matches!(message.role, MessageRole::User))
-            .count()
-    }
-
-    /// Returns normalized search text from the first user message in storage order for protocol
-    /// embedders, or an empty string when none exists.
-    pub fn first_user_message(&self) -> String {
-        self.nodes
-            .iter()
-            .filter_map(SessionNodeRecord::message)
-            .find(|message| matches!(message.role, MessageRole::User))
-            .map(|message| first_message_search_text(&message))
-            .unwrap_or_default()
-    }
-
     /// Updates leaf node id state for store, effect-host, and protocol implementors while
     /// materializing, executing, or persisting a session turn.
     pub fn set_leaf_node_id(&mut self, node_id: Option<String>) {
@@ -1487,21 +1466,6 @@ fn next_replacement_draft_node_id(
         }
     }
     unreachable!("draft node id space exhausted")
-}
-
-fn first_message_search_text(message: &Message) -> String {
-    message
-        .parts
-        .iter()
-        .filter_map(|part| match part.kind {
-            crate::PartKind::ToolCall | crate::PartKind::ToolResult => None,
-            crate::PartKind::Attachment => Some("[Attachment]".to_string()),
-            _ => (!part.content.trim().is_empty()).then(|| part.content.clone()),
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n")
-        .trim()
-        .to_string()
 }
 
 #[cfg(test)]

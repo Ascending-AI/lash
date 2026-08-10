@@ -520,10 +520,6 @@ impl SessionCommitStore for RuntimePerfStore {
         }
         *meta = Some(store::SessionMeta {
             session_id: binding.session_id.clone(),
-            session_name: binding.session_id.clone(),
-            created_at: "test".to_string(),
-            model: binding.model_id.clone(),
-            cwd: binding.cwd.clone(),
             relation: binding.relation.clone(),
         });
         Ok(lash_core::SessionAdmission::Created)

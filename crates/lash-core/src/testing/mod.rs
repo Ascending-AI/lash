@@ -1149,7 +1149,7 @@ mod test_protocol_fakes {
             )
             .await;
         for ((index, invocation), outcome) in parallel_specs.into_iter().zip(outcomes) {
-            let tool_label = invocation.label();
+            let tool_label = invocation.tool_id.to_string();
             let tool_record = outcome.record.unwrap_or(crate::ToolCallRecord {
                 call_id: Some(invocation.id),
                 tool: tool_label,

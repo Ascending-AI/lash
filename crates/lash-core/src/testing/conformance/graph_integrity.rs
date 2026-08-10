@@ -128,7 +128,7 @@ async fn run_case(
         .append_plugin("graph-integrity", serde_json::json!({"case": case}));
     handles
         .runtime
-        .admit_and_bind_session(&crate::SessionBinding::root(&session_id, &state.policy))
+        .admit_and_bind_session(&crate::SessionBinding::root(&session_id))
         .await
         .expect("admit graph-integrity session");
     handles

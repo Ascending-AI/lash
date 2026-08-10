@@ -170,10 +170,6 @@ pub(super) struct UsageDeltaObservation {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct SessionMetaObservation {
-    pub(super) session_name: String,
-    pub(super) created_at: String,
-    pub(super) model: String,
-    pub(super) cwd: Option<String>,
     pub(super) relation: SessionRelation,
 }
 

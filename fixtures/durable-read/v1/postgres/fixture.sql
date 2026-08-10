@@ -792,7 +792,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 42);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 43);
 
 
 --
@@ -806,7 +806,7 @@ INSERT INTO lash_durable_read_fixture.lash_session_execution_leases VALUES ('dur
 -- Data for Name: lash_session_meta; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', '{"session_id":"durable-read-fixture","session_name":"durable-read-fixture","created_at":"2023-11-14T22:13:20+00:00","model":"","cwd":null,"relation":{"kind":"root"}}');
+INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', '{"session_id":"durable-read-fixture","relation":{"kind":"root"}}');
 
 
 --

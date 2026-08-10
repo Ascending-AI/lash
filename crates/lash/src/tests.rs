@@ -91,10 +91,6 @@ impl SnapshotStore {
         let turn_state = state.turn_state();
         let session_meta = lash_core::SessionMeta {
             session_id: state.session_id.clone(),
-            session_name: state.session_id.clone(),
-            created_at: "test".to_string(),
-            model: state.policy.model.id.clone(),
-            cwd: None,
             relation: lash_core::SessionRelation::Root,
         };
         let config = lash_core::PersistedSessionConfig {
@@ -181,10 +177,6 @@ impl lash_core::SessionCommitStore for SnapshotStore {
         }
         *meta = Some(lash_core::SessionMeta {
             session_id: binding.session_id.clone(),
-            session_name: binding.session_id.clone(),
-            created_at: "test".to_string(),
-            model: binding.model_id.clone(),
-            cwd: binding.cwd.clone(),
             relation: binding.relation.clone(),
         });
         Ok(lash_core::SessionAdmission::Created)
@@ -251,10 +243,6 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             if session_meta.is_none() {
                 *session_meta = Some(lash_core::SessionMeta {
                     session_id: commit.session_id.clone(),
-                    session_name: commit.session_id.clone(),
-                    created_at: "test".to_string(),
-                    model: commit.config.model.id.clone(),
-                    cwd: None,
                     relation: lash_core::SessionRelation::Root,
                 });
             }
@@ -803,10 +791,6 @@ impl lash_core::SessionCommitStore for BoundSessionStore {
     ) -> std::result::Result<Option<lash_core::SessionMeta>, lash_core::store::StoreError> {
         Ok(Some(lash_core::SessionMeta {
             session_id: self.session_id.clone(),
-            session_name: self.session_id.clone(),
-            created_at: "test".to_string(),
-            model: "mock-model".to_string(),
-            cwd: None,
             relation: lash_core::SessionRelation::Root,
         }))
     }

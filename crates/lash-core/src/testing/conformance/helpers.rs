@@ -47,12 +47,8 @@ pub(crate) async fn bind_conformance_session(
     store: &Arc<dyn RuntimePersistence>,
     session_id: &str,
 ) {
-    let state = RuntimeSessionState {
-        session_id: session_id.to_string(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
     store
-        .admit_and_bind_session(&crate::SessionBinding::root(session_id, &state.policy))
+        .admit_and_bind_session(&crate::SessionBinding::root(session_id))
         .await
         .expect("bind conformance store to its explicit session");
 }

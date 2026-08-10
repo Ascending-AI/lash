@@ -18,15 +18,10 @@ impl InMemorySessionStore {
     pub(super) fn ensure_session_metadata_for_commit(
         &self,
         commit: &crate::RuntimeCommit,
-        created_at: &str,
     ) -> Result<(), crate::StoreError> {
         let mut session_meta = self.session_meta.lock_recover();
         session_meta.get_or_insert_with(|| crate::SessionMeta {
             session_id: commit.session_id.clone(),
-            session_name: commit.session_id.clone(),
-            created_at: created_at.to_string(),
-            model: commit.config.model.id.clone(),
-            cwd: None,
             relation: crate::SessionRelation::Root,
         });
         Ok(())

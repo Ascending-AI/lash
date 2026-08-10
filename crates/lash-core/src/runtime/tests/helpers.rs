@@ -322,10 +322,6 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
         if !self.defer_metadata_to_admission {
             *store.session_meta.lock_recover() = Some(crate::SessionMeta {
                 session_id: request.session_id.clone(),
-                session_name: request.session_id.clone(),
-                created_at: "2026-04-06T00:00:00Z".to_string(),
-                model: request.policy.model.id.clone(),
-                cwd: None,
                 relation: request.relation.clone(),
             });
         }

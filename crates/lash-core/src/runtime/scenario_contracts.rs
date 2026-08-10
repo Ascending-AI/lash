@@ -2,7 +2,6 @@
 pub struct ScenarioContractSpec {
     pub suite: &'static str,
     pub test_name: &'static str,
-    pub display_name: &'static str,
     pub owned_invariant: &'static str,
     pub semantic_oracle: &'static str,
     pub required_sim_evidence: &'static [&'static str],
@@ -21,7 +20,6 @@ pub const RUNTIME_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     ScenarioContractSpec {
         suite: "runtime",
         test_name: "runtime_scenario_drains_command_before_turn_work_and_commits_checkpoint",
-        display_name: "command before turn work",
         owned_invariant: "Session-command gate, checkpoint persistence, stale queue completion rejection, final queue drain.",
         semantic_oracle: "runtime.command_before_turn_work",
         required_sim_evidence: RUNTIME_REQUIRED_EVIDENCE,
@@ -30,7 +28,6 @@ pub const RUNTIME_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     ScenarioContractSpec {
         suite: "runtime",
         test_name: "runtime_scenario_command_only_queue_drain_completes_without_turn_work",
-        display_name: "command-only queue drain",
         owned_invariant: "Command-only queued work claims no turn work and explicitly commits.",
         semantic_oracle: "runtime.command_only_queue_drain",
         required_sim_evidence: RUNTIME_REQUIRED_EVIDENCE,
@@ -39,7 +36,6 @@ pub const RUNTIME_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     ScenarioContractSpec {
         suite: "runtime",
         test_name: "runtime_scenario_queued_work_claim_keeps_pending_next_turn_input",
-        display_name: "queued work claim keeps pending next-turn input",
         owned_invariant: "Queued turn work does not consume pending next-turn input.",
         semantic_oracle: "runtime.queued_work_keeps_pending_input",
         required_sim_evidence: RUNTIME_REQUIRED_EVIDENCE,
@@ -48,7 +44,6 @@ pub const RUNTIME_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     ScenarioContractSpec {
         suite: "runtime",
         test_name: "runtime_scenario_claims_queued_turn_input_and_completes_it",
-        display_name: "queued turn input completion",
         owned_invariant: "Next-turn pending inputs are claimed, hidden while live, and completed by commit.",
         semantic_oracle: "runtime.queued_turn_input_completion",
         required_sim_evidence: RUNTIME_REQUIRED_EVIDENCE,
@@ -57,7 +52,6 @@ pub const RUNTIME_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     ScenarioContractSpec {
         suite: "runtime",
         test_name: "runtime_scenario_observation_replay_keeps_original_turn_input",
-        display_name: "observation replay preserves live turn input",
         owned_invariant: "Source-key observation replay preserves the original live input payload and id.",
         semantic_oracle: "runtime.observation_replay_preserves_input",
         required_sim_evidence: RUNTIME_REQUIRED_EVIDENCE,
@@ -66,7 +60,6 @@ pub const RUNTIME_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     ScenarioContractSpec {
         suite: "runtime",
         test_name: "runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel",
-        display_name: "checkpoint redrive cancel",
         owned_invariant: "Active-turn input deferral, cancellation after deferral, and no later idle claim.",
         semantic_oracle: "runtime.checkpoint_redrive_cancel",
         required_sim_evidence: RUNTIME_REQUIRED_EVIDENCE,
@@ -75,7 +68,6 @@ pub const RUNTIME_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     ScenarioContractSpec {
         suite: "runtime",
         test_name: "runtime_scenario_commits_after_advisory_session_lease_release",
-        display_name: "advisory session lease release",
         owned_invariant: "A released advisory lease permits a current-head commit while the head CAS rejects stale state.",
         semantic_oracle: "runtime.advisory_lease_head_cas",
         required_sim_evidence: RUNTIME_REQUIRED_EVIDENCE,
@@ -84,7 +76,6 @@ pub const RUNTIME_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     ScenarioContractSpec {
         suite: "runtime",
         test_name: "runtime_scenario_waits_for_stale_session_lease_ttl",
-        display_name: "stale session lease expiry",
         owned_invariant: "An unexpired stale holder stays busy; TTL expiry advances the fence and the successor stays protected.",
         semantic_oracle: "runtime.stale_lease_ttl",
         required_sim_evidence: RUNTIME_REQUIRED_EVIDENCE,
@@ -105,7 +96,6 @@ mod tests {
         for contract in RUNTIME_SCENARIO_CONTRACTS {
             assert_eq!(contract.suite, "runtime");
             assert!(contract.test_name.starts_with("runtime_scenario_"));
-            assert!(!contract.display_name.trim().is_empty());
             assert!(!contract.owned_invariant.trim().is_empty());
             assert!(contract.semantic_oracle.starts_with("runtime."));
             assert!(!contract.required_sim_evidence.is_empty());

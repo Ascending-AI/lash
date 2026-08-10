@@ -725,7 +725,7 @@ async fn execute_runtime_batch_tool(
                 .record
                 .as_ref()
                 .map(|record| record.tool.clone())
-                .unwrap_or_else(|| invocation.label());
+                .unwrap_or_else(|| invocation.tool_id.to_string());
             let output = outcome.output;
             serde_json::json!({
                 "index": index,

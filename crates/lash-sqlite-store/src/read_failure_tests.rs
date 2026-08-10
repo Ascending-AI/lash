@@ -44,13 +44,6 @@ async fn absent_rows_remain_honest_successful_outcomes() {
     );
     assert!(
         store
-            .load_picker_info()
-            .await
-            .expect("read picker")
-            .is_none()
-    );
-    assert!(
-        store
             .load_session_graph()
             .await
             .expect("read graph")
@@ -109,13 +102,12 @@ async fn malformed_durable_rows_surface_typed_corruption() {
 
     raw.execute(
         "INSERT INTO session_meta
-         (session_id, session_name, created_at, model, cwd, relation_json)
-         VALUES ('corrupt', 'corrupt', 'now', 'model', NULL, '{')",
+         (session_id, relation_json)
+         VALUES ('corrupt', '{')",
         [],
     )
     .expect("insert malformed relation");
     assert_corrupt(store.load_session_meta().await, "SessionMeta relation");
-    assert_corrupt(store.load_picker_info().await, "SessionMeta relation");
     raw.execute(
         "UPDATE session_meta SET relation_json = ?1 WHERE session_id = 'corrupt'",
         params![serde_json::to_string(&lash_core::SessionRelation::Root).expect("encode relation")],
@@ -309,7 +301,6 @@ async fn closed_connection_surfaces_storage_failure_for_every_read_family() {
         "load_session_head_meta",
         store.load_session_head_meta().await,
     );
-    assert_storage_failure("load_picker_info", store.load_picker_info().await);
     assert_storage_failure("load_session_graph", store.load_session_graph().await);
     assert_storage_failure("get_blob", store.get_blob(&blob_ref).await);
     assert_storage_failure(

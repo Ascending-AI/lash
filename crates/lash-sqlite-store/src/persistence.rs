@@ -381,7 +381,6 @@ impl SessionCommitStore for Store {
         self.bind_session(&planner.commit().session_id)?;
         let blob_profile = self.options.blob_profile;
         let now = self.clock.timestamp_ms();
-        let created_at = self.clock.timestamp_rfc3339();
         let enqueue_nonce_start = self.commit_count.fetch_add(
             planner.commit().enqueued_queue_batches.len() as u64,
             AtomicOrdering::Relaxed,
@@ -402,12 +401,10 @@ impl SessionCommitStore for Store {
                     )?;
                     tx.execute(
                         "INSERT OR IGNORE INTO session_meta
-                         (session_id, session_name, created_at, model, cwd, relation_json)
-                         VALUES (?1, ?1, ?2, ?3, NULL, ?4)",
+                         (session_id, relation_json)
+                         VALUES (?1, ?2)",
                         params![
                             commit.session_id,
-                            created_at,
-                            commit.config.model.id,
                             serde_json::to_string(&lash_core::SessionRelation::Root)
                                 .map_err(|error| StoreError::Backend(error.to_string()))?,
                         ],
@@ -985,9 +982,6 @@ impl SessionCommitStore for Store {
         binding.validate()?;
         self.bind_session(&binding.session_id)?;
         let session_id = binding.session_id.clone();
-        let created_at = self.clock.timestamp_rfc3339();
-        let model = binding.model_id.clone();
-        let cwd = binding.cwd.clone();
         let relation_json = serde_json::to_string(&binding.relation)
             .map_err(|error| StoreError::Backend(error.to_string()))?;
         self.conn
@@ -997,9 +991,9 @@ impl SessionCommitStore for Store {
                     let inserted = tx
                         .execute(
                             "INSERT OR IGNORE INTO session_meta
-                     (session_id, session_name, created_at, model, cwd, relation_json)
-                     VALUES (?1, ?1, ?2, ?3, ?4, ?5)",
-                            params![session_id, created_at, model, cwd, relation_json,],
+                     (session_id, relation_json)
+                     VALUES (?1, ?2)",
+                            params![session_id, relation_json],
                         )
                         .map_err(sqlite_error)?;
                     Ok(if inserted == 1 {

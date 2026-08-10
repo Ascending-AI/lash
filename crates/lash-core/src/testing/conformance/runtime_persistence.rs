@@ -6507,11 +6507,10 @@ async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
 async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {
     let meta = SessionMeta {
         session_id: "root".to_string(),
-        session_name: "Conformance Root".to_string(),
-        created_at: "2026-06-02T00:00:00Z".to_string(),
-        model: "gpt-5.4-mini".to_string(),
-        cwd: Some("/tmp/lash-conformance".to_string()),
-        relation: SessionRelation::Root,
+        relation: SessionRelation::Child {
+            parent_session_id: "parent-session".to_string(),
+            caused_by: None,
+        },
     };
     store
         .save_session_meta(meta.clone())
@@ -6522,12 +6521,7 @@ async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {
         .await
         .expect("load session meta")
         .expect("session meta present");
-    assert_eq!(loaded.session_id, meta.session_id);
-    assert_eq!(loaded.session_name, meta.session_name);
-    assert_eq!(loaded.created_at, meta.created_at);
-    assert_eq!(loaded.model, meta.model);
-    assert_eq!(loaded.cwd, meta.cwd);
-    assert_eq!(loaded.relation, meta.relation);
+    assert_eq!(loaded, meta);
 }
 
 /// Blob-backed backends must physically reclaim the checkpoint blob a superseding
@@ -6740,10 +6734,6 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
 
     let meta = SessionMeta {
         session_id: "root".to_string(),
-        session_name: "Durable Root".to_string(),
-        created_at: "2026-06-02T00:00:00Z".to_string(),
-        model: "gpt-5.4-mini".to_string(),
-        cwd: Some("/tmp/lash-reopen".to_string()),
         relation: SessionRelation::Root,
     };
     factory
@@ -6843,7 +6833,7 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
         .await
         .expect("load reopened meta")
         .expect("reopened meta");
-    assert_eq!(reopened_meta.session_name, meta.session_name);
+    assert_eq!(reopened_meta, meta);
     let reopened = factory
         .reopen
         .load_session()

@@ -42,7 +42,7 @@ and uses the same permanent-tombstone admission path.
 durable/ephemeral identity distinction did not describe two identities after
 reuse was forbidden; the meaningful boundary is whether a runtime has been
 bound to a store. `SessionCommitStore::admit_and_bind_session` takes the
-complete `SessionBinding` (id, relation, model id, and cwd), returns
+complete `SessionBinding` (id and relation), returns
 `SessionAdmission::{Created, Rebound}`, materializes metadata, and checks both
 the handle binding and permanent deletion fence atomically. The runtime reads
 the materialized identity back before committing, so a loose third-party store

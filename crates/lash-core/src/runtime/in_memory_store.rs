@@ -817,7 +817,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         let commit = planner.commit();
         let session_id = commit.session_id.clone();
         let transaction_now = self.clock.timestamp_ms();
-        let transaction_created_at = self.clock.timestamp_rfc3339();
         let _transaction = self.write_transaction.lock_recover();
         #[cfg(test)]
         self.commit_write_transaction_count
@@ -837,7 +836,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         planner.validate_session_binding(meta.as_ref().map(|meta| meta.session_id.as_str()))?;
         #[cfg(test)]
         let session_meta_before_commit = self.session_meta.lock_recover().clone();
-        self.ensure_session_metadata_for_commit(commit, &transaction_created_at)?;
+        self.ensure_session_metadata_for_commit(commit)?;
         #[cfg(test)]
         self.fail_after_first_runtime_commit_mutation_if_requested(session_meta_before_commit)?;
         planner.validate_node_derivation()?;
@@ -1262,7 +1261,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         self.session_admission_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         binding.validate()?;
-        let created_at = self.clock.timestamp_rfc3339();
         let _transaction = self.write_transaction.lock_recover();
         if self
             .deleted_session_ids
@@ -1285,10 +1283,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         }
         *durable = Some(crate::SessionMeta {
             session_id: binding.session_id.clone(),
-            session_name: binding.session_id.clone(),
-            created_at,
-            model: binding.model_id.clone(),
-            cwd: binding.cwd.clone(),
             relation: binding.relation.clone(),
         });
         Ok(crate::SessionAdmission::Created)

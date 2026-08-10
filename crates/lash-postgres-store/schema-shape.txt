@@ -17,7 +17,7 @@
 # in this file records how the DDL declares it and is documentation, not a
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
-version 42
+version 43
 table lash_attachment_manifest
   column attachment_id text not-null
   column canonical_uri text not-null

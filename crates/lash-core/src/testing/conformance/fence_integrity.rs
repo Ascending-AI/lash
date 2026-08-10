@@ -210,10 +210,7 @@ async fn negative_session_head_revision(handles: FenceIntegrityHandles) {
     let session_id = "fence-negative-head";
     handles
         .runtime
-        .admit_and_bind_session(&crate::SessionBinding::root(
-            session_id,
-            &crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
-        ))
+        .admit_and_bind_session(&crate::SessionBinding::root(session_id))
         .await
         .expect("admit negative-head session");
     let state = crate::RuntimeSessionState {

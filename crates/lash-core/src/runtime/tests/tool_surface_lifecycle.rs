@@ -190,10 +190,6 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
     let store = Arc::new(RecordingStore::default());
     *store.session_meta.lock_recover() = Some(crate::SessionMeta {
         session_id: "parked-session".to_string(),
-        session_name: "parked-session".to_string(),
-        created_at: "2026-07-29T00:00:00Z".to_string(),
-        model: "mock-model".to_string(),
-        cwd: None,
         relation: crate::SessionRelation::Root,
     });
     let runtime = LashRuntime::from_environment(

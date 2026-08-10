@@ -59,12 +59,6 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         };
         let meta = SessionMeta {
             session_id: request.session_id.clone(),
-            session_name: request.session_id.clone(),
-            created_at: current_timestamp_string(),
-            model: request.policy.model.id.clone(),
-            cwd: std::env::current_dir()
-                .ok()
-                .and_then(|path| path.to_str().map(str::to_string)),
             relation: request.relation.clone(),
         };
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
@@ -472,12 +466,6 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         }
         let meta = SessionMeta {
             session_id: request.session_id.clone(),
-            session_name: request.session_id.clone(),
-            created_at: current_timestamp_string(),
-            model: request.policy.model.id.clone(),
-            cwd: std::env::current_dir()
-                .ok()
-                .and_then(|path| path.to_str().map(str::to_string)),
             relation: request.relation.clone(),
         };
         sqlx::query("INSERT INTO lash_session_meta (session_id, meta_json) VALUES ($1, $2)")

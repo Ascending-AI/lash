@@ -891,9 +891,8 @@ async fn runtime_perf_commit_state(
         session_id: session_id.to_string(),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
-    let policy = state.policy.clone();
     store
-        .admit_and_bind_session(&lash_core::SessionBinding::root(session_id, &policy))
+        .admit_and_bind_session(&lash_core::SessionBinding::root(session_id))
         .await?;
     Ok(state)
 }

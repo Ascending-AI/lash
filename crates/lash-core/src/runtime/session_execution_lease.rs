@@ -840,10 +840,7 @@ mod tests {
         let persistence: Arc<dyn RuntimePersistence> = store.clone();
         let owner = crate::LeaseOwnerIdentity::opaque("borrow-owner", "borrow-incarnation");
         store
-            .admit_and_bind_session(&crate::SessionBinding::root(
-                "borrow-valid",
-                &crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
-            ))
+            .admit_and_bind_session(&crate::SessionBinding::root("borrow-valid"))
             .await
             .expect("bind borrowed-commit session");
         let guard = SessionExecutionLeaseGuard::try_acquire(
@@ -880,10 +877,7 @@ mod tests {
         let persistence: Arc<dyn RuntimePersistence> = store.clone();
         let owner = crate::LeaseOwnerIdentity::opaque("lapsed-owner", "lapsed-incarnation");
         store
-            .admit_and_bind_session(&crate::SessionBinding::root(
-                "borrow-lapsed",
-                &crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
-            ))
+            .admit_and_bind_session(&crate::SessionBinding::root("borrow-lapsed"))
             .await
             .expect("bind lapsed borrowed-commit session");
         let timings = LeaseTimings::from_ttl(std::time::Duration::from_millis(30))

@@ -401,7 +401,7 @@ pub enum SessionRelation {
     },
     Fork {
         /// Host-declared lineage: the session this fork branched from as the
-        /// host understands it. Stores persist it as picker/display metadata
+        /// host understands it. Stores persist it as durable fork lineage
         /// and never validate it against the fork point's anchor provenance —
         /// repeated rewinds legitimately name superseded intermediate
         /// sessions, while [`crate::ForkSessionResult::source_session_id`]
