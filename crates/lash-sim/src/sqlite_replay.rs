@@ -153,7 +153,12 @@ pub async fn replay_trace_to_sqlite(
     let mut replayed_boundary_families = BTreeSet::new();
     for delivered in &trace.events {
         let event = delivered.as_event();
-        let observed = if is_suspend_replay_boundary(&event) {
+        let observed = if event.kind == BoundaryKind::BackendFailure {
+            // Generation already exercised the real SQLite fault injector and
+            // recorded its StoreError. Preserve that observation instead of
+            // projecting a model failure during backend replay.
+            delivered.observed.clone()
+        } else if is_suspend_replay_boundary(&event) {
             // Suspend ingress/resume boundaries are a generated-runtime mechanism;
             // the abstract projector reproduces their observed without running the
             // SQLite runtime world.

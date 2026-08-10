@@ -1,3 +1,4 @@
+mod backend_fault;
 #[cfg(test)]
 mod cache_regression;
 mod canonical_scripts;

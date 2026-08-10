@@ -174,7 +174,12 @@ pub async fn replay_trace_to_postgres(
     let mut replayed_boundary_families = BTreeSet::new();
     for delivered in &trace.events {
         let event = delivered.as_event();
-        let observed = if is_suspend_replay_boundary(&event) {
+        let observed = if event.kind == BoundaryKind::BackendFailure {
+            // BackendFailure evidence comes from the dedicated real SQLite
+            // injector during generation; Postgres replay carries that recorded
+            // observation rather than fabricating a model failure.
+            delivered.observed.clone()
+        } else if is_suspend_replay_boundary(&event) {
             store.project_boundary_observation(&event)
         } else if is_runtime_session_boundary(event.kind) {
             world.deliver_boundary(&event, &delivered.observed).await?

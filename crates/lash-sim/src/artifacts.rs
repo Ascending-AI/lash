@@ -414,6 +414,8 @@ pub struct GeneratedSimCounts {
     pub generated_backend_regression_fixtures: usize,
     pub oracle_passes: usize,
     pub oracle_failures: usize,
+    pub real_observation_oracles: usize,
+    pub model_property_oracles: usize,
     pub model_store_sessions: usize,
     /// Largest interleaving highwater observed across every generated seed: how
     /// many provider turns the scheduler drove concurrently at the busiest
@@ -577,11 +579,11 @@ pub(crate) fn model_only_boundary_reviews() -> Vec<ModelOnlyBoundaryReview> {
         },
         ModelOnlyBoundaryReview {
             boundary_kind: "backend_failure",
-            status: "production_store_error_classified_fault_injection_boundary",
-            production_abstraction_used: "lash_core::StoreError variants plus generated SQLite divergence artifacts and Postgres backend contention lanes",
-            model_only_scope: "connection corruption and live database fault injection remain excluded; generated boundaries classify retryable and terminal backend faults as concrete StoreError variants and fail on generated SQLite dynamic rerun divergence",
+            status: "real_sqlite_fault_injector_observation",
+            production_abstraction_used: "lash_sqlite_store::testing::SqliteFaultInjector armed at AfterBegin and CommitIo around real RuntimePersistence::commit_runtime_state calls",
+            model_only_scope: "the generated lane exercises SQLite transaction faults directly; Postgres connection faults remain in the separate backend-contention lane",
             oracle_id: "sim.oracle.backend-failure-observed.v1",
-            artifact_evidence: "backend failure events include production_store_error.type=lash_core::StoreError, variant, message, retryable_class, retry attempt counts, and generated SQLite divergence artifacts on mismatch",
+            artifact_evidence: "backend failure events include StoreError::StorageFailure plus fault_injector.enabled, exercised, seed, point, and write_transaction_ordinal; disabling the injector changes the oracle result",
         },
         ModelOnlyBoundaryReview {
             boundary_kind: "provider_mutation",

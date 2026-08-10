@@ -456,6 +456,11 @@ async fn run_generated_evidence_profile(
         .filter(|verdict| verdict.status == OracleStatus::Passed)
         .count();
     let oracle_failures = oracle_verdicts.len() - oracle_passes;
+    let real_observation_oracles = oracle_verdicts
+        .iter()
+        .filter(|verdict| verdict.observation_class == OracleObservationClass::RealObservation)
+        .count();
+    let model_property_oracles = oracle_verdicts.len() - real_observation_oracles;
     let scheduler_controlled_boundaries = event_lines
         .iter()
         .filter(|line| line.event.scheduler.scheduler_controlled)
@@ -535,6 +540,8 @@ async fn run_generated_evidence_profile(
             generated_backend_regression_fixtures: generated_backend_regression_fixture_count,
             oracle_passes,
             oracle_failures,
+            real_observation_oracles,
+            model_property_oracles,
             model_store_sessions,
             interleaving_depth_max,
             interleaving_depth_min: if interleaving_depth_min == usize::MAX {
@@ -605,6 +612,11 @@ async fn run_generated_search_profile(
         .filter(|verdict| verdict.status == OracleStatus::Passed)
         .count();
     let mut oracle_failures = recorded_verdicts.len() - oracle_passes;
+    let mut real_observation_oracles = recorded_verdicts
+        .iter()
+        .filter(|verdict| verdict.observation_class == OracleObservationClass::RealObservation)
+        .count();
+    let mut model_property_oracles = recorded_verdicts.len() - real_observation_oracles;
 
     let mut provider_matrix_by_kind: BTreeMap<String, GeneratedRuntimeProviderMatrixRow> =
         BTreeMap::new();
@@ -658,6 +670,10 @@ async fn run_generated_search_profile(
         interleaving_depth_min = interleaving_depth_min.min(seed_interleaving_depth);
         model_store_sessions += trace.final_summary.session_count;
         for verdict in &trace.oracles {
+            match verdict.observation_class {
+                OracleObservationClass::RealObservation => real_observation_oracles += 1,
+                OracleObservationClass::ModelProperty => model_property_oracles += 1,
+            }
             if verdict.oracle_id.starts_with("sim.oracle.scenario-mini.") {
                 scenario_contract_mini_oracles += 1;
             } else if verdict.oracle_id.starts_with("sim.oracle.scenario.") {
@@ -673,11 +689,13 @@ async fn run_generated_search_profile(
 
         // In-memory determinism replay for every search seed.
         let replay_outcome = replay_trace(&trace_path, &trace);
+        model_property_oracles += 1;
         match &replay_outcome {
             Ok(_) => oracle_passes += 1,
             Err(_) => oracle_failures += 1,
         }
         let determinism_failure = if seed_index % 20 == 0 {
+            model_property_oracles += 1;
             let rerun = run_generated_workload(
                 generate_workload(seed, profile, boundary_limit)?,
                 &fixed_manifest.script_bundle_hash,
@@ -846,6 +864,11 @@ async fn run_generated_search_profile(
     }
 
     write_failure_artifact_shape(artifact_root)?;
+    debug_assert_eq!(
+        real_observation_oracles + model_property_oracles,
+        oracle_passes + oracle_failures,
+        "every evaluated oracle must contribute to the observation-class census"
+    );
     let generated_runtime_provider_matrix = finish_runtime_provider_matrix(provider_matrix_by_kind);
     let summary_path = artifact_root.join(GENERATED_SIM_SUMMARY);
     let report = GeneratedSimProfileReport {
@@ -896,6 +919,8 @@ async fn run_generated_search_profile(
             generated_backend_regression_fixtures: 0,
             oracle_passes,
             oracle_failures,
+            real_observation_oracles,
+            model_property_oracles,
             model_store_sessions,
             interleaving_depth_max,
             interleaving_depth_min: if interleaving_depth_min == usize::MAX {

@@ -79,7 +79,7 @@ pub fn replay_trace(
         // them: thread the recorded observation in directly instead of projecting.
         let observed = if matches!(
             event.kind,
-            BoundaryKind::Worker | BoundaryKind::ProcessLifecycle
+            BoundaryKind::Worker | BoundaryKind::ProcessLifecycle | BoundaryKind::BackendFailure
         ) {
             store.apply_observed_boundary(&event, &expected.observed);
             expected.observed.clone()

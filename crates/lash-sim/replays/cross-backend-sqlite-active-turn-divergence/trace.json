@@ -961,7 +961,8 @@
         "runtime_contract": {
           "message": "turn 1 matched session, transcript, graph, and provider output contracts",
           "oracle_id": "runtime.turn_contract",
-          "status": "passed"
+          "status": "passed",
+          "observation_class": "real_observation"
         },
         "runtime_final_value_facts": {
           "assistant_output_text": "answer 1 for session-001 seed 14123330213291275571 profile full-random path cf9d",
@@ -1918,7 +1919,8 @@
         "runtime_contract": {
           "message": "turn 1 matched session, transcript, graph, and provider output contracts",
           "oracle_id": "runtime.turn_contract",
-          "status": "passed"
+          "status": "passed",
+          "observation_class": "real_observation"
         },
         "runtime_final_value_facts": {
           "assistant_output_text": "answer 1 for session-002 seed 14123330213291275571 profile full-random path ba5a",
@@ -2595,7 +2597,8 @@
         "runtime_contract": {
           "message": "turn 2 matched session, transcript, graph, and provider output contracts",
           "oracle_id": "runtime.turn_contract",
-          "status": "passed"
+          "status": "passed",
+          "observation_class": "real_observation"
         },
         "runtime_final_value_facts": {
           "assistant_output_text": "answer 2 for session-001 seed 14123330213291275571 profile full-random path e2e8",
@@ -3109,7 +3112,8 @@
         "runtime_contract": {
           "message": "turn 1 matched session, transcript, graph, and provider output contracts",
           "oracle_id": "runtime.turn_contract",
-          "status": "passed"
+          "status": "passed",
+          "observation_class": "real_observation"
         },
         "runtime_final_value_facts": {
           "assistant_output_text": "answer 1 for session-003 seed 14123330213291275571 profile full-random path e93b",
@@ -3575,7 +3579,8 @@
         "runtime_contract": {
           "message": "turn 1 matched session, transcript, graph, and provider output contracts",
           "oracle_id": "runtime.turn_contract",
-          "status": "passed"
+          "status": "passed",
+          "observation_class": "real_observation"
         },
         "runtime_final_value_facts": {
           "assistant_output_text": "answer 1 for session-004 seed 14123330213291275571 profile full-random path ee90",
@@ -4194,7 +4199,8 @@
         "runtime_contract": {
           "message": "turn 2 matched session, transcript, graph, and provider output contracts",
           "oracle_id": "runtime.turn_contract",
-          "status": "passed"
+          "status": "passed",
+          "observation_class": "real_observation"
         },
         "runtime_final_value_facts": {
           "assistant_output_text": "answer 2 for session-002 seed 14123330213291275571 profile full-random path e921",
@@ -4617,7 +4623,8 @@
         "runtime_contract": {
           "message": "turn 3 matched session, transcript, graph, and provider output contracts",
           "oracle_id": "runtime.turn_contract",
-          "status": "passed"
+          "status": "passed",
+          "observation_class": "real_observation"
         },
         "runtime_final_value_facts": {
           "assistant_output_text": "answer 3 for session-001 seed 14123330213291275571 profile full-random path 7c17",
@@ -5411,7 +5418,8 @@
         "runtime_contract": {
           "message": "turn 2 matched session, transcript, graph, and provider output contracts",
           "oracle_id": "runtime.turn_contract",
-          "status": "passed"
+          "status": "passed",
+          "observation_class": "real_observation"
         },
         "runtime_final_value_facts": {
           "assistant_output_text": "answer 2 for session-003 seed 14123330213291275571 profile full-random path c5ae",
@@ -5839,7 +5847,8 @@
         "runtime_contract": {
           "message": "turn 2 matched session, transcript, graph, and provider output contracts",
           "oracle_id": "runtime.turn_contract",
-          "status": "passed"
+          "status": "passed",
+          "observation_class": "real_observation"
         },
         "runtime_final_value_facts": {
           "assistant_output_text": "answer 2 for session-004 seed 14123330213291275571 profile full-random path e09f",
@@ -6732,7 +6741,8 @@
         "runtime_contract": {
           "message": "turn 3 matched session, transcript, graph, and provider output contracts",
           "oracle_id": "runtime.turn_contract",
-          "status": "passed"
+          "status": "passed",
+          "observation_class": "real_observation"
         },
         "runtime_final_value_facts": {
           "assistant_output_text": "answer 3 for session-002 seed 14123330213291275571 profile full-random path db1c",
@@ -8796,7 +8806,8 @@
         "runtime_contract": {
           "message": "turn 3 matched session, transcript, graph, and provider output contracts",
           "oracle_id": "runtime.turn_contract",
-          "status": "passed"
+          "status": "passed",
+          "observation_class": "real_observation"
         },
         "runtime_final_value_facts": {
           "assistant_output_text": "answer 3 for session-004 seed 14123330213291275571 profile full-random path de42",
@@ -9236,7 +9247,8 @@
         "runtime_contract": {
           "message": "turn 3 matched session, transcript, graph, and provider output contracts",
           "oracle_id": "runtime.turn_contract",
-          "status": "passed"
+          "status": "passed",
+          "observation_class": "real_observation"
         },
         "runtime_final_value_facts": {
           "assistant_output_text": "answer 3 for session-003 seed 14123330213291275571 profile full-random path 92e5",
@@ -10909,7 +10921,8 @@
         "runtime_contract": {
           "message": "turn 4 matched session, transcript, graph, and provider output contracts",
           "oracle_id": "runtime.turn_contract",
-          "status": "passed"
+          "status": "passed",
+          "observation_class": "real_observation"
         },
         "runtime_final_value_facts": {
           "assistant_output_text": "answer 4 for session-003 seed 14123330213291275571 profile full-random path 3f30",
@@ -12675,7 +12688,8 @@
         "runtime_contract": {
           "message": "turn 5 matched session, transcript, graph, and provider output contracts",
           "oracle_id": "runtime.turn_contract",
-          "status": "passed"
+          "status": "passed",
+          "observation_class": "real_observation"
         },
         "runtime_final_value_facts": {
           "assistant_output_text": "answer 5 for session-003 seed 14123330213291275571 profile full-random path bc74",
@@ -14555,7 +14569,8 @@
         "runtime_contract": {
           "message": "turn 6 matched session, transcript, graph, and provider output contracts",
           "oracle_id": "runtime.turn_contract",
-          "status": "passed"
+          "status": "passed",
+          "observation_class": "real_observation"
         },
         "runtime_final_value_facts": {
           "assistant_output_text": "answer 6 for session-003 seed 14123330213291275571 profile full-random path 69b8",
@@ -16916,7 +16931,8 @@
         "runtime_contract": {
           "message": "turn 7 matched session, transcript, graph, and provider output contracts",
           "oracle_id": "runtime.turn_contract",
-          "status": "passed"
+          "status": "passed",
+          "observation_class": "real_observation"
         },
         "runtime_final_value_facts": {
           "assistant_output_text": "answer 7 for session-003 seed 14123330213291275571 profile full-random path 0acc",
@@ -36044,468 +36060,561 @@
   "oracle": {
     "status": "passed",
     "oracle_id": "sim.oracle.generated-workload.v1",
-    "message": "92 generated workload oracles passed"
+    "message": "92 generated workload oracles passed",
+    "observation_class": "model_property"
   },
   "oracles": [
     {
       "status": "passed",
       "oracle_id": "sim.oracle.live-provider-failure-coverage.v1",
-      "message": "3 live provider failure turns terminalized with no committed output across 2 provider kinds {\"anthropic\", \"openai-compatible\"} and 2 fault positions {1, 2}"
+      "message": "3 live provider failure turns terminalized with no committed output across 2 provider kinds {\"anthropic\", \"openai-compatible\"} and 2 fault positions {1, 2}",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scheduler-controlled-delivery.v1",
-      "message": "generated trace records scheduler-owned delivery order, timing, and tie-break evidence"
+      "message": "generated trace records scheduler-owned delivery order, timing, and tie-break evidence",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scheduler-owned-runtime-completions.v1",
-      "message": "provider chunks/retries, cancellation, tool returns, exec results, durable completions, provider mutations, and worker completions were registered as pending runtime boundaries and delivered by the scheduler"
+      "message": "provider chunks/retries, cancellation, tool returns, exec results, durable completions, provider mutations, and worker completions were registered as pending runtime boundaries and delivered by the scheduler",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.state-machine-semantic-invariants.v1",
-      "message": "queued input, cancellation, trigger wakeup, retry terminalization, duplicate delivery/replay, protocol terminal-state, and disposition-driven recovery-abandonment invariants held"
+      "message": "queued input, cancellation, trigger wakeup, retry terminalization, duplicate delivery/replay, protocol terminal-state, and disposition-driven recovery-abandonment invariants held",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.operational-coverage.v1",
-      "message": "generated DST trace hit queueing, triggers, cancellation, observer reconnects, provider failure/mutation, process wake, tool/exec, durable effect, worker failover, backend choice, retry, and duplicate cases"
+      "message": "generated DST trace hit queueing, triggers, cancellation, observer reconnects, provider failure/mutation, process wake, tool/exec, durable effect, worker failover, backend choice, retry, and duplicate cases",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.ingress-session-opened.v1",
-      "message": "each generated session opened through an ingress boundary exactly once"
+      "message": "each generated session opened through an ingress boundary exactly once",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.queued-ingress-observed.v1",
-      "message": "generated workload queued turn input through an explicit ingress boundary carrying a stable source key"
+      "message": "generated workload queued turn input through an explicit ingress boundary carrying a stable source key",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.cancellation-observed.v1",
-      "message": "generated workload cancelled a pending boundary and terminalized its queued input"
+      "message": "generated workload cancelled a pending boundary and terminalized its queued input",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.trigger-delivery-observed.v1",
-      "message": "generated workload delivered a trigger boundary routed through a runtime trigger DTO with stable source identity"
+      "message": "generated workload delivered a trigger boundary routed through a runtime trigger DTO with stable source identity",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.observer-reconnect.v1",
-      "message": "observer reconnect boundary converged on the same session state (final provider turn)"
+      "message": "observer reconnect boundary converged on the same session state (final provider turn)",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.backend-failure-observed.v1",
-      "message": "generated workload injected a backend failure boundary that terminalized through the retry path"
+      "message": "generated workload injected a backend failure boundary that terminalized through the retry path",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.provider-mutation-rejected.v1",
-      "message": "provider/script mutation boundary was rejected through the real provider parser matrix without changing runtime state"
+      "message": "provider/script mutation boundary was rejected through the real provider parser matrix without changing runtime state",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.provider-transport-mutation-classified.v1",
-      "message": "transport mutation classes classified on distinct failure paths: {\"mid_stream_disconnect\", \"response_start_timeout\", \"retryable_server_error_sequence\", \"stream_chunk_timeout\"}"
+      "message": "transport mutation classes classified on distinct failure paths: {\"mid_stream_disconnect\", \"response_start_timeout\", \"retryable_server_error_sequence\", \"stream_chunk_timeout\"}",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.generated-runtime-provider-matrix.v1",
-      "message": "generated runtime turns covered OpenAI-compatible, direct OpenAI, Anthropic, and Google provider crates through ScriptedLlmHttpTransport"
+      "message": "generated runtime turns covered OpenAI-compatible, direct OpenAI, Anthropic, and Google provider crates through ScriptedLlmHttpTransport",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.provider-turn-interleaving-depth.v1",
-      "message": "scheduler drove 3 provider turns concurrently across 4 sessions"
+      "message": "scheduler drove 3 provider turns concurrently across 4 sessions",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.process-wake-observed.v1",
-      "message": "process wake boundary materialized a runtime DTO"
+      "message": "process wake boundary materialized a runtime DTO",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.process-wake-at-most-once-runtime-turn.v1",
-      "message": "18 enqueued logical process wake(s) materialized into at most one runtime turn each (18 materialized)"
+      "message": "18 enqueued logical process wake(s) materialized into at most one runtime turn each (18 materialized)",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.process-never-double-started.v1",
-      "message": "every started OwnerBound process was abandoned rather than re-run, while a Rerunnable sibling was re-run — the sweep can re-execute but never re-runs started OwnerBound work"
+      "message": "every started OwnerBound process was abandoned rather than re-run, while a Rerunnable sibling was re-run — the sweep can re-execute but never re-runs started OwnerBound work",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.abandoned-requires-evidence.v1",
-      "message": "every Abandoned terminal carried its licensing evidence (provably-dead holder, owner drain, or reconciled request with a lapsed lease)"
+      "message": "every Abandoned terminal carried its licensing evidence (provably-dead holder, owner drain, or reconciled request with a lapsed lease)",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.tool-boundary-observed.v1",
-      "message": "tool boundary produced a captured runtime tool-output DTO"
+      "message": "tool boundary produced a captured runtime tool-output DTO",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.exec-code-observed.v1",
-      "message": "exec-code boundary produced a captured RuntimeEffectOutcome result"
+      "message": "exec-code boundary produced a captured RuntimeEffectOutcome result",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.cross-session-isolation.v1",
-      "message": "all generated session outputs stayed scoped to their session alias"
+      "message": "all generated session outputs stayed scoped to their session alias",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.observer-convergence.v1",
-      "message": "observer snapshots converged to the generated runtime turn count"
+      "message": "observer snapshots converged to the generated runtime turn count",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.runtime-session-graph.v1",
-      "message": "runtime-backed generated sessions advanced provider exchanges, graph nodes, and transcript messages across multiple turns"
+      "message": "runtime-backed generated sessions advanced provider exchanges, graph nodes, and transcript messages across multiple turns",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.runtime-graph-acyclic.v1",
-      "message": "16 real provider turn graphs had unique nodes, valid parents, and no cycles"
+      "message": "16 real provider turn graphs had unique nodes, valid parents, and no cycles",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.runtime-single-active-agent-frame.v1",
-      "message": "16 real provider turn snapshots had exactly one active current Agent Frame"
+      "message": "16 real provider turn snapshots had exactly one active current Agent Frame",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.runtime-usage-monotonic.v1",
-      "message": "16 real provider turns had non-negative usage and non-decreasing session ledger totals"
+      "message": "16 real provider turns had non-negative usage and non-decreasing session ledger totals",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.durable-effect-exactly-once.v1",
-      "message": "durable effect replay reused the first semantic result for each durable key"
+      "message": "durable effect replay reused the first semantic result for each durable key",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.worker-stale-completion-rejected.v1",
-      "message": "worker topology rejected stale process terminal output and persisted the successor terminal exactly once after an incarnation change"
+      "message": "worker topology rejected stale process terminal output and persisted the successor terminal exactly once after an incarnation change",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.worker-failover-continues-work.v1",
-      "message": "a second worker incarnation reclaimed the dead owner's lease at a strictly higher fence and committed (continued) the queued work the crashed first owner could not, rejecting its stale completion"
+      "message": "a second worker incarnation reclaimed the dead owner's lease at a strictly higher fence and committed (continued) the queued work the crashed first owner could not, rejecting its stale completion",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.healthy-long-turn-liveness.v1",
-      "message": "provider turn `session-001:provider:001` committed after its delivered schedule crossed at least three production lease TTL windows"
+      "message": "provider turn `session-001:provider:001` committed after its delivered schedule crossed at least three production lease TTL windows",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.lease-time-monotonic.v1",
-      "message": "71 lease-time boundaries advanced a real session-execution-lease fencing token monotonically per session"
+      "message": "71 lease-time boundaries advanced a real session-execution-lease fencing token monotonically per session",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.generated-suspend-resume.v1",
-      "message": "3 generated suspend turn(s) parked mid-flight and resumed only after a scheduler-delivered completion"
+      "message": "3 generated suspend turn(s) parked mid-flight and resumed only after a scheduler-delivered completion",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.generated-final-value-semantic-channel.v1",
-      "message": "16 generated assistant-message turn(s) kept the semantic final-value channel empty (no transcript-inferred final values)"
+      "message": "16 generated assistant-message turn(s) kept the semantic final-value channel empty (no transcript-inferred final values)",
+      "observation_class": "real_observation"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario-mini.runtime.queued-input-hidden-while-live.v1",
-      "message": "queued input stayed hidden from provider turns while the generated live turn continued"
+      "message": "queued input stayed hidden from provider turns while the generated live turn continued",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario-mini.runtime.cancellation-prevents-idle-claim.v1",
-      "message": "cancelled queued input targets a generated queued boundary and prevents later idle claim"
+      "message": "cancelled queued input targets a generated queued boundary and prevents later idle claim",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario-mini.runtime.process-wake-duplicate-rejected.v1",
-      "message": "duplicate process wake used the same structural process/event source key and was claimed at most once"
+      "message": "duplicate process wake used the same structural process/event source key and was claimed at most once",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario-mini.runtime.stale-lease-commit-rejected.v1",
-      "message": "stale worker lease completion was rejected while the reclaimed live lease stayed renewable"
+      "message": "stale worker lease completion was rejected while the reclaimed live lease stayed renewable",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario-mini.standard.streamed-text-finalizes-once.v1",
-      "message": "streamed provider output contains exactly one final assistant text projection"
+      "message": "streamed provider output contains exactly one final assistant text projection",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario-mini.standard.provider-error-without-checkpoint.v1",
-      "message": "provider failure/mutation completed through scheduler before any later successful checkpointed provider turn"
+      "message": "provider failure/mutation completed through scheduler before any later successful checkpointed provider turn",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario-mini.standard.tool-loop-reenters-after-checkpoint.v1",
-      "message": "tool result was captured and a later provider turn re-entered the model loop for the same session"
+      "message": "tool result was captured and a later provider turn re-entered the model loop for the same session",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario-mini.rlm.finish-required-prose-repair.v1",
-      "message": "finish-required repair mini-replay observed repeated provider completions and observer convergence"
+      "message": "finish-required repair mini-replay observed repeated provider completions and observer convergence",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario-mini.rlm.schema-mismatch-repair.v1",
-      "message": "schema mismatch repair mini-replay used mutated provider scripts through real provider parsers"
+      "message": "schema mismatch repair mini-replay used mutated provider scripts through real provider parsers",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario-mini.rlm.lashlang-cell-exec-continues.v1",
-      "message": "lashlang cell exec mini-replay produced an exec outcome and continued to a later provider turn"
+      "message": "lashlang cell exec mini-replay produced an exec outcome and continued to a later provider turn",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario-mini.agent.durable-input-resolution.v1",
-      "message": "durable input mini-replay observed durable replay, process wake, and observer reconnect resolution"
+      "message": "durable input mini-replay observed durable replay, process wake, and observer reconnect resolution",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario-mini.agent.child-failure-graph.v1",
-      "message": "child failure mini-replay kept multi-session graph evidence while worker/backend failure boundaries executed"
+      "message": "child failure mini-replay kept multi-session graph evidence while worker/backend failure boundaries executed",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario-mini.agent.parallel-spawn-join-determinism.v1",
-      "message": "parallel spawn/join mini-replay recorded deterministic process/worker sequence ordering"
+      "message": "parallel spawn/join mini-replay recorded deterministic process/worker sequence ordering",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.runtime-contract.v1:runtime_scenario_drains_command_before_turn_work_and_commits_checkpoint",
-      "message": "runtime contract `runtime_scenario_drains_command_before_turn_work_and_commits_checkpoint` passed semantic `runtime.command_before_turn_work`: Session-command gate, checkpoint persistence, stale queue completion rejection, final queue drain.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: a command queued before turn work preserved later turns and lease ordering"
+      "message": "runtime contract `runtime_scenario_drains_command_before_turn_work_and_commits_checkpoint` passed semantic `runtime.command_before_turn_work`: Session-command gate, checkpoint persistence, stale queue completion rejection, final queue drain.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: a command queued before turn work preserved later turns and lease ordering",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.runtime-contract.v1:runtime_scenario_command_only_queue_drain_completes_without_turn_work",
-      "message": "runtime contract `runtime_scenario_command_only_queue_drain_completes_without_turn_work` passed semantic `runtime.command_only_queue_drain`: Command-only queued work claims no turn work and explicitly commits.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: command queue source keys drained against monotonically advancing lease fences"
+      "message": "runtime contract `runtime_scenario_command_only_queue_drain_completes_without_turn_work` passed semantic `runtime.command_only_queue_drain`: Command-only queued work claims no turn work and explicitly commits.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: command queue source keys drained against monotonically advancing lease fences",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.runtime-contract.v1:runtime_scenario_queued_work_claim_keeps_pending_next_turn_input",
-      "message": "runtime contract `runtime_scenario_queued_work_claim_keeps_pending_next_turn_input` passed semantic `runtime.queued_work_keeps_pending_input`: Queued turn work does not consume pending next-turn input.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: queued ingress kept a stable source key while live provider turns continued"
+      "message": "runtime contract `runtime_scenario_queued_work_claim_keeps_pending_next_turn_input` passed semantic `runtime.queued_work_keeps_pending_input`: Queued turn work does not consume pending next-turn input.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: queued ingress kept a stable source key while live provider turns continued",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.runtime-contract.v1:runtime_scenario_claims_queued_turn_input_and_completes_it",
-      "message": "runtime contract `runtime_scenario_claims_queued_turn_input_and_completes_it` passed semantic `runtime.queued_turn_input_completion`: Next-turn pending inputs are claimed, hidden while live, and completed by commit.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: a queued turn input source key was followed by a completed subsequent turn"
+      "message": "runtime contract `runtime_scenario_claims_queued_turn_input_and_completes_it` passed semantic `runtime.queued_turn_input_completion`: Next-turn pending inputs are claimed, hidden while live, and completed by commit.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: a queued turn input source key was followed by a completed subsequent turn",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.runtime-contract.v1:runtime_scenario_observation_replay_keeps_original_turn_input",
-      "message": "runtime contract `runtime_scenario_observation_replay_keeps_original_turn_input` passed semantic `runtime.observation_replay_preserves_input`: Source-key observation replay preserves the original live input payload and id.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: observer reconnect replay converged to the final provider turn"
+      "message": "runtime contract `runtime_scenario_observation_replay_keeps_original_turn_input` passed semantic `runtime.observation_replay_preserves_input`: Source-key observation replay preserves the original live input payload and id.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: observer reconnect replay converged to the final provider turn",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.runtime-contract.v1:runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel",
-      "message": "runtime contract `runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel` passed semantic `runtime.checkpoint_redrive_cancel`: Active-turn input deferral, cancellation after deferral, and no later idle claim.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: queued input cancellation targeted a source key and observers converged"
+      "message": "runtime contract `runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel` passed semantic `runtime.checkpoint_redrive_cancel`: Active-turn input deferral, cancellation after deferral, and no later idle claim.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: queued input cancellation targeted a source key and observers converged",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.runtime-contract.v1:runtime_scenario_commits_after_advisory_session_lease_release",
-      "message": "runtime contract `runtime_scenario_commits_after_advisory_session_lease_release` passed semantic `runtime.advisory_lease_head_cas`: A released advisory lease permits a current-head commit while the head CAS rejects stale state.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: the stale worker completion was rejected by durable commit fencing"
+      "message": "runtime contract `runtime_scenario_commits_after_advisory_session_lease_release` passed semantic `runtime.advisory_lease_head_cas`: A released advisory lease permits a current-head commit while the head CAS rejects stale state.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: the stale worker completion was rejected by durable commit fencing",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.runtime-contract.v1:runtime_scenario_reclaims_dead_session_lease_and_rejects_stale_observation",
-      "message": "runtime contract `runtime_scenario_reclaims_dead_session_lease_and_rejects_stale_observation` passed semantic `runtime.dead_lease_reclaim_rejects_stale`: Dead local holder lease reclaim advances the fence and stale observed-holder reclaim stays busy.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: a second incarnation reclaimed the dead lease at a strictly higher fence"
+      "message": "runtime contract `runtime_scenario_reclaims_dead_session_lease_and_rejects_stale_observation` passed semantic `runtime.dead_lease_reclaim_rejects_stale`: Dead local holder lease reclaim advances the fence and stale observed-holder reclaim stays busy.. Evidence: queued_ingress, cancellation, process_wake, worker_stale_completion, lease_time; adapter: a second incarnation reclaimed the dead lease at a strictly higher fence",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.standard-contract.v1:standard_protocol_scenario_projects_initial_request",
-      "message": "standard contract `standard_protocol_scenario_projects_initial_request` passed semantic `standard.initial_request_projection`: Standard protocol projects user/system input into the first model request.. Evidence: provider_turn, runtime_session_graph; adapter: generated contract facts held: standard_initial_request_projection_execution, standard_initial_request_projection"
+      "message": "standard contract `standard_protocol_scenario_projects_initial_request` passed semantic `standard.initial_request_projection`: Standard protocol projects user/system input into the first model request.. Evidence: provider_turn, runtime_session_graph; adapter: generated contract facts held: standard_initial_request_projection_execution, standard_initial_request_projection",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.standard-contract.v1:standard_protocol_scenario_empty_model_response_stops_provider_error",
-      "message": "standard contract `standard_protocol_scenario_empty_model_response_stops_provider_error` passed semantic `standard.empty_provider_response_error`: Empty provider response terminates through the protocol error boundary.. Evidence: provider_mutation; adapter: generated contract facts held: standard_empty_provider_response_error_execution, standard_empty_response_terminal_error"
+      "message": "standard contract `standard_protocol_scenario_empty_model_response_stops_provider_error` passed semantic `standard.empty_provider_response_error`: Empty provider response terminates through the protocol error boundary.. Evidence: provider_mutation; adapter: generated contract facts held: standard_empty_provider_response_error_execution, standard_empty_response_terminal_error",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.standard-contract.v1:standard_protocol_scenario_provider_error_stops_without_checkpoint",
-      "message": "standard contract `standard_protocol_scenario_provider_error_stops_without_checkpoint` passed semantic `standard.provider_error_without_checkpoint`: Provider errors stop without committing a protocol checkpoint.. Evidence: provider_mutation; adapter: generated contract facts held: standard_provider_error_without_checkpoint_execution, standard_provider_error_no_checkpoint"
+      "message": "standard contract `standard_protocol_scenario_provider_error_stops_without_checkpoint` passed semantic `standard.provider_error_without_checkpoint`: Provider errors stop without committing a protocol checkpoint.. Evidence: provider_mutation; adapter: generated contract facts held: standard_provider_error_without_checkpoint_execution, standard_provider_error_no_checkpoint",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.standard-contract.v1:standard_protocol_scenario_native_tool_loop_reenters_model_after_checkpoint",
-      "message": "standard contract `standard_protocol_scenario_native_tool_loop_reenters_model_after_checkpoint` passed semantic `standard.native_tool_loop_reenters_model`: Native tool calls checkpoint and re-enter the model loop.. Evidence: tool_result, provider_turn; adapter: generated contract facts held: standard_native_tool_loop_reenters_model_execution, standard_native_tool_reenters_model"
+      "message": "standard contract `standard_protocol_scenario_native_tool_loop_reenters_model_after_checkpoint` passed semantic `standard.native_tool_loop_reenters_model`: Native tool calls checkpoint and re-enter the model loop.. Evidence: tool_result, provider_turn; adapter: generated contract facts held: standard_native_tool_loop_reenters_model_execution, standard_native_tool_reenters_model",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.standard-contract.v1:standard_protocol_scenario_parallel_tool_results_checkpoint_once",
-      "message": "standard contract `standard_protocol_scenario_parallel_tool_results_checkpoint_once` passed semantic `standard.parallel_tool_results_checkpoint_once`: Parallel native tool results checkpoint once before protocol re-entry.. Evidence: tool_result, provider_event, provider_turn; adapter: generated contract facts held: standard_parallel_tool_results_checkpoint_once_execution, standard_parallel_tool_checkpoint_once"
+      "message": "standard contract `standard_protocol_scenario_parallel_tool_results_checkpoint_once` passed semantic `standard.parallel_tool_results_checkpoint_once`: Parallel native tool results checkpoint once before protocol re-entry.. Evidence: tool_result, provider_event, provider_turn; adapter: generated contract facts held: standard_parallel_tool_results_checkpoint_once_execution, standard_parallel_tool_checkpoint_once",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.standard-contract.v1:standard_protocol_scenario_tool_failure_feedback_reenters_model_after_checkpoint",
-      "message": "standard contract `standard_protocol_scenario_tool_failure_feedback_reenters_model_after_checkpoint` passed semantic `standard.tool_failure_feedback_reenters_model`: Tool failure is converted into model feedback after checkpoint.. Evidence: tool_result, provider_mutation, provider_turn; adapter: generated contract facts held: standard_tool_failure_feedback_reenters_model_execution, standard_tool_feedback_reenters_model, standard_tool_failure_feedback_parser_path"
+      "message": "standard contract `standard_protocol_scenario_tool_failure_feedback_reenters_model_after_checkpoint` passed semantic `standard.tool_failure_feedback_reenters_model`: Tool failure is converted into model feedback after checkpoint.. Evidence: tool_result, provider_mutation, provider_turn; adapter: generated contract facts held: standard_tool_failure_feedback_reenters_model_execution, standard_tool_feedback_reenters_model, standard_tool_failure_feedback_parser_path",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.standard-contract.v1:standard_protocol_scenario_streamed_text_finishes_without_duplicate_delta",
-      "message": "standard contract `standard_protocol_scenario_streamed_text_finishes_without_duplicate_delta` passed semantic `standard.streamed_text_finalizes_once`: Streaming text projection emits a clean final response without duplicate deltas.. Evidence: provider_event, provider_turn, observer_convergence; adapter: generated contract facts held: standard_streamed_text_finalizes_once_execution, standard_streamed_text_finalizes_once"
+      "message": "standard contract `standard_protocol_scenario_streamed_text_finishes_without_duplicate_delta` passed semantic `standard.streamed_text_finalizes_once`: Streaming text projection emits a clean final response without duplicate deltas.. Evidence: provider_event, provider_turn, observer_convergence; adapter: generated contract facts held: standard_streamed_text_finalizes_once_execution, standard_streamed_text_finalizes_once",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.standard-contract.v1:standard_protocol_scenario_max_turns_terminates_after_tool_result",
-      "message": "standard contract `standard_protocol_scenario_max_turns_terminates_after_tool_result` passed semantic `standard.max_turns_after_tool_result`: Tool-result continuation terminates at max-turns with the expected final message.. Evidence: tool_result, provider_turn, max_turn_stop; adapter: generated contract facts held: standard_max_turns_after_tool_result"
+      "message": "standard contract `standard_protocol_scenario_max_turns_terminates_after_tool_result` passed semantic `standard.max_turns_after_tool_result`: Tool-result continuation terminates at max-turns with the expected final message.. Evidence: tool_result, provider_turn, max_turn_stop; adapter: generated contract facts held: standard_max_turns_after_tool_result",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_prose_only_response_finishes_by_default",
-      "message": "rlm contract `rlm_protocol_scenario_prose_only_response_finishes_by_default` passed semantic `rlm.natural_prose_finalizes`: Natural RLM prose-only response finalizes by default.. Evidence: provider_turn; adapter: generated contract facts held: rlm_natural_prose_finalizes"
+      "message": "rlm contract `rlm_protocol_scenario_prose_only_response_finishes_by_default` passed semantic `rlm.natural_prose_finalizes`: Natural RLM prose-only response finalizes by default.. Evidence: provider_turn; adapter: generated contract facts held: rlm_natural_prose_finalizes",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_typed_prose_only_response_requests_finish",
-      "message": "rlm contract `rlm_protocol_scenario_typed_prose_only_response_requests_finish` passed semantic `rlm.typed_prose_requires_finish`: Typed RLM output requires explicit finish rather than prose-only success.. Evidence: trigger, provider_turn; adapter: generated contract facts held: rlm_typed_prose_requires_finish"
+      "message": "rlm contract `rlm_protocol_scenario_typed_prose_only_response_requests_finish` passed semantic `rlm.typed_prose_requires_finish`: Typed RLM output requires explicit finish rather than prose-only success.. Evidence: trigger, provider_turn; adapter: generated contract facts held: rlm_typed_prose_requires_finish",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_finish_required_prose_at_max_turns_stops_without_retry_prompt",
-      "message": "rlm contract `rlm_protocol_scenario_finish_required_prose_at_max_turns_stops_without_retry_prompt` passed semantic `rlm.finish_required_max_turn_stop`: Finish-required prose stops at max turns without an extra retry prompt.. Evidence: provider_turn; adapter: generated contract facts held: rlm_finish_required_max_turn_stop"
+      "message": "rlm contract `rlm_protocol_scenario_finish_required_prose_at_max_turns_stops_without_retry_prompt` passed semantic `rlm.finish_required_max_turn_stop`: Finish-required prose stops at max turns without an extra retry prompt.. Evidence: provider_turn; adapter: generated contract facts held: rlm_finish_required_max_turn_stop",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_finish_required_exec_error_at_max_turns_stops_without_retry",
-      "message": "rlm contract `rlm_protocol_scenario_finish_required_exec_error_at_max_turns_stops_without_retry` passed semantic `rlm.exec_error_max_turn_stop`: Exec errors at max turns stop cleanly without another repair turn.. Evidence: exec_code; adapter: generated contract facts held: rlm_exec_error_max_turn_stop, rlm_exec_error_max_turn_stop"
+      "message": "rlm contract `rlm_protocol_scenario_finish_required_exec_error_at_max_turns_stops_without_retry` passed semantic `rlm.exec_error_max_turn_stop`: Exec errors at max turns stop cleanly without another repair turn.. Evidence: exec_code; adapter: generated contract facts held: rlm_exec_error_max_turn_stop, rlm_exec_error_max_turn_stop",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_finish_required_prose_only_diagnostic_has_clean_counts",
-      "message": "rlm contract `rlm_protocol_scenario_finish_required_prose_only_diagnostic_has_clean_counts` passed semantic `rlm.finish_required_diagnostic_counts`: Finish-required diagnostics classify prose-only responses with clean counts.. Evidence: provider_turn; adapter: generated contract facts held: rlm_finish_required_diagnostic_counts"
+      "message": "rlm contract `rlm_protocol_scenario_finish_required_prose_only_diagnostic_has_clean_counts` passed semantic `rlm.finish_required_diagnostic_counts`: Finish-required diagnostics classify prose-only responses with clean counts.. Evidence: provider_turn; adapter: generated contract facts held: rlm_finish_required_diagnostic_counts",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_natural_prose_only_diagnostic_has_clean_counts",
-      "message": "rlm contract `rlm_protocol_scenario_natural_prose_only_diagnostic_has_clean_counts` passed semantic `rlm.natural_diagnostic_counts`: Natural diagnostics classify prose-only responses with clean counts.. Evidence: provider_turn; adapter: generated contract facts held: rlm_natural_diagnostic_counts"
+      "message": "rlm contract `rlm_protocol_scenario_natural_prose_only_diagnostic_has_clean_counts` passed semantic `rlm.natural_diagnostic_counts`: Natural diagnostics classify prose-only responses with clean counts.. Evidence: provider_turn; adapter: generated contract facts held: rlm_natural_diagnostic_counts",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_cell_reasoning_prose_code_diagnostic_has_clean_counts",
-      "message": "rlm contract `rlm_protocol_scenario_cell_reasoning_prose_code_diagnostic_has_clean_counts` passed semantic `rlm.cell_diagnostic_counts`: Mixed reasoning/prose/code diagnostics keep separate counts.. Evidence: exec_code, provider_turn; adapter: generated contract facts held: rlm_cell_diagnostic_counts, rlm_cell_diagnostic_exec_counts"
+      "message": "rlm contract `rlm_protocol_scenario_cell_reasoning_prose_code_diagnostic_has_clean_counts` passed semantic `rlm.cell_diagnostic_counts`: Mixed reasoning/prose/code diagnostics keep separate counts.. Evidence: exec_code, provider_turn; adapter: generated contract facts held: rlm_cell_diagnostic_counts, rlm_cell_diagnostic_exec_counts",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_retired_percent_marker_inside_source_is_plain_lashlang_text",
-      "message": "rlm contract `rlm_protocol_scenario_retired_percent_marker_inside_source_is_plain_lashlang_text` passed semantic `rlm.retired_marker_plain_lashlang_text`: Retired percent cell marker remains Lashlang source text, not a control marker.. Evidence: exec_code; adapter: generated contract facts held: rlm_retired_marker_plain_lashlang_text, rlm_retired_marker_plain_lashlang_text"
+      "message": "rlm contract `rlm_protocol_scenario_retired_percent_marker_inside_source_is_plain_lashlang_text` passed semantic `rlm.retired_marker_plain_lashlang_text`: Retired percent cell marker remains Lashlang source text, not a control marker.. Evidence: exec_code; adapter: generated contract facts held: rlm_retired_marker_plain_lashlang_text, rlm_retired_marker_plain_lashlang_text",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_lashlang_cell_runs_exec_and_continues",
-      "message": "rlm contract `rlm_protocol_scenario_lashlang_cell_runs_exec_and_continues` passed semantic `rlm.lashlang_cell_exec_continues`: Lashlang cell execution feeds the protocol loop and continues.. Evidence: exec_code, provider_turn; adapter: generated contract facts held: rlm_lashlang_cell_exec_continues, rlm_lashlang_cell_exec_continues"
+      "message": "rlm contract `rlm_protocol_scenario_lashlang_cell_runs_exec_and_continues` passed semantic `rlm.lashlang_cell_exec_continues`: Lashlang cell execution feeds the protocol loop and continues.. Evidence: exec_code, provider_turn; adapter: generated contract facts held: rlm_lashlang_cell_exec_continues, rlm_lashlang_cell_exec_continues",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_streamed_lashlang_cell_runs_exec_and_persists_trajectory",
-      "message": "rlm contract `rlm_protocol_scenario_streamed_lashlang_cell_runs_exec_and_persists_trajectory` passed semantic `rlm.streamed_lashlang_cell_exec_persists_trajectory`: A complete streamed Lashlang cell executes and persists trajectory events.. Evidence: exec_code, provider_event, provider_turn; adapter: generated contract facts held: rlm_streamed_lashlang_cell_exec_persists_trajectory, rlm_streamed_lashlang_cell_exec_persists_trajectory"
+      "message": "rlm contract `rlm_protocol_scenario_streamed_lashlang_cell_runs_exec_and_persists_trajectory` passed semantic `rlm.streamed_lashlang_cell_exec_persists_trajectory`: A complete streamed Lashlang cell executes and persists trajectory events.. Evidence: exec_code, provider_event, provider_turn; adapter: generated contract facts held: rlm_streamed_lashlang_cell_exec_persists_trajectory, rlm_streamed_lashlang_cell_exec_persists_trajectory",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_empty_turn_options_use_natural_default",
-      "message": "rlm contract `rlm_protocol_scenario_empty_turn_options_use_natural_default` passed semantic `rlm.empty_options_natural_default`: Empty RLM turn options use the natural default.. Evidence: provider_turn; adapter: generated contract facts held: rlm_empty_options_natural_default"
+      "message": "rlm contract `rlm_protocol_scenario_empty_turn_options_use_natural_default` passed semantic `rlm.empty_options_natural_default`: Empty RLM turn options use the natural default.. Evidence: provider_turn; adapter: generated contract facts held: rlm_empty_options_natural_default",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_exec_result_emits_accounting_without_storing_tool_call_ids",
-      "message": "rlm contract `rlm_protocol_scenario_exec_result_emits_accounting_without_storing_tool_call_ids` passed semantic `rlm.exec_result_no_tool_call_replay`: Exec result feedback avoids tool-call id storage and synthetic tool replay.. Evidence: exec_code; adapter: generated contract facts held: rlm_exec_result_no_tool_call_replay, rlm_exec_result_no_tool_call_replay"
+      "message": "rlm contract `rlm_protocol_scenario_exec_result_emits_accounting_without_storing_tool_call_ids` passed semantic `rlm.exec_result_no_tool_call_replay`: Exec result feedback avoids tool-call id storage and synthetic tool replay.. Evidence: exec_code; adapter: generated contract facts held: rlm_exec_result_no_tool_call_replay, rlm_exec_result_no_tool_call_replay",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal",
-      "message": "rlm contract `rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal` passed semantic `rlm.exec_tool_control_frame_switch_terminal`: Tool control frame-switch from exec is terminal.. Evidence: exec_code, trigger; adapter: generated contract facts held: rlm_exec_tool_control_frame_switch_terminal, rlm_exec_tool_control_frame_switch_terminal, rlm_exec_tool_control_frame_switch_trigger"
+      "message": "rlm contract `rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal` passed semantic `rlm.exec_tool_control_frame_switch_terminal`: Tool control frame-switch from exec is terminal.. Evidence: exec_code, trigger; adapter: generated contract facts held: rlm_exec_tool_control_frame_switch_terminal, rlm_exec_tool_control_frame_switch_terminal, rlm_exec_tool_control_frame_switch_trigger",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_exec_any_tool_control_fail_is_terminal_error",
-      "message": "rlm contract `rlm_protocol_scenario_exec_any_tool_control_fail_is_terminal_error` passed semantic `rlm.exec_tool_control_fail_terminal`: Tool control fail from exec is a terminal error.. Evidence: exec_code, backend_failure; adapter: generated contract facts held: rlm_exec_tool_control_fail_terminal, rlm_exec_tool_control_fail_terminal, rlm_exec_tool_control_fail_backend"
+      "message": "rlm contract `rlm_protocol_scenario_exec_any_tool_control_fail_is_terminal_error` passed semantic `rlm.exec_tool_control_fail_terminal`: Tool control fail from exec is a terminal error.. Evidence: exec_code, backend_failure; adapter: generated contract facts held: rlm_exec_tool_control_fail_terminal, rlm_exec_tool_control_fail_terminal, rlm_exec_tool_control_fail_backend",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_typed_finish_emits_turn_outcome_and_done",
-      "message": "rlm contract `rlm_protocol_scenario_typed_finish_emits_turn_outcome_and_done` passed semantic `rlm.typed_finish_emits_outcome_and_done`: Typed finish emits both turn outcome and done status.. Evidence: final_value; adapter: generated contract facts held: rlm_typed_finish_emits_outcome_and_done"
+      "message": "rlm contract `rlm_protocol_scenario_typed_finish_emits_turn_outcome_and_done` passed semantic `rlm.typed_finish_emits_outcome_and_done`: Typed finish emits both turn outcome and done status.. Evidence: final_value; adapter: generated contract facts held: rlm_typed_finish_emits_outcome_and_done",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_natural_allows_finish_value",
-      "message": "rlm contract `rlm_protocol_scenario_natural_allows_finish_value` passed semantic `rlm.natural_allows_finish_value`: Natural RLM mode accepts an explicit finish value.. Evidence: provider_turn; adapter: generated contract facts held: rlm_natural_allows_finish_value"
+      "message": "rlm contract `rlm_protocol_scenario_natural_allows_finish_value` passed semantic `rlm.natural_allows_finish_value`: Natural RLM mode accepts an explicit finish value.. Evidence: provider_turn; adapter: generated contract facts held: rlm_natural_allows_finish_value",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback",
-      "message": "rlm contract `rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback` passed semantic `rlm.typed_schema_mismatch_repair_loop`: Typed schema mismatch loops with repair feedback.. Evidence: provider_mutation, provider_turn; adapter: generated contract facts held: rlm_typed_schema_mismatch_feedback, rlm_typed_schema_mismatch_repair_loop"
+      "message": "rlm contract `rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback` passed semantic `rlm.typed_schema_mismatch_repair_loop`: Typed schema mismatch loops with repair feedback.. Evidence: provider_mutation, provider_turn; adapter: generated contract facts held: rlm_typed_schema_mismatch_feedback, rlm_typed_schema_mismatch_repair_loop",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.rlm-contract.v1:rlm_protocol_scenario_typed_schema_mismatch_checks_any_of",
-      "message": "rlm contract `rlm_protocol_scenario_typed_schema_mismatch_checks_any_of` passed semantic `rlm.typed_schema_any_of_mismatch`: Typed schema validation checks anyOf mismatches.. Evidence: provider_mutation, provider_turn; adapter: generated contract facts held: rlm_typed_schema_anyof_feedback, rlm_typed_schema_anyof_mismatch"
+      "message": "rlm contract `rlm_protocol_scenario_typed_schema_mismatch_checks_any_of` passed semantic `rlm.typed_schema_any_of_mismatch`: Typed schema validation checks anyOf mismatches.. Evidence: provider_mutation, provider_turn; adapter: generated contract facts held: rlm_typed_schema_anyof_feedback, rlm_typed_schema_anyof_mismatch",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.agent-contract.v1:agent_scenario_foreground_labeled_tool_call",
-      "message": "agent contract `agent_scenario_foreground_labeled_tool_call` passed semantic `agent.foreground_tool_call_round_trip`: Facade root turn, app tool execution, label graph, final value, and remote DTO round trip.. Evidence: tool_result, provider_turn; adapter: generated contract facts held: agent_foreground_tool_call_round_trip_execution, agent_foreground_tool_call_round_trip"
+      "message": "agent contract `agent_scenario_foreground_labeled_tool_call` passed semantic `agent.foreground_tool_call_round_trip`: Facade root turn, app tool execution, label graph, final value, and remote DTO round trip.. Evidence: tool_result, provider_turn; adapter: generated contract facts held: agent_foreground_tool_call_round_trip_execution, agent_foreground_tool_call_round_trip",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.agent-contract.v1:agent_scenario_started_process_labeled_tool_call",
-      "message": "agent contract `agent_scenario_started_process_labeled_tool_call` passed semantic `agent.started_process_tool_call_graph`: Started Lashlang process calling an app tool with process graph completion.. Evidence: process_wake, tool_result, provider_turn; adapter: generated contract facts held: agent_started_process_tool_call_graph_execution, agent_started_process_graph, agent_started_process_tool_call"
+      "message": "agent contract `agent_scenario_started_process_labeled_tool_call` passed semantic `agent.started_process_tool_call_graph`: Started Lashlang process calling an app tool with process graph completion.. Evidence: process_wake, tool_result, provider_turn; adapter: generated contract facts held: agent_started_process_tool_call_graph_execution, agent_started_process_graph, agent_started_process_tool_call",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.agent-contract.v1:agent_scenario_process_durable_input_request_tool",
-      "message": "agent contract `agent_scenario_process_durable_input_request_tool` passed semantic `agent.durable_input_suspension_resolution`: Live durable input suspension, external resolution, process event, and final value.. Evidence: durable_effect, process_wake, observer_reconnect; adapter: generated contract facts held: agent_durable_input_suspension_resolution_execution, agent_durable_input_first_and_replay, agent_durable_input_process_wake, agent_durable_input_observer_reconnect"
+      "message": "agent contract `agent_scenario_process_durable_input_request_tool` passed semantic `agent.durable_input_suspension_resolution`: Live durable input suspension, external resolution, process event, and final value.. Evidence: durable_effect, process_wake, observer_reconnect; adapter: generated contract facts held: agent_durable_input_suspension_resolution_execution, agent_durable_input_first_and_replay, agent_durable_input_process_wake, agent_durable_input_observer_reconnect",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.agent-contract.v1:agent_scenario_shell_nonzero_and_pipeline_results_are_data",
-      "message": "agent contract `agent_scenario_shell_nonzero_and_pipeline_results_are_data` passed semantic `agent.shell_results_are_data`: Shell failures and pipelines remain data at the facade boundary.. Evidence: exec_code, tool_result; adapter: generated contract facts held: agent_shell_results_are_data_execution, agent_shell_exec_result_data, agent_shell_tool_result_data"
+      "message": "agent contract `agent_scenario_shell_nonzero_and_pipeline_results_are_data` passed semantic `agent.shell_results_are_data`: Shell failures and pipelines remain data at the facade boundary.. Evidence: exec_code, tool_result; adapter: generated contract facts held: agent_shell_results_are_data_execution, agent_shell_exec_result_data, agent_shell_tool_result_data",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.agent-contract.v1:agent_scenario_shell_output_survives_print_projection_in_variable",
-      "message": "agent contract `agent_scenario_shell_output_survives_print_projection_in_variable` passed semantic `agent.shell_output_print_projection_survives`: Large shell output survives print projection and remains addressable.. Evidence: exec_code, provider_turn; adapter: generated contract facts held: agent_shell_output_print_projection_execution, agent_shell_output_exec_projection, agent_shell_output_projection_survives"
+      "message": "agent contract `agent_scenario_shell_output_survives_print_projection_in_variable` passed semantic `agent.shell_output_print_projection_survives`: Large shell output survives print projection and remains addressable.. Evidence: exec_code, provider_turn; adapter: generated contract facts held: agent_shell_output_print_projection_execution, agent_shell_output_exec_projection, agent_shell_output_projection_survives",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.agent-contract.v1:agent_scenario_started_process_labeled_subagent_spawn",
-      "message": "agent contract `agent_scenario_started_process_labeled_subagent_spawn` passed semantic `agent.started_process_subagent_spawn`: Started process spawns a subagent and records child session execution graphs.. Evidence: process_wake, multi_session; adapter: generated contract facts held: agent_started_process_subagent_spawn_execution, agent_started_process_subagent_spawn"
+      "message": "agent contract `agent_scenario_started_process_labeled_subagent_spawn` passed semantic `agent.started_process_subagent_spawn`: Started process spawns a subagent and records child session execution graphs.. Evidence: process_wake, multi_session; adapter: generated contract facts held: agent_started_process_subagent_spawn_execution, agent_started_process_subagent_spawn",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.agent-contract.v1:agent_scenario_nested_process_start_await",
-      "message": "agent contract `agent_scenario_nested_process_start_await` passed semantic `agent.nested_process_start_await`: Nested process start/await produces deterministic process ids and graph lineage.. Evidence: process_wake, multi_session; adapter: generated contract facts held: agent_nested_process_start_await_execution, agent_nested_process_start_await"
+      "message": "agent contract `agent_scenario_nested_process_start_await` passed semantic `agent.nested_process_start_await`: Nested process start/await produces deterministic process ids and graph lineage.. Evidence: process_wake, multi_session; adapter: generated contract facts held: agent_nested_process_start_await_execution, agent_nested_process_start_await",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.agent-contract.v1:agent_scenario_session_turn_process_child",
-      "message": "agent contract `agent_scenario_session_turn_process_child` passed semantic `agent.session_turn_process_child`: Host session-turn process API creates and awaits a child session turn.. Evidence: process_wake, provider_turn, multi_session; adapter: generated contract facts held: agent_session_turn_process_child_execution, agent_session_turn_process_child_wake, agent_session_turn_process_child_provider"
+      "message": "agent contract `agent_scenario_session_turn_process_child` passed semantic `agent.session_turn_process_child`: Host session-turn process API creates and awaits a child session turn.. Evidence: process_wake, provider_turn, multi_session; adapter: generated contract facts held: agent_session_turn_process_child_execution, agent_session_turn_process_child_wake, agent_session_turn_process_child_provider",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.agent-contract.v1:agent_scenario_failed_child_preserves_failure_graph",
-      "message": "agent contract `agent_scenario_failed_child_preserves_failure_graph` passed semantic `agent.failed_child_preserves_failure_graph`: Child failure path preserves failure graph and avoids provider-exhaustion false failures.. Evidence: worker_stale_completion, backend_failure, multi_session; adapter: generated contract facts held: agent_failed_child_preserves_failure_graph_execution, agent_failed_child_worker_graph, agent_failed_child_backend_graph"
+      "message": "agent contract `agent_scenario_failed_child_preserves_failure_graph` passed semantic `agent.failed_child_preserves_failure_graph`: Child failure path preserves failure graph and avoids provider-exhaustion false failures.. Evidence: worker_stale_completion, backend_failure, multi_session; adapter: generated contract facts held: agent_failed_child_preserves_failure_graph_execution, agent_failed_child_worker_graph, agent_failed_child_backend_graph",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.agent-contract.v1:agent_scenario_parallel_spawn_and_join",
-      "message": "agent contract `agent_scenario_parallel_spawn_and_join` passed semantic `agent.parallel_spawn_and_join`: Parallel process starts join deterministically with unique process ids.. Evidence: process_wake, worker_stale_completion, multi_session; adapter: generated contract facts held: agent_parallel_spawn_and_join_execution, agent_parallel_spawn_process_wakes, agent_parallel_spawn_join_worker_order"
+      "message": "agent contract `agent_scenario_parallel_spawn_and_join` passed semantic `agent.parallel_spawn_and_join`: Parallel process starts join deterministically with unique process ids.. Evidence: process_wake, worker_stale_completion, multi_session; adapter: generated contract facts held: agent_parallel_spawn_and_join_execution, agent_parallel_spawn_process_wakes, agent_parallel_spawn_join_worker_order",
+      "observation_class": "model_property"
     },
     {
       "status": "passed",
       "oracle_id": "sim.oracle.scenario.agent-contract.v1:agent_scenario_tuple_values_finish_as_json_arrays",
-      "message": "agent contract `agent_scenario_tuple_values_finish_as_json_arrays` passed semantic `agent.tuple_values_finish_as_json_arrays`: Facade final values preserve tuple-to-JSON array projection.. Evidence: final_value; adapter: generated contract facts held: agent_tuple_values_finish_json_arrays_execution"
+      "message": "agent contract `agent_scenario_tuple_values_finish_as_json_arrays` passed semantic `agent.tuple_values_finish_as_json_arrays`: Facade final values preserve tuple-to-JSON array projection.. Evidence: final_value; adapter: generated contract facts held: agent_tuple_values_finish_json_arrays_execution",
+      "observation_class": "model_property"
     }
   ],
   "final_summary": {

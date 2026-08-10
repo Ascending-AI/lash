@@ -40,6 +40,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 sqlx = { workspace = true, default-features = false, features = ["postgres"] }
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 
 [dev-dependencies]
@@ -50,4 +51,3 @@ lash-provider-google = { workspace = true, features = ["testing"] }
 lash-provider-openai = { workspace = true, features = ["testing"] }
 rmp-serde = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }
-tempfile = { workspace = true }

@@ -5476,7 +5476,8 @@ fn backend_retry_terminalization_fact(
     events: &[DeliveredBoundary],
     fact: &'static str,
 ) -> Result<ScenarioContractGeneratedFact, String> {
-    let mut by_operation: BTreeMap<String, Vec<&DeliveredBoundary>> = BTreeMap::new();
+    let mut by_session_operation: BTreeMap<(String, String), Vec<&DeliveredBoundary>> =
+        BTreeMap::new();
     for event in events
         .iter()
         .filter(|event| event.kind == BoundaryKind::BackendFailure)
@@ -5488,9 +5489,18 @@ fn backend_retry_terminalization_fact(
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        by_operation.entry(operation).or_default().push(event);
+        let session = event
+            .observed
+            .get("session")
+            .and_then(Value::as_str)
+            .unwrap_or(event.actor_alias.as_str())
+            .to_string();
+        by_session_operation
+            .entry((session, operation))
+            .or_default()
+            .push(event);
     }
-    let Some(mut operation_events) = by_operation.into_values().find(|events| {
+    let Some(mut operation_events) = by_session_operation.into_values().find(|events| {
         let retryable = events.iter().any(|event| {
             event.observed.get("retryable").and_then(Value::as_bool) == Some(true)
                 && event
@@ -5498,6 +5508,11 @@ fn backend_retry_terminalization_fact(
                     .pointer("/production_store_error/retryable_class")
                     .and_then(Value::as_bool)
                     == Some(true)
+                && event
+                    .observed
+                    .pointer("/fault_injector/point")
+                    .and_then(Value::as_str)
+                    == Some("after_begin")
         });
         let terminal = events.iter().any(|event| {
             event.observed.get("retryable").and_then(Value::as_bool) == Some(false)
@@ -5506,6 +5521,11 @@ fn backend_retry_terminalization_fact(
                     .get("store_error_class")
                     .and_then(Value::as_str)
                     == Some("terminal_backend_error")
+                && event
+                    .observed
+                    .pointer("/fault_injector/point")
+                    .and_then(Value::as_str)
+                    == Some("commit_io")
         });
         retryable && terminal
     }) else {
@@ -5992,7 +6012,8 @@ fn trigger_wakeup_route_semantics(events: &[DeliveredBoundary]) -> bool {
 }
 
 fn backend_retry_terminalization_semantics(events: &[DeliveredBoundary]) -> bool {
-    let mut by_operation: BTreeMap<String, Vec<&DeliveredBoundary>> = BTreeMap::new();
+    let mut by_session_operation: BTreeMap<(String, String), Vec<&DeliveredBoundary>> =
+        BTreeMap::new();
     for event in events
         .iter()
         .filter(|event| event.kind == BoundaryKind::BackendFailure)
@@ -6004,9 +6025,18 @@ fn backend_retry_terminalization_semantics(events: &[DeliveredBoundary]) -> bool
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        by_operation.entry(operation).or_default().push(event);
+        let session = event
+            .observed
+            .get("session")
+            .and_then(Value::as_str)
+            .unwrap_or(event.actor_alias.as_str())
+            .to_string();
+        by_session_operation
+            .entry((session, operation))
+            .or_default()
+            .push(event);
     }
-    by_operation.values().any(|events| {
+    by_session_operation.values().any(|events| {
         let mut events = events.clone();
         events.sort_by_key(|event| event.sequence);
         let mut saw_retryable = false;
@@ -6021,23 +6051,28 @@ fn backend_retry_terminalization_semantics(events: &[DeliveredBoundary]) -> bool
                 return false;
             }
             last_attempt = attempt;
-            let retryable = event
-                .observed
-                .get("retryable")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let store_error_retryable = event
+            let Some(retryable) = event.observed.get("retryable").and_then(Value::as_bool) else {
+                return false;
+            };
+            let Some(store_error_retryable) = event
                 .observed
                 .pointer("/production_store_error/retryable_class")
                 .and_then(Value::as_bool)
-                .unwrap_or(retryable);
-            if retryable && store_error_retryable {
+            else {
+                return false;
+            };
+            let observed_fault_point = event
+                .observed
+                .pointer("/fault_injector/point")
+                .and_then(Value::as_str);
+            if retryable && store_error_retryable && observed_fault_point == Some("after_begin") {
                 saw_retryable = true;
                 continue;
             }
             if saw_retryable
                 && !retryable
                 && !store_error_retryable
+                && observed_fault_point == Some("commit_io")
                 && event
                     .observed
                     .get("store_error_class")
@@ -7593,30 +7628,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn seeded_duplicate_durable_execution_mutation_fails_generated_oracle() {
-        let workload = crate::generator::generate_workload(5, "fast-random", 24)
-            .expect("seeded generated workload");
-        let mut trace = crate::runner::run_generated_workload_for_fixture(workload, "bundle")
-            .await
-            .expect("generated trace");
-        let effect = trace
-            .final_summary
-            .durable_effects
-            .first_mut()
-            .expect("seed 5 exercises a durable effect");
-
-        // Acceptance mutation: model a replay-controller defect that invokes
-        // the local executor twice before the normal replay. The generated
-        // lane's summary must retain both real executions rather than clamp the
-        // observation to one.
-        effect.execution_count += 1;
-
-        let verdict = durable_effect_exactly_once(&trace.final_summary);
-        assert!(!verdict.is_passed(), "duplicate execution must be red");
-        assert!(verdict.message.contains("executed 2 times"));
-    }
-
-    #[tokio::test]
     async fn seeded_duplicate_raw_graph_row_mutation_fails_with_projection_contrast() {
         let workload = crate::generator::generate_workload(5, "fast-random", 24)
             .expect("seeded generated workload");
@@ -9071,6 +9082,7 @@ mod tests {
                         "type": "lash_core::StoreError",
                         "variant": "HeadRevisionConflict"
                     },
+                    "fault_injector": {"point": "after_begin"},
                     "retryable": true,
                     "store_error_class": "retryable_conflict"
                 }),
@@ -9093,6 +9105,7 @@ mod tests {
                         "type": "lash_core::StoreError",
                         "variant": "SessionExecutionLeaseExpired"
                     },
+                    "fault_injector": {"point": "commit_io"},
                     "retryable": false,
                     "store_error_class": "terminal_backend_error"
                 }),

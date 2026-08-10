@@ -89,11 +89,11 @@ use crate::stack_policy::{
 };
 use crate::store::{
     CheckpointComponentWriteKind, CheckpointWriteCollector, CheckpointWriteEvent, ModelStore,
-    ObservedSessionStoreFactory, backend_fault_observation,
+    ObservedSessionStoreFactory,
 };
 use crate::trace::{
-    AbstractWorldSummary, OracleStatus, OracleVerdict, SimulationTrace, TraceEventLine,
-    TraceIoError, write_event_lines, write_replay_report, write_trace,
+    AbstractWorldSummary, OracleObservationClass, OracleStatus, OracleVerdict, SimulationTrace,
+    TraceEventLine, TraceIoError, write_event_lines, write_replay_report, write_trace,
 };
 use crate::usage_oracle::checkpoint_usage_conservation;
 
