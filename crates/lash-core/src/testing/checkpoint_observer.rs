@@ -153,6 +153,7 @@ pub struct CheckpointWriteCollector {
 struct CheckpointWriteCollectorState {
     events: Vec<CheckpointWriteEvent>,
     next_commit_by_session: BTreeMap<String, usize>,
+    commit_budgets: BTreeMap<(String, u64), crate::testing::RuntimeCommitBudgetMeasurement>,
 }
 
 #[derive(Clone, Debug)]
@@ -197,6 +198,20 @@ impl CheckpointWriteCollector {
         events
     }
 
+    /// Return the exact pre-transaction budget measurement for an observed,
+    /// successfully committed runtime write.
+    pub fn runtime_commit_budget(
+        &self,
+        session_id: &str,
+        revision_before: u64,
+    ) -> Option<crate::testing::RuntimeCommitBudgetMeasurement> {
+        self.state
+            .lock_recover()
+            .commit_budgets
+            .get(&(session_id.to_string(), revision_before))
+            .copied()
+    }
+
     /// Record one observed commit, assigning its per-session commit index.
     ///
     /// Harnesses call this when re-attributing a commit that a separately
@@ -208,6 +223,16 @@ impl CheckpointWriteCollector {
         *next += 1;
         event.commit_index = *next;
         state.events.push(event);
+    }
+
+    fn push_runtime_commit(
+        &self,
+        event: CheckpointWriteEvent,
+        budget: crate::testing::RuntimeCommitBudgetMeasurement,
+    ) {
+        let key = (event.session_id.clone(), event.revision_before);
+        self.push(event);
+        self.state.lock_recover().commit_budgets.insert(key, budget);
     }
 
     fn apply_mutation(&self, commit: &mut RuntimeCommit) {
@@ -403,6 +428,7 @@ impl SessionCommitStore for ObservedSessionStore {
     ) -> Result<RuntimeCommitResult, StoreError> {
         self.collector.apply_mutation(&mut commit);
         let mut event = checkpoint_write_event(&commit);
+        let budget = crate::testing::measure_runtime_commit_budget(&commit)?;
         let result = self.inner.commit_runtime_state(commit).await?;
         if let Some(state) = event.state.as_mut()
             && let Some(accepted) = self.inner.load_session().await?
@@ -423,10 +449,13 @@ impl SessionCommitStore for ObservedSessionStore {
                 "token_usage": accepted.checkpoint.as_ref().map(|checkpoint| &checkpoint.turn_state.token_usage),
             }));
         }
-        self.collector.push(CheckpointWriteEvent {
-            revision_after: result.head_revision,
-            ..event
-        });
+        self.collector.push_runtime_commit(
+            CheckpointWriteEvent {
+                revision_after: result.head_revision,
+                ..event
+            },
+            budget,
+        );
         Ok(result)
     }
 

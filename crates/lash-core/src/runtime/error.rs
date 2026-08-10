@@ -45,6 +45,8 @@ pub enum RuntimeErrorCode {
     ContextPrepareTurn,
     ProtocolTurnExtension,
     ProtocolBeforeLlmCall,
+    /// A protocol requested `SwitchAgentFrame` without a usable frame identity.
+    InvalidAgentFrameSwitchFrameId,
     TurnStreamJoin,
     EmptyAgentFrameRun,
     DurableEffectLiveProtocolExtension,
@@ -162,6 +164,7 @@ impl RuntimeErrorCode {
             Self::ContextPrepareTurn => "context_prepare_turn",
             Self::ProtocolTurnExtension => "protocol_turn_extension",
             Self::ProtocolBeforeLlmCall => "protocol_before_llm_call",
+            Self::InvalidAgentFrameSwitchFrameId => "invalid_agent_frame_switch_frame_id",
             Self::TurnStreamJoin => "turn_stream_join",
             Self::EmptyAgentFrameRun => "empty_agent_frame_run",
             Self::DurableEffectLiveProtocolExtension => "durable_effect_live_protocol_extension",
@@ -324,6 +327,7 @@ impl RuntimeErrorCode {
                 | Self::SessionCommandIdempotencyKey
                 | Self::SessionDeleteScopeMismatch
                 | Self::SessionToolRegistry
+                | Self::InvalidAgentFrameSwitchFrameId
                 | Self::SqliteAwaitEventDecode
                 | Self::SqliteAwaitEventEncode
                 | Self::SqliteAwaitEventSign
@@ -368,6 +372,7 @@ impl RuntimeErrorCode {
             "context_prepare_turn" => Self::ContextPrepareTurn,
             "protocol_turn_extension" => Self::ProtocolTurnExtension,
             "protocol_before_llm_call" => Self::ProtocolBeforeLlmCall,
+            "invalid_agent_frame_switch_frame_id" => Self::InvalidAgentFrameSwitchFrameId,
             "turn_stream_join" => Self::TurnStreamJoin,
             "empty_agent_frame_run" => Self::EmptyAgentFrameRun,
             "durable_effect_live_protocol_extension" => Self::DurableEffectLiveProtocolExtension,
@@ -686,6 +691,7 @@ mod tests {
             | RuntimeErrorCode::SessionCommandIdempotencyKey
             | RuntimeErrorCode::SessionDeleteScopeMismatch
             | RuntimeErrorCode::SessionToolRegistry
+            | RuntimeErrorCode::InvalidAgentFrameSwitchFrameId
             | RuntimeErrorCode::SqliteAwaitEventDecode
             | RuntimeErrorCode::SqliteAwaitEventEncode
             | RuntimeErrorCode::SqliteAwaitEventSign
@@ -748,6 +754,7 @@ mod tests {
             RuntimeErrorCode::ContextPrepareTurn,
             RuntimeErrorCode::ProtocolTurnExtension,
             RuntimeErrorCode::ProtocolBeforeLlmCall,
+            RuntimeErrorCode::InvalidAgentFrameSwitchFrameId,
             RuntimeErrorCode::TurnStreamJoin,
             RuntimeErrorCode::EmptyAgentFrameRun,
             RuntimeErrorCode::DurableEffectLiveProtocolExtension,

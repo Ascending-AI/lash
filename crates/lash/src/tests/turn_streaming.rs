@@ -74,6 +74,143 @@ struct TurnPersistedGraphAppendPlugin {
 }
 
 #[cfg(feature = "rlm")]
+struct StopAfterFrameSwitchCommitFactory;
+
+#[cfg(feature = "rlm")]
+impl lash_core::facade_support::PluginFactory for StopAfterFrameSwitchCommitFactory {
+    fn id(&self) -> &'static str {
+        "stop-after-frame-switch-commit"
+    }
+
+    fn build(
+        &self,
+        _ctx: &lash_core::facade_support::PluginSessionContext,
+    ) -> std::result::Result<
+        Arc<dyn lash_core::facade_support::SessionPlugin>,
+        lash_core::PluginError,
+    > {
+        Ok(Arc::new(StopAfterFrameSwitchCommitPlugin))
+    }
+}
+
+#[cfg(feature = "rlm")]
+struct StopAfterFrameSwitchCommitPlugin;
+
+#[cfg(feature = "rlm")]
+impl lash_core::facade_support::SessionPlugin for StopAfterFrameSwitchCommitPlugin {
+    fn id(&self) -> &'static str {
+        "stop-after-frame-switch-commit"
+    }
+
+    fn register(
+        &self,
+        reg: &mut lash_core::facade_support::PluginRegistrar,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        reg.session().on_event(Arc::new(|event| {
+            Box::pin(async move {
+                if matches!(
+                    event,
+                    lash_core::facade_support::PluginLifecycleEvent::TurnPersisted(_)
+                ) {
+                    return Err(lash_core::PluginError::Session(
+                        "stop after the accepted frame-switch commit".to_string(),
+                    ));
+                }
+                Ok(())
+            })
+        }));
+        Ok(())
+    }
+}
+
+#[cfg(feature = "rlm")]
+fn frame_state_probe_definition() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:frame_state_probe",
+        "frame_state_probe",
+        "Record a deferred resolution in the current execution state.",
+        lash_core::ToolDefinition::default_input_schema(),
+        serde_json::json!({ "type": "string" }),
+    )
+    .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
+        ["fixture"],
+        "probe",
+    ))
+}
+
+#[cfg(feature = "rlm")]
+struct FrameStateDeferredResolver;
+
+#[cfg(feature = "rlm")]
+#[async_trait]
+impl lash_lashlang_runtime::DeferredToolResolver for FrameStateDeferredResolver {
+    async fn resolve(
+        &self,
+        paths: &[&str],
+    ) -> std::collections::BTreeMap<String, lash_lashlang_runtime::Resolution> {
+        paths
+            .iter()
+            .map(|path| {
+                let resolution = if *path == "fixture.probe" {
+                    lash_lashlang_runtime::Resolution::Resolved(Box::new(
+                        lash_lashlang_runtime::ToolGrant::new(frame_state_probe_definition())
+                            .with_source_id(lash_core::facade_support::PLUGIN_TOOL_SOURCE_ID),
+                    ))
+                } else {
+                    lash_lashlang_runtime::Resolution::NotAvailable
+                };
+                ((*path).to_string(), resolution)
+            })
+            .collect()
+    }
+}
+
+#[cfg(feature = "rlm")]
+struct FrameStateDeferredTools;
+
+#[cfg(feature = "rlm")]
+#[async_trait]
+impl lash_core::ToolProvider for FrameStateDeferredTools {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        Vec::new()
+    }
+
+    fn resolve_manifest_by_id(&self, id: &lash_core::ToolId) -> Option<lash_core::ToolManifest> {
+        (id == &lash_core::ToolId::from("tool:frame_state_probe"))
+            .then(|| frame_state_probe_definition().manifest())
+    }
+
+    fn resolve_contract(&self, _name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        None
+    }
+
+    async fn prepare_granted_tool_call(
+        &self,
+        _grant: &lash_core::ToolExecutionGrant,
+        call: lash_core::ToolPrepareCall<'_>,
+    ) -> std::result::Result<lash_core::PreparedToolCall, lash_core::ToolResult> {
+        Ok(lash_core::PreparedToolCall::identity(
+            call.tool_id,
+            call.pending,
+        ))
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+        assert_eq!(call.name, "frame_state_probe");
+        lash_core::ToolResult::ok(serde_json::json!("recorded"))
+    }
+
+    async fn execute_granted(
+        &self,
+        grant: &lash_core::ToolExecutionGrant,
+        args: &serde_json::Value,
+        context: &lash_core::ToolContext<'_>,
+    ) -> lash_core::ToolResult {
+        self.execute_by_id(&grant.manifest.id, args, context).await
+    }
+}
+
+#[cfg(feature = "rlm")]
 fn assert_sqlite_session_lane_free_at_generation(
     store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
     session_id: &str,
@@ -5296,6 +5433,244 @@ finish { established: control.total }"#,
     );
     assert_eq!(provider_call_count.load(Ordering::SeqCst), 3);
     Ok(())
+}
+
+#[cfg(feature = "rlm")]
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+struct RlmExecutionSnapshotProbe {
+    version: u32,
+    engine: String,
+    #[serde(with = "serde_bytes")]
+    vars: Vec<u8>,
+    files: std::collections::BTreeMap<String, String>,
+    deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
+}
+
+#[cfg(feature = "rlm")]
+struct ColdReopenFrameState {
+    switch_checkpoint_budget_bytes: usize,
+    resident_execution_state: RlmExecutionSnapshotProbe,
+    execution_state: RlmExecutionSnapshotProbe,
+}
+
+#[cfg(feature = "rlm")]
+async fn frame_switch_state_after_cold_reopen(
+    session_id: &str,
+    abandoned_global_bytes: usize,
+) -> Result<ColdReopenFrameState> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sqlite_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+        dir.path().join("sessions"),
+    ));
+    let checkpoint_writes =
+        lash_core::testing::checkpoint_observer::CheckpointWriteCollector::default();
+    let store_factory = Arc::new(
+        lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
+            sqlite_store_factory.clone() as Arc<dyn lash_core::SessionStoreFactory>,
+            checkpoint_writes.clone(),
+        ),
+    );
+    let abandoned_value = "x".repeat(abandoned_global_bytes);
+    let switch_source = format!(
+        r#"abandoned_global = {abandoned_value:?}
+probe_result = await fixture.probe({{}})?
+await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_seed: "seed:survives" }} }})?"#
+    );
+    let first_factory =
+        rlm_factory().with_deferred_tool_resolver(Arc::new(FrameStateDeferredResolver));
+    let first_core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        first_factory,
+    ))
+    .provider(queued_text_provider(vec![lashlang_block(&switch_source)]))
+    .model(mock_model_spec())
+    .store_factory(store_factory.clone())
+    .tools(Arc::new(FrameStateDeferredTools))
+    .plugin(Arc::new(StopAfterFrameSwitchCommitFactory))
+    .disable_queued_work_driver()
+    .build()?;
+    let first_session = first_core.session(session_id).open().await?;
+
+    let initial_execution_state = first_session
+        .admin()
+        .state()
+        .snapshot_execution()
+        .await?
+        .expect("RLM has an execution snapshot");
+    let mut initial_execution_state: RlmExecutionSnapshotProbe =
+        rmp_serde::from_slice(&initial_execution_state).expect("decode RLM execution snapshot");
+    initial_execution_state
+        .files
+        .insert("old-frame.txt".to_string(), "scratch:abandoned".to_string());
+    first_session
+        .admin()
+        .state()
+        .restore_execution(
+            &rmp_serde::to_vec_named(&initial_execution_state)
+                .expect("encode mutated RLM execution snapshot"),
+        )
+        .await?;
+
+    let switched = first_session
+        .turn(TurnInput::text("switch away from the abandoned frame"))
+        .run()
+        .await?;
+    assert!(matches!(
+        switched.result.outcome,
+        TurnOutcome::AgentFrameSwitch { .. }
+    ));
+    assert!(
+        switched.result.errors.iter().any(|issue| issue
+            .message
+            .contains("stop after the accepted frame-switch commit")),
+        "the test hook must stop automatic follow-through only after the switch commit: {switched:?}"
+    );
+    let switch_turn_index = switched.result.state.turn_index;
+
+    let resident_execution_state = first_session
+        .admin()
+        .state()
+        .snapshot_execution()
+        .await?
+        .expect("resident switched RLM has an execution snapshot");
+
+    drop(switched);
+    drop(first_session);
+    drop(first_core);
+
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let conn = rusqlite::Connection::open(sqlite_store_factory.catalog_path())
+                .expect("open SQLite session catalog");
+            let owner = conn
+                .query_row(
+                    "SELECT lease_owner_id FROM session_execution_leases WHERE session_id = ?1",
+                    [session_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .expect("read session execution lease row");
+            if owner.is_none() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("dropped runtime releases its session lane");
+
+    let store_request = lash_core::SessionStoreCreateRequest {
+        session_id: session_id.to_string(),
+        relation: lash_core::SessionRelation::Root,
+        policy: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded),
+    };
+    let store = lash_core::SessionStoreFactory::open_existing_store(
+        sqlite_store_factory.as_ref(),
+        &store_request,
+    )
+    .await
+    .expect("open durable session store")
+    .expect("frame-switch session is durable");
+    let durable = store
+        .load_session()
+        .await?
+        .expect("frame-switch session has a durable head");
+    let checkpoint = durable
+        .checkpoint
+        .as_ref()
+        .expect("frame-switch commit has a checkpoint");
+    assert!(
+        checkpoint.execution_state_ref.is_none() && checkpoint.execution_state.is_none(),
+        "the accepted switch commit and resident reset must agree on cleared execution state"
+    );
+    let switch_writes = checkpoint_writes
+        .events()
+        .into_iter()
+        .filter(|event| event.session_id == session_id && event.turn_index == switch_turn_index)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        switch_writes.len(),
+        1,
+        "observe exactly one RuntimeCommit for the accepted frame-switch turn: {switch_writes:?}"
+    );
+    let switch_checkpoint_budget_bytes = checkpoint_writes
+        .runtime_commit_budget(session_id, switch_writes[0].revision_before)
+        .expect("observe the accepted frame-switch RuntimeCommit before its transaction")
+        .checkpoint_bytes;
+    drop(store);
+    drop(durable);
+
+    let reopened_core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(queued_text_provider(vec![lashlang_block(
+        r#"finish "unused after state inspection""#,
+    )]))
+    .model(mock_model_spec())
+    .store_factory(sqlite_store_factory)
+    .disable_queued_work_driver()
+    .build()?;
+    let reopened_session = reopened_core.session(session_id).open().await?;
+    let execution_state = reopened_session
+        .admin()
+        .state()
+        .snapshot_execution()
+        .await?
+        .expect("reopened RLM has an execution snapshot");
+
+    Ok(ColdReopenFrameState {
+        switch_checkpoint_budget_bytes,
+        resident_execution_state: rmp_serde::from_slice(&resident_execution_state)
+            .expect("decode resident RLM execution snapshot"),
+        execution_state: rmp_serde::from_slice(&execution_state)
+            .expect("decode cold-reopened RLM execution snapshot"),
+    })
+}
+
+#[cfg(feature = "rlm")]
+#[test]
+fn agent_frame_switch_clears_execution_state_across_cold_reopen() -> Result<()> {
+    run_async_test_on_stack_budget("agent-frame-switch-cold-reopen-test", || async {
+        let small = frame_switch_state_after_cold_reopen("frame-clear-small", 16).await?;
+        let large = frame_switch_state_after_cold_reopen("frame-clear-large", 128 * 1024).await?;
+
+        for (geometry, execution_state) in [
+            ("resident", &large.resident_execution_state),
+            ("cold-reopened", &large.execution_state),
+        ] {
+            let vars = lashlang::Snapshot::from_canonical_bytes(&execution_state.vars)
+                .expect("decode canonical Lashlang snapshot");
+            assert!(
+                vars.globals.get("abandoned_global").is_none(),
+                "the old frame's globals must not survive in the {geometry} executor"
+            );
+            assert!(matches!(
+                vars.globals.get("frame_seed"),
+                Some(lashlang::Value::String(value)) if value.as_str() == "seed:survives"
+            ));
+
+            assert!(
+                !execution_state.files.contains_key("old-frame.txt"),
+                "the old frame's scratch files must not survive in the {geometry} executor"
+            );
+
+            assert!(
+                execution_state.deferred_resolutions.is_empty(),
+                "the old frame's deferred resolutions must not survive in the {geometry} executor"
+            );
+        }
+
+        let checkpoint_growth = large
+            .switch_checkpoint_budget_bytes
+            .abs_diff(small.switch_checkpoint_budget_bytes);
+        assert!(
+            checkpoint_growth < 1_024,
+            "the budgeted RuntimeCommit checkpoint must not scale with 128 KiB of abandoned execution state: small={}, large={}, growth={checkpoint_growth}",
+            small.switch_checkpoint_budget_bytes,
+            large.switch_checkpoint_budget_bytes
+        );
+        Ok(())
+    })
 }
 
 #[cfg(feature = "rlm")]

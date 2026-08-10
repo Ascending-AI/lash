@@ -68,6 +68,7 @@ struct FinalCommitInput<'a> {
     tool_calls: &'a [ToolCallRecord],
     plugins: Option<&'a PluginSession>,
     execution_state_update: ExecutionStateUpdate,
+    agent_frame_switch_materializes: bool,
     store: Option<&'a (dyn RuntimePersistence + 'a)>,
     usage_deltas: &'a [crate::store::RuntimeUsageDelta],
     outcome: &'a TurnOutcome,
@@ -310,12 +311,24 @@ impl TurnBoundary {
         interrupted_turn_input_turn_id: Option<String>,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
     ) -> Result<AcceptedTurnCommit, StoreError> {
+        let agent_frame_switch_materializes = match &returned_turn.outcome {
+            TurnOutcome::AgentFrameSwitch { frame_id, .. } => agent_frame_switch_materializes(
+                &self.state().session_id,
+                frame_id,
+                self.state().current_frame_node_id.as_deref(),
+            ),
+            _ => false,
+        };
         let (store, plugins, execution_state_update) = match session {
             Some(session) => {
                 let store = session.history_store();
-                let execution_state_update = Self::capture_execution_state_update(session)
-                    .await
-                    .map_err(accepted_commit::execution_state_capture_error)?;
+                let execution_state_update = if agent_frame_switch_materializes {
+                    ExecutionStateUpdate::Clear
+                } else {
+                    Self::capture_execution_state_update(session)
+                        .await
+                        .map_err(accepted_commit::execution_state_capture_error)?
+                };
                 let plugins = Arc::clone(session.plugins());
                 (store, Some(plugins), execution_state_update)
             }
@@ -327,6 +340,7 @@ impl TurnBoundary {
                 tool_calls: &returned_turn.tool_calls,
                 plugins: plugins.as_deref(),
                 execution_state_update,
+                agent_frame_switch_materializes,
                 store: store.as_ref().map(|store| store.as_ref()),
                 usage_deltas,
                 outcome: &returned_turn.outcome,
@@ -404,6 +418,7 @@ impl TurnBoundary {
             tool_calls,
             plugins,
             execution_state_update,
+            agent_frame_switch_materializes,
             store,
             usage_deltas,
             outcome,
@@ -433,7 +448,12 @@ impl TurnBoundary {
         }
         execution_state_update.apply(state);
         materialize_terminal_output(state, outcome, clock.as_ref(), &terminal_message_id);
-        materialize_agent_frame_switch(state, outcome, clock.as_ref());
+        materialize_agent_frame_switch(
+            state,
+            outcome,
+            clock.as_ref(),
+            agent_frame_switch_materializes,
+        );
         let state = self.final_state_mut();
 
         if let Some(store) = store {
@@ -833,6 +853,7 @@ mod tests {
                 initial_nodes: vec![seed_node],
             },
             &crate::SystemClock,
+            true,
         );
         let expected_frame_node_id =
             crate::session_graph::frame_node_id(&state.session_id, &frame_id);
@@ -1106,6 +1127,7 @@ mod tests {
                 tool_calls: &[],
                 plugins: None,
                 execution_state_update: ExecutionStateUpdate::Clean,
+                agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &[],
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
@@ -1163,6 +1185,7 @@ mod tests {
                 tool_calls: &[],
                 plugins: None,
                 execution_state_update: ExecutionStateUpdate::Clean,
+                agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &[],
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
@@ -1290,6 +1313,7 @@ mod tests {
                 returned_state: &returned_state,
                 plugins: None,
                 execution_state_update: ExecutionStateUpdate::Replace(b"runtime".to_vec()),
+                agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &usage,
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
@@ -1393,6 +1417,7 @@ mod tests {
                 tool_calls: &[],
                 plugins: None,
                 execution_state_update: ExecutionStateUpdate::Clean,
+                agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &[],
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
@@ -1457,6 +1482,7 @@ mod tests {
                 returned_state: &queue_state,
                 plugins: None,
                 execution_state_update: ExecutionStateUpdate::Clean,
+                agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &[],
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
@@ -1487,6 +1513,7 @@ mod tests {
                 returned_state: &input_state,
                 plugins: None,
                 execution_state_update: ExecutionStateUpdate::Clean,
+                agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &[],
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
@@ -1534,6 +1561,7 @@ mod tests {
                 returned_state: &returned_state,
                 plugins: None,
                 execution_state_update: ExecutionStateUpdate::Clean,
+                agent_frame_switch_materializes: false,
                 store: None,
                 usage_deltas: &[],
                 outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),

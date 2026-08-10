@@ -30,7 +30,7 @@ mod usage_conservation;
 pub use attachment_conservation::RuntimePersistenceStateMachineHandles;
 use attachment_conservation::{apply_attachment_operation, assert_attachment_conservation};
 use counterexample::persist_counterexample;
-use generator::generated_case;
+use generator::{component_selection, generated_case};
 use usage_conservation::{
     assert_usage_conservation, confirm_usage, record_usage, register_committed_usage,
     replay_usage_receipt, stage_usage,
@@ -208,6 +208,7 @@ struct RunShape {
     stale_head_rejections: u64,
     checkpoint_stores: u64,
     checkpoint_ref_reuses: u64,
+    checkpoint_clears: u64,
     crash_points: u64,
     crash_reclaims: u64,
 }
@@ -242,6 +243,7 @@ struct RunShapeTotals {
     stale_head_rejections: AtomicU64,
     checkpoint_stores: AtomicU64,
     checkpoint_ref_reuses: AtomicU64,
+    checkpoint_clears: AtomicU64,
     crash_points: AtomicU64,
     crash_reclaims: AtomicU64,
 }
@@ -281,6 +283,7 @@ impl RunShapeTotals {
         add!(stale_head_rejections);
         add!(checkpoint_stores);
         add!(checkpoint_ref_reuses);
+        add!(checkpoint_clears);
         add!(crash_points);
         add!(crash_reclaims);
     }
@@ -354,7 +357,7 @@ where
     }
 
     eprintln!(
-        "runtime-persistence run shape ({backend}, cases={cases}): lease_acquisitions={} lease_fence_rejections={} queue_enqueues={} queue_claims={} selected_batch_claims={} queue_completions={} claim_supersession_rejections={} stale_claim_settlements={} out_of_order_settlements={} coalesced_claims={} queue_cancellations={} input_enqueues={} input_claims={} input_applications={} input_cancellations={} usage_records={} usage_stages={} usage_confirmations={} usage_receipt_replays={} attachment_commits={} attachment_intent_puts={} attachment_receipt_replays={} attachment_session_reclaims={} attachment_gc_probes={} accepted_commits={} stale_head_rejections={} checkpoint_stores={} checkpoint_ref_reuses={} crash_points={} crash_reclaims={}",
+        "runtime-persistence run shape ({backend}, cases={cases}): lease_acquisitions={} lease_fence_rejections={} queue_enqueues={} queue_claims={} selected_batch_claims={} queue_completions={} claim_supersession_rejections={} stale_claim_settlements={} out_of_order_settlements={} coalesced_claims={} queue_cancellations={} input_enqueues={} input_claims={} input_applications={} input_cancellations={} usage_records={} usage_stages={} usage_confirmations={} usage_receipt_replays={} attachment_commits={} attachment_intent_puts={} attachment_receipt_replays={} attachment_session_reclaims={} attachment_gc_probes={} accepted_commits={} stale_head_rejections={} checkpoint_stores={} checkpoint_ref_reuses={} checkpoint_clears={} crash_points={} crash_reclaims={}",
         totals.lease_acquisitions.load(Ordering::Relaxed),
         totals.lease_fence_rejections.load(Ordering::Relaxed),
         totals.queue_enqueues.load(Ordering::Relaxed),
@@ -383,6 +386,7 @@ where
         totals.stale_head_rejections.load(Ordering::Relaxed),
         totals.checkpoint_stores.load(Ordering::Relaxed),
         totals.checkpoint_ref_reuses.load(Ordering::Relaxed),
+        totals.checkpoint_clears.load(Ordering::Relaxed),
         totals.crash_points.load(Ordering::Relaxed),
         totals.crash_reclaims.load(Ordering::Relaxed),
     );
@@ -430,6 +434,7 @@ fn assert_required_shape(shape: RunShape) -> Result<(), TestCaseError> {
         (shape.stale_head_rejections, "stale-head rejections"),
         (shape.checkpoint_stores, "checkpoint stores"),
         (shape.checkpoint_ref_reuses, "checkpoint ref reuses"),
+        (shape.checkpoint_clears, "checkpoint clears"),
         (shape.crash_points, "claim-to-commit crash points"),
         (shape.crash_reclaims, "post-crash reclaims"),
     ];
@@ -1130,10 +1135,10 @@ fn update_components_after_commit(
     manifest: &crate::SessionCheckpoint,
     shape: &mut RunShape,
 ) -> Result<(), String> {
-    let stores = component_selection(mode);
+    let selection = component_selection(mode);
     check_component_ref(
         "tool-state",
-        stores.0,
+        selection.store_tool,
         before.tool_value,
         Some(value),
         before.tool_ref.as_ref(),
@@ -1142,29 +1147,40 @@ fn update_components_after_commit(
     )?;
     check_component_ref(
         "plugin-snapshot",
-        stores.1,
+        selection.store_plugin,
         before.plugin_value,
         Some(value),
         before.plugin_ref.as_ref(),
         manifest.plugin_snapshot_ref.as_ref(),
         shape,
     )?;
-    check_component_ref(
-        "execution-state",
-        stores.2,
-        before.execution_value,
-        Some(value),
-        before.execution_ref.as_ref(),
-        manifest.execution_state_ref.as_ref(),
-        shape,
-    )?;
-    if stores.0 {
+    if selection.clear_execution {
+        if manifest.execution_state_ref.is_some() {
+            return Err("cleared execution-state transition retained its ref".to_string());
+        }
+        if before.execution_ref.is_some() {
+            shape.checkpoint_clears += 1;
+        }
+    } else {
+        check_component_ref(
+            "execution-state",
+            selection.store_execution,
+            before.execution_value,
+            Some(value),
+            before.execution_ref.as_ref(),
+            manifest.execution_state_ref.as_ref(),
+            shape,
+        )?;
+    }
+    if selection.store_tool {
         model.components.tool_value = Some(value);
     }
-    if stores.1 {
+    if selection.store_plugin {
         model.components.plugin_value = Some(value);
     }
-    if stores.2 {
+    if selection.clear_execution {
+        model.components.execution_value = None;
+    } else if selection.store_execution {
         model.components.execution_value = Some(value);
     }
     model.components.tool_ref = manifest.tool_state_ref.clone();
@@ -1363,26 +1379,18 @@ fn modeled_state(model: &ReferenceModel) -> RuntimeSessionState {
 }
 
 fn install_component_bodies(state: &mut RuntimeSessionState, mode: u8, value: u8) {
-    let stores = component_selection(mode);
-    if stores.0 {
+    let selection = component_selection(mode);
+    if selection.store_tool {
         state.tool_state_snapshot = Some(ToolState::default().with_generation(u64::from(value)));
     }
-    if stores.1 {
+    if selection.store_plugin {
         state.plugin_snapshot_revision = Some(u64::from(value));
         state.plugin_snapshot = Some(plugin_snapshot(value));
     }
-    if stores.2 {
+    if selection.clear_execution {
+        state.set_execution_state_snapshot(None);
+    } else if selection.store_execution {
         state.execution_state_snapshot = Some(vec![value, value.wrapping_add(1)]);
-    }
-}
-
-fn component_selection(mode: u8) -> (bool, bool, bool) {
-    match mode % 5 {
-        0 => (false, false, false),
-        1 => (true, true, true),
-        2 => (true, false, false),
-        3 => (false, true, false),
-        _ => (false, false, true),
     }
 }
 
@@ -2430,6 +2438,13 @@ async fn law_checkpoint_refs_track_content(
         },
         RuntimePersistenceOp::Commit {
             component_mode: 0,
+            value: 0,
+            settle_work: false,
+            settle_inputs: false,
+            stale_head: false,
+        },
+        RuntimePersistenceOp::Commit {
+            component_mode: 5,
             value: 0,
             settle_work: false,
             settle_inputs: false,
