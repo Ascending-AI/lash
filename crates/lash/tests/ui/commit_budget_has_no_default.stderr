@@ -1,0 +1,16 @@
+error[E0599]: no associated function or constant named `default` found for struct `CommitBudget` in the current scope
+ --> tests/ui/commit_budget_has_no_default.rs:2:39
+  |
+2 |     let _budget = lash::CommitBudget::default();
+  |                                       ^^^^^^^ associated function or constant not found in `CommitBudget`
+  |
+note: if you're trying to build a new `CommitBudget` consider using one of the following associated functions:
+      CommitBudget::new
+      CommitBudget::bounded
+ --> $WORKSPACE/crates/lash-core/src/store/commit_budget.rs
+  |
+  |     pub const fn new(bytes: CommitBudgetLimit, nodes: CommitBudgetLimit) -> Self {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+  |     pub const fn bounded(bytes: usize, nodes: usize) -> Self {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

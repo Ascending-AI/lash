@@ -590,6 +590,7 @@ finish "done via Restate E2E"
             .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
                 data_dir.join("attachments"),
             )))
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .process_env_store(process_env_store)
             .trigger_store(trigger_store)
             .effect_host(turn_deployment.effect_host())

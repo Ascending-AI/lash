@@ -49,6 +49,7 @@ fn deferred_tools_test_core(
             Arc::new(lash::durability::InlineEffectHost::default()),
             test_attachment_store(),
             process_env_store,
+            lash::CommitBudget::bounded(1024 * 1024, 512),
         ))
         .build()
         .expect("build deferred-tool test core")

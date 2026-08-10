@@ -37,6 +37,9 @@ pub struct RuntimeHostConfig {
 
 #[derive(Clone)]
 pub struct RuntimeDurabilityConfig {
+    /// Operational limits stamped onto every runtime commit assembled by this
+    /// host and revalidated by the shared facade and concrete backend.
+    pub commit_budget: crate::CommitBudget,
     /// The session-bound attachment facade every runtime consumer sees. Hosts
     /// supply a flat [`AttachmentStore`](crate::AttachmentStore) backend
     /// (`RuntimeHostConfig::new`, the builder); the runtime wraps it here in a
@@ -87,20 +90,23 @@ pub struct RuntimeTracingConfig {
 }
 
 impl RuntimeHostConfig {
-    /// Construct a config with the three host-owned dependencies named
-    /// explicitly.
+    /// Construct a config with the host-owned durability dependencies and
+    /// commit budget named explicitly.
     ///
-    /// There is intentionally no `Default`. The effect host and stores decide
-    /// a runtime's durability, so hosts must choose them rather than silently
-    /// inheriting in-memory implementations. Use [`RuntimeHostConfig::in_memory`]
-    /// to opt into the in-process / in-memory versions by name.
+    /// There is intentionally no `Default`. The effect host, stores, and commit
+    /// limits decide a runtime's durability envelope, so hosts must choose them
+    /// rather than silently inheriting policy. Use
+    /// [`RuntimeHostConfig::in_memory`] to opt into the in-process / in-memory
+    /// implementations while still supplying the budget.
     pub fn new(
         effect_host: Arc<dyn EffectHost>,
         attachment_store: Arc<dyn crate::AttachmentStore>,
         process_env_store: Arc<dyn ProcessExecutionEnvStore>,
+        commit_budget: crate::CommitBudget,
     ) -> Self {
         Self {
             durability: RuntimeDurabilityConfig {
+                commit_budget,
                 attachment_store: Arc::new(crate::SessionAttachmentStore::ephemeral(
                     attachment_store,
                 )),
@@ -153,13 +159,15 @@ impl RuntimeHostConfig {
     /// Explicit in-process / in-memory configuration: an
     /// [`InlineEffectHost`] and in-memory stores.
     ///
-    /// Convenient for tests and local experiments; not durable. Named so the
-    /// choice is never silent.
-    pub fn in_memory() -> Self {
+    /// Convenient for tests and local experiments; not durable. The commit
+    /// budget remains required because backend latency policy is independent
+    /// of whether persistence is in-memory.
+    pub fn in_memory(commit_budget: crate::CommitBudget) -> Self {
         Self::new(
             Arc::new(InlineEffectHost::default()),
             Arc::new(crate::InMemoryAttachmentStore::new()),
             Arc::new(InMemoryProcessExecutionEnvStore::new()),
+            commit_budget,
         )
     }
 
@@ -348,7 +356,7 @@ mod tests {
 
     #[test]
     fn managed_turn_concurrency_limit_defaults_to_event_channel_bound() {
-        let config = RuntimeHostConfig::in_memory();
+        let config = RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
 
         assert_eq!(
             config.control.managed_turn_concurrency_limit.get(),

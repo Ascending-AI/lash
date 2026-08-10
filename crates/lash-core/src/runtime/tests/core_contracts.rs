@@ -49,7 +49,7 @@ fn default_lease_timings_are_contractual_windows() {
         .is_err(),
         "a ttl below three renew intervals must be rejected"
     );
-    let host = crate::RuntimeHostConfig::in_memory();
+    let host = crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
     assert_eq!(host.control.lease_timings, timings);
 }
 

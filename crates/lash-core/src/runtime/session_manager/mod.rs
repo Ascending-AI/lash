@@ -383,7 +383,9 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
         .expect("mixed-envelope plugin session");
     let mut runtime = crate::LashRuntime::from_persistent_embedded_state(
         policy.clone(),
-        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory()),
+        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+        )),
         crate::PersistentRuntimeServices::new(plugins, Arc::clone(&store)),
         crate::RuntimeSessionState {
             policy,
@@ -693,7 +695,9 @@ pub(crate) async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
         .expect("cancelled usage plugin session");
     let mut runtime = crate::LashRuntime::from_persistent_embedded_state(
         policy.clone(),
-        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory()),
+        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+        )),
         crate::PersistentRuntimeServices::new(plugins, Arc::clone(&store)),
         crate::RuntimeSessionState {
             policy,

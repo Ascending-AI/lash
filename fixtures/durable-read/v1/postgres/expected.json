@@ -1,5 +1,5 @@
 {
-  "fixture_schema_version": 4,
+  "fixture_schema_version": 5,
   "head_revision": 3,
   "node_ids_in_read_order": [
     "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
@@ -7,6 +7,14 @@
     "n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9"
   ],
   "current_append_retry": {
+    "commit_budget": {
+      "bytes": {
+        "bounded": 1048576
+      },
+      "nodes": {
+        "bounded": 512
+      }
+    },
     "session_id": "durable-read-fixture",
     "expected_head_revision": 0,
     "config": {
@@ -129,6 +137,14 @@
     "committed_attachment_ids": []
   },
   "legacy_commit_retry": {
+    "commit_budget": {
+      "bytes": {
+        "bounded": 1048576
+      },
+      "nodes": {
+        "bounded": 512
+      }
+    },
     "session_id": "durable-read-fixture",
     "expected_head_revision": 1,
     "config": {

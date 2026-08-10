@@ -289,7 +289,8 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
         relation: crate::SessionRelation::Root,
     });
     let bytes = Arc::new(crate::InMemoryAttachmentStore::new());
-    let mut host_config = crate::RuntimeHostConfig::in_memory();
+    let mut host_config =
+        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
     host_config.durability.attachment_store =
         Arc::new(crate::SessionAttachmentStore::ephemeral(bytes.clone()));
     let host = crate::EmbeddedRuntimeHost::new(host_config)
@@ -401,8 +402,10 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
     let child_factory = RecordingSessionStoreFactory::default().deferring_metadata_to_admission();
     let root_store = Arc::new(RecordingStore::default());
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());
-    let embedded = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory())
-        .with_session_store_factory(Arc::new(child_factory.clone()));
+    let embedded = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+    ))
+    .with_session_store_factory(Arc::new(child_factory.clone()));
     let host = crate::ProcessRuntimeHost::new(embedded, registry);
     let mut runtime = LashRuntime::from_persistent_background_state(
         standard_test_policy(),

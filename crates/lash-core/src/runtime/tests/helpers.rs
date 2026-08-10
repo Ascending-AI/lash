@@ -273,7 +273,7 @@ pub(crate) fn standard_test_policy() -> SessionPolicy {
 }
 
 pub(crate) fn test_host_config() -> EmbeddedRuntimeHost {
-    let mut config = RuntimeHostConfig::in_memory();
+    let mut config = RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         mock_provider(Vec::new()).into_handle(),
     ));
@@ -281,7 +281,7 @@ pub(crate) fn test_host_config() -> EmbeddedRuntimeHost {
 }
 
 pub(crate) fn test_host_config_with_trace_path(path: PathBuf) -> EmbeddedRuntimeHost {
-    let mut config = RuntimeHostConfig::in_memory();
+    let mut config = RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
     config.tracing.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(path)));
     EmbeddedRuntimeHost::new(config)
 }
@@ -289,7 +289,7 @@ pub(crate) fn test_host_config_with_trace_path(path: PathBuf) -> EmbeddedRuntime
 pub(crate) fn test_host_config_with_trace_path_and_stream_events(
     path: PathBuf,
 ) -> EmbeddedRuntimeHost {
-    let mut config = RuntimeHostConfig::in_memory();
+    let mut config = RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
     config.tracing.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(path)));
     config.tracing.trace_level = lash_trace::TraceLevel::Extended;
     EmbeddedRuntimeHost::new(config)

@@ -96,7 +96,8 @@ impl crate::ProcessEngine for AttachmentWritingEngine {
                 })
             })
             .build();
-        let mut nested_host = RuntimeHostConfig::in_memory();
+        let mut nested_host =
+            RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
         nested_host.durability.attachment_store = Arc::clone(&attachment_store);
         let mut nested_runtime =
             crate::runtime::tests::helpers::runtime_with_plugins_and_tools_and_host(
@@ -153,7 +154,8 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
         store: Arc::clone(&parent_store),
     });
     let attachment_backend = Arc::new(crate::InMemoryAttachmentStore::new());
-    let mut runtime_host = RuntimeHostConfig::in_memory();
+    let mut runtime_host =
+        RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
     runtime_host.durability.attachment_store =
         Arc::new(crate::SessionAttachmentStore::ephemeral(attachment_backend));
     let worker = DurableProcessWorker::new(
@@ -214,7 +216,8 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
     let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
     let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
     let attachment_backend = Arc::new(crate::InMemoryAttachmentStore::new());
-    let mut runtime_host = RuntimeHostConfig::in_memory();
+    let mut runtime_host =
+        RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
     runtime_host.durability.attachment_store = Arc::new(crate::SessionAttachmentStore::ephemeral(
         attachment_backend.clone(),
     ));

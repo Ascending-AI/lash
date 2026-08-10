@@ -657,6 +657,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         )
         .store_factory(session_store_factory)
         .attachment_store(config.attachment_store)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .process_env_store(process_env_store)
         .effect_host(
             Arc::new(RestateEffectHost::new(config.restate_ingress_url.clone()))

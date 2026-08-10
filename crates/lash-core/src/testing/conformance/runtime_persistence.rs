@@ -260,6 +260,8 @@ where
     commit_increments_head_and_round_trips_agent_frames(make()).await;
     concurrent_head_revision_cas_applies_exactly_once(make()).await;
     commit_rejects_a_different_session_id(make()).await;
+    commit_rejects_carried_nondefault_node_budget(make()).await;
+    commit_rejects_carried_nondefault_byte_budget(make()).await;
     load_hydrates_checkpoint_and_usage(make()).await;
     load_retains_reasoning_only_usage(make()).await;
     checkpoint_restore_rejects_turn_index_without_increment_headroom(make()).await;
@@ -383,6 +385,63 @@ async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
         .expect("replace-then-clear session has a checkpoint");
     assert!(checkpoint.execution_state_ref.is_none());
     assert!(checkpoint.execution_state.is_none());
+}
+
+async fn commit_rejects_carried_nondefault_node_budget(store: Arc<dyn RuntimePersistence>) {
+    const CONFIGURED_NODE_LIMIT: usize = 1;
+    let state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let parent = sample_session_node("root", "budget-frame", None);
+    let child = sample_session_node("root", "budget-child", Some(&parent.node_id));
+    let budget = crate::CommitBudget::new(
+        crate::CommitBudgetLimit::Unbounded,
+        crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
+    );
+    let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
+    commit.graph = crate::GraphAppend {
+        nodes: vec![parent, child],
+        leaf_node_id: None,
+    };
+
+    let error = store
+        .commit_runtime_state(commit)
+        .await
+        .expect_err("backend must enforce the carried non-default node budget");
+    assert!(matches!(
+        error,
+        StoreError::CommitNodeBudgetExceeded {
+            node_count: 2,
+            max_nodes: CONFIGURED_NODE_LIMIT,
+        }
+    ));
+}
+
+async fn commit_rejects_carried_nondefault_byte_budget(store: Arc<dyn RuntimePersistence>) {
+    const CONFIGURED_BYTE_LIMIT: usize = 64;
+    let state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let budget = crate::CommitBudget::new(
+        crate::CommitBudgetLimit::bounded(CONFIGURED_BYTE_LIMIT),
+        crate::CommitBudgetLimit::Unbounded,
+    );
+    let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
+    commit.checkpoint.execution_state = Some(vec![0; CONFIGURED_BYTE_LIMIT * 2]);
+
+    let error = store
+        .commit_runtime_state(commit)
+        .await
+        .expect_err("backend must enforce the carried non-default byte budget");
+    assert!(matches!(
+        error,
+        StoreError::CommitByteBudgetExceeded {
+            max_bytes: CONFIGURED_BYTE_LIMIT,
+            ..
+        }
+    ));
 }
 
 async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(

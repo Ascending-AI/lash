@@ -292,8 +292,8 @@ async fn standard_core_runs_mock_turn() -> Result<()> {
 
 #[tokio::test]
 async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable() -> Result<()> {
-    let oversized_text =
-        "x".repeat(lash_core::RuntimeCommit::MAX_COMMIT_BUDGET_BYTES.saturating_add(1));
+    const CONFIGURED_BYTE_LIMIT: usize = 4_096;
+    let oversized_text = "x".repeat(CONFIGURED_BYTE_LIMIT * 2);
     let provider = crate::testing::TestProvider::builder()
         .kind("oversized-commit")
         .complete(move |_request| {
@@ -302,11 +302,19 @@ async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable(
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
-        .build()?;
+    let core = explicit_ephemeral_facets_with_budget(
+        LashCore::standard_builder(crate::TurnBudget::Unbounded),
+        crate::CommitBudget::new(
+            crate::CommitBudgetLimit::bounded(CONFIGURED_BYTE_LIMIT),
+            crate::CommitBudgetLimit::Unbounded,
+        ),
+    )
+    .provider(provider)
+    .model(mock_model_spec())
+    .store_factory(Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    ))
+    .build()?;
     let session = core.session("commit-budget-surface").open().await?;
 
     let error = match session
@@ -328,13 +336,229 @@ async fn commit_byte_budget_failure_reaches_the_host_as_terminal_and_actionable(
     assert!(
         runtime_error.message.contains(&format!(
             "exceeding the {}-byte transaction budget",
-            lash_core::RuntimeCommit::MAX_COMMIT_BUDGET_BYTES
+            CONFIGURED_BYTE_LIMIT
         )),
         "{}",
         runtime_error.message
     );
     assert!(error.is_terminal(), "{error}");
     assert!(!error.is_retryable(), "{error}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn commit_node_budget_failure_reaches_the_host_as_terminal_and_actionable() -> Result<()> {
+    const CONFIGURED_NODE_LIMIT: usize = 1;
+    let provider = crate::testing::TestProvider::builder()
+        .kind("oversized-node-commit")
+        .complete(|_request| async move { Ok(text_response("assistant response")) })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets_with_budget(
+        LashCore::standard_builder(crate::TurnBudget::Unbounded),
+        crate::CommitBudget::new(
+            crate::CommitBudgetLimit::Unbounded,
+            crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
+        ),
+    )
+    .provider(provider)
+    .model(mock_model_spec())
+    .store_factory(Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    ))
+    .build()?;
+    let session = core.session("commit-node-budget-surface").open().await?;
+
+    let error = match session.turn(TurnInput::text("produce a turn")).run().await {
+        Ok(_) => panic!("the over-limit node commit must fail at the production surface"),
+        Err(error) => error,
+    };
+
+    let EmbedError::Runtime(runtime_error) = &error else {
+        panic!("expected a host-visible runtime error, got {error}");
+    };
+    assert_eq!(
+        runtime_error.code,
+        lash_core::RuntimeErrorCode::StoreCommitNodeBudgetExceeded
+    );
+    assert!(
+        runtime_error.message.contains(&format!(
+            "exceeding the {CONFIGURED_NODE_LIMIT}-node transaction budget"
+        )),
+        "{}",
+        runtime_error.message
+    );
+    assert!(error.is_terminal(), "{error}");
+    assert!(!error.is_retryable(), "{error}");
+    Ok(())
+}
+
+fn core_with_commit_budget(commit_budget: crate::CommitBudget) -> Result<LashCore> {
+    explicit_ephemeral_facets_with_budget(
+        LashCore::standard_builder(crate::TurnBudget::Unbounded),
+        commit_budget,
+    )
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .store_factory(Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    ))
+    .build()
+}
+
+fn pending_park_state(session_id: &str, text: &str) -> RuntimeSessionState {
+    let policy = lash_core::SessionPolicy {
+        provider_id: mock_provider().kind().to_string(),
+        model: mock_model_spec(),
+        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+    };
+    let mut state = RuntimeSessionState::new(policy);
+    state.session_id = session_id.to_string();
+    state.ensure_agent_frame_initialized();
+    state.append_active_conversation_messages(&[text_message(
+        lash_core::MessageRole::User,
+        text,
+    )]);
+    state
+}
+
+fn assert_byte_budget_session_error(error: &EmbedError, configured_limit: usize) {
+    assert!(
+        matches!(
+            error,
+            EmbedError::Session(SessionError::Store {
+                source: lash_core::StoreError::CommitByteBudgetExceeded { max_bytes, .. },
+                ..
+            }) if *max_bytes == configured_limit
+        ),
+        "expected typed byte-budget rejection, got {error}"
+    );
+    assert!(
+        error.to_string().contains(&format!(
+            "exceeding the {configured_limit}-byte transaction budget"
+        )),
+        "{error}"
+    );
+    assert!(error.is_terminal(), "{error}");
+    assert!(!error.is_retryable(), "{error}");
+}
+
+fn assert_node_budget_session_error(error: &EmbedError, configured_limit: usize) {
+    assert!(
+        matches!(
+            error,
+            EmbedError::Session(SessionError::Store {
+                source: lash_core::StoreError::CommitNodeBudgetExceeded { max_nodes, .. },
+                ..
+            }) if *max_nodes == configured_limit
+        ),
+        "expected typed node-budget rejection, got {error}"
+    );
+    assert!(
+        error.to_string().contains(&format!(
+            "exceeding the {configured_limit}-node transaction budget"
+        )),
+        "{error}"
+    );
+    assert!(error.is_terminal(), "{error}");
+    assert!(!error.is_retryable(), "{error}");
+}
+
+#[tokio::test]
+async fn public_append_byte_budget_failure_is_typed_terminal_and_actionable() -> Result<()> {
+    const CONFIGURED_BYTE_LIMIT: usize = 256;
+    let core = core_with_commit_budget(crate::CommitBudget::new(
+        crate::CommitBudgetLimit::bounded(CONFIGURED_BYTE_LIMIT),
+        crate::CommitBudgetLimit::Unbounded,
+    ))?;
+    let session = core.session("append-byte-budget-surface").open().await?;
+
+    let error = session
+        .admin()
+        .state()
+        .append_messages(vec![lash_core::PluginMessage::text(
+            lash_core::MessageRole::User,
+            "x".repeat(CONFIGURED_BYTE_LIMIT * 4),
+        )])
+        .await
+        .expect_err("the public append must reject its over-limit commit");
+
+    assert_byte_budget_session_error(&error, CONFIGURED_BYTE_LIMIT);
+    Ok(())
+}
+
+#[tokio::test]
+async fn public_append_node_budget_failure_is_typed_terminal_and_actionable() -> Result<()> {
+    const CONFIGURED_NODE_LIMIT: usize = 1;
+    let core = core_with_commit_budget(crate::CommitBudget::new(
+        crate::CommitBudgetLimit::Unbounded,
+        crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
+    ))?;
+    let session = core.session("append-node-budget-surface").open().await?;
+
+    let error = session
+        .admin()
+        .state()
+        .append_messages(vec![lash_core::PluginMessage::text(
+            lash_core::MessageRole::User,
+            "one appended message plus the initial frame exceeds one node",
+        )])
+        .await
+        .expect_err("the public append must reject its over-limit commit");
+
+    assert_node_budget_session_error(&error, CONFIGURED_NODE_LIMIT);
+    Ok(())
+}
+
+#[tokio::test]
+async fn park_byte_budget_failure_is_typed_terminal_and_actionable() -> Result<()> {
+    const CONFIGURED_BYTE_LIMIT: usize = 256;
+    let core = core_with_commit_budget(crate::CommitBudget::new(
+        crate::CommitBudgetLimit::bounded(CONFIGURED_BYTE_LIMIT),
+        crate::CommitBudgetLimit::Unbounded,
+    ))?;
+    let session = core.session("park-byte-budget-surface").open().await?;
+    session
+        .admin()
+        .state()
+        .set_persisted(pending_park_state(
+            "park-byte-budget-surface",
+            &"x".repeat(CONFIGURED_BYTE_LIMIT * 4),
+        ))
+        .await?;
+
+    let error = match session.park().await {
+        Ok(_) => panic!("park must reject its over-limit commit"),
+        Err(error) => error,
+    };
+
+    assert_byte_budget_session_error(&error, CONFIGURED_BYTE_LIMIT);
+    Ok(())
+}
+
+#[tokio::test]
+async fn park_node_budget_failure_is_typed_terminal_and_actionable() -> Result<()> {
+    const CONFIGURED_NODE_LIMIT: usize = 1;
+    let core = core_with_commit_budget(crate::CommitBudget::new(
+        crate::CommitBudgetLimit::Unbounded,
+        crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
+    ))?;
+    let session = core.session("park-node-budget-surface").open().await?;
+    session
+        .admin()
+        .state()
+        .set_persisted(pending_park_state(
+            "park-node-budget-surface",
+            "one pending message plus the initial frame exceeds one node",
+        ))
+        .await?;
+
+    let error = match session.park().await {
+        Ok(_) => panic!("park must reject its over-limit commit"),
+        Err(error) => error,
+    };
+
+    assert_node_budget_session_error(&error, CONFIGURED_NODE_LIMIT);
     Ok(())
 }
 
@@ -627,6 +851,7 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
         .model(mock_model_spec())
         .effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(crate::persistence::InMemoryAttachmentStore::new()))
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .process_env_store(Arc::new(
             crate::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))

@@ -27,6 +27,7 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))

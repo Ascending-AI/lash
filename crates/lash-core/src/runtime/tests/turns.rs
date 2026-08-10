@@ -3459,8 +3459,11 @@ async fn long_turn_keeps_claims_live_across_session_lease_renewals() {
 
     let store = Arc::new(RecordingStore::default());
     let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
-    let mut config = crate::RuntimeHostConfig::in_memory()
-        .with_lease_timings(crate::LeaseTimings::from_ttl(lease_ttl).expect("valid lease timings"));
+    let mut config =
+        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .with_lease_timings(
+                crate::LeaseTimings::from_ttl(lease_ttl).expect("valid lease timings"),
+            );
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -4168,7 +4171,9 @@ async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue() {
     let store = Arc::new(RecordingStore::with_clock(store_clock));
     let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store;
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
-    let mut config = crate::RuntimeHostConfig::in_memory().with_clock(host_clock);
+    let mut config =
+        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .with_clock(host_clock);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -4359,7 +4364,9 @@ async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff() {
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
     let borrowed_append_attempted = Arc::new(AtomicBool::new(false));
     let borrowed_append_error = Arc::new(std::sync::Mutex::new(None));
-    let mut config = crate::RuntimeHostConfig::in_memory().with_clock(host_clock);
+    let mut config =
+        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .with_clock(host_clock);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -4497,7 +4504,9 @@ async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff() {
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
     let borrowed_append_attempted = Arc::new(AtomicBool::new(false));
     let borrowed_append_error = Arc::new(std::sync::Mutex::new(None));
-    let mut config = crate::RuntimeHostConfig::in_memory().with_clock(host_clock);
+    let mut config =
+        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .with_clock(host_clock);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -4732,7 +4741,9 @@ async fn lost_lease_and_reacquisition_force_graph_reloads() {
     let store = Arc::new(RecordingStore::with_clock(store_clock));
     let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
-    let mut config = crate::RuntimeHostConfig::in_memory().with_clock(host_clock);
+    let mut config =
+        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .with_clock(host_clock);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -5737,7 +5748,9 @@ async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit()
         })
         .build();
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
-    let mut config = crate::RuntimeHostConfig::in_memory().with_clock(host_clock);
+    let mut config =
+        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .with_clock(host_clock);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -5778,7 +5791,9 @@ async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit()
     }]);
     let successor_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
     let successor_host_clock: Arc<dyn crate::Clock> = clock.clone();
-    let successor_config = crate::RuntimeHostConfig::in_memory().with_clock(successor_host_clock);
+    let successor_config =
+        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .with_clock(successor_host_clock);
     let mut successor_runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
@@ -5912,9 +5927,10 @@ async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
         })
         .build();
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
-    let mut config = crate::RuntimeHostConfig::in_memory()
-        .with_clock(host_clock)
-        .with_lease_timings(crate::LeaseTimings::from_ttl(lease_ttl).expect("valid timings"));
+    let mut config =
+        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .with_clock(host_clock)
+            .with_lease_timings(crate::LeaseTimings::from_ttl(lease_ttl).expect("valid timings"));
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -6051,8 +6067,9 @@ async fn cancellation_sealed_before_renewal_failure_remains_evidence_bearing_can
             }
         })
         .build();
-    let mut config = crate::RuntimeHostConfig::in_memory()
-        .with_lease_timings(crate::LeaseTimings::from_ttl(lease_ttl).expect("valid timings"));
+    let mut config =
+        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .with_lease_timings(crate::LeaseTimings::from_ttl(lease_ttl).expect("valid timings"));
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -6161,7 +6178,9 @@ async fn finish_turn_commit_uses_head_cas_after_advisory_lease_expiry() {
         }),
     }]);
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
-    let mut config = crate::RuntimeHostConfig::in_memory().with_clock(host_clock);
+    let mut config =
+        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .with_clock(host_clock);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
@@ -6209,7 +6228,9 @@ async fn prepared_checkpoint_continues_after_advisory_lease_expiry() {
         }),
     }]);
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
-    let mut config = crate::RuntimeHostConfig::in_memory().with_clock(host_clock);
+    let mut config =
+        crate::RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .with_clock(host_clock);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));

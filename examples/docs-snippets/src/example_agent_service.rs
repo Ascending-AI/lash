@@ -61,6 +61,7 @@ async fn service_core(
         .effect_host(std::sync::Arc::new(
             lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .process_env_store(process_env_store)
         .trigger_store(trigger_store)
         .attachment_store(std::sync::Arc::new(

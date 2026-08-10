@@ -23,10 +23,11 @@ impl ManagedSessionCapability {
                 "create-session",
             );
             let (commit, persisted_node_ids) =
-                crate::store::RuntimeCommit::persisted_state_with_operation(
+                crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                     &mut persisted_state,
                     &[],
                     operation,
+                    materialized.runtime.host.core.durability.commit_budget,
                 )
                 .map_err(|err| crate::PluginError::Session(err.to_string()))?;
             // Lane-less by construction: the child is being created before it

@@ -37,6 +37,7 @@ mod tests {
             .expect("model spec")
     }
 
+    include!("tests/commit_budget.rs");
     include!("tests/recoverable_chat.rs");
     include!("tests/continue_as_projection.rs");
     include!("tests/tool_catalog.rs");
@@ -62,6 +63,7 @@ mod tests {
             .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
                 data_dir.join("attachments"),
             )))
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .process_env_store(Arc::new(sync_await({
                 let path = data_dir.join("process-env.db");
                 async move {
@@ -1233,6 +1235,7 @@ finish initial
                     data_dir.join("attachments"),
                 )),
                 process_env_store,
+                lash::CommitBudget::bounded(1024 * 1024, 512),
             ))
             .build()
             .expect("build core");
@@ -1860,6 +1863,7 @@ finish initial
             .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
                 data_dir.join("attachments"),
             )))
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .process_env_store(process_env_store)
             .trigger_store(Arc::clone(&trigger_store))
             .trace_sink(Arc::clone(&trace_sink))
@@ -2192,6 +2196,7 @@ finish initial
                 Arc::new(lash::durability::InlineEffectHost::default()),
                 attachment_store,
                 process_env_store,
+                lash::CommitBudget::bounded(1024 * 1024, 512),
             ))
             .build()
             .expect("build core")

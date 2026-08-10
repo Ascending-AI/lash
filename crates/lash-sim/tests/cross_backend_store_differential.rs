@@ -1466,6 +1466,7 @@ impl BackendRunner {
         lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
             .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
             .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .process_env_store(Arc::new(
                 lash::persistence::InMemoryProcessExecutionEnvStore::new(),
             ))
@@ -1476,7 +1477,6 @@ impl BackendRunner {
             .build()
             .expect("build differential lifecycle core")
     }
-
     async fn close_reopened_postgres_pool(&mut self) {
         if let Some(pool) = self.reopened_postgres_pool.take() {
             pool.close().await;

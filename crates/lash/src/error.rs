@@ -22,6 +22,10 @@ pub enum EmbedError {
         "process execution environment store is required; provide an explicit process env store with .process_env_store(...)"
     )]
     MissingProcessEnvStore,
+    #[error(
+        "commit budget is required; provide explicit byte and node limits with .commit_budget(...)"
+    )]
+    MissingCommitBudget,
     #[error("failed to create store for session `{session_id}`: {message}")]
     StoreFactory { session_id: String, message: String },
     #[error("session store operation failed: {0}")]
@@ -134,7 +138,10 @@ impl EmbedError {
     ///   `CodeExecutionUnavailable`);
     /// - direct, session-wrapped, or nested controller-owned
     ///   [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted)
-    ///   tombstones — session ids are permanently single-use.
+    ///   tombstones — session ids are permanently single-use;
+    /// - direct or session-wrapped commit byte or node budget rejections, which
+    ///   require the host to raise the configured limit or submit a smaller
+    ///   commit.
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::MissingProtocolPlugin
@@ -142,6 +149,7 @@ impl EmbedError {
             | Self::MissingEffectHost
             | Self::MissingAttachmentStore
             | Self::MissingProcessEnvStore
+            | Self::MissingCommitBudget
             | Self::StoreSessionMismatch { .. }
             | Self::MissingProcessWorkerStoreFactory
             | Self::ProcessRegistryRequiresStoreFactory
@@ -152,7 +160,11 @@ impl EmbedError {
             | Self::MissingPluginTurnInput { .. }
             | Self::DurableEffectHostRequiresHandlerContext { .. }
             | Self::StaticTurnStreamRequiresStaticEffectHost => true,
-            Self::Store(lash_core::StoreError::SessionDeleted { .. }) => true,
+            Self::Store(
+                lash_core::StoreError::SessionDeleted { .. }
+                | lash_core::StoreError::CommitNodeBudgetExceeded { .. }
+                | lash_core::StoreError::CommitByteBudgetExceeded { .. },
+            ) => true,
             Self::Runtime(err) => err.is_terminal(),
             Self::Plugin(lash_core::PluginError::Runtime(err)) => err.is_terminal(),
             Self::Plugin(lash_core::PluginError::RuntimeEffectController(err)) => matches!(
@@ -166,7 +178,9 @@ impl EmbedError {
                     | SessionError::ProviderUnavailable { .. }
                     | SessionError::CodeExecutionUnavailable
                     | SessionError::Store {
-                        source: lash_core::StoreError::SessionDeleted { .. },
+                        source: lash_core::StoreError::SessionDeleted { .. }
+                            | lash_core::StoreError::CommitNodeBudgetExceeded { .. }
+                            | lash_core::StoreError::CommitByteBudgetExceeded { .. },
                         ..
                     }
             ),
@@ -247,6 +261,15 @@ mod tests {
     }
 
     #[test]
+    fn unrelated_session_protocol_error_is_neither_retryable_nor_terminal() {
+        // Guard against blanket-classifying Protocol as terminal to fix an
+        // unrelated retry problem; only typed budget variants are terminal.
+        let err = EmbedError::Session(SessionError::Protocol("unrelated failure".to_string()));
+        assert!(!err.is_retryable(), "{err}");
+        assert!(!err.is_terminal(), "{err}");
+    }
+
+    #[test]
     fn wiring_errors_are_terminal_and_not_retryable() {
         for err in [
             EmbedError::MissingProtocolPlugin,
@@ -265,6 +288,23 @@ mod tests {
             RuntimeErrorCode::StoreCommitByteBudgetExceeded,
         ] {
             let err = runtime_error(code);
+            assert!(err.is_terminal(), "{err}");
+            assert!(!err.is_retryable(), "{err}");
+        }
+
+        for err in [
+            EmbedError::Store(StoreError::CommitNodeBudgetExceeded {
+                node_count: 2,
+                max_nodes: 1,
+            }),
+            EmbedError::Store(StoreError::CommitByteBudgetExceeded {
+                graph_delta_bytes: 2,
+                checkpoint_bytes: 3,
+                attachment_manifest_bytes: 5,
+                total_bytes: 10,
+                max_bytes: 9,
+            }),
+        ] {
             assert!(err.is_terminal(), "{err}");
             assert!(!err.is_retryable(), "{err}");
         }

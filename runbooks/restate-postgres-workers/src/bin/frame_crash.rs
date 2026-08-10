@@ -88,6 +88,7 @@ async fn run(mode: &str) -> Result<()> {
         )
         .store_factory(Arc::new(storage.session_store_factory()))
         .attachment_store(Arc::new(s3_store_from_env()?))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .process_env_store(Arc::new(storage.process_env_store()))
         .process_registry(Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>)
         .trigger_store(Arc::new(storage.trigger_store()))

@@ -9,7 +9,7 @@
 //! Three embedder patterns this enables:
 //!
 //! * **CLI interactive (single runtime, default):**
-//!   `RuntimeEnvironment::builder().build()`. The builder seeds an explicit
+//!   `RuntimeEnvironment::builder(crate::CommitBudget::bounded(1024 * 1024, 512)).build()`. The builder seeds an explicit
 //!   in-memory core (`RuntimeHostConfig::in_memory`); override it with
 //!   `with_runtime_host_config` for durable stores.
 //! * **Long autonomous agent:** reuse the environment and let the durable
@@ -65,8 +65,12 @@ pub struct RuntimeEnvironment {
 }
 
 impl RuntimeEnvironment {
-    pub fn builder() -> RuntimeEnvironmentBuilder {
-        RuntimeEnvironmentBuilder::default()
+    /// Construct an environment builder seeded with an in-memory host using
+    /// `commit_budget`. A later
+    /// [`with_runtime_host_config`](RuntimeEnvironmentBuilder::with_runtime_host_config)
+    /// call replaces that host config wholesale, including its commit budget.
+    pub fn builder(commit_budget: crate::CommitBudget) -> RuntimeEnvironmentBuilder {
+        RuntimeEnvironmentBuilder::new(commit_budget)
     }
 }
 
@@ -91,8 +95,9 @@ pub struct RuntimeEnvironmentBuilder {
     env: RuntimeEnvironment,
 }
 
-impl Default for RuntimeEnvironmentBuilder {
-    fn default() -> Self {
+impl RuntimeEnvironmentBuilder {
+    /// Construct an environment builder with an explicit commit budget.
+    fn new(commit_budget: crate::CommitBudget) -> Self {
         // `RuntimeHostConfig` has no `Default`; the builder starts from an
         // explicitly named in-memory core so the choice is visible in source.
         // The `lash` facade always overrides this via `with_runtime_host_config`
@@ -105,13 +110,10 @@ impl Default for RuntimeEnvironmentBuilder {
                 session_store_factory: None,
                 process_work_driver: None,
                 queued_work_driver: None,
-                core: RuntimeHostConfig::in_memory(),
+                core: RuntimeHostConfig::in_memory(commit_budget),
             },
         }
     }
-}
-
-impl RuntimeEnvironmentBuilder {
     pub fn with_plugin_host(mut self, host: Arc<crate::PluginHost>) -> Self {
         self.env.plugin_host = Some(host);
         self
@@ -256,7 +258,7 @@ mod tests {
             treat_missing_done_as_failure: false,
         };
 
-        let env = RuntimeEnvironment::builder()
+        let env = RuntimeEnvironment::builder(crate::CommitBudget::bounded(1024 * 1024, 512))
             .with_attachment_store(Arc::clone(&attachment_store))
             .with_prompt_template(crate::default_prompt_template())
             .with_trace_sink(Some(Arc::new(lash_trace::JsonlTraceSink::new(
@@ -285,13 +287,13 @@ mod tests {
 
     #[test]
     fn runtime_host_config_replaces_core_config() {
-        let mut core = RuntimeHostConfig::in_memory();
+        let mut core = RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
         core.tracing.trace_level = TraceLevel::Extended;
         core.control.termination = TerminationPolicy {
             treat_missing_done_as_failure: false,
         };
 
-        let env = RuntimeEnvironment::builder()
+        let env = RuntimeEnvironment::builder(crate::CommitBudget::bounded(1024 * 1024, 512))
             .with_trace_level(TraceLevel::Standard)
             .with_runtime_host_config(core)
             .build();

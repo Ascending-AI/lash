@@ -35,8 +35,9 @@ struct EmbeddedRuntimeDriverBindings {
     queued: Option<crate::QueuedWorkDriver>,
 }
 
-impl Default for EmbeddedRuntimeBuilder {
-    fn default() -> Self {
+impl EmbeddedRuntimeBuilder {
+    /// Construct an embedded runtime builder with an explicit commit budget.
+    pub fn new(commit_budget: crate::CommitBudget) -> Self {
         Self {
             session_id: None,
             policy: None,
@@ -46,7 +47,7 @@ impl Default for EmbeddedRuntimeBuilder {
             // `RuntimeHostConfig` has no `Default`; start from an explicitly
             // named in-memory core. Callers that need durable stores override
             // it with `with_runtime_host`.
-            core: RuntimeHostConfig::in_memory(),
+            core: RuntimeHostConfig::in_memory(commit_budget),
             session_store_factory: None,
             trigger_store: Some(Arc::new(crate::InMemoryTriggerStore::default())),
             store: None,
@@ -54,12 +55,6 @@ impl Default for EmbeddedRuntimeBuilder {
             process_registry: None,
             drivers: Box::default(),
         }
-    }
-}
-
-impl EmbeddedRuntimeBuilder {
-    pub fn new() -> Self {
-        Self::default()
     }
 
     pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
@@ -345,7 +340,11 @@ impl EmbeddedRuntimeBuilder {
 }
 
 impl LashRuntime {
-    pub fn builder() -> EmbeddedRuntimeBuilder {
-        EmbeddedRuntimeBuilder::new()
+    /// Construct an embedded runtime builder seeded with an in-memory host
+    /// using `commit_budget`. A later
+    /// [`with_runtime_host`](EmbeddedRuntimeBuilder::with_runtime_host) call
+    /// replaces that host config wholesale, including its commit budget.
+    pub fn builder(commit_budget: crate::CommitBudget) -> EmbeddedRuntimeBuilder {
+        EmbeddedRuntimeBuilder::new(commit_budget)
     }
 }

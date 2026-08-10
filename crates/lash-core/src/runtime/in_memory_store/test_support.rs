@@ -394,9 +394,16 @@ mod tests {
                 ),
             },
         };
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(
+            &state,
+            &[],
+            crate::CommitBudget::new(
+                crate::CommitBudgetLimit::Unbounded,
+                crate::CommitBudgetLimit::bounded(2),
+            ),
+        );
         commit.graph = GraphAppend {
-            nodes: (0..=RuntimeCommit::MAX_COMMIT_NODE_COUNT)
+            nodes: (0..=2)
                 .map(|index| crate::SessionNodeRecord {
                     node_id: format!("node-{index}"),
                     ..node.clone()
@@ -410,7 +417,13 @@ mod tests {
             .await
             .expect_err("over-budget commit");
 
-        assert!(matches!(error, StoreError::CommitNodeBudgetExceeded { .. }));
+        assert!(matches!(
+            error,
+            StoreError::CommitNodeBudgetExceeded {
+                node_count: 3,
+                max_nodes: 2,
+            }
+        ));
         assert_eq!(
             store.commit_write_transaction_count(),
             0,

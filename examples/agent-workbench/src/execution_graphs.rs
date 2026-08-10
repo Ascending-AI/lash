@@ -495,6 +495,7 @@ mod tests {
             .store_factory(Arc::new(
                 lash::persistence::InMemorySessionStoreFactory::new(),
             ))
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .process_env_store(Arc::new(
                 lash::persistence::InMemoryProcessExecutionEnvStore::new(),
             ))

@@ -746,7 +746,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_rejects_bad_cursors_before_replay_store_gap_handling() {
         let runtime = Box::pin(
-            LashRuntime::builder()
+            LashRuntime::builder(crate::CommitBudget::bounded(1024 * 1024, 512))
                 .with_session_id("session-a")
                 .with_policy(crate::SessionPolicy {
                     model: crate::ModelSpec::builder("test-model")
@@ -792,7 +792,7 @@ mod tests {
     #[tokio::test]
     async fn publish_revision_matches_the_single_export_across_a_commit() {
         let runtime = Box::pin(
-            LashRuntime::builder()
+            LashRuntime::builder(crate::CommitBudget::bounded(1024 * 1024, 512))
                 .with_session_id("revision-equivalence")
                 .with_policy(crate::SessionPolicy {
                     model: crate::ModelSpec::builder("test-model")
@@ -823,7 +823,7 @@ mod tests {
     #[tokio::test]
     async fn publish_keeps_frame_switch_immediately_before_commit() {
         let runtime = Box::pin(
-            LashRuntime::builder()
+            LashRuntime::builder(crate::CommitBudget::bounded(1024 * 1024, 512))
                 .with_session_id("publish-order")
                 .with_policy(crate::SessionPolicy {
                     model: crate::ModelSpec::builder("test-model")
@@ -867,7 +867,7 @@ mod tests {
     async fn measure_publish_from_wall_clock() {
         const COMMITS: usize = 5_000;
         let runtime = Box::pin(
-            LashRuntime::builder()
+            LashRuntime::builder(crate::CommitBudget::bounded(1024 * 1024, 512))
                 .with_session_id("publish-perf")
                 .with_policy(crate::SessionPolicy {
                     model: crate::ModelSpec::builder("test-model")

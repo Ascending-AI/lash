@@ -72,7 +72,8 @@ pub(super) async fn worker_with_engine_registry_timings_and_supplier(
         Arc::clone(&run_handle) as Arc<dyn crate::ProcessRunHandle>,
     );
     let registry = driver.process_registry();
-    let mut runtime_host = RuntimeHostConfig::in_memory();
+    let mut runtime_host =
+        RuntimeHostConfig::in_memory(crate::CommitBudget::bounded(1024 * 1024, 512));
     runtime_host.process_engines = crate::ProcessEngineRegistry::new().with_engine(engine);
     if let Some(lease_timings) = lease_timings {
         runtime_host = runtime_host.with_lease_timings(lease_timings);

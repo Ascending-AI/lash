@@ -952,7 +952,9 @@ mod tests {
         let provider_handle = lash_core::facade_support::ProviderHandle::new(
             lash_core::facade_support::ProviderComponents::new(Box::new(provider)),
         );
-        let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory();
+        let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        );
         host.providers.provider_resolver = Arc::new(
             lash_core::facade_support::SingleProviderResolver::new(provider_handle),
         );
@@ -990,12 +992,15 @@ mod tests {
         )
         .expect("scoped controller");
         let mut runtime = Box::pin(
-            lash_core::facade_support::LashRuntime::builder()
-                .with_session_id("standard-batch-session")
-                .with_policy(policy)
-                .with_runtime_host(host)
-                .with_plugin_factories(factories)
-                .build(),
+            lash_core::facade_support::LashRuntime::builder(lash_core::CommitBudget::bounded(
+                1024 * 1024,
+                512,
+            ))
+            .with_session_id("standard-batch-session")
+            .with_policy(policy)
+            .with_runtime_host(host)
+            .with_plugin_factories(factories)
+            .build(),
         )
         .await
         .expect("runtime");

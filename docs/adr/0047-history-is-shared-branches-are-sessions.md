@@ -86,6 +86,8 @@ can shrink, not an accumulator. Reaching the 1 MiB cap requires roughly 1 MB of
 live globals in one turn. The cap is a live-state capacity limit, not a
 time-dependent failure.
 
+The preceding paragraph's budget-authority claim is superseded by [ADR 0058](0058-runtime-commit-budgets-are-explicit-host-policy.md).
+
 Reachability is defined by stored edges. Session heads, child nodes, and retained
 continuation anchors keep history alive. Forking adds a new session root and
 shares the prefix. Ownership is therefore reachability, not producer-session

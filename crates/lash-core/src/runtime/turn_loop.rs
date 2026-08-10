@@ -1312,6 +1312,7 @@ impl LashRuntime {
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
             self.state.turn_scope(&trace_turn_id),
+            self.host.core.durability.commit_budget,
         );
         turn_pipeline.apply_prepared_messages(&messages);
         let finish_result = Box::pin(self.finish_turn(
@@ -1900,6 +1901,7 @@ impl LashRuntime {
                     self.state.clone(),
                     Arc::clone(&self.host.core.clock),
                     self.state.turn_scope(&trace_turn_id),
+                    self.host.core.durability.commit_budget,
                 );
                 turn_pipeline.apply_prepared_messages(&messages);
                 let claims = LogicalTurnClaims::new(queued_claims, turn_input_claims);
@@ -2273,6 +2275,7 @@ impl LashRuntime {
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
             self.state.turn_scope(&trace_turn_id),
+            self.host.core.durability.commit_budget,
         );
         turn_pipeline.apply_prepared_messages(&prepared.messages);
         emit_terminal_sequence(
@@ -2432,6 +2435,7 @@ impl LashRuntime {
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
             self.state.turn_scope(&trace_turn_id),
+            self.host.core.durability.commit_budget,
         );
         turn_pipeline
             .prepared_checkpoint(

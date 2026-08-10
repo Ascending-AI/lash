@@ -144,11 +144,12 @@ impl LashRuntime {
                 .to_vec();
             let locally_derived_leaf_node_id = graph.leaf_node_id.clone().unwrap_or_default();
             let mut commit =
-                crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
+                crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
                     &self.state,
                     graph,
                     &[],
                     operation,
+                    self.host.core.durability.commit_budget,
                 )
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
             commit.turn_commit = append_stamp;
@@ -693,11 +694,12 @@ impl LashRuntime {
                     }
                 };
             let commit =
-                crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
+                crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
                     &self.state,
                     graph,
                     &[],
                     operation,
+                    self.host.core.durability.commit_budget,
                 )
                 .map_err(|err| {
                     PluginOperationInvokeError::Failed(format!(
@@ -751,10 +753,11 @@ impl LashRuntime {
         };
         let operation = crate::OperationId::new(operation_scope, "plugin-operation-state");
         let (commit, persisted_node_ids) =
-            crate::store::RuntimeCommit::persisted_state_with_operation(
+            crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                 &mut self.state,
                 &[],
                 operation,
+                self.host.core.durability.commit_budget,
             )
             .map_err(|err| {
                 PluginOperationInvokeError::Failed(format!(

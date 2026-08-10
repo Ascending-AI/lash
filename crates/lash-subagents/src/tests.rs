@@ -884,7 +884,8 @@ async fn run_seed_probe_inner(
         .expect("plugin session");
     let host = ProcessRuntimeHost::new(
         lash_core::facade_support::EmbeddedRuntimeHost::new({
-            let mut config = RuntimeHostConfig::in_memory();
+            let mut config =
+                RuntimeHostConfig::in_memory(lash_core::CommitBudget::bounded(1024 * 1024, 512));
             config.providers.provider_resolver = Arc::new(
                 lash_core::facade_support::SingleProviderResolver::new(provider.clone()),
             );
@@ -912,7 +913,10 @@ async fn run_seed_probe_inner(
         lash_core::facade_support::DurableProcessWorkerConfig::from_plugin_factories(
             factories,
             {
-                let mut config = RuntimeHostConfig::in_memory();
+                let mut config = RuntimeHostConfig::in_memory(lash_core::CommitBudget::bounded(
+                    1024 * 1024,
+                    512,
+                ));
                 config.providers.provider_resolver = Arc::new(
                     lash_core::facade_support::SingleProviderResolver::new(provider.clone()),
                 );

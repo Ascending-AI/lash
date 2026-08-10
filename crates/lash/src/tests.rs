@@ -2024,7 +2024,15 @@ async fn session_delete_scope(
 fn explicit_ephemeral_facets(
     builder: crate::core::LashCoreBuilder,
 ) -> crate::core::LashCoreBuilder {
+    explicit_ephemeral_facets_with_budget(builder, crate::CommitBudget::bounded(1024 * 1024, 512))
+}
+
+fn explicit_ephemeral_facets_with_budget(
+    builder: crate::core::LashCoreBuilder,
+    commit_budget: crate::CommitBudget,
+) -> crate::core::LashCoreBuilder {
     builder
+        .commit_budget(commit_budget)
         .effect_host(Arc::new(
             crate::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
