@@ -165,7 +165,9 @@ impl RlmRuntimeState {
         }
         let protected_names = self.protected_projected_binding_names().await;
         if let Some(snapshot) = state.execution_state_snapshot().map(|bytes| bytes.to_vec()) {
-            execution.restore_execution_state(&snapshot)?;
+            execution
+                .restore_execution_state(&snapshot)
+                .map_err(|error| SessionError::Protocol(error.to_string()))?;
             execution.prune_protected_globals(&protected_names);
         }
         for event in state.read_view().active_events() {
@@ -271,7 +273,8 @@ impl RlmRuntimeState {
         execution
             .as_mut()
             .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?
-            .restore_execution_state(data)?;
+            .restore_execution_state(data)
+            .map_err(|error| SessionError::Protocol(error.to_string()))?;
         drop(execution);
         self.refresh_bound_variables_prompt().await;
         Ok(())

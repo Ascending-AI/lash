@@ -3,8 +3,6 @@ mod host_bridge;
 mod snapshot;
 mod state;
 
-#[cfg(test)]
-use snapshot::restore_runtime;
 pub use state::RlmExecutionState;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -2445,15 +2443,15 @@ mod tests {
 
         assert_eq!(projected.render_count.load(Ordering::SeqCst), 0);
         assert_eq!(projected.materialize_count.load(Ordering::SeqCst), 0);
-        let outer: Value = serde_json::from_slice(&bytes).expect("snapshot json");
-        let vars = outer
-            .get("vars")
-            .and_then(Value::as_str)
-            .expect("vars string");
-        assert!(!vars.contains("rendered tool text"));
-        assert!(!vars.contains("materialized tool text"));
+        let encoded_text = String::from_utf8_lossy(&bytes);
+        assert!(!encoded_text.contains("rendered tool text"));
+        assert!(!encoded_text.contains("materialized tool text"));
 
-        let restored = restore_runtime(vars).expect("restore runtime");
+        let mut restored_execution = RlmExecutionState::new().expect("restored state");
+        restored_execution
+            .restore_execution_state(&bytes)
+            .expect("restore runtime");
+        let restored = restored_execution.rlm;
         assert!(matches!(
             restored.snapshot().globals.get("m"),
             Some(FlowValue::Projected(_))
@@ -2726,15 +2724,24 @@ mod tests {
             .snapshot_execution_state()
             .expect("executor snapshot")
             .expect("snapshot bytes");
-        let outer: Value = serde_json::from_slice(&bytes).expect("snapshot json");
-        let vars = outer
-            .get("vars")
-            .and_then(Value::as_str)
-            .expect("vars string");
-        assert!(vars.contains("projection_ref"));
-        assert!(vars.contains("\"kind\":\"memory\""));
+        let encoded_envelope: state::RlmSnapshotEnvelope =
+            rmp_serde::from_slice(&bytes).expect("decode typed envelope");
+        let encoded_snapshot = lashlang::Snapshot::from_canonical_bytes(&encoded_envelope.vars)
+            .expect("decode typed vars");
+        let Some(FlowValue::Projected(encoded_projected)) = encoded_snapshot.globals.get("doc")
+        else {
+            panic!("expected encoded projected value");
+        };
+        assert_eq!(
+            encoded_projected.projection_ref(),
+            Some(&serde_json::json!({"kind": "memory", "key": "doc"}))
+        );
 
-        let restored = restore_runtime(vars).expect("restore runtime");
+        let mut restored_execution = RlmExecutionState::new().expect("restored state");
+        restored_execution
+            .restore_execution_state(&bytes)
+            .expect("restore runtime");
+        let restored = restored_execution.rlm;
         let restored_snapshot = restored.snapshot();
         let Some(FlowValue::Projected(projected)) = restored_snapshot.globals.get("doc") else {
             panic!("expected restored projected value");

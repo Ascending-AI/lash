@@ -7,7 +7,8 @@ use bench_support::{
 };
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use lashlang::{
-    ExecutionEnvironment, ExecutionOutcome, State, Value, compile_linked, execute, prewarm,
+    ExecutionEnvironment, ExecutionOutcome, Snapshot, State, Value, compile_linked, execute,
+    prewarm,
 };
 use std::hint::black_box;
 use std::time::Duration;
@@ -83,8 +84,8 @@ fn benchmark_one_shot_modes(
         b.iter(|| {
             let mut state = seeded_state_for(scenario);
             let snapshot = state.snapshot();
-            let encoded = serde_json::to_vec(&snapshot).expect("snapshot encode");
-            let decoded = serde_json::from_slice(&encoded).expect("snapshot decode");
+            let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
+            let decoded = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
             state = State::from_snapshot(decoded);
             let env = ExecutionEnvironment::new(host).with_projected_bindings(projected.clone());
             let outcome = rt
